@@ -1,0 +1,33 @@
+{
+  "project": "VoxelForge Engine",
+  "version": "0.0.1",
+  "status": "Starter Kit",
+  "principle": "L'IA assiste l'artiste sans le remplacer.",
+  "documents": [
+    ".github/ISSUE_TEMPLATE/feature_request.md",
+    ".github/pull_request_template.md",
+    ".gitignore",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE.md",
+    "README.md",
+    "assets/.gitkeep",
+    "docs/000_Foundation/ADR/ADR-0001-Modular-Architecture.md",
+    "docs/000_Foundation/ADR/ADR-0002-AI-Is-Optional.md",
+    "docs/000_Foundation/ADR/ADR-0003-Artist-Control.md",
+    "docs/000_Foundation/VF-0000-PRD.md",
+    "docs/000_Foundation/VF-0001-Constitution.md",
+    "docs/000_Foundation/VF-0002-Things-We-Never-Do.md",
+    "docs/100_Architecture/VF-0100-Domain-Model.md",
+    "docs/100_Architecture/VF-0110-High-Level-Architecture.md",
+    "docs/900_Roadmap/ROADMAP.md",
+    "editor/.gitkeep",
+    "engine/.gitkeep",
+    "examples/.gitkeep",
+    "plugins/.gitkeep",
+    "prompts/PROMPT-000-MASTER.md",
+    "prompts/PROMPT-001-ARCHITECTURE-NEXT.md",
+    "tests/.gitkeep",
+    "tools/.gitkeep"
+  ]
+}

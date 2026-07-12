@@ -1,0 +1,27 @@
+# Build
+/build/
+/out/
+/bin/
+
+# IDE
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated
+*.log
+*.tmp
+.cache/
+
+# Local AI models and large assets
+/models/
+/datasets/
+/local_assets/
+
+# VoxelForge local projects
+/workspace/
