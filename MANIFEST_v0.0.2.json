@@ -1,0 +1,21 @@
+{
+  "project": "VoxelForge Engine",
+  "version": "0.0.2",
+  "type": "overlay development pack",
+  "files": [
+    "CHANGELOG_v0.0.2.md",
+    "CMakeLists.txt",
+    "CMakePresets.json",
+    "INSTALL_v0.0.2.md",
+    "docs/100_Architecture/Core/VF-0120-Core-Bootstrap.md",
+    "editor/CMakeLists.txt",
+    "editor/src/main.cpp",
+    "engine/Core/CMakeLists.txt",
+    "engine/Core/include/VoxelForge/Core/Application.h",
+    "engine/Core/include/VoxelForge/Core/Logger.h",
+    "engine/Core/include/VoxelForge/Core/Version.h",
+    "engine/Core/src/Application.cpp",
+    "engine/Core/src/Logger.cpp",
+    "engine/Core/src/Version.cpp"
+  ]
+}
