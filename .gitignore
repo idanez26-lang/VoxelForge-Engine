@@ -1,4 +1,7 @@
-# Visual Studio 2026
+# =========================
+# Visual Studio
+# =========================
+
 .vs/
 
 # Fichiers utilisateur
@@ -8,7 +11,7 @@
 *.sln.docstates
 *.rsuser
 
-# Cache et index Visual Studio
+# Cache Visual Studio
 *.vsidx
 FileContentIndex/
 *.VC.db
@@ -19,22 +22,53 @@ FileContentIndex/
 *.sqlite-shm
 *.sqlite-wal
 
-# Compilation
-Debug/
-Release/
-x64/
-x86/
-bin/
-obj/
-out/
-
 # IntelliSense
 ipch/
 *.ipch
 *.iobj
 *.ipdb
 
-# Fichiers temporaires
+# =========================
+# Compilation
+# =========================
+
+Debug/
+Release/
+x64/
+x86/
+bin/
+obj/
+build/
+out/
+cmake-build-*/
+
+# =========================
+# CMake
+# =========================
+
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+Makefile
+
+# =========================
+# Binaires
+# =========================
+
+*.obj
+*.lib
+*.dll
+*.exe
+*.exp
+*.ilk
+*.pdb
+
+# =========================
+# Temporaire
+# =========================
+
 *.tmp
 *.log
 *.cache
