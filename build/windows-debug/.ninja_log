@@ -1,0 +1,13 @@
+# ninja log v7
+62	2330	8056030238382310	editor/CMakeFiles/VoxelForgeEditor.dir/src/main.cpp.obj	7d14a628a86a9036
+45	1234	8056030238202297	engine/Core/CMakeFiles/VoxelForgeCore.dir/src/Version.cpp.obj	cb36f2b7494b0a41
+28	1286	8056030238031533	engine/Core/CMakeFiles/VoxelForgeCore.dir/src/Logger.cpp.obj	9d161473c07996bd
+17	1239	8056030237921456	engine/Core/CMakeFiles/VoxelForgeCore.dir/src/Application.cpp.obj	8a5ade8bb647fcac
+2335	2400	8056030261098857	engine/Core/VoxelForgeCore.lib	3db284ebecaee289
+2451	2687	8056030262255655	editor/VoxelForgeEditor.exe	7fe2316fac5a85f1
+39	1487	8056030238142315	engine/Core/CMakeFiles/VoxelForgeCore.dir/src/UUID.cpp.obj	f355a7372de475e1
+34	1920	8056030238091498	engine/Core/CMakeFiles/VoxelForgeCore.dir/src/Time.cpp.obj	4c4d2cc39fca5486
+51	2227	8056030238262303	engine/Project/CMakeFiles/VoxelForgeProject.dir/src/Project.cpp.obj	fc2080a4780a7fa2
+56	2254	8056030238312332	engine/Project/CMakeFiles/VoxelForgeProject.dir/src/ProjectManager.cpp.obj	2a140fc80f085ce7
+23	2334	8056030237981506	engine/Core/CMakeFiles/VoxelForgeCore.dir/src/FileSystem.cpp.obj	b1b6627475cc2140
+2400	2450	8056030261750472	engine/Project/VoxelForgeProject.lib	34bcc350e6426bd5

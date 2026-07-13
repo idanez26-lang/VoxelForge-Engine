@@ -4,7 +4,10 @@ target_sources(
     VoxelForgeCore
     PRIVATE
         src/Application.cpp
+        src/FileSystem.cpp
         src/Logger.cpp
+        src/Time.cpp
+        src/UUID.cpp
         src/Version.cpp
 )
 

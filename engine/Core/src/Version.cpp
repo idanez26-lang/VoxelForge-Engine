@@ -1,5 +1,4 @@
 #include "VoxelForge/Core/Version.h"
-
 #include <sstream>
 
 namespace VoxelForge::Core

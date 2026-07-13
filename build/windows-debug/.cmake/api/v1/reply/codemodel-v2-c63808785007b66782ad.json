@@ -1,0 +1,127 @@
+{
+	"configurations" : 
+	[
+		{
+			"abstractTargets" : [],
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2,
+						3
+					],
+					"jsonFile" : "directory-.-Debug-f040eec181a89de70dbe.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.24"
+					},
+					"projectIndex" : 0,
+					"source" : "."
+				},
+				{
+					"build" : "engine/Core",
+					"jsonFile" : "directory-engine.Core-Debug-5585118002c697bf88f7.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.24"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "engine/Core",
+					"targetIndexes" : 
+					[
+						0
+					]
+				},
+				{
+					"build" : "engine/Project",
+					"jsonFile" : "directory-engine.Project-Debug-3c35afd6a9d8a9bb12b3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.24"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "engine/Project",
+					"targetIndexes" : 
+					[
+						2
+					]
+				},
+				{
+					"build" : "editor",
+					"jsonFile" : "directory-editor-Debug-f58f5bdc08aba6b6dc4c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.24"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "editor",
+					"targetIndexes" : 
+					[
+						1
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3
+					],
+					"name" : "VoxelForgeEngine",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "VoxelForgeCore::@f56d2dee9ff0a09b85fe",
+					"jsonFile" : "target-VoxelForgeCore-Debug-870725b9a9e12b288d84.json",
+					"name" : "VoxelForgeCore",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "VoxelForgeEditor::@ed37844f285895dce70e",
+					"jsonFile" : "target-VoxelForgeEditor-Debug-b515654554f7ae4304b6.json",
+					"name" : "VoxelForgeEditor",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "VoxelForgeProject::@5dfb4e9c5db77ce3787c",
+					"jsonFile" : "target-VoxelForgeProject-Debug-0bf5320c23bed240dda1.json",
+					"name" : "VoxelForgeProject",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "E:/VoxelForge-Engine/build/windows-debug",
+		"source" : "E:/VoxelForge-Engine"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 10
+	}
+}

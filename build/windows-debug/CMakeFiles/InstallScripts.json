@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"E:/VoxelForge-Engine/build/windows-debug/cmake_install.cmake",
+		"E:/VoxelForge-Engine/build/windows-debug/engine/Core/cmake_install.cmake",
+		"E:/VoxelForge-Engine/build/windows-debug/engine/Project/cmake_install.cmake",
+		"E:/VoxelForge-Engine/build/windows-debug/editor/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

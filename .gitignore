@@ -1,27 +1,40 @@
-# Build
-/build/
-/out/
-/bin/
+# Visual Studio 2026
+.vs/
 
-# IDE
-.vscode/
-.idea/
-*.user
+# Fichiers utilisateur
 *.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
 
-# OS
-.DS_Store
-Thumbs.db
+# Cache et index Visual Studio
+*.vsidx
+FileContentIndex/
+*.VC.db
+*.VC.opendb
+*.VC.db-shm
+*.VC.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
-# Generated
-*.log
+# Compilation
+Debug/
+Release/
+x64/
+x86/
+bin/
+obj/
+out/
+
+# IntelliSense
+ipch/
+*.ipch
+*.iobj
+*.ipdb
+
+# Fichiers temporaires
 *.tmp
-.cache/
-
-# Local AI models and large assets
-/models/
-/datasets/
-/local_assets/
-
-# VoxelForge local projects
-/workspace/
+*.log
+*.cache

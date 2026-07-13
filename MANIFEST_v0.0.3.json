@@ -1,0 +1,27 @@
+{
+  "project": "VoxelForge Engine",
+  "version": "0.0.3",
+  "type": "overlay development pack",
+  "files": [
+    "CHANGELOG_v0.0.3.md",
+    "CMakeLists.txt",
+    "INSTALL_v0.0.3.md",
+    "docs/100_Architecture/Core/VF-0130-Core-Utilities.md",
+    "docs/100_Architecture/Project/VF-0140-Project-System.md",
+    "editor/CMakeLists.txt",
+    "engine/Core/CMakeLists.txt",
+    "engine/Core/include/VoxelForge/Core/FileSystem.h",
+    "engine/Core/include/VoxelForge/Core/Time.h",
+    "engine/Core/include/VoxelForge/Core/UUID.h",
+    "engine/Core/include/VoxelForge/Core/Version.h",
+    "engine/Core/src/Application.cpp",
+    "engine/Core/src/FileSystem.cpp",
+    "engine/Core/src/Time.cpp",
+    "engine/Core/src/UUID.cpp",
+    "engine/Project/CMakeLists.txt",
+    "engine/Project/include/VoxelForge/Project/Project.h",
+    "engine/Project/include/VoxelForge/Project/ProjectManager.h",
+    "engine/Project/src/Project.cpp",
+    "engine/Project/src/ProjectManager.cpp"
+  ]
+}

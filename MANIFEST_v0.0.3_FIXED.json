@@ -1,0 +1,39 @@
+{
+  "project": "VoxelForge Engine",
+  "version": "0.0.3-fixed",
+  "verification": {
+    "cmake_configure": "passed",
+    "compile": "passed",
+    "include_paths": [
+      "engine/Core/include",
+      "engine/Project/include"
+    ],
+    "dependency_direction": "Editor -> Project -> Core"
+  },
+  "files": [
+    "CHANGELOG_v0.0.3_FIXED.md",
+    "CMakeLists.txt",
+    "CMakePresets.json",
+    "INSTALL_v0.0.3_FIXED.md",
+    "editor/CMakeLists.txt",
+    "editor/src/main.cpp",
+    "engine/Core/CMakeLists.txt",
+    "engine/Core/include/VoxelForge/Core/Application.h",
+    "engine/Core/include/VoxelForge/Core/FileSystem.h",
+    "engine/Core/include/VoxelForge/Core/Logger.h",
+    "engine/Core/include/VoxelForge/Core/Time.h",
+    "engine/Core/include/VoxelForge/Core/UUID.h",
+    "engine/Core/include/VoxelForge/Core/Version.h",
+    "engine/Core/src/Application.cpp",
+    "engine/Core/src/FileSystem.cpp",
+    "engine/Core/src/Logger.cpp",
+    "engine/Core/src/Time.cpp",
+    "engine/Core/src/UUID.cpp",
+    "engine/Core/src/Version.cpp",
+    "engine/Project/CMakeLists.txt",
+    "engine/Project/include/VoxelForge/Project/Project.h",
+    "engine/Project/include/VoxelForge/Project/ProjectManager.h",
+    "engine/Project/src/Project.cpp",
+    "engine/Project/src/ProjectManager.cpp"
+  ]
+}

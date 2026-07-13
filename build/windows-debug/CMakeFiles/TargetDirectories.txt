@@ -1,0 +1,11 @@
+E:/VoxelForge-Engine/build/windows-debug/CMakeFiles/edit_cache.dir
+E:/VoxelForge-Engine/build/windows-debug/CMakeFiles/rebuild_cache.dir
+E:/VoxelForge-Engine/build/windows-debug/engine/Core/CMakeFiles/VoxelForgeCore.dir
+E:/VoxelForge-Engine/build/windows-debug/engine/Core/CMakeFiles/edit_cache.dir
+E:/VoxelForge-Engine/build/windows-debug/engine/Core/CMakeFiles/rebuild_cache.dir
+E:/VoxelForge-Engine/build/windows-debug/engine/Project/CMakeFiles/VoxelForgeProject.dir
+E:/VoxelForge-Engine/build/windows-debug/engine/Project/CMakeFiles/edit_cache.dir
+E:/VoxelForge-Engine/build/windows-debug/engine/Project/CMakeFiles/rebuild_cache.dir
+E:/VoxelForge-Engine/build/windows-debug/editor/CMakeFiles/VoxelForgeEditor.dir
+E:/VoxelForge-Engine/build/windows-debug/editor/CMakeFiles/edit_cache.dir
+E:/VoxelForge-Engine/build/windows-debug/editor/CMakeFiles/rebuild_cache.dir

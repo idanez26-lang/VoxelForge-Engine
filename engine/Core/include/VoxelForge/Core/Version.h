@@ -1,5 +1,4 @@
 #pragma once
-
 #include <string>
 
 namespace VoxelForge::Core
@@ -14,7 +13,7 @@ namespace VoxelForge::Core
 
         [[nodiscard]] static constexpr Version Current() noexcept
         {
-            return Version{0, 0, 2};
+            return Version{0, 0, 3};
         }
     };
 }

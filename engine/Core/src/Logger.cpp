@@ -1,25 +1,18 @@
 #include "VoxelForge/Core/Logger.h"
-
 #include <iostream>
 #include <string_view>
 
 namespace
 {
-    [[nodiscard]] constexpr std::string_view PrefixFor(
-        const VoxelForge::Core::LogLevel level) noexcept
+    constexpr std::string_view PrefixFor(VoxelForge::Core::LogLevel level) noexcept
     {
         using VoxelForge::Core::LogLevel;
-
         switch (level)
         {
-        case LogLevel::Info:
-            return "[INFO]";
-        case LogLevel::Warning:
-            return "[WARNING]";
-        case LogLevel::Error:
-            return "[ERROR]";
+        case LogLevel::Info: return "[INFO]";
+        case LogLevel::Warning: return "[WARNING]";
+        case LogLevel::Error: return "[ERROR]";
         }
-
         return "[UNKNOWN]";
     }
 }
@@ -32,28 +25,14 @@ namespace VoxelForge::Core
         return logger;
     }
 
-    void Logger::Log(const LogLevel level, const std::string_view message)
+    void Logger::Log(LogLevel level, std::string_view message)
     {
         const std::scoped_lock lock(mutex_);
-
-        std::ostream& output =
-            level == LogLevel::Error ? std::cerr : std::cout;
-
+        std::ostream& output = level == LogLevel::Error ? std::cerr : std::cout;
         output << PrefixFor(level) << ' ' << message << '\n';
     }
 
-    void Logger::Info(const std::string_view message)
-    {
-        Log(LogLevel::Info, message);
-    }
-
-    void Logger::Warning(const std::string_view message)
-    {
-        Log(LogLevel::Warning, message);
-    }
-
-    void Logger::Error(const std::string_view message)
-    {
-        Log(LogLevel::Error, message);
-    }
+    void Logger::Info(std::string_view message) { Log(LogLevel::Info, message); }
+    void Logger::Warning(std::string_view message) { Log(LogLevel::Warning, message); }
+    void Logger::Error(std::string_view message) { Log(LogLevel::Error, message); }
 }

@@ -9,6 +9,7 @@ target_sources(
 target_link_libraries(
     VoxelForgeEditor
     PRIVATE
+        VoxelForgeProject
         VoxelForgeCore
 )
 

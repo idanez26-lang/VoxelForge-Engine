@@ -27,6 +27,7 @@ namespace VoxelForge::Core
         Logger::Instance().Info("Initializing Core...");
         Logger::Instance().Info("Logger initialized.");
         Logger::Instance().Info("Version system initialized.");
+        Logger::Instance().Info("FileSystem initialized.");
         Logger::Instance().Info("Application initialized.");
 
         initialized_ = true;
