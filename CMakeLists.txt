@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     VoxelForgeEngine
-    VERSION 0.0.8
+    VERSION 0.0.9
     DESCRIPTION "Universal AI-assisted voxel creation platform"
     LANGUAGES CXX
 )
@@ -30,7 +30,6 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(SDL3)
 
-# Docking requires the maintained Dear ImGui docking release.
 FetchContent_Declare(
     DearImGui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -77,6 +76,7 @@ endif()
 
 add_subdirectory(engine/Core)
 add_subdirectory(engine/Project)
+add_subdirectory(engine/Scene)
 
 if(VF_BUILD_EDITOR)
     add_subdirectory(editor)

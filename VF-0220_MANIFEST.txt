@@ -1,0 +1,20 @@
+VF-0220 Scene Foundation
+
+Nouveaux fichiers :
+- engine/Scene/CMakeLists.txt
+- engine/Scene/include/VoxelForge/Scene/Components.h
+- engine/Scene/include/VoxelForge/Scene/Entity.h
+- engine/Scene/include/VoxelForge/Scene/Scene.h
+- engine/Scene/src/Entity.cpp
+- engine/Scene/src/Scene.cpp
+- docs/100_Architecture/Scene/VF-0220-Scene-Foundation.md
+- INSTALL_VF-0220.md
+- CHANGELOG_VF-0220.md
+- VF-0220_MANIFEST.txt
+- CHECKLIST_VF-0220.md
+
+Fichiers remplacés :
+- CMakeLists.txt
+- editor/CMakeLists.txt
+- editor/src/EditorLayer.h
+- editor/src/EditorLayer.cpp

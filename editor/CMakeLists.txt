@@ -3,7 +3,9 @@ add_executable(VoxelForgeEditor)
 target_sources(
     VoxelForgeEditor
     PRIVATE
+        src/EditorCamera.cpp
         src/EditorLayer.cpp
+        src/ViewportRenderer.cpp
         src/main.cpp
 )
 
@@ -17,6 +19,7 @@ target_link_libraries(
     VoxelForgeEditor
     PRIVATE
         VoxelForgeProject
+        VoxelForgeScene
         VoxelForgeCore
         VoxelForgeImGui
 )

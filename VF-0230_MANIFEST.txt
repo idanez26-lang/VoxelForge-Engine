@@ -1,0 +1,24 @@
+VF-0230 Viewport 3D Prototype
+
+Nouveaux fichiers :
+- editor/src/EditorMath.h
+- editor/src/EditorCamera.h
+- editor/src/EditorCamera.cpp
+- editor/src/ViewportRenderer.h
+- editor/src/ViewportRenderer.cpp
+- docs/100_Architecture/Editor/VF-0230-Viewport-3D-Prototype.md
+- INSTALL_VF-0230.md
+- CHANGELOG_VF-0230.md
+- VF-0230_MANIFEST.txt
+- CHECKLIST_VF-0230.md
+
+Fichiers remplacés :
+- editor/CMakeLists.txt
+- editor/src/EditorLayer.h
+- editor/src/EditorLayer.cpp
+
+Non modifiés :
+- CMakeLists.txt racine
+- Core
+- Scene
+- SDLWindow
