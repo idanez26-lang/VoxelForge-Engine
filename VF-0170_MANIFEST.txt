@@ -1,0 +1,19 @@
+VF-0170 Layer System v1.0
+
+Nouveaux fichiers :
+- engine/Core/include/VoxelForge/Core/Layer/Layer.h
+- engine/Core/include/VoxelForge/Core/Layer/LayerStack.h
+- engine/Core/src/Layer/Layer.cpp
+- engine/Core/src/Layer/LayerStack.cpp
+- tests/Core/LayerSystemTests.cpp
+- docs/100_Architecture/Core/VF-0170-Layer-System.md
+- INSTALL_VF-0170.md
+- CHANGELOG_VF-0170.md
+
+Fichiers remplacés :
+- engine/Core/CMakeLists.txt
+- engine/Core/include/VoxelForge/Core/Application.h
+- engine/Core/src/Application.cpp
+
+Standard : C++20
+Dépendances : VF-0150 et VF-0160.1

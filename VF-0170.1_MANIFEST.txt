@@ -1,0 +1,10 @@
+VF-0170.1 Layer System Fix
+
+Fichiers remplacés :
+- engine/Core/include/VoxelForge/Core/Application.h
+- engine/Core/src/Application.cpp
+- engine/Core/include/VoxelForge/Core/Layer/LayerStack.h
+- engine/Core/src/Layer/LayerStack.cpp
+
+CMake modifié : non
+main.cpp modifié : non

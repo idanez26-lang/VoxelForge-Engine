@@ -1,0 +1,17 @@
+VF-0160 Application Framework
+
+Fichiers remplacés :
+- engine/Core/include/VoxelForge/Core/Application.h
+- engine/Core/src/Application.cpp
+
+Fichiers ajoutés :
+- engine/Core/include/VoxelForge/Core/ApplicationSpecification.h
+- tests/Core/ApplicationFrameworkTests.cpp
+- docs/100_Architecture/Core/VF-0160-Application-Framework.md
+- INSTALL_VF-0160.md
+- CHANGELOG_VF-0160.md
+
+CMake modifié : non
+editor/src/main.cpp modifié : non
+Standard : C++20
+Dépendance : VF-0150 Event System
