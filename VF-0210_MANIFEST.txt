@@ -1,0 +1,16 @@
+VF-0210 Dockspace
+
+Fichiers remplacés :
+- CMakeLists.txt
+- engine/Core/src/Window/SDLWindow.cpp
+- editor/src/EditorLayer.h
+- editor/src/EditorLayer.cpp
+
+Nouveaux fichiers :
+- INSTALL_VF-0210.md
+- CHANGELOG_VF-0210.md
+- VF-0210_MANIFEST.txt
+- CHECKLIST_VF-0210.md
+
+Dépendance :
+- Dear ImGui v1.92.8-docking

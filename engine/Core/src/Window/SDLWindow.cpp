@@ -81,7 +81,7 @@ void SDLWindow::Initialize()
         "SDL3 window created: " + specification_.Title + " (" +
         std::to_string(specification_.Width) + "x" +
         std::to_string(specification_.Height) + ").");
-    Logger::Instance().Info("Dear ImGui initialized.");
+    Logger::Instance().Info("Dear ImGui docking initialized.");
 }
 
 void SDLWindow::InitializeImGui()
@@ -91,6 +91,7 @@ void SDLWindow::InitializeImGui()
 
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     ImGui::StyleColorsDark();
 

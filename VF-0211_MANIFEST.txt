@@ -1,0 +1,13 @@
+VF-0211 Default Workspace
+
+Fichiers remplacés :
+- editor/src/EditorLayer.h
+- editor/src/EditorLayer.cpp
+
+Nouveaux fichiers :
+- INSTALL_VF-0211.md
+- CHANGELOG_VF-0211.md
+- VF-0211_MANIFEST.txt
+- CHECKLIST_VF-0211.md
+
+Aucun CMakeLists.txt remplacé.

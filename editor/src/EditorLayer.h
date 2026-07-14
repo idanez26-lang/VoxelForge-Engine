@@ -2,6 +2,10 @@
 
 #include "VoxelForge/Core/Layer/Layer.h"
 
+struct ImGuiViewport;
+
+using ImGuiID = unsigned int;
+
 namespace VoxelForge::Editor
 {
 
@@ -15,8 +19,25 @@ public:
     void OnImGuiRender() override;
 
 private:
-    bool showDemoWindow_ = true;
-    bool showAboutWindow_ = false;
+    void BuildDefaultWorkspace(
+        ImGuiID dockspaceId,
+        const ImGuiViewport& viewport);
+
+    void DrawMainMenuBar();
+    void DrawHierarchyPanel();
+    void DrawInspectorPanel();
+    void DrawViewportPanel();
+    void DrawAssetBrowserPanel();
+    void DrawConsolePanel();
+    void DrawStatusBar();
+
+    bool showHierarchy_ = true;
+    bool showInspector_ = true;
+    bool showViewport_ = true;
+    bool showAssetBrowser_ = true;
+    bool showConsole_ = true;
+    bool showAboutPopup_ = false;
+    bool resetWorkspaceRequested_ = false;
 };
 
 } // namespace VoxelForge::Editor
