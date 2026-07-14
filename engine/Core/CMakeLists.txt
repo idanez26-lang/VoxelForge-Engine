@@ -5,6 +5,7 @@ target_sources(
     PRIVATE
         src/Application.cpp
         src/FileSystem.cpp
+        src/Input/Input.cpp
         src/Layer/Layer.cpp
         src/Layer/LayerStack.cpp
         src/Logger.cpp

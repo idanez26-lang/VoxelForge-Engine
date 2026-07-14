@@ -1,0 +1,17 @@
+VF-0190 Input System v1.0
+
+Nouveaux fichiers :
+- engine/Core/include/VoxelForge/Core/Input/Input.h
+- engine/Core/include/VoxelForge/Core/Input/KeyCodes.h
+- engine/Core/include/VoxelForge/Core/Input/MouseCodes.h
+- engine/Core/src/Input/Input.cpp
+
+Fichiers remplacés :
+- engine/Core/CMakeLists.txt
+- engine/Core/include/VoxelForge/Core/Event/KeyboardEvent.h
+- engine/Core/include/VoxelForge/Core/Event/MouseEvent.h
+- engine/Core/src/Window/SDLWindow.cpp
+
+CMake racine modifié : non
+Application modifiée : non
+Window publique modifiée : non

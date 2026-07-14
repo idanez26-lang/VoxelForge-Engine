@@ -1,5 +1,7 @@
 #include "Window/SDLWindow.h"
 
+#include "VoxelForge/Core/Event/KeyboardEvent.h"
+#include "VoxelForge/Core/Event/MouseEvent.h"
 #include "VoxelForge/Core/Event/WindowEvent.h"
 #include "VoxelForge/Core/Logger.h"
 
@@ -135,6 +137,53 @@ void SDLWindow::PollEvents()
                     event.window.data1,
                     event.window.data2);
                 eventCallback_(movedEvent);
+                break;
+            }
+
+            case SDL_EVENT_KEY_DOWN:
+            {
+                VoxelForge::KeyPressedEvent keyEvent(
+                    static_cast<VoxelForge::KeyCode>(event.key.scancode),
+                    event.key.repeat);
+                eventCallback_(keyEvent);
+                break;
+            }
+
+            case SDL_EVENT_KEY_UP:
+            {
+                VoxelForge::KeyReleasedEvent keyEvent(
+                    static_cast<VoxelForge::KeyCode>(event.key.scancode));
+                eventCallback_(keyEvent);
+                break;
+            }
+
+            case SDL_EVENT_MOUSE_MOTION:
+            {
+                VoxelForge::MouseMovedEvent mouseEvent(event.motion.x, event.motion.y);
+                eventCallback_(mouseEvent);
+                break;
+            }
+
+            case SDL_EVENT_MOUSE_WHEEL:
+            {
+                VoxelForge::MouseScrolledEvent scrollEvent(event.wheel.x, event.wheel.y);
+                eventCallback_(scrollEvent);
+                break;
+            }
+
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            {
+                VoxelForge::MouseButtonPressedEvent buttonEvent(
+                    static_cast<VoxelForge::MouseCode>(event.button.button));
+                eventCallback_(buttonEvent);
+                break;
+            }
+
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+            {
+                VoxelForge::MouseButtonReleasedEvent buttonEvent(
+                    static_cast<VoxelForge::MouseCode>(event.button.button));
+                eventCallback_(buttonEvent);
                 break;
             }
 
