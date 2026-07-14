@@ -1,0 +1,4 @@
+VF-0240 Renderer Foundation
+
+Nouveaux fichiers : module engine/Renderer et documentation.
+Fichiers remplacés : CMakeLists.txt racine et editor/CMakeLists.txt.
