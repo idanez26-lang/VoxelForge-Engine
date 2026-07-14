@@ -4,7 +4,7 @@
 
 .vs/
 
-# Fichiers utilisateur
+# Fichiers utilisateur et état local de l'IDE
 *.suo
 *.user
 *.userosscache
@@ -22,20 +22,31 @@ FileContentIndex/
 *.sqlite-shm
 *.sqlite-wal
 
-# IntelliSense
+# IntelliSense et compilation incrémentale
 ipch/
 *.ipch
 *.iobj
 *.ipdb
+*.idb
+*.pch
+*.tlog
+*.lastbuildstate
+*.recipe
+*.res
 
 # =========================
 # Compilation
 # =========================
 
 Debug/
+DebugPublic/
 Release/
+RelWithDebInfo/
+MinSizeRel/
 x64/
 x86/
+ARM/
+ARM64/
 bin/
 obj/
 build/
@@ -52,6 +63,11 @@ cmake_install.cmake
 CTestTestfile.cmake
 compile_commands.json
 Makefile
+CMakeUserPresets.json
+DartConfiguration.tcl
+install_manifest.txt
+Testing/
+_deps/
 
 # =========================
 # Binaires
@@ -65,10 +81,29 @@ Makefile
 *.ilk
 *.pdb
 
+# Un fichier .obj dans assets/ ou examples/ est un modèle Wavefront utile,
+# pas un objet de compilation MSVC.
+!assets/**/*.obj
+!examples/**/*.obj
+
 # =========================
-# Temporaire
+# Exécution locale et fichiers temporaires
 # =========================
 
+imgui.ini
+/workspace/
 *.tmp
+*.temp
 *.log
 *.cache
+*~
+
+# =========================
+# Windows
+# =========================
+
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump

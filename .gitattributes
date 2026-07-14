@@ -1,2 +1,29 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Normaliser tous les fichiers texte en LF dans le dépôt et le répertoire de travail.
+* text=auto eol=lf
+
+# Les scripts natifs Windows conservent CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Ressources binaires courantes : aucune conversion de fin de ligne.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.bmp binary
+*.tga binary
+*.ico binary
+*.dds binary
+*.vox binary
+*.vxl binary
+*.qb binary
+*.glb binary
+*.fbx binary
+*.blend binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.7z binary
