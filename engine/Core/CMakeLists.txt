@@ -11,12 +11,22 @@ target_sources(
         src/Time.cpp
         src/UUID.cpp
         src/Version.cpp
+        src/Window/SDLWindow.cpp
+        src/Window/Window.cpp
 )
 
 target_include_directories(
     VoxelForgeCore
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(
+    VoxelForgeCore
+    PRIVATE
+        SDL3::SDL3
 )
 
 target_compile_features(VoxelForgeCore PUBLIC cxx_std_20)

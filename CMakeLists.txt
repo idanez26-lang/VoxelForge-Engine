@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     VoxelForgeEngine
-    VERSION 0.0.3
+    VERSION 0.0.6
     DESCRIPTION "Universal AI-assisted voxel creation platform"
     LANGUAGES CXX
 )
@@ -12,6 +12,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(VF_BUILD_EDITOR "Build the VoxelForge editor executable" ON)
+
+include(FetchContent)
+
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    SDL3
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG release-3.4.10
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(SDL3)
 
 add_subdirectory(engine/Core)
 add_subdirectory(engine/Project)

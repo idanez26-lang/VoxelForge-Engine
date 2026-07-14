@@ -6,9 +6,12 @@
 #include "VoxelForge/Core/Layer/LayerStack.h"
 #include "VoxelForge/Core/Logger.h"
 #include "VoxelForge/Core/Version.h"
+#include "VoxelForge/Core/Window/Window.h"
 
-#include <iostream>
+#include <SDL3/SDL_timer.h>
+
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -18,6 +21,7 @@ namespace VoxelForge::Core
 Application::Application(ApplicationSpecification specification)
     : specification_(std::move(specification)),
       layerStack_(std::make_unique<LayerStack>()),
+      window_(nullptr),
       initialized_(false),
       running_(false)
 {
@@ -34,18 +38,27 @@ bool Application::Initialize()
         return true;
     }
 
-    const std::string version = Version::Current().ToString();
-
-    std::cout << "========================================\n";
-    std::cout << " " << specification_.Name << "\n";
-    std::cout << " v" << version << "\n";
-    std::cout << "========================================\n\n";
-
     Logger::Instance().Info("Initializing Core...");
     Logger::Instance().Info("Logger initialized.");
     Logger::Instance().Info("Version system initialized.");
     Logger::Instance().Info("FileSystem initialized.");
     Logger::Instance().Info("Layer system initialized.");
+
+    WindowSpecification windowSpecification;
+    windowSpecification.Title = specification_.Name;
+    windowSpecification.Width = specification_.WindowWidth;
+    windowSpecification.Height = specification_.WindowHeight;
+    windowSpecification.Resizable = specification_.WindowResizable;
+    windowSpecification.Maximized = specification_.WindowMaximized;
+
+    window_ = Window::Create(windowSpecification);
+    window_->SetEventCallback(
+        [this](VoxelForge::Event& event)
+        {
+            OnEvent(event);
+        });
+
+    Logger::Instance().Info("Window system initialized.");
     Logger::Instance().Info("Application initialized.");
 
     initialized_ = true;
@@ -55,24 +68,38 @@ bool Application::Initialize()
 
 int Application::Run()
 {
-    if (!Initialize())
+    try
     {
-        Logger::Instance().Error("VoxelForge failed to initialize.");
+        if (!Initialize())
+        {
+            Logger::Instance().Error("VoxelForge failed to initialize.");
+            return 1;
+        }
+
+        Logger::Instance().Info("VoxelForge Engine Ready.");
+
+        while (running_)
+        {
+            window_->PollEvents();
+
+            if (!running_)
+                break;
+
+            UpdateLayers();
+            RenderLayerInterfaces();
+            SDL_Delay(1);
+        }
+
+        Shutdown();
+        return 0;
+    }
+    catch (const std::exception& exception)
+    {
+        Logger::Instance().Error(
+            std::string("Application failure: ") + exception.what());
+        Shutdown();
         return 1;
     }
-
-    Logger::Instance().Info("VoxelForge Engine Ready.");
-
-    // La boucle de mise à jour des layers sera ajoutée avec le système Window.
-    if (specification_.PauseOnExit && running_)
-    {
-        std::cout << "\nPress Enter to close VoxelForge...\n";
-        std::cin.get();
-    }
-
-    Close();
-    Shutdown();
-    return 0;
 }
 
 void Application::Close() noexcept
@@ -97,6 +124,7 @@ void Application::OnEvent(VoxelForge::Event& event)
          ++iterator)
     {
         (*iterator)->OnEvent(event);
+
         if (event.Handled)
             break;
     }
@@ -142,6 +170,28 @@ const LayerStack& Application::GetLayerStack() const noexcept
     return *layerStack_;
 }
 
+Window& Application::GetWindow() noexcept
+{
+    return *window_;
+}
+
+const Window& Application::GetWindow() const noexcept
+{
+    return *window_;
+}
+
+void Application::UpdateLayers()
+{
+    for (const auto& layer : *layerStack_)
+        layer->OnUpdate();
+}
+
+void Application::RenderLayerInterfaces()
+{
+    for (const auto& layer : *layerStack_)
+        layer->OnImGuiRender();
+}
+
 bool Application::OnWindowClose(VoxelForge::WindowCloseEvent&)
 {
     Close();
@@ -151,15 +201,20 @@ bool Application::OnWindowClose(VoxelForge::WindowCloseEvent&)
 void Application::Shutdown()
 {
     if (!initialized_)
+    {
+        window_.reset();
         return;
+    }
 
     Logger::Instance().Info("Shutting down VoxelForge Engine...");
 
     if (layerStack_)
         layerStack_->Clear();
 
+    window_.reset();
     running_ = false;
     initialized_ = false;
+
     Logger::Instance().Info("Shutdown complete.");
 }
 

@@ -1,0 +1,17 @@
+VF-0180 Window SDL3 v1.0
+
+Nouveaux fichiers :
+- engine/Core/include/VoxelForge/Core/Window/Window.h
+- engine/Core/src/Window/Window.cpp
+- engine/Core/src/Window/SDLWindow.h
+- engine/Core/src/Window/SDLWindow.cpp
+- docs/100_Architecture/Core/VF-0180-Window-SDL3.md
+- INSTALL_VF-0180.md
+- CHANGELOG_VF-0180.md
+
+Fichiers remplacés :
+- CMakeLists.txt
+- engine/Core/CMakeLists.txt
+- engine/Core/include/VoxelForge/Core/ApplicationSpecification.h
+- engine/Core/include/VoxelForge/Core/Application.h
+- engine/Core/src/Application.cpp

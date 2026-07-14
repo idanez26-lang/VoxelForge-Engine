@@ -15,6 +15,7 @@ namespace VoxelForge::Core
 
 class Layer;
 class LayerStack;
+class Window;
 
 class Application final
 {
@@ -40,14 +41,19 @@ public:
     [[nodiscard]] bool IsRunning() const noexcept;
     [[nodiscard]] LayerStack& GetLayerStack() noexcept;
     [[nodiscard]] const LayerStack& GetLayerStack() const noexcept;
+    [[nodiscard]] Window& GetWindow() noexcept;
+    [[nodiscard]] const Window& GetWindow() const noexcept;
 
 private:
     bool Initialize();
+    void UpdateLayers();
+    void RenderLayerInterfaces();
     void Shutdown();
     bool OnWindowClose(VoxelForge::WindowCloseEvent& event);
 
     ApplicationSpecification specification_;
     std::unique_ptr<LayerStack> layerStack_;
+    std::unique_ptr<Window> window_;
     bool initialized_;
     bool running_;
 };
