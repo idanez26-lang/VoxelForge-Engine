@@ -4,11 +4,13 @@
 #include "VoxelForge/Core/Event/MouseEvent.h"
 #include "VoxelForge/Core/Event/WindowEvent.h"
 #include "VoxelForge/Core/Logger.h"
+#include "VoxelForge/Renderer/Renderer.h"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_gpu.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
-#include <imgui_impl_sdlrenderer3.h>
+#include <imgui_impl_sdlgpu3.h>
 
 #include <cstdint>
 #include <stdexcept>
@@ -31,13 +33,11 @@ SDLWindow::~SDLWindow()
 
 void SDLWindow::Initialize()
 {
-    if (!SDL_Init(SDL_INIT_VIDEO))
+    if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0)
     {
         throw std::runtime_error(
-            std::string("SDL video initialization failed: ") + SDL_GetError());
+            "SDL video subsystem must be initialized before SDLWindow.");
     }
-
-    ownsSDL_ = true;
 
     SDL_WindowFlags flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
@@ -65,23 +65,51 @@ void SDLWindow::Initialize()
             std::string("SDL window creation failed: ") + error);
     }
 
-    renderer_ = SDL_CreateRenderer(window_, nullptr);
+    gpuDevice_ = Renderer::Renderer::GetGPUDevice();
 
-    if (renderer_ == nullptr)
+    if (gpuDevice_ == nullptr)
+    {
+        Shutdown();
+        throw std::runtime_error(
+            "SDL GPU device is unavailable during window initialization.");
+    }
+
+    if (!SDL_ClaimWindowForGPUDevice(gpuDevice_, window_))
     {
         const std::string error = SDL_GetError();
         Shutdown();
         throw std::runtime_error(
-            std::string("SDL renderer creation failed: ") + error);
+            std::string("SDL GPU failed to claim the window: ") + error);
+    }
+
+    windowClaimedByGPU_ = true;
+
+    const SDL_GPUPresentMode presentMode =
+        Renderer::Renderer::GetSpecification().EnableVSync
+            ? SDL_GPU_PRESENTMODE_VSYNC
+            : SDL_GPU_PRESENTMODE_IMMEDIATE;
+
+    if (!SDL_SetGPUSwapchainParameters(
+            gpuDevice_,
+            window_,
+            SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+            presentMode))
+    {
+        const std::string error = SDL_GetError();
+        Shutdown();
+        throw std::runtime_error(
+            std::string("SDL GPU swapchain configuration failed: ") + error);
     }
 
     InitializeImGui();
 
     Logger::Instance().Info(
-        "SDL3 window created: " + specification_.Title + " (" +
+        "SDL3 GPU window created: " + specification_.Title + " (" +
         std::to_string(specification_.Width) + "x" +
         std::to_string(specification_.Height) + ").");
-    Logger::Instance().Info("Dear ImGui docking initialized.");
+
+    Logger::Instance().Info(
+        "Dear ImGui SDL GPU backend initialized.");
 }
 
 void SDLWindow::InitializeImGui()
@@ -95,19 +123,30 @@ void SDLWindow::InitializeImGui()
 
     ImGui::StyleColorsDark();
 
-    if (!ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_))
+    if (!ImGui_ImplSDL3_InitForSDLGPU(window_))
     {
         ImGui::DestroyContext();
         throw std::runtime_error(
-            "Dear ImGui SDL3 backend initialization failed.");
+            "Dear ImGui SDL3 platform backend initialization failed.");
     }
 
-    if (!ImGui_ImplSDLRenderer3_Init(renderer_))
+    ImGui_ImplSDLGPU3_InitInfo initInfo{};
+    initInfo.Device = gpuDevice_;
+    initInfo.ColorTargetFormat =
+        SDL_GetGPUSwapchainTextureFormat(gpuDevice_, window_);
+    initInfo.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+    initInfo.SwapchainComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
+    initInfo.PresentMode =
+        Renderer::Renderer::GetSpecification().EnableVSync
+            ? SDL_GPU_PRESENTMODE_VSYNC
+            : SDL_GPU_PRESENTMODE_IMMEDIATE;
+
+    if (!ImGui_ImplSDLGPU3_Init(&initInfo))
     {
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
         throw std::runtime_error(
-            "Dear ImGui SDL renderer backend initialization failed.");
+            "Dear ImGui SDL GPU renderer backend initialization failed.");
     }
 
     imguiInitialized_ = true;
@@ -115,30 +154,31 @@ void SDLWindow::InitializeImGui()
 
 void SDLWindow::Shutdown() noexcept
 {
+    if (gpuDevice_ != nullptr)
+    {
+        SDL_WaitForGPUIdle(gpuDevice_);
+    }
+
     if (imguiInitialized_)
     {
-        ImGui_ImplSDLRenderer3_Shutdown();
+        ImGui_ImplSDLGPU3_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
         imguiInitialized_ = false;
     }
 
-    if (renderer_ != nullptr)
+    if (windowClaimedByGPU_ && gpuDevice_ != nullptr && window_ != nullptr)
     {
-        SDL_DestroyRenderer(renderer_);
-        renderer_ = nullptr;
+        SDL_ReleaseWindowFromGPUDevice(gpuDevice_, window_);
+        windowClaimedByGPU_ = false;
     }
+
+    gpuDevice_ = nullptr;
 
     if (window_ != nullptr)
     {
         SDL_DestroyWindow(window_);
         window_ = nullptr;
-    }
-
-    if (ownsSDL_)
-    {
-        SDL_Quit();
-        ownsSDL_ = false;
     }
 }
 
@@ -269,7 +309,7 @@ void SDLWindow::PollEvents()
 
 void SDLWindow::BeginFrame()
 {
-    ImGui_ImplSDLRenderer3_NewFrame();
+    ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 }
@@ -278,14 +318,82 @@ void SDLWindow::EndFrame()
 {
     ImGui::Render();
 
-    SDL_SetRenderDrawColor(renderer_, 18, 18, 22, 255);
-    SDL_RenderClear(renderer_);
+    ImDrawData* drawData = ImGui::GetDrawData();
+    const bool minimized =
+        drawData->DisplaySize.x <= 0.0F ||
+        drawData->DisplaySize.y <= 0.0F;
 
-    ImGui_ImplSDLRenderer3_RenderDrawData(
-        ImGui::GetDrawData(),
-        renderer_);
+    SDL_GPUCommandBuffer* commandBuffer =
+        SDL_AcquireGPUCommandBuffer(gpuDevice_);
 
-    SDL_RenderPresent(renderer_);
+    if (commandBuffer == nullptr)
+    {
+        Logger::Instance().Error(
+            std::string("SDL GPU command buffer acquisition failed: ") +
+            SDL_GetError());
+        return;
+    }
+
+    SDL_GPUTexture* swapchainTexture = nullptr;
+
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(
+            commandBuffer,
+            window_,
+            &swapchainTexture,
+            nullptr,
+            nullptr))
+    {
+        Logger::Instance().Error(
+            std::string("SDL GPU swapchain acquisition failed: ") +
+            SDL_GetError());
+
+        SDL_CancelGPUCommandBuffer(commandBuffer);
+        return;
+    }
+
+    if (swapchainTexture != nullptr && !minimized)
+    {
+        ImGui_ImplSDLGPU3_PrepareDrawData(drawData, commandBuffer);
+
+        SDL_GPUColorTargetInfo targetInfo{};
+        targetInfo.texture = swapchainTexture;
+        targetInfo.clear_color = SDL_FColor{0.07F, 0.07F, 0.09F, 1.0F};
+        targetInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+        targetInfo.store_op = SDL_GPU_STOREOP_STORE;
+        targetInfo.mip_level = 0;
+        targetInfo.layer_or_depth_plane = 0;
+        targetInfo.cycle = false;
+
+        SDL_GPURenderPass* renderPass = SDL_BeginGPURenderPass(
+            commandBuffer,
+            &targetInfo,
+            1,
+            nullptr);
+
+        if (renderPass == nullptr)
+        {
+            Logger::Instance().Error(
+                std::string("SDL GPU render pass creation failed: ") +
+                SDL_GetError());
+
+            SDL_CancelGPUCommandBuffer(commandBuffer);
+            return;
+        }
+
+        ImGui_ImplSDLGPU3_RenderDrawData(
+            drawData,
+            commandBuffer,
+            renderPass);
+
+        SDL_EndGPURenderPass(renderPass);
+    }
+
+    if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
+    {
+        Logger::Instance().Error(
+            std::string("SDL GPU command buffer submission failed: ") +
+            SDL_GetError());
+    }
 }
 
 void SDLWindow::SetEventCallback(EventCallback callback)
@@ -313,9 +421,9 @@ void* SDLWindow::GetNativeHandle() const noexcept
     return window_;
 }
 
-void* SDLWindow::GetNativeRendererHandle() const noexcept
+void* SDLWindow::GetNativeGPUDeviceHandle() const noexcept
 {
-    return renderer_;
+    return gpuDevice_;
 }
 
 } // namespace VoxelForge::Core

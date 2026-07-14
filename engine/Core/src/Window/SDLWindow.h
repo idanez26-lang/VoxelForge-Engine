@@ -2,7 +2,7 @@
 
 #include "VoxelForge/Core/Window/Window.h"
 
-struct SDL_Renderer;
+struct SDL_GPUDevice;
 struct SDL_Window;
 
 namespace VoxelForge::Core
@@ -23,7 +23,7 @@ public:
     [[nodiscard]] std::uint32_t GetWidth() const noexcept override;
     [[nodiscard]] std::uint32_t GetHeight() const noexcept override;
     [[nodiscard]] void* GetNativeHandle() const noexcept override;
-    [[nodiscard]] void* GetNativeRendererHandle() const noexcept override;
+    [[nodiscard]] void* GetNativeGPUDeviceHandle() const noexcept override;
 
 private:
     void Initialize();
@@ -33,8 +33,8 @@ private:
     WindowSpecification specification_;
     EventCallback eventCallback_;
     SDL_Window* window_ = nullptr;
-    SDL_Renderer* renderer_ = nullptr;
-    bool ownsSDL_ = false;
+    SDL_GPUDevice* gpuDevice_ = nullptr;
+    bool windowClaimedByGPU_ = false;
     bool imguiInitialized_ = false;
 };
 

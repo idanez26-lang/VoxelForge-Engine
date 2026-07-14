@@ -28,11 +28,9 @@ public:
 
     [[nodiscard]] static SDL_GPUDevice* GetGPUDevice() noexcept;
 
-    [[nodiscard]] static const std::string&
-    GetBackendName() noexcept;
-
-    [[nodiscard]] static const std::string&
-    GetShaderFormatsDescription() noexcept;
+    [[nodiscard]] static const std::string& GetBackendName() noexcept;
+    [[nodiscard]] static const std::string& GetShaderFormatsDescription() noexcept;
+    [[nodiscard]] static const std::string& GetLastError() noexcept;
 
     [[nodiscard]] static const RendererSpecification&
     GetSpecification() noexcept;
@@ -46,6 +44,8 @@ private:
     static inline SDL_GPUDevice* gpuDevice_ = nullptr;
     static inline std::string backendName_ = "None";
     static inline std::string shaderFormatsDescription_ = "None";
+    static inline std::string lastError_{};
+    static inline bool ownsSDLVideo_ = false;
     static inline bool initialized_ = false;
 };
 

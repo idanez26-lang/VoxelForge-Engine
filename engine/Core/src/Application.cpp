@@ -7,6 +7,7 @@
 #include "VoxelForge/Core/Logger.h"
 #include "VoxelForge/Core/Version.h"
 #include "VoxelForge/Core/Window/Window.h"
+#include "VoxelForge/Renderer/Renderer.h"
 
 #include <SDL3/SDL_timer.h>
 
@@ -44,6 +45,26 @@ bool Application::Initialize()
     Logger::Instance().Info("FileSystem initialized.");
     Logger::Instance().Info("Layer system initialized.");
 
+    Renderer::RendererSpecification rendererSpecification;
+    rendererSpecification.ApplicationName = specification_.Name;
+    rendererSpecification.EnableValidation = true;
+    rendererSpecification.EnableVSync = true;
+
+    if (!Renderer::Renderer::Initialize(rendererSpecification))
+    {
+        Logger::Instance().Error(
+            Renderer::Renderer::GetLastError());
+        return false;
+    }
+
+    Logger::Instance().Info(
+        "SDL GPU renderer initialized. Backend: " +
+        Renderer::Renderer::GetBackendName() + ".");
+
+    Logger::Instance().Info(
+        "SDL GPU shader formats: " +
+        Renderer::Renderer::GetShaderFormatsDescription() + ".");
+
     WindowSpecification windowSpecification;
     windowSpecification.Title = specification_.Name;
     windowSpecification.Width = specification_.WindowWidth;
@@ -73,6 +94,7 @@ int Application::Run()
         if (!Initialize())
         {
             Logger::Instance().Error("VoxelForge failed to initialize.");
+            Shutdown();
             return 1;
         }
 
@@ -87,10 +109,14 @@ int Application::Run()
                 break;
             }
 
+            Renderer::Renderer::BeginFrame();
+
             window_->BeginFrame();
             UpdateLayers();
             RenderLayerInterfaces();
             window_->EndFrame();
+
+            Renderer::Renderer::EndFrame();
 
             SDL_Delay(1);
         }
@@ -216,6 +242,7 @@ void Application::Shutdown()
     if (!initialized_)
     {
         window_.reset();
+        Renderer::Renderer::Shutdown();
         return;
     }
 
@@ -227,6 +254,8 @@ void Application::Shutdown()
     }
 
     window_.reset();
+    Renderer::Renderer::Shutdown();
+
     running_ = false;
     initialized_ = false;
 

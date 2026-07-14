@@ -1,0 +1,20 @@
+VF-0242 ImGui SDL GPU Backend
+
+Fichiers remplacés :
+- CMakeLists.txt
+- engine/Renderer/CMakeLists.txt
+- engine/Renderer/include/VoxelForge/Renderer/Renderer.h
+- engine/Renderer/src/Renderer.cpp
+- engine/Core/CMakeLists.txt
+- engine/Core/include/VoxelForge/Core/Window/Window.h
+- engine/Core/src/Window/SDLWindow.h
+- engine/Core/src/Window/SDLWindow.cpp
+- engine/Core/src/Application.cpp
+- editor/src/EditorLayer.cpp
+
+Nouveaux fichiers :
+- docs/100_Architecture/Renderer/VF-0242-ImGui-SDL-GPU-Backend.md
+- INSTALL_VF-0242.md
+- CHANGELOG_VF-0242.md
+- VF-0242_MANIFEST.txt
+- CHECKLIST_VF-0242.md

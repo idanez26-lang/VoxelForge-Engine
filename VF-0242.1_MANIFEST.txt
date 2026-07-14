@@ -1,0 +1,14 @@
+VF-0242.1 SDL Video Lifetime Fix
+
+Fichiers remplacés :
+- engine/Renderer/include/VoxelForge/Renderer/Renderer.h
+- engine/Renderer/src/Renderer.cpp
+- engine/Core/src/Window/SDLWindow.h
+- engine/Core/src/Window/SDLWindow.cpp
+
+Nouveaux fichiers :
+- CHANGELOG_VF-0242.1.md
+- INSTALL_VF-0242.1.md
+- VF-0242.1_MANIFEST.txt
+
+Aucun CMakeLists.txt remplacé.

@@ -1,6 +1,5 @@
 #include "VoxelForge/Renderer/Renderer.h"
 
-#include "VoxelForge/Core/Logger.h"
 #include "VoxelForge/Renderer/RendererAPI.h"
 
 #include <SDL3/SDL.h>
@@ -65,12 +64,7 @@ namespace
         appendFormat("METALLIB");
     }
 
-    if (description.empty())
-    {
-        description = "None";
-    }
-
-    return description;
+    return description.empty() ? "None" : description;
 }
 
 } // namespace
@@ -79,8 +73,6 @@ bool Renderer::Initialize(const RendererSpecification& specification)
 {
     if (initialized_)
     {
-        Core::Logger::Instance().Warning(
-            "Renderer initialization was requested more than once.");
         return true;
     }
 
@@ -88,16 +80,25 @@ bool Renderer::Initialize(const RendererSpecification& specification)
     statistics_ = {};
     backendName_ = "None";
     shaderFormatsDescription_ = "None";
-
-    Core::Logger::Instance().Info(
-        "Initializing renderer. Requested API: " +
-        std::string(ToString(specification_.API)) + ".");
+    lastError_.clear();
 
     if (specification_.API != RendererAPI::SDLGPU)
     {
-        Core::Logger::Instance().Error(
-            "The requested renderer API is not implemented.");
+        lastError_ = "The requested renderer API is not implemented.";
         return false;
+    }
+
+    if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0)
+    {
+        if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+        {
+            lastError_ =
+                std::string("SDL video initialization failed: ") +
+                SDL_GetError();
+            return false;
+        }
+
+        ownsSDLVideo_ = true;
     }
 
     gpuDevice_ = SDL_CreateGPUDevice(
@@ -107,9 +108,16 @@ bool Renderer::Initialize(const RendererSpecification& specification)
 
     if (gpuDevice_ == nullptr)
     {
-        Core::Logger::Instance().Error(
+        lastError_ =
             std::string("SDL GPU device creation failed: ") +
-            SDL_GetError());
+            SDL_GetError();
+
+        if (ownsSDLVideo_)
+        {
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            ownsSDLVideo_ = false;
+        }
+
         return false;
     }
 
@@ -121,15 +129,6 @@ bool Renderer::Initialize(const RendererSpecification& specification)
         SDL_GetGPUShaderFormats(gpuDevice_));
 
     initialized_ = true;
-
-    Core::Logger::Instance().Info(
-        "SDL GPU device created. Backend: " +
-        backendName_ + ".");
-
-    Core::Logger::Instance().Info(
-        "SDL GPU shader formats: " +
-        shaderFormatsDescription_ + ".");
-
     return true;
 }
 
@@ -142,40 +141,33 @@ void Renderer::Shutdown() noexcept
         gpuDevice_ = nullptr;
     }
 
-    if (!initialized_)
-    {
-        backendName_ = "None";
-        shaderFormatsDescription_ = "None";
-        return;
-    }
-
     initialized_ = false;
     statistics_ = {};
     backendName_ = "None";
     shaderFormatsDescription_ = "None";
+    lastError_.clear();
 
-    Core::Logger::Instance().Info(
-        "SDL GPU device and renderer shut down.");
+    if (ownsSDLVideo_)
+    {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        ownsSDLVideo_ = false;
+    }
 }
 
 void Renderer::BeginFrame() noexcept
 {
-    if (!initialized_)
+    if (initialized_)
     {
-        return;
+        statistics_.ResetPerFrame();
     }
-
-    statistics_.ResetPerFrame();
 }
 
 void Renderer::EndFrame() noexcept
 {
-    if (!initialized_)
+    if (initialized_)
     {
-        return;
+        ++statistics_.FrameIndex;
     }
-
-    ++statistics_.FrameIndex;
 }
 
 bool Renderer::IsInitialized() noexcept
@@ -201,6 +193,11 @@ const std::string& Renderer::GetBackendName() noexcept
 const std::string& Renderer::GetShaderFormatsDescription() noexcept
 {
     return shaderFormatsDescription_;
+}
+
+const std::string& Renderer::GetLastError() noexcept
+{
+    return lastError_;
 }
 
 const RendererSpecification& Renderer::GetSpecification() noexcept

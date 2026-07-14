@@ -43,7 +43,7 @@ public:
     [[nodiscard]] virtual std::uint32_t GetWidth() const noexcept = 0;
     [[nodiscard]] virtual std::uint32_t GetHeight() const noexcept = 0;
     [[nodiscard]] virtual void* GetNativeHandle() const noexcept = 0;
-    [[nodiscard]] virtual void* GetNativeRendererHandle() const noexcept = 0;
+    [[nodiscard]] virtual void* GetNativeGPUDeviceHandle() const noexcept = 0;
 
     [[nodiscard]] static std::unique_ptr<Window> Create(
         const WindowSpecification& specification);

@@ -15,8 +15,6 @@ target_include_directories(
 target_link_libraries(
     VoxelForgeRenderer
     PUBLIC
-        VoxelForgeCore
-    PRIVATE
         SDL3::SDL3
 )
 

@@ -26,38 +26,16 @@ void EditorLayer::OnAttach()
 
 void EditorLayer::OnDetach()
 {
-    Renderer::Renderer::Shutdown();
-
     selectedEntity_ = nullptr;
     scene_.reset();
-
     Core::Logger::Instance().Info("Viewport 3D prototype detached.");
 }
 
 void EditorLayer::OnUpdate()
 {
-    if (!Renderer::Renderer::IsInitialized())
-    {
-        Renderer::RendererSpecification specification;
-        specification.ApplicationName = "VoxelForge Studio";
-        specification.EnableValidation = true;
-        specification.EnableVSync = true;
-
-        if (!Renderer::Renderer::Initialize(specification))
-        {
-            Core::Logger::Instance().Error(
-                "VoxelForge will continue with the ImGui viewport prototype "
-                "because SDL GPU initialization failed.");
-        }
-    }
-
-    Renderer::Renderer::BeginFrame();
-
     const ImGuiIO& io = ImGui::GetIO();
     deltaTime_ = std::clamp(io.DeltaTime, 0.0001F, 0.1F);
     editorCamera_.Update(deltaTime_, viewportHovered_);
-
-    Renderer::Renderer::EndFrame();
 }
 
 void EditorLayer::CreateDefaultScene()
@@ -123,7 +101,7 @@ void EditorLayer::OnImGuiRender()
             nullptr,
             ImGuiWindowFlags_AlwaysAutoResize))
     {
-        ImGui::TextUnformatted("VoxelForge Studio v0.1.1");
+        ImGui::TextUnformatted("VoxelForge Studio v0.1.2");
         ImGui::Separator();
         ImGui::TextUnformatted("Créer plus vite. Rester l'artisan.");
 
@@ -424,7 +402,7 @@ void EditorLayer::DrawConsolePanel()
     {
         ImGui::TextColored(
             ImVec4(0.45F, 0.85F, 0.55F, 1.0F),
-            "[INFO] SDL GPU device actif.");
+            "[INFO] Interface rendue avec SDL GPU.");
 
         ImGui::Text(
             "Backend : %s",
@@ -438,10 +416,7 @@ void EditorLayer::DrawConsolePanel()
     {
         ImGui::TextColored(
             ImVec4(0.95F, 0.45F, 0.35F, 1.0F),
-            "[ERROR] Aucun périphérique SDL GPU actif.");
-
-        ImGui::TextDisabled(
-            "Le Viewport prototype reste disponible.");
+            "[ERROR] Aucun peripherique SDL GPU actif.");
     }
 
     ImGui::End();
@@ -478,16 +453,11 @@ void EditorLayer::DrawStatusBar()
         const std::size_t entityCount =
             scene_ == nullptr ? 0 : scene_->GetEntityCount();
 
-        const char* gpuStatus =
-            Renderer::Renderer::HasGPUDevice()
-                ? Renderer::Renderer::GetBackendName().c_str()
-                : "GPU indisponible";
-
         ImGui::Text(
-            "FPS : %.1f | Scene : %zu objets | GPU : %s | VF-0241",
+            "FPS : %.1f | Scene : %zu objets | GPU UI : %s | VF-0242",
             io.Framerate,
             entityCount,
-            gpuStatus);
+            Renderer::Renderer::GetBackendName().c_str());
     }
 
     ImGui::End();
