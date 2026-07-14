@@ -1,0 +1,20 @@
+VF-0241 SDL GPU Device
+
+Fichiers remplacés :
+- engine/Renderer/CMakeLists.txt
+- engine/Renderer/include/VoxelForge/Renderer/Renderer.h
+- engine/Renderer/src/Renderer.cpp
+- editor/src/EditorLayer.cpp
+
+Nouveaux fichiers :
+- docs/100_Architecture/Renderer/VF-0241-SDL-GPU-Device.md
+- INSTALL_VF-0241.md
+- CHANGELOG_VF-0241.md
+- VF-0241_MANIFEST.txt
+- CHECKLIST_VF-0241.md
+
+Non remplacés :
+- CMakeLists.txt racine
+- editor/CMakeLists.txt
+- SDLWindow
+- Scene
