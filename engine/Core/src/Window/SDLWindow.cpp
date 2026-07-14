@@ -6,6 +6,9 @@
 #include "VoxelForge/Core/Logger.h"
 
 #include <SDL3/SDL.h>
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_sdlrenderer3.h>
 
 #include <cstdint>
 #include <stdexcept>
@@ -39,10 +42,14 @@ void SDLWindow::Initialize()
     SDL_WindowFlags flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
     if (specification_.Resizable)
+    {
         flags |= SDL_WINDOW_RESIZABLE;
+    }
 
     if (specification_.Maximized)
+    {
         flags |= SDL_WINDOW_MAXIMIZED;
+    }
 
     window_ = SDL_CreateWindow(
         specification_.Title.c_str(),
@@ -58,14 +65,69 @@ void SDLWindow::Initialize()
             std::string("SDL window creation failed: ") + error);
     }
 
+    renderer_ = SDL_CreateRenderer(window_, nullptr);
+
+    if (renderer_ == nullptr)
+    {
+        const std::string error = SDL_GetError();
+        Shutdown();
+        throw std::runtime_error(
+            std::string("SDL renderer creation failed: ") + error);
+    }
+
+    InitializeImGui();
+
     Logger::Instance().Info(
         "SDL3 window created: " + specification_.Title + " (" +
         std::to_string(specification_.Width) + "x" +
         std::to_string(specification_.Height) + ").");
+    Logger::Instance().Info("Dear ImGui initialized.");
+}
+
+void SDLWindow::InitializeImGui()
+{
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    ImGui::StyleColorsDark();
+
+    if (!ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_))
+    {
+        ImGui::DestroyContext();
+        throw std::runtime_error(
+            "Dear ImGui SDL3 backend initialization failed.");
+    }
+
+    if (!ImGui_ImplSDLRenderer3_Init(renderer_))
+    {
+        ImGui_ImplSDL3_Shutdown();
+        ImGui::DestroyContext();
+        throw std::runtime_error(
+            "Dear ImGui SDL renderer backend initialization failed.");
+    }
+
+    imguiInitialized_ = true;
 }
 
 void SDLWindow::Shutdown() noexcept
 {
+    if (imguiInitialized_)
+    {
+        ImGui_ImplSDLRenderer3_Shutdown();
+        ImGui_ImplSDL3_Shutdown();
+        ImGui::DestroyContext();
+        imguiInitialized_ = false;
+    }
+
+    if (renderer_ != nullptr)
+    {
+        SDL_DestroyRenderer(renderer_);
+        renderer_ = nullptr;
+    }
+
     if (window_ != nullptr)
     {
         SDL_DestroyWindow(window_);
@@ -85,8 +147,15 @@ void SDLWindow::PollEvents()
 
     while (SDL_PollEvent(&event))
     {
+        if (imguiInitialized_)
+        {
+            ImGui_ImplSDL3_ProcessEvent(&event);
+        }
+
         if (!eventCallback_)
+        {
             continue;
+        }
 
         switch (event.type)
         {
@@ -159,14 +228,18 @@ void SDLWindow::PollEvents()
 
             case SDL_EVENT_MOUSE_MOTION:
             {
-                VoxelForge::MouseMovedEvent mouseEvent(event.motion.x, event.motion.y);
+                VoxelForge::MouseMovedEvent mouseEvent(
+                    event.motion.x,
+                    event.motion.y);
                 eventCallback_(mouseEvent);
                 break;
             }
 
             case SDL_EVENT_MOUSE_WHEEL:
             {
-                VoxelForge::MouseScrolledEvent scrollEvent(event.wheel.x, event.wheel.y);
+                VoxelForge::MouseScrolledEvent scrollEvent(
+                    event.wheel.x,
+                    event.wheel.y);
                 eventCallback_(scrollEvent);
                 break;
             }
@@ -193,6 +266,27 @@ void SDLWindow::PollEvents()
     }
 }
 
+void SDLWindow::BeginFrame()
+{
+    ImGui_ImplSDLRenderer3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+}
+
+void SDLWindow::EndFrame()
+{
+    ImGui::Render();
+
+    SDL_SetRenderDrawColor(renderer_, 18, 18, 22, 255);
+    SDL_RenderClear(renderer_);
+
+    ImGui_ImplSDLRenderer3_RenderDrawData(
+        ImGui::GetDrawData(),
+        renderer_);
+
+    SDL_RenderPresent(renderer_);
+}
+
 void SDLWindow::SetEventCallback(EventCallback callback)
 {
     eventCallback_ = std::move(callback);
@@ -216,6 +310,11 @@ std::uint32_t SDLWindow::GetHeight() const noexcept
 void* SDLWindow::GetNativeHandle() const noexcept
 {
     return window_;
+}
+
+void* SDLWindow::GetNativeRendererHandle() const noexcept
+{
+    return renderer_;
 }
 
 } // namespace VoxelForge::Core

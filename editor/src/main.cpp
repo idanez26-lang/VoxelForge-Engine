@@ -1,3 +1,5 @@
+#include "EditorLayer.h"
+
 #include "VoxelForge/Core/Application.h"
 #include "VoxelForge/Core/Logger.h"
 #include "VoxelForge/Project/ProjectManager.h"
@@ -5,6 +7,7 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 
 int main()
 {
@@ -26,6 +29,9 @@ int main()
         }
 
         VoxelForge::Core::Application application;
+        application.PushLayer(
+            std::make_unique<VoxelForge::Editor::EditorLayer>());
+
         const int result = application.Run();
 
         projectManager.CloseProject();

@@ -1,0 +1,19 @@
+VF-0200.2 First ImGui Window
+
+Nouveaux fichiers :
+- editor/src/EditorLayer.h
+- editor/src/EditorLayer.cpp
+- INSTALL_VF-0200.2.md
+- CHANGELOG_VF-0200.2.md
+
+Fichiers remplacés :
+- engine/Core/CMakeLists.txt
+- engine/Core/include/VoxelForge/Core/Window/Window.h
+- engine/Core/src/Window/SDLWindow.h
+- engine/Core/src/Window/SDLWindow.cpp
+- engine/Core/src/Application.cpp
+- editor/CMakeLists.txt
+- editor/src/main.cpp
+
+CMakeLists.txt racine : non remplacé
+Dépendance ImGui : déjà installée par VF-0200.1

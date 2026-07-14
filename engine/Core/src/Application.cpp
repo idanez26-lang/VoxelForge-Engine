@@ -83,10 +83,15 @@ int Application::Run()
             window_->PollEvents();
 
             if (!running_)
+            {
                 break;
+            }
 
+            window_->BeginFrame();
             UpdateLayers();
             RenderLayerInterfaces();
+            window_->EndFrame();
+
             SDL_Delay(1);
         }
 
@@ -117,7 +122,9 @@ void Application::OnEvent(VoxelForge::Event& event)
         });
 
     if (event.Handled || !layerStack_)
+    {
         return;
+    }
 
     for (auto iterator = layerStack_->rbegin();
          iterator != layerStack_->rend();
@@ -126,7 +133,9 @@ void Application::OnEvent(VoxelForge::Event& event)
         (*iterator)->OnEvent(event);
 
         if (event.Handled)
+        {
             break;
+        }
     }
 }
 
@@ -183,13 +192,17 @@ const Window& Application::GetWindow() const noexcept
 void Application::UpdateLayers()
 {
     for (const auto& layer : *layerStack_)
+    {
         layer->OnUpdate();
+    }
 }
 
 void Application::RenderLayerInterfaces()
 {
     for (const auto& layer : *layerStack_)
+    {
         layer->OnImGuiRender();
+    }
 }
 
 bool Application::OnWindowClose(VoxelForge::WindowCloseEvent&)
@@ -209,7 +222,9 @@ void Application::Shutdown()
     Logger::Instance().Info("Shutting down VoxelForge Engine...");
 
     if (layerStack_)
+    {
         layerStack_->Clear();
+    }
 
     window_.reset();
     running_ = false;

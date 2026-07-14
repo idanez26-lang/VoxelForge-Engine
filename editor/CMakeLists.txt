@@ -3,7 +3,14 @@ add_executable(VoxelForgeEditor)
 target_sources(
     VoxelForgeEditor
     PRIVATE
+        src/EditorLayer.cpp
         src/main.cpp
+)
+
+target_include_directories(
+    VoxelForgeEditor
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_link_libraries(
@@ -11,6 +18,7 @@ target_link_libraries(
     PRIVATE
         VoxelForgeProject
         VoxelForgeCore
+        VoxelForgeImGui
 )
 
 target_compile_features(VoxelForgeEditor PRIVATE cxx_std_20)

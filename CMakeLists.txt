@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     VoxelForgeEngine
-    VERSION 0.0.6
+    VERSION 0.0.7
     DESCRIPTION "Universal AI-assisted voxel creation platform"
     LANGUAGES CXX
 )
@@ -29,6 +29,50 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(SDL3)
+
+FetchContent_Declare(
+    DearImGui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.92.8
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(DearImGui)
+
+add_library(VoxelForgeImGui STATIC)
+
+target_sources(
+    VoxelForgeImGui
+    PRIVATE
+        ${dearimgui_SOURCE_DIR}/imgui.cpp
+        ${dearimgui_SOURCE_DIR}/imgui_demo.cpp
+        ${dearimgui_SOURCE_DIR}/imgui_draw.cpp
+        ${dearimgui_SOURCE_DIR}/imgui_tables.cpp
+        ${dearimgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${dearimgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+        ${dearimgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp
+)
+
+target_include_directories(
+    VoxelForgeImGui
+    PUBLIC
+        ${dearimgui_SOURCE_DIR}
+        ${dearimgui_SOURCE_DIR}/backends
+)
+
+target_link_libraries(
+    VoxelForgeImGui
+    PUBLIC
+        SDL3::SDL3
+)
+
+target_compile_features(VoxelForgeImGui PUBLIC cxx_std_20)
+
+if(MSVC)
+    target_compile_options(VoxelForgeImGui PRIVATE /W3)
+else()
+    target_compile_options(VoxelForgeImGui PRIVATE -Wall -Wextra)
+endif()
 
 add_subdirectory(engine/Core)
 add_subdirectory(engine/Project)

@@ -28,6 +28,7 @@ target_link_libraries(
     VoxelForgeCore
     PRIVATE
         SDL3::SDL3
+        VoxelForgeImGui
 )
 
 target_compile_features(VoxelForgeCore PUBLIC cxx_std_20)

@@ -1,0 +1,8 @@
+1. Fermer Visual Studio.
+2. Copier CMakeLists.txt dans E:\VoxelForge-Engine
+3. Vérifier que le chemin final est :
+   E:\VoxelForge-Engine\CMakeLists.txt
+4. Supprimer uniquement build et .vs.
+5. Rouvrir Visual Studio.
+6. Quand Visual Studio demande le fichier CMakeLists.txt, sélectionner ce fichier précis.
+7. Compiler avec Ctrl + Shift + B.
