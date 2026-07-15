@@ -60,13 +60,16 @@ endif()
 add_library(VoxelForgeEditorCommands STATIC)
 target_sources(
     VoxelForgeEditorCommands
-    PRIVATE src/Commands/CommandHistory.cpp
+    PRIVATE
+        src/Commands/CommandHistory.cpp
+        src/Commands/Voxel/EraseVoxelCommand.cpp
 )
 target_include_directories(
     VoxelForgeEditorCommands
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_compile_features(VoxelForgeEditorCommands PUBLIC cxx_std_20)
+target_link_libraries(VoxelForgeEditorCommands PUBLIC VoxelForgeVoxel)
 if(MSVC)
     target_compile_options(VoxelForgeEditorCommands PRIVATE /W4 /permissive-)
 else()

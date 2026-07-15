@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <memory>
 #include <string_view>
 #include <utility>
 
@@ -493,10 +494,13 @@ void EditorWorkspace::DrawScenePanel()
     }
 
     const bool hasModel = viewportState_.HasModel();
+    Voxel::VoxelGrid* viewportGrid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
     const VoxelViewportStatistics& statistics = viewportState_.Statistics();
-    ImGui::TextUnformatted(hasModel
-        ? viewportState_.Name().c_str()
-        : "No voxel model loaded.");
+    const std::string modelLabel = hasModel
+        ? viewportState_.Name() + (voxelModelModified_ ? " *" : "")
+        : "No voxel model loaded.";
+    ImGui::TextUnformatted(modelLabel.c_str());
     const float toolbarWidth = ImGui::GetContentRegionAvail().x;
     const bool narrowToolbar = toolbarWidth < 520.0F;
     if (ImGui::Button("Frame Model"))
@@ -530,6 +534,20 @@ void EditorWorkspace::DrawScenePanel()
     {
         viewportState_.SetBackground(
             static_cast<ViewportBackground>(selectedBackground));
+    }
+
+    bool eraseRequested = false;
+    const bool canErase = hasModel && voxelSelection_.Selected().has_value();
+    ImGui::BeginDisabled(!canErase);
+    if (ImGui::Button("Erase Selected"))
+        eraseRequested = true;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("Delete");
+    if (voxelModelModified_)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Unsaved changes");
     }
 
     if (hasModel)
@@ -602,7 +620,7 @@ void EditorWorkspace::DrawScenePanel()
         const bool cameraControl =
             ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
             ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-        if (selectionInputAvailable && hasModel && viewportGrid_ &&
+        if (selectionInputAvailable && hasModel && viewportGrid != nullptr &&
             !cameraControl)
         {
             const float normalizedX =
@@ -613,7 +631,7 @@ void EditorWorkspace::DrawScenePanel()
                 viewportCamera_.CreateViewportRay(normalizedX, normalizedY),
                 voxelModelCenter_);
             if (voxelSelection_.SetHovered(
-                    RaycastVoxelGrid(*viewportGrid_, ray)))
+                    RaycastVoxelGrid(*viewportGrid, ray)))
                 UpdateVoxelHighlights();
         }
         else if (voxelSelection_.SetHovered(std::nullopt))
@@ -637,12 +655,18 @@ void EditorWorkspace::DrawScenePanel()
         }
         viewportCamera_.Update(imageHovered, available.y);
         const bool sceneActive = imageHovered || sceneFocused;
+        const bool incompatiblePopupOpen = ImGui::IsPopupOpen(
+            nullptr,
+            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
         const bool shortcutsEnabled = sceneActive &&
-            !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput;
+            !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
+            !incompatiblePopupOpen;
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_F, false))
             FrameVoxelViewport();
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Home, false))
             viewportCamera_.Reset();
+        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+            eraseRequested = true;
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
             voxelSelection_.ClearSelection())
             UpdateVoxelHighlights();
@@ -655,6 +679,7 @@ void EditorWorkspace::DrawScenePanel()
         voxelViewportRenderFailed_ = true;
         DrawErrorMessage(viewportRenderer_.LastError());
     }
+    if (eraseRequested) static_cast<void>(EraseSelectedVoxel());
     ImGui::End();
 }
 
@@ -865,10 +890,15 @@ void EditorWorkspace::DrawStatusBar()
         const std::string projectStatus = activeProject
             ? "Project: " + activeProject->Name()
             : "No project loaded";
+        const std::string modelStatus = viewportState_.HasModel()
+            ? " | Model: " + viewportState_.Name() +
+                (voxelModelModified_ ? " *" : "")
+            : "";
 
         ImGui::Text(
-            "Ready | %s | FPS %.1f | %.2f ms | Backend: %s | ImGui %s",
+            "Ready | %s%s | FPS %.1f | %.2f ms | Backend: %s | ImGui %s",
             projectStatus.c_str(),
+            modelStatus.c_str(),
             io.Framerate,
             frameTime,
             backendName.c_str(),
@@ -1225,23 +1255,26 @@ bool EditorWorkspace::OpenVoxInViewport(
         AddConsoleMessage("VOX viewport mesh failed: " + built.Message);
         return false;
     }
-    if (!viewportRenderer_.Upload(*built.Mesh, converted.Model->Palette()))
+    const Vec3 modelCenter = CalculateVoxelGridCenter(*grid);
+    if (!viewportRenderer_.Upload(
+            *built.Mesh, converted.Model->Palette(), modelCenter))
     {
         const std::string error = viewportRenderer_.LastError();
-        ClearVoxelViewport();
         AddConsoleMessage("VOX viewport GPU upload failed: " + error);
         return false;
     }
+    commandHistory_.Clear();
+    activeVoxelModel_ = std::move(*converted.Model);
+    ++voxelModelGeneration_;
     if (!viewportState_.Replace(
-            filePath.filename().string(), *converted.Model, *built.Mesh))
+            filePath.filename().string(), *activeVoxelModel_, *built.Mesh))
     {
         ClearVoxelViewport();
-        AddConsoleMessage("VOX viewport load failed: the first grid is empty.");
+        AddConsoleMessage("VOX viewport load failed: no first grid is available.");
         return false;
     }
-    commandHistory_.Clear();
-    viewportGrid_ = *grid;
-    voxelModelCenter_ = CalculateVoxelMeshCenter(*built.Mesh);
+    voxelModelCenter_ = modelCenter;
+    voxelModelModified_ = false;
     static_cast<void>(voxelSelection_.Clear());
     UpdateVoxelHighlights();
     voxelViewportRendered_ = false;
@@ -1281,11 +1314,13 @@ void EditorWorkspace::SetVoxelViewportView(
 
 bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
 {
-    if (!viewportGrid_) return false;
+    const Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    if (grid == nullptr) return false;
     if (frame == 0U)
     {
         const auto hit = RaycastVoxelGrid(
-            *viewportGrid_, {{-1.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+            *grid, {{-1.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
         if (!hit) return false;
         static_cast<void>(voxelSelection_.SetHovered(hit));
         static_cast<void>(voxelSelection_.SelectHovered());
@@ -1297,6 +1332,136 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
         UpdateVoxelHighlights();
     }
     return true;
+}
+
+bool EditorWorkspace::RunEraseVoxelSmokeStep(const std::size_t frame)
+{
+    const Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    if (grid == nullptr) return false;
+
+    if (frame == 0U)
+    {
+        eraseSmokeInitialVoxelCount_ = grid->OccupiedVoxelCount();
+        const auto hit = RaycastVoxelGrid(
+            *grid, {{-1.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        eraseSmokeSelected_ = hit.has_value();
+        if (!hit) return false;
+        static_cast<void>(voxelSelection_.SetHovered(hit));
+        static_cast<void>(voxelSelection_.SelectHovered());
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 1U)
+    {
+        eraseSmokeEraseRenderBaseline_ = viewportRenderer_.ModelRenderCount();
+        eraseSmokeExecuted_ = EraseSelectedVoxel() &&
+            grid->OccupiedVoxelCount() + 1U == eraseSmokeInitialVoxelCount_ &&
+            !voxelSelection_.Selected() && voxelModelModified_;
+    }
+    else if (frame == 10U)
+    {
+        const bool erasedFramesRendered =
+            viewportRenderer_.ModelRenderCount() > eraseSmokeEraseRenderBaseline_;
+        UndoCommand();
+        eraseSmokeUndone_ = erasedFramesRendered &&
+            grid->OccupiedVoxelCount() == eraseSmokeInitialVoxelCount_;
+        eraseSmokeUndoRenderBaseline_ = viewportRenderer_.ModelRenderCount();
+    }
+    else if (frame == 20U)
+    {
+        const bool undoFramesRendered =
+            viewportRenderer_.ModelRenderCount() > eraseSmokeUndoRenderBaseline_;
+        RedoCommand();
+        eraseSmokeRedone_ = undoFramesRendered &&
+            grid->OccupiedVoxelCount() + 1U == eraseSmokeInitialVoxelCount_;
+        eraseSmokeRedoRenderBaseline_ = viewportRenderer_.ModelRenderCount();
+    }
+    return true;
+}
+
+bool EditorWorkspace::EraseVoxelSmokePassed() const noexcept
+{
+    return eraseSmokeSelected_ && eraseSmokeExecuted_ &&
+        eraseSmokeUndone_ && eraseSmokeRedone_ &&
+        viewportRenderer_.ModelRenderCount() > eraseSmokeRedoRenderBaseline_ &&
+        viewportState_.Statistics().OccupiedVoxelCount + 1U ==
+            eraseSmokeInitialVoxelCount_;
+}
+
+bool EditorWorkspace::EraseSelectedVoxel()
+{
+    if (!activeVoxelModel_)
+    {
+        AddConsoleMessage("Erase failed: no voxel model is loaded.");
+        return false;
+    }
+    const std::optional<VoxelRaycastHit> selected = voxelSelection_.Selected();
+    if (!selected)
+    {
+        AddConsoleMessage("Erase failed: no voxel is selected.");
+        return false;
+    }
+
+    const VoxelCoordinates coordinates = selected->Coordinates;
+    CommandResult result = commandHistory_.Execute(
+        std::make_unique<EraseVoxelCommand>(
+            static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
+            coordinates.X, coordinates.Y, coordinates.Z));
+    if (!result)
+    {
+        AddConsoleMessage("Erase failed: " + result.Message);
+        return false;
+    }
+
+    AddConsoleMessage(
+        "Erased voxel: " + std::to_string(coordinates.X) + ", " +
+        std::to_string(coordinates.Y) + ", " +
+        std::to_string(coordinates.Z));
+    return true;
+}
+
+std::uint64_t EditorWorkspace::VoxelModelGeneration() const noexcept
+{
+    return voxelModelGeneration_;
+}
+
+Voxel::VoxelModel* EditorWorkspace::ActiveVoxelModel() noexcept
+{
+    return activeVoxelModel_ ? &*activeVoxelModel_ : nullptr;
+}
+
+CommandResult EditorWorkspace::RebuildActiveVoxelMesh()
+{
+    if (!activeVoxelModel_)
+        return CommandResult::Failure("No active voxel model is available.");
+    Voxel::VoxelGrid* grid = activeVoxelModel_->GetGrid(0U);
+    if (grid == nullptr)
+        return CommandResult::Failure("The active voxel model has no grid.");
+
+    Mesh::MeshBuildResult built = Mesh::VoxelMeshBuilder::Build(*grid);
+    if (!built.Succeeded || !built.Mesh)
+        return CommandResult::Failure(
+            "Voxel mesh rebuild failed: " + built.Message);
+
+    const Vec3 modelCenter = CalculateVoxelGridCenter(*grid);
+    if (!viewportRenderer_.Upload(
+            *built.Mesh, activeVoxelModel_->Palette(), modelCenter))
+        return CommandResult::Failure(
+            "Voxel mesh GPU upload failed: " + viewportRenderer_.LastError());
+
+    static_cast<void>(
+        viewportState_.UpdateStatistics(*activeVoxelModel_, *built.Mesh));
+    voxelModelCenter_ = modelCenter;
+    voxelViewportRendered_ = false;
+    voxelViewportRenderFailed_ = false;
+    return CommandResult::Success();
+}
+
+void EditorWorkspace::CompleteVoxelEdit() noexcept
+{
+    static_cast<void>(voxelSelection_.Clear());
+    UpdateVoxelHighlights();
+    voxelModelModified_ = true;
 }
 
 std::size_t EditorWorkspace::VoxelHighlightUploadCount() const noexcept
@@ -1325,14 +1490,24 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
 void EditorWorkspace::ClearVoxelViewport() noexcept
 {
     commandHistory_.Clear();
+    ++voxelModelGeneration_;
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();
-    viewportGrid_.reset();
+    activeVoxelModel_.reset();
     static_cast<void>(voxelSelection_.Clear());
     voxelModelCenter_ = {};
     voxelViewportRendered_ = false;
     voxelViewportRenderFailed_ = false;
+    voxelModelModified_ = false;
+    eraseSmokeSelected_ = false;
+    eraseSmokeExecuted_ = false;
+    eraseSmokeUndone_ = false;
+    eraseSmokeRedone_ = false;
+    eraseSmokeInitialVoxelCount_ = 0U;
+    eraseSmokeEraseRenderBaseline_ = 0U;
+    eraseSmokeUndoRenderBaseline_ = 0U;
+    eraseSmokeRedoRenderBaseline_ = 0U;
 }
 
 void EditorWorkspace::FrameVoxelViewport() noexcept

@@ -38,6 +38,9 @@ public:
         std::string name,
         const Voxel::VoxelModel& model,
         const Mesh::MeshData& mesh);
+    [[nodiscard]] bool UpdateStatistics(
+        const Voxel::VoxelModel& model,
+        const Mesh::MeshData& mesh) noexcept;
     void Clear() noexcept;
 
     [[nodiscard]] bool HasModel() const noexcept;

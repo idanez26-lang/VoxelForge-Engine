@@ -121,6 +121,19 @@ add_test(
     NAME VoxelForge.Editor.CommandHistory
     COMMAND $<TARGET_FILE:VoxelForgeEditorCommandHistoryTests>
 )
+add_executable(
+    VoxelForgeEditorEraseVoxelTests
+    Editor/EraseVoxelTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorEraseVoxelTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorEraseVoxelTests)
+add_test(
+    NAME VoxelForge.Editor.EraseVoxel
+    COMMAND $<TARGET_FILE:VoxelForgeEditorEraseVoxelTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -186,6 +199,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelViewport
     VoxelForge.Editor.VoxelSelection
     VoxelForge.Editor.CommandHistory
+    VoxelForge.Editor.EraseVoxel
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Voxel.Core
@@ -206,10 +220,15 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelSelectionSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-selection-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.EraseVoxelSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --erase-voxel-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
         VoxelForge.Editor.VoxelSelectionSmoke
+        VoxelForge.Editor.EraseVoxelSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

@@ -126,6 +126,23 @@ int main()
     passed &= Check(state.Name() == validName && state.HasModel(),
         "A failed replacement must preserve the current state.");
 
+    Voxel::VoxelModel emptyModel;
+    Voxel::VoxelGrid emptyGrid;
+    passed &= Check(emptyGrid.Resize(2U, 2U, 2U),
+        "Empty editable grid setup failed.");
+    emptyModel.AddGrid(std::move(emptyGrid));
+    const Mesh::MeshBuildResult emptyBuilt =
+        Mesh::VoxelMeshBuilder::Build(*emptyModel.GetGrid(0U));
+    Editor::VoxelViewportState emptyState;
+    passed &= Check(emptyBuilt.Succeeded && emptyBuilt.Mesh &&
+        emptyBuilt.Mesh->Empty() &&
+        emptyState.Replace("empty.vox", emptyModel, *emptyBuilt.Mesh) &&
+        emptyState.HasModel() &&
+        emptyState.Statistics().OccupiedVoxelCount == 0U &&
+        emptyState.Statistics().VertexCount == 0U &&
+        emptyState.Statistics().TriangleCount == 0U,
+        "An editable model with an empty mesh must remain valid.");
+
     const auto color = Editor::ToViewportColor({255U, 128U, 0U, 64U});
     passed &= Check(std::abs(color[0] - 1.0F) < 0.0001F &&
         color[1] > 0.50F && color[1] < 0.51F && color[2] == 0.0F,

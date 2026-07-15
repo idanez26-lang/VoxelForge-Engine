@@ -4,6 +4,7 @@
 #include "VoxelSelection/VoxelRay.h"
 
 #include "VoxelForge/Mesh/MeshData.h"
+#include "VoxelForge/Voxel/VoxelGrid.h"
 
 #include <algorithm>
 #include <array>
@@ -44,6 +45,15 @@ namespace VoxelForge::Editor
         (minimum[0] + maximum[0]) * 0.5F,
         (minimum[1] + maximum[1]) * 0.5F,
         (minimum[2] + maximum[2]) * 0.5F};
+}
+
+[[nodiscard]] inline Vec3 CalculateVoxelGridCenter(
+    const Voxel::VoxelGrid& grid) noexcept
+{
+    return {
+        static_cast<float>(grid.Width()) * 0.5F,
+        static_cast<float>(grid.Height()) * 0.5F,
+        static_cast<float>(grid.Depth()) * 0.5F};
 }
 
 } // namespace VoxelForge::Editor

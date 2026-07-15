@@ -23,7 +23,9 @@ EditorLayer::EditorLayer(
     std::filesystem::path startupVoxPath,
     const bool requireVoxelViewportRender,
     const bool voxelSelectionSmokeTest,
-    const bool voxelSelectionVisualTest)
+    const bool voxelSelectionVisualTest,
+    const bool eraseVoxelSmokeTest,
+    const bool eraseVoxelVisualTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(projectManager, std::move(windowTitleCallback)),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
@@ -31,7 +33,9 @@ EditorLayer::EditorLayer(
       startupVoxPath_(std::move(startupVoxPath)),
       requireVoxelViewportRender_(requireVoxelViewportRender),
       voxelSelectionSmokeTest_(voxelSelectionSmokeTest),
-      voxelSelectionVisualTest_(voxelSelectionVisualTest)
+      voxelSelectionVisualTest_(voxelSelectionVisualTest),
+      eraseVoxelSmokeTest_(eraseVoxelSmokeTest),
+      eraseVoxelVisualTest_(eraseVoxelVisualTest)
 {
 }
 
@@ -94,6 +98,12 @@ void EditorLayer::OnImGuiRender()
         voxelSelectionRayHit_ |=
             workspace_.RunVoxelSelectionSmokeStep(renderedFrameCount_);
     }
+    if (eraseVoxelSmokeTest_ ||
+        (eraseVoxelVisualTest_ && renderedFrameCount_ <= 1U))
+    {
+        static_cast<void>(
+            workspace_.RunEraseVoxelSmokeStep(renderedFrameCount_));
+    }
     workspace_.Draw();
 
     ++renderedFrameCount_;
@@ -115,6 +125,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Voxel selection smoke test did not raycast, upload, and render highlights.");
+    }
+    if (eraseVoxelSmokeTest_ && smokeTestComplete &&
+        !workspace_.EraseVoxelSmokePassed())
+    {
+        throw std::runtime_error(
+            "Erase voxel smoke test did not execute, undo, redo, and render.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

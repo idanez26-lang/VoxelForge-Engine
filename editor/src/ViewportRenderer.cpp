@@ -229,19 +229,24 @@ bool ViewportRenderer::EnsurePipeline()
 
 bool ViewportRenderer::Upload(
     const Mesh::MeshData& mesh,
-    const Voxel::VoxelPalette& palette)
+    const Voxel::VoxelPalette& palette,
+    const Vec3 modelCenter)
 {
-    if (!EnsurePipeline() || mesh.Empty() ||
+    if (mesh.Empty())
+    {
+        ClearModel();
+        lastError_.clear();
+        return true;
+    }
+    if (!EnsurePipeline() ||
         mesh.VertexCount() > std::numeric_limits<std::uint32_t>::max() ||
         mesh.IndexCount() > std::numeric_limits<std::uint32_t>::max())
     {
-        if (mesh.Empty()) SetError("Cannot upload an empty voxel mesh.");
         return false;
     }
 
     std::vector<GPUVertex> vertices;
     vertices.reserve(mesh.VertexCount());
-    const Vec3 center = CalculateVoxelMeshCenter(mesh);
     for (const Mesh::MeshVertex& source : mesh.Vertices())
     {
         const Voxel::VoxelColor* color = palette.Get(source.ColorIndex);
@@ -249,7 +254,7 @@ bool ViewportRenderer::Upload(
         const Voxel::VoxelColor& value = color != nullptr ? *color : fallback;
         const Vec3 position = VoxelGridToViewport(
             {source.Position[0], source.Position[1], source.Position[2]},
-            center);
+            modelCenter);
         vertices.push_back({
             {position.X, position.Y, position.Z},
             source.Normal,
@@ -622,6 +627,7 @@ bool ViewportRenderer::Render(
         SDL_BindGPUIndexBuffer(
             pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
         SDL_DrawGPUIndexedPrimitives(pass, indexCount_, 1U, 0U, 0, 0U);
+        ++modelRenderCount_;
     }
     if (highlightIndexCount_ > 0U)
     {
@@ -733,6 +739,11 @@ std::size_t ViewportRenderer::HighlightUploadCount() const noexcept
 std::size_t ViewportRenderer::HighlightRenderCount() const noexcept
 {
     return highlightRenderCount_;
+}
+
+std::size_t ViewportRenderer::ModelRenderCount() const noexcept
+{
+    return modelRenderCount_;
 }
 
 void ViewportRenderer::SetError(std::string message)

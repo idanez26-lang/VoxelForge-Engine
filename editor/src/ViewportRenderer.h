@@ -28,7 +28,8 @@ public:
 
     [[nodiscard]] bool Upload(
         const Mesh::MeshData& mesh,
-        const Voxel::VoxelPalette& palette);
+        const Voxel::VoxelPalette& palette,
+        Vec3 modelCenter);
     void ConfigureGuides(float width, float height, float depth) noexcept;
     void ConfigureHighlights(
         std::optional<VoxelCoordinates> hovered,
@@ -48,6 +49,7 @@ public:
     [[nodiscard]] const std::string& LastError() const noexcept;
     [[nodiscard]] std::size_t HighlightUploadCount() const noexcept;
     [[nodiscard]] std::size_t HighlightRenderCount() const noexcept;
+    [[nodiscard]] std::size_t ModelRenderCount() const noexcept;
 
 private:
     [[nodiscard]] bool EnsurePipeline();
@@ -93,6 +95,7 @@ private:
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;
     std::size_t highlightRenderCount_ = 0U;
+    std::size_t modelRenderCount_ = 0U;
     std::string lastError_;
 };
 

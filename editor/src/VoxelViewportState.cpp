@@ -21,12 +21,23 @@ bool VoxelViewportState::Replace(
     const Mesh::MeshData& mesh)
 {
     const Voxel::VoxelGrid* grid = model.GetGrid(0U);
-    if (grid == nullptr || mesh.Empty())
+    if (grid == nullptr)
     {
         return false;
     }
 
     name_ = std::move(name);
+    static_cast<void>(UpdateStatistics(model, mesh));
+    hasModel_ = true;
+    return true;
+}
+
+bool VoxelViewportState::UpdateStatistics(
+    const Voxel::VoxelModel& model,
+    const Mesh::MeshData& mesh) noexcept
+{
+    const Voxel::VoxelGrid* grid = model.GetGrid(0U);
+    if (grid == nullptr) return false;
     statistics_ = {
         grid->Width(),
         grid->Height(),
@@ -34,7 +45,6 @@ bool VoxelViewportState::Replace(
         grid->OccupiedVoxelCount(),
         mesh.VertexCount(),
         mesh.TriangleCount()};
-    hasModel_ = true;
     return true;
 }
 

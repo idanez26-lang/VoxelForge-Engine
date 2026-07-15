@@ -2,6 +2,7 @@
 
 #include "AssetBrowser/AssetBrowser.h"
 #include "Commands/CommandHistory.h"
+#include "Commands/Voxel/EraseVoxelCommand.h"
 #include "EditorCamera.h"
 #include "EditorExitRequest.h"
 #include "ViewportRenderer.h"
@@ -9,8 +10,10 @@
 #include "VoxelSelection/VoxelSelectionState.h"
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
+#include "VoxelForge/Voxel/VoxelModel.h"
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -27,7 +30,7 @@ class ProjectManager;
 namespace VoxelForge::Editor
 {
 
-class EditorWorkspace final
+class EditorWorkspace final : private VoxelEditSession
 {
 public:
     using WindowTitleCallback = std::function<bool(std::string)>;
@@ -45,6 +48,8 @@ public:
     [[nodiscard]] bool HasVoxelViewportRenderError() const noexcept;
     void SetVoxelViewportView(EditorCameraView view) noexcept;
     [[nodiscard]] bool RunVoxelSelectionSmokeStep(std::size_t frame);
+    [[nodiscard]] bool RunEraseVoxelSmokeStep(std::size_t frame);
+    [[nodiscard]] bool EraseVoxelSmokePassed() const noexcept;
     [[nodiscard]] std::size_t VoxelHighlightUploadCount() const noexcept;
     [[nodiscard]] std::size_t VoxelHighlightRenderCount() const noexcept;
 
@@ -87,6 +92,12 @@ private:
     void ClearVoxelViewport() noexcept;
     void FrameVoxelViewport() noexcept;
     void UpdateVoxelHighlights() noexcept;
+    [[nodiscard]] bool EraseSelectedVoxel();
+
+    [[nodiscard]] std::uint64_t VoxelModelGeneration() const noexcept override;
+    [[nodiscard]] Voxel::VoxelModel* ActiveVoxelModel() noexcept override;
+    [[nodiscard]] CommandResult RebuildActiveVoxelMesh() override;
+    void CompleteVoxelEdit() noexcept override;
 
     void AddConsoleMessage(std::string message);
     [[nodiscard]] std::string GetBackendDisplayName() const;
@@ -97,12 +108,13 @@ private:
     EditorCamera viewportCamera_;
     ViewportRenderer viewportRenderer_;
     VoxelViewportState viewportState_;
-    std::optional<Voxel::VoxelGrid> viewportGrid_;
+    std::optional<Voxel::VoxelModel> activeVoxelModel_;
     VoxelSelectionState voxelSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
     // handle to an obsolete model.
     CommandHistory commandHistory_;
+    std::uint64_t voxelModelGeneration_ = 0U;
     Vec3 voxelModelCenter_{};
     std::vector<std::string> consoleMessages_;
     EditorExitRequest exitRequest_{};
@@ -128,6 +140,15 @@ private:
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
     bool voxelSelectionClickCandidate_ = false;
+    bool voxelModelModified_ = false;
+    bool eraseSmokeSelected_ = false;
+    bool eraseSmokeExecuted_ = false;
+    bool eraseSmokeUndone_ = false;
+    bool eraseSmokeRedone_ = false;
+    std::size_t eraseSmokeInitialVoxelCount_ = 0U;
+    std::size_t eraseSmokeEraseRenderBaseline_ = 0U;
+    std::size_t eraseSmokeUndoRenderBaseline_ = 0U;
+    std::size_t eraseSmokeRedoRenderBaseline_ = 0U;
 };
 
 } // namespace VoxelForge::Editor

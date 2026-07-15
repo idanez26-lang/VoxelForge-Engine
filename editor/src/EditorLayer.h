@@ -34,7 +34,9 @@ public:
         std::filesystem::path startupVoxPath = {},
         bool requireVoxelViewportRender = false,
         bool voxelSelectionSmokeTest = false,
-        bool voxelSelectionVisualTest = false);
+        bool voxelSelectionVisualTest = false,
+        bool eraseVoxelSmokeTest = false,
+        bool eraseVoxelVisualTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -69,6 +71,8 @@ private:
     bool requireVoxelViewportRender_ = false;
     bool voxelSelectionSmokeTest_ = false;
     bool voxelSelectionVisualTest_ = false;
+    bool eraseVoxelSmokeTest_ = false;
+    bool eraseVoxelVisualTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 
