@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorCamera.h"
+#include "EditorWorkspace.h"
 #include "ViewportRenderer.h"
 #include "VoxelForge/Core/Layer/Layer.h"
 #include "VoxelForge/Scene/Scene.h"
@@ -42,6 +43,7 @@ private:
 
     EditorCamera editorCamera_{};
     ViewportRenderer viewportRenderer_{};
+    EditorWorkspace workspace_{};
 
     float deltaTime_ = 1.0F / 60.0F;
     bool viewportHovered_ = false;
