@@ -57,6 +57,11 @@ void EditorWorkspace::Draw()
     DrawAboutPopup();
 }
 
+bool EditorWorkspace::ConsumeExitRequest() noexcept
+{
+    return exitRequest_.ConsumeExitRequest();
+}
+
 void EditorWorkspace::DrawMainMenuBar()
 {
     if (!ImGui::BeginMainMenuBar())
@@ -89,12 +94,10 @@ void EditorWorkspace::DrawMainMenuBar()
         }
 
         ImGui::Separator();
-        ImGui::MenuItem("Exit", nullptr, false, false);
 
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        if (ImGui::MenuItem("Exit"))
         {
-            ImGui::SetTooltip(
-                "Exit is disabled until the editor owns a direct close request.");
+            exitRequest_.RequestExit();
         }
 
         ImGui::EndMenu();

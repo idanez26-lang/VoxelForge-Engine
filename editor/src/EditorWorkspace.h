@@ -1,5 +1,7 @@
 #pragma once
 
+#include "EditorExitRequest.h"
+
 #include <string>
 #include <vector>
 
@@ -14,6 +16,7 @@ public:
     EditorWorkspace();
 
     void Draw();
+    [[nodiscard]] bool ConsumeExitRequest() noexcept;
 
 private:
     void DrawMainMenuBar();
@@ -33,6 +36,7 @@ private:
     [[nodiscard]] std::string GetBackendDisplayName() const;
 
     std::vector<std::string> consoleMessages_;
+    EditorExitRequest exitRequest_{};
 
     bool showExplorer_ = true;
     bool showScene_ = true;

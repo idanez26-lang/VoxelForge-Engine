@@ -15,9 +15,9 @@ int main()
     assert(dispatched);
     assert(event.Handled);
     assert(event.IsInCategory(EventCategoryApplication));
-    KeyPressedEvent keyEvent(65u, false);
+    KeyPressedEvent keyEvent(KeyCode::A, false);
     assert(keyEvent.IsInCategory(EventCategoryKeyboard));
-    MouseButtonPressedEvent mouseEvent(1u);
+    MouseButtonPressedEvent mouseEvent(MouseCode::Left);
     assert(mouseEvent.IsInCategory(EventCategoryMouseButton));
     return 0;
 }

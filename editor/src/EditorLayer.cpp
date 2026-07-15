@@ -9,12 +9,17 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <utility>
 
 namespace VoxelForge::Editor
 {
 
-EditorLayer::EditorLayer()
-    : Layer("VoxelForge Editor Layer")
+EditorLayer::EditorLayer(
+    ApplicationCloseCallback applicationCloseCallback,
+    const std::size_t smokeTestFrameLimit)
+    : Layer("VoxelForge Editor Layer"),
+      applicationCloseCallback_(std::move(applicationCloseCallback)),
+      smokeTestFrameLimit_(smokeTestFrameLimit)
 {
 }
 
@@ -63,6 +68,32 @@ void EditorLayer::CreateDefaultScene()
 void EditorLayer::OnImGuiRender()
 {
     workspace_.Draw();
+
+    ++renderedFrameCount_;
+
+    const bool smokeTestComplete =
+        smokeTestFrameLimit_ > 0 &&
+        renderedFrameCount_ >= smokeTestFrameLimit_;
+
+    if (workspace_.ConsumeExitRequest() || smokeTestComplete)
+    {
+        RequestApplicationClose();
+    }
+}
+
+void EditorLayer::RequestApplicationClose()
+{
+    if (applicationCloseRequested_)
+    {
+        return;
+    }
+
+    applicationCloseRequested_ = true;
+
+    if (applicationCloseCallback_)
+    {
+        applicationCloseCallback_();
+    }
 }
 
 void EditorLayer::BuildDefaultWorkspace(

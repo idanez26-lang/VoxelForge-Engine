@@ -7,6 +7,8 @@ project(
     LANGUAGES CXX
 )
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -128,4 +130,8 @@ add_subdirectory(engine/Scene)
 
 if(VF_BUILD_EDITOR)
     add_subdirectory(editor)
+endif()
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
 endif()

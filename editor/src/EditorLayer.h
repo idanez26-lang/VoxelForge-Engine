@@ -6,6 +6,8 @@
 #include "VoxelForge/Core/Layer/Layer.h"
 #include "VoxelForge/Scene/Scene.h"
 
+#include <cstddef>
+#include <functional>
 #include <memory>
 
 struct ImGuiViewport;
@@ -17,7 +19,11 @@ namespace VoxelForge::Editor
 class EditorLayer final : public Core::Layer
 {
 public:
-    EditorLayer();
+    using ApplicationCloseCallback = std::function<void()>;
+
+    explicit EditorLayer(
+        ApplicationCloseCallback applicationCloseCallback,
+        std::size_t smokeTestFrameLimit = 0);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -25,6 +31,8 @@ public:
     void OnImGuiRender() override;
 
 private:
+    void RequestApplicationClose();
+
     void BuildDefaultWorkspace(
         ImGuiID dockspaceId,
         const ImGuiViewport& viewport);
@@ -44,6 +52,11 @@ private:
     EditorCamera editorCamera_{};
     ViewportRenderer viewportRenderer_{};
     EditorWorkspace workspace_{};
+    ApplicationCloseCallback applicationCloseCallback_;
+
+    std::size_t smokeTestFrameLimit_ = 0;
+    std::size_t renderedFrameCount_ = 0;
+    bool applicationCloseRequested_ = false;
 
     float deltaTime_ = 1.0F / 60.0F;
     bool viewportHovered_ = false;
