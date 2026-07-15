@@ -191,6 +191,11 @@ void TestMinimalAndDefaultPalette(const TemporaryDirectory& directory)
         outcome.Asset->TotalVoxelCount() == 1U,
         "Voxel count is incorrect.");
     Require(
+        outcome.Asset->Models[0].Voxels ==
+            std::vector<VoxelForge::Asset::Vox::VoxVoxel>{
+                {1U, 2U, 3U, 1U}},
+        "XYZI voxel data was not preserved.");
+    Require(
         !outcome.Asset->HasCustomPalette,
         "Palette should be the default palette.");
     Require(

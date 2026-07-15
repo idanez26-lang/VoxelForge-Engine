@@ -278,6 +278,9 @@ bool ReadVoxels(
     }
 
     const VoxDimensions dimensions = *state.PendingDimensions;
+    VoxModelMetadata model;
+    model.Dimensions = dimensions;
+    model.Voxels.reserve(voxelCount);
     std::size_t voxelOffset = chunk.ContentBegin + 4U;
 
     for (std::uint32_t index = 0; index < voxelCount; ++index)
@@ -305,11 +308,12 @@ bool ReadVoxels(
                 "XYZI contains reserved color index 0.");
         }
 
+        model.Voxels.push_back({x, y, z, colorIndex});
         voxelOffset += 4U;
     }
 
     state.TotalVoxelCount += voxelCount;
-    state.Model.Models.push_back({dimensions, voxelCount});
+    state.Model.Models.push_back(std::move(model));
     state.PendingDimensions.reset();
 
     if (state.Model.Models.size() > MaximumVoxModelCount)

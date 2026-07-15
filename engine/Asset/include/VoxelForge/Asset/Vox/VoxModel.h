@@ -1,7 +1,9 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <vector>
 
 namespace VoxelForge::Asset::Vox
@@ -26,10 +28,31 @@ struct VoxDimensions final
     [[nodiscard]] bool operator==(const VoxDimensions&) const noexcept = default;
 };
 
+struct VoxVoxel final
+{
+    std::uint8_t X = 0;
+    std::uint8_t Y = 0;
+    std::uint8_t Z = 0;
+    std::uint8_t ColorIndex = 0;
+
+    [[nodiscard]] bool operator==(const VoxVoxel&) const noexcept = default;
+};
+
+static_assert(sizeof(VoxVoxel) == 4U);
+static_assert(std::is_trivially_copyable_v<VoxVoxel>);
+
 struct VoxModelMetadata final
 {
     VoxDimensions Dimensions;
-    std::uint32_t VoxelCount = 0;
+    std::vector<VoxVoxel> Voxels;
+
+    [[nodiscard]] std::size_t VoxelCount() const noexcept
+    {
+        return Voxels.size();
+    }
+
+    [[nodiscard]] bool operator==(
+        const VoxModelMetadata&) const noexcept = default;
 };
 
 struct VoxModel final
@@ -49,7 +72,7 @@ struct VoxModel final
 
         for (const VoxModelMetadata& model : Models)
         {
-            total += model.VoxelCount;
+            total += model.VoxelCount();
         }
 
         return total;

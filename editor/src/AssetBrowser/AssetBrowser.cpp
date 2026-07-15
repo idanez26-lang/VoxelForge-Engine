@@ -1171,7 +1171,7 @@ void AssetBrowser::InspectVox(const AssetEntry& entry)
                 model.Dimensions.X,
                 model.Dimensions.Y,
                 model.Dimensions.Z,
-                model.VoxelCount});
+                static_cast<std::uint32_t>(model.VoxelCount())});
         }
     }
 
