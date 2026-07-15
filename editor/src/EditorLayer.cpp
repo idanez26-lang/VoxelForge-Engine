@@ -90,6 +90,30 @@ void EditorLayer::OnImGuiRender()
 
     DrawStatusBar();
 
+    static bool showImGuiDemoWindow = false;
+
+    if (ImGui::Begin(
+            "VoxelForge Studio",
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted("Créer plus vite. Rester l'artisan.");
+        ImGui::Text(
+            "Images par seconde : %.1f",
+            ImGui::GetIO().Framerate);
+        ImGui::Button("Nouveau projet");
+        ImGui::Checkbox(
+            "Afficher la démonstration ImGui",
+            &showImGuiDemoWindow);
+    }
+
+    ImGui::End();
+
+    if (showImGuiDemoWindow)
+    {
+        ImGui::ShowDemoWindow(&showImGuiDemoWindow);
+    }
+
     if (showAboutPopup_)
     {
         ImGui::OpenPopup("A propos de VoxelForge");
@@ -119,10 +143,14 @@ void EditorLayer::BuildDefaultWorkspace(
     const ImGuiViewport& viewport)
 {
     ImGui::DockBuilderRemoveNode(dockspaceId);
+
+    const ImGuiDockNodeFlags dockNodeFlags =
+        static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) |
+        ImGuiDockNodeFlags_PassthruCentralNode;
+
     ImGui::DockBuilderAddNode(
         dockspaceId,
-        ImGuiDockNodeFlags_DockSpace |
-            ImGuiDockNodeFlags_PassthruCentralNode);
+        dockNodeFlags);
     ImGui::DockBuilderSetNodeSize(dockspaceId, viewport.WorkSize);
 
     ImGuiID centerId = dockspaceId;

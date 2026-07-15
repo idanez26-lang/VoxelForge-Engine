@@ -23,7 +23,15 @@ namespace VoxelForge::Core
 SDLWindow::SDLWindow(const WindowSpecification& specification)
     : specification_(specification)
 {
-    Initialize();
+    try
+    {
+        Initialize();
+    }
+    catch (...)
+    {
+        Shutdown();
+        throw;
+    }
 }
 
 SDLWindow::~SDLWindow()

@@ -39,6 +39,52 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(DearImGui)
 
+function(vf_fix_msvc_ninja_showincludes_prefix)
+    if(NOT MSVC OR MSVC_VERSION LESS 1951 OR NOT CMAKE_GENERATOR MATCHES "^Ninja")
+        return()
+    endif()
+
+    # MSVC 19.51 emits /showIncludes output as UTF-8. CMake 4.3.1 may
+    # decode that output with the active Windows console code page instead,
+    # which prevents Ninja from recording header dependencies.
+    set(show_includes_dir "${CMAKE_BINARY_DIR}/CMakeFiles/VoxelForgeShowIncludes")
+    file(MAKE_DIRECTORY "${show_includes_dir}")
+    file(WRITE "${show_includes_dir}/header.h" "\n")
+    file(WRITE "${show_includes_dir}/source.cpp" "#include \"header.h\"\n")
+
+    execute_process(
+        COMMAND
+            "${CMAKE_CXX_COMPILER}"
+            ${CMAKE_CXX_COMPILER_ARG1}
+            /nologo
+            /showIncludes
+            /Zs
+            source.cpp
+        WORKING_DIRECTORY "${show_includes_dir}"
+        OUTPUT_VARIABLE show_includes_output
+        ERROR_VARIABLE show_includes_error
+        RESULT_VARIABLE show_includes_result
+        ENCODING UTF-8
+    )
+
+    if(
+        show_includes_result EQUAL 0
+        AND show_includes_output MATCHES
+            "(^|\n)([^:\n][^:\n]+:[^:\n]*[^: \n][^: \n]:?[ \t]+)([A-Za-z]:\\\\|\\./|\\.\\\\|/)"
+    )
+        set(CMAKE_C_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_2}" PARENT_SCOPE)
+        set(CMAKE_CXX_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_2}" PARENT_SCOPE)
+        set(CMAKE_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_2}" PARENT_SCOPE)
+    else()
+        message(
+            WARNING
+            "Unable to detect the UTF-8 MSVC /showIncludes prefix: ${show_includes_error}"
+        )
+    endif()
+endfunction()
+
+vf_fix_msvc_ninja_showincludes_prefix()
+
 add_library(VoxelForgeImGui STATIC)
 
 target_sources(
