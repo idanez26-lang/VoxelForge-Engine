@@ -127,6 +127,7 @@ add_subdirectory(engine/Renderer)
 add_subdirectory(engine/Core)
 add_subdirectory(engine/Asset)
 add_subdirectory(engine/Voxel)
+add_subdirectory(engine/Mesh)
 add_subdirectory(engine/Project)
 add_subdirectory(engine/Scene)
 

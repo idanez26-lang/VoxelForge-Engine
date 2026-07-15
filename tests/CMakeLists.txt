@@ -114,6 +114,21 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeVoxelCoreTests>
 )
 
+add_executable(
+    VoxelForgeMeshBuilderTests
+    Mesh/VoxelMeshBuilderTests.cpp
+)
+target_link_libraries(
+    VoxelForgeMeshBuilderTests
+    PRIVATE
+        VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeMeshBuilderTests)
+add_test(
+    NAME VoxelForge.Mesh.VoxelMeshBuilder
+    COMMAND $<TARGET_FILE:VoxelForgeMeshBuilderTests>
+)
+
 set_tests_properties(
     VoxelForge.Core.Events
     VoxelForge.Core.Layers
@@ -123,6 +138,7 @@ set_tests_properties(
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Voxel.Core
+    VoxelForge.Mesh.VoxelMeshBuilder
     PROPERTIES TIMEOUT 10
 )
 
