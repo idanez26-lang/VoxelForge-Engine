@@ -63,6 +63,8 @@ target_sources(
     PRIVATE
         src/Commands/CommandHistory.cpp
         src/Commands/Voxel/EraseVoxelCommand.cpp
+        src/Commands/Voxel/PaintVoxelCommand.cpp
+        src/Commands/Voxel/VoxelEditTransaction.cpp
 )
 target_include_directories(
     VoxelForgeEditorCommands

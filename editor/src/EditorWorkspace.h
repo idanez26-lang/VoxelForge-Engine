@@ -3,6 +3,8 @@
 #include "AssetBrowser/AssetBrowser.h"
 #include "Commands/CommandHistory.h"
 #include "Commands/Voxel/EraseVoxelCommand.h"
+#include "Commands/Voxel/PaintPaletteSelection.h"
+#include "Commands/Voxel/PaintVoxelCommand.h"
 #include "EditorCamera.h"
 #include "EditorExitRequest.h"
 #include "Platform/FileDialogService.h"
@@ -59,6 +61,8 @@ public:
     [[nodiscard]] bool RunVoxelSelectionSmokeStep(std::size_t frame);
     [[nodiscard]] bool RunEraseVoxelSmokeStep(std::size_t frame);
     [[nodiscard]] bool EraseVoxelSmokePassed() const noexcept;
+    [[nodiscard]] bool RunPaintVoxelSmokeStep(std::size_t frame);
+    [[nodiscard]] bool PaintVoxelSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -119,6 +123,7 @@ private:
     void FrameVoxelViewport() noexcept;
     void UpdateVoxelHighlights() noexcept;
     [[nodiscard]] bool EraseSelectedVoxel();
+    [[nodiscard]] bool PaintSelectedVoxel();
 
     [[nodiscard]] std::uint64_t VoxelModelGeneration() const noexcept override;
     [[nodiscard]] Voxel::VoxelModel* ActiveVoxelModel() noexcept override;
@@ -136,6 +141,7 @@ private:
     VoxelViewportState viewportState_;
     std::optional<Voxel::VoxelModel> activeVoxelModel_;
     VoxelSelectionState voxelSelection_;
+    PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
     // handle to an obsolete model.
@@ -179,11 +185,25 @@ private:
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;
     bool eraseSmokeRedone_ = false;
+    bool paintSmokeSelected_ = false;
+    bool paintSmokeExecuted_ = false;
+    bool paintSmokeUndone_ = false;
+    bool paintSmokeRedone_ = false;
     bool qualityOfLifeSmokePassed_ = false;
     std::size_t eraseSmokeInitialVoxelCount_ = 0U;
     std::size_t eraseSmokeEraseRenderBaseline_ = 0U;
     std::size_t eraseSmokeUndoRenderBaseline_ = 0U;
     std::size_t eraseSmokeRedoRenderBaseline_ = 0U;
+    std::size_t paintSmokeInitialVoxelCount_ = 0U;
+    std::size_t paintSmokeInitialTriangleCount_ = 0U;
+    std::size_t paintSmokeExecuteRenderBaseline_ = 0U;
+    std::size_t paintSmokeUndoRenderBaseline_ = 0U;
+    std::size_t paintSmokeRedoRenderBaseline_ = 0U;
+    std::uint32_t paintSmokeX_ = 0U;
+    std::uint32_t paintSmokeY_ = 0U;
+    std::uint32_t paintSmokeZ_ = 0U;
+    std::uint8_t paintSmokeInitialColor_ = 0U;
+    std::uint8_t paintSmokeNewColor_ = 0U;
 };
 
 } // namespace VoxelForge::Editor

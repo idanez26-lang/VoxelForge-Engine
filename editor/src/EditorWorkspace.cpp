@@ -631,6 +631,7 @@ void EditorWorkspace::DrawScenePanel()
     DrawTooltip("Choose the viewport background");
 
     bool eraseRequested = false;
+    bool paintRequested = false;
     const bool canErase = hasModel && voxelSelection_.Selected().has_value();
     ImGui::BeginDisabled(!canErase);
     if (ImGui::Button("Erase Selected"))
@@ -763,6 +764,8 @@ void EditorWorkspace::DrawScenePanel()
             viewportCamera_.Reset();
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
             eraseRequested = true;
+        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_P, false))
+            paintRequested = true;
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
             voxelSelection_.ClearSelection())
             UpdateVoxelHighlights();
@@ -776,6 +779,7 @@ void EditorWorkspace::DrawScenePanel()
         DrawErrorMessage(viewportRenderer_.LastError());
     }
     if (eraseRequested) static_cast<void>(EraseSelectedVoxel());
+    if (paintRequested) static_cast<void>(PaintSelectedVoxel());
     ImGui::End();
 }
 
@@ -905,7 +909,125 @@ void EditorWorkspace::DrawInspectorPanel()
     ImGui::Begin("Inspector", &showInspector_);
     ImGui::TextUnformatted("Inspector");
     ImGui::Separator();
-    ImGui::TextDisabled("No object selected");
+
+    if (!activeVoxelModel_)
+    {
+        ImGui::TextDisabled("No voxel model loaded.");
+        ImGui::End();
+        return;
+    }
+
+    const auto colorToImGui = [](const Voxel::VoxelColor& color)
+    {
+        constexpr float ByteScale = 1.0F / 255.0F;
+        return ImVec4(
+            static_cast<float>(color.Red) * ByteScale,
+            static_cast<float>(color.Green) * ByteScale,
+            static_cast<float>(color.Blue) * ByteScale,
+            1.0F);
+    };
+
+    const Voxel::VoxelGrid* grid = activeVoxelModel_->GetGrid(0U);
+    const std::optional<VoxelRaycastHit>& selected = voxelSelection_.Selected();
+    const Voxel::Voxel* selectedVoxel = selected && grid
+        ? grid->Get(
+            selected->Coordinates.X,
+            selected->Coordinates.Y,
+            selected->Coordinates.Z)
+        : nullptr;
+    const bool hasOccupiedSelection =
+        selectedVoxel != nullptr && selectedVoxel->IsOccupied();
+
+    ImGui::TextUnformatted("Selected voxel");
+    if (hasOccupiedSelection)
+    {
+        ImGui::Text(
+            "Coordinates: %u, %u, %u",
+            selected->Coordinates.X,
+            selected->Coordinates.Y,
+            selected->Coordinates.Z);
+        ImGui::Text("Current Color: %u", selectedVoxel->ColorIndex);
+        const Voxel::VoxelColor* currentColor =
+            activeVoxelModel_->Palette().Get(selectedVoxel->ColorIndex);
+        if (currentColor)
+        {
+            ImGui::SameLine();
+            ImGui::ColorButton(
+                "##CurrentVoxelColor",
+                colorToImGui(*currentColor),
+                ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                ImVec2(18.0F, 18.0F));
+        }
+    }
+    else
+    {
+        ImGui::TextDisabled("Nothing selected.");
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Paint Color: %u", paintPaletteSelection_.Index());
+    const Voxel::VoxelColor* paintPreview =
+        paintPaletteSelection_.SelectedColor(&activeVoxelModel_->Palette());
+    if (paintPreview)
+    {
+        ImGui::SameLine();
+        ImGui::ColorButton(
+            "##PaintColorPreview",
+            colorToImGui(*paintPreview),
+            ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+            ImVec2(18.0F, 18.0F));
+    }
+    const float swatchSize = std::max(14.0F, ImGui::GetFrameHeight() * 0.70F);
+    for (std::size_t index = 0U;
+         index < Voxel::VoxelPalette::Size();
+         ++index)
+    {
+        const Voxel::VoxelColor* color = activeVoxelModel_->Palette().Get(index);
+        if (color == nullptr) continue;
+
+        ImGui::PushID(static_cast<int>(index));
+        const bool chosen = index == paintPaletteSelection_.Index();
+        if (chosen)
+        {
+            ImGui::PushStyleColor(
+                ImGuiCol_Border, ImVec4(1.0F, 0.85F, 0.25F, 1.0F));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0F);
+        }
+        if (ImGui::ColorButton(
+                "##PaintColor",
+                colorToImGui(*color),
+                ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                ImVec2(swatchSize, swatchSize)))
+        {
+            static_cast<void>(paintPaletteSelection_.SetIndex(index));
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "Index %zu | RGBA %u, %u, %u, %u",
+                index, color->Red, color->Green, color->Blue, color->Alpha);
+        }
+        if (chosen)
+        {
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
+        }
+        ImGui::PopID();
+        if ((index + 1U) % 16U != 0U) ImGui::SameLine();
+    }
+
+    const bool wouldChange = hasOccupiedSelection &&
+        selectedVoxel->ColorIndex != paintPaletteSelection_.Index();
+    ImGui::BeginDisabled(!wouldChange);
+    if (ImGui::Button("Paint Selected"))
+        static_cast<void>(PaintSelectedVoxel());
+    ImGui::EndDisabled();
+    DrawTooltip(
+        wouldChange
+            ? "Paint the selected voxel (P while Scene is active)"
+            : "Select an occupied voxel and choose a different color.");
+    ImGui::SameLine();
+    ImGui::TextDisabled("P");
     ImGui::End();
 }
 
@@ -1600,6 +1722,7 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     }
     commandHistory_.Clear();
     activeVoxelModel_ = std::move(*converted.Model);
+    paintPaletteSelection_.OnModelLoaded();
     ++voxelModelGeneration_;
     if (!viewportState_.Replace(
             filePath.filename().string(), *activeVoxelModel_, *built.Mesh))
@@ -1723,6 +1846,97 @@ bool EditorWorkspace::EraseVoxelSmokePassed() const noexcept
             eraseSmokeInitialVoxelCount_;
 }
 
+bool EditorWorkspace::RunPaintVoxelSmokeStep(const std::size_t frame)
+{
+    const Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    if (grid == nullptr) return false;
+
+    if (frame == 0U)
+    {
+        const auto hit = RaycastVoxelGrid(
+            *grid, {{-1.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        paintSmokeSelected_ = hit.has_value();
+        if (!hit) return false;
+        paintSmokeX_ = hit->Coordinates.X;
+        paintSmokeY_ = hit->Coordinates.Y;
+        paintSmokeZ_ = hit->Coordinates.Z;
+        const Voxel::Voxel* voxel =
+            grid->Get(paintSmokeX_, paintSmokeY_, paintSmokeZ_);
+        if (voxel == nullptr || !voxel->IsOccupied()) return false;
+        paintSmokeInitialColor_ = voxel->ColorIndex;
+        paintSmokeNewColor_ = static_cast<std::uint8_t>(
+            (static_cast<std::uint16_t>(paintSmokeInitialColor_) + 1U) %
+            Voxel::VoxelPalette::Size());
+        paintSmokeInitialVoxelCount_ = grid->OccupiedVoxelCount();
+        paintSmokeInitialTriangleCount_ =
+            viewportState_.Statistics().TriangleCount;
+        static_cast<void>(paintPaletteSelection_.SetIndex(paintSmokeNewColor_));
+        static_cast<void>(voxelSelection_.SetHovered(hit));
+        static_cast<void>(voxelSelection_.SelectHovered());
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 1U)
+    {
+        paintSmokeExecuteRenderBaseline_ =
+            viewportRenderer_.ModelRenderCount();
+        const bool painted = PaintSelectedVoxel();
+        const Voxel::Voxel* voxel =
+            grid->Get(paintSmokeX_, paintSmokeY_, paintSmokeZ_);
+        paintSmokeExecuted_ = painted && voxel != nullptr &&
+            voxel->IsOccupied() &&
+            voxel->ColorIndex == paintSmokeNewColor_ &&
+            grid->OccupiedVoxelCount() == paintSmokeInitialVoxelCount_ &&
+            viewportState_.Statistics().TriangleCount ==
+                paintSmokeInitialTriangleCount_ &&
+            !voxelSelection_.Selected() && voxelModelModified_;
+    }
+    else if (frame == 10U)
+    {
+        const bool paintedFramesRendered =
+            viewportRenderer_.ModelRenderCount() >
+            paintSmokeExecuteRenderBaseline_;
+        UndoCommand();
+        const Voxel::Voxel* voxel =
+            grid->Get(paintSmokeX_, paintSmokeY_, paintSmokeZ_);
+        paintSmokeUndone_ = paintedFramesRendered && voxel != nullptr &&
+            voxel->IsOccupied() &&
+            voxel->ColorIndex == paintSmokeInitialColor_ &&
+            grid->OccupiedVoxelCount() == paintSmokeInitialVoxelCount_ &&
+            viewportState_.Statistics().TriangleCount ==
+                paintSmokeInitialTriangleCount_;
+        paintSmokeUndoRenderBaseline_ = viewportRenderer_.ModelRenderCount();
+    }
+    else if (frame == 20U)
+    {
+        const bool undoFramesRendered =
+            viewportRenderer_.ModelRenderCount() >
+            paintSmokeUndoRenderBaseline_;
+        RedoCommand();
+        const Voxel::Voxel* voxel =
+            grid->Get(paintSmokeX_, paintSmokeY_, paintSmokeZ_);
+        paintSmokeRedone_ = undoFramesRendered && voxel != nullptr &&
+            voxel->IsOccupied() &&
+            voxel->ColorIndex == paintSmokeNewColor_ &&
+            grid->OccupiedVoxelCount() == paintSmokeInitialVoxelCount_ &&
+            viewportState_.Statistics().TriangleCount ==
+                paintSmokeInitialTriangleCount_;
+        paintSmokeRedoRenderBaseline_ = viewportRenderer_.ModelRenderCount();
+    }
+    return true;
+}
+
+bool EditorWorkspace::PaintVoxelSmokePassed() const noexcept
+{
+    return paintSmokeSelected_ && paintSmokeExecuted_ &&
+        paintSmokeUndone_ && paintSmokeRedone_ &&
+        viewportRenderer_.ModelRenderCount() > paintSmokeRedoRenderBaseline_ &&
+        viewportState_.Statistics().OccupiedVoxelCount ==
+            paintSmokeInitialVoxelCount_ &&
+        viewportState_.Statistics().TriangleCount ==
+            paintSmokeInitialTriangleCount_;
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -1822,6 +2036,42 @@ bool EditorWorkspace::EraseSelectedVoxel()
     return true;
 }
 
+bool EditorWorkspace::PaintSelectedVoxel()
+{
+    if (!activeVoxelModel_)
+    {
+        AddConsoleMessage("Paint failed: no voxel model is loaded.");
+        return false;
+    }
+    const std::optional<VoxelRaycastHit> selected = voxelSelection_.Selected();
+    if (!selected)
+    {
+        AddConsoleMessage("Paint failed: no voxel is selected.");
+        return false;
+    }
+
+    const VoxelCoordinates coordinates = selected->Coordinates;
+    const std::uint8_t colorIndex = paintPaletteSelection_.Index();
+    // Paint v1 deliberately uses the shared full mesh rebuild because palette
+    // indices are currently baked into mesh vertices.
+    CommandResult result = commandHistory_.Execute(
+        std::make_unique<PaintVoxelCommand>(
+            static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
+            coordinates.X, coordinates.Y, coordinates.Z, colorIndex));
+    if (!result)
+    {
+        AddConsoleMessage("Paint failed: " + result.Message);
+        return false;
+    }
+
+    AddConsoleMessage(
+        "Painted voxel " + std::to_string(coordinates.X) + ", " +
+        std::to_string(coordinates.Y) + ", " +
+        std::to_string(coordinates.Z) + " with color " +
+        std::to_string(colorIndex));
+    return true;
+}
+
 std::uint64_t EditorWorkspace::VoxelModelGeneration() const noexcept
 {
     return voxelModelGeneration_;
@@ -1861,6 +2111,8 @@ CommandResult EditorWorkspace::RebuildActiveVoxelMesh()
 
 void EditorWorkspace::CompleteVoxelEdit() noexcept
 {
+    // All successful voxel edits use the same predictable v1 rule: clear both
+    // selection and hover after the rebuilt mesh has replaced the old one.
     static_cast<void>(voxelSelection_.Clear());
     UpdateVoxelHighlights();
     voxelModelModified_ = true;
@@ -1910,6 +2162,20 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     eraseSmokeEraseRenderBaseline_ = 0U;
     eraseSmokeUndoRenderBaseline_ = 0U;
     eraseSmokeRedoRenderBaseline_ = 0U;
+    paintSmokeSelected_ = false;
+    paintSmokeExecuted_ = false;
+    paintSmokeUndone_ = false;
+    paintSmokeRedone_ = false;
+    paintSmokeInitialVoxelCount_ = 0U;
+    paintSmokeInitialTriangleCount_ = 0U;
+    paintSmokeExecuteRenderBaseline_ = 0U;
+    paintSmokeUndoRenderBaseline_ = 0U;
+    paintSmokeRedoRenderBaseline_ = 0U;
+    paintSmokeX_ = 0U;
+    paintSmokeY_ = 0U;
+    paintSmokeZ_ = 0U;
+    paintSmokeInitialColor_ = 0U;
+    paintSmokeNewColor_ = 0U;
 }
 
 void EditorWorkspace::FrameVoxelViewport() noexcept

@@ -27,6 +27,7 @@ constexpr std::size_t SmokeTestFrameCount = 5;
 constexpr std::size_t ViewportSmokeTestFrameCount = 30;
 constexpr std::size_t VoxelSelectionSmokeTestFrameCount = 30;
 constexpr std::size_t EraseVoxelSmokeTestFrameCount = 35;
+constexpr std::size_t PaintVoxelSmokeTestFrameCount = 35;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -38,6 +39,8 @@ struct CommandLine final
     bool VoxelSelectionVisualTest = false;
     bool EraseVoxelSmokeTest = false;
     bool EraseVoxelVisualTest = false;
+    bool PaintVoxelSmokeTest = false;
+    bool PaintVoxelVisualTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -58,6 +61,10 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--erase-voxel-smoke-test";
         result.EraseVoxelVisualTest |=
             argument == "--erase-voxel-visual-test";
+        result.PaintVoxelSmokeTest |=
+            argument == "--paint-voxel-smoke-test";
+        result.PaintVoxelVisualTest |=
+            argument == "--paint-voxel-visual-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -176,6 +183,8 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelSelectionVisualTest ||
             commandLine.EraseVoxelSmokeTest ||
             commandLine.EraseVoxelVisualTest ||
+            commandLine.PaintVoxelSmokeTest ||
+            commandLine.PaintVoxelVisualTest ||
             commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
@@ -204,6 +213,8 @@ int main(const int argumentCount, char* arguments[])
                 [&application]() noexcept { application.Close(); },
                 commandLine.EraseVoxelSmokeTest
                     ? EraseVoxelSmokeTestFrameCount
+                    : commandLine.PaintVoxelSmokeTest
+                    ? PaintVoxelSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -215,11 +226,14 @@ int main(const int argumentCount, char* arguments[])
                              : std::filesystem::path{},
                 commandLine.ViewportSmokeTest ||
                     commandLine.VoxelSelectionSmokeTest ||
-                    commandLine.EraseVoxelSmokeTest,
+                    commandLine.EraseVoxelSmokeTest ||
+                    commandLine.PaintVoxelSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
                 commandLine.EraseVoxelVisualTest,
+                commandLine.PaintVoxelSmokeTest,
+                commandLine.PaintVoxelVisualTest,
                 commandLine.QualityOfLifeSmokeTest,
                 commandLine.QualityOfLifeSmokeTest
                     ? viewportFixture.Parent() : std::filesystem::path{});
