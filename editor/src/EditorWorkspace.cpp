@@ -1,4 +1,6 @@
 #include "EditorWorkspace.h"
+#include "VoxelModelTransform.h"
+#include "VoxelSelection/VoxelRaycast.h"
 #include "EditorWindowTitle.h"
 
 #include "VoxelForge/Project/Project.h"
@@ -479,6 +481,27 @@ void EditorWorkspace::DrawScenePanel()
             statistics.Width, statistics.Height, statistics.Depth,
             statistics.OccupiedVoxelCount, statistics.TriangleCount / 2U,
             statistics.TriangleCount);
+        const auto drawHit = [](const char* label,
+            const std::optional<VoxelRaycastHit>& hit)
+        {
+            if (!hit)
+            {
+                ImGui::TextDisabled("%s: None", label);
+                return;
+            }
+            ImGui::Text("%s: %u, %u, %u", label,
+                hit->Coordinates.X, hit->Coordinates.Y, hit->Coordinates.Z);
+        };
+        drawHit("Hovered", voxelSelection_.Hovered());
+        ImGui::SameLine();
+        drawHit("Selected", voxelSelection_.Selected());
+        const auto& detail = voxelSelection_.Hovered()
+            ? voxelSelection_.Hovered() : voxelSelection_.Selected();
+        if (detail)
+        {
+            ImGui::TextDisabled("Face: %s | Color index: %u",
+                VoxelHitFaceName(detail->Face), detail->ColorIndex);
+        }
     }
     else
     {
@@ -513,15 +536,58 @@ void EditorWorkspace::DrawScenePanel()
             IM_COL32(55, 64, 78, 255));
 
         const bool imageHovered = ImGui::IsItemHovered();
-        viewportCamera_.Update(imageHovered, available.y);
-        const bool sceneActive = imageHovered || ImGui::IsWindowFocused(
+        const ImGuiIO& io = ImGui::GetIO();
+        const bool sceneFocused = ImGui::IsWindowFocused(
             ImGuiFocusedFlags_RootAndChildWindows);
+        const bool selectionInputAvailable = imageHovered && sceneFocused &&
+            !ImGui::IsAnyItemActive() && !io.WantTextInput;
+        const bool cameraControl =
+            ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+            ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+        if (selectionInputAvailable && hasModel && viewportGrid_ &&
+            !cameraControl)
+        {
+            const float normalizedX =
+                2.0F * (io.MousePos.x - imageOrigin.x) / available.x - 1.0F;
+            const float normalizedY =
+                1.0F - 2.0F * (io.MousePos.y - imageOrigin.y) / available.y;
+            const VoxelRay ray = ViewportToVoxelGrid(
+                viewportCamera_.CreateViewportRay(normalizedX, normalizedY),
+                voxelModelCenter_);
+            if (voxelSelection_.SetHovered(
+                    RaycastVoxelGrid(*viewportGrid_, ray)))
+                UpdateVoxelHighlights();
+        }
+        else if (voxelSelection_.SetHovered(std::nullopt))
+        {
+            UpdateVoxelHighlights();
+        }
+        if (selectionInputAvailable &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            voxelSelectionClickCandidate_ = !cameraControl &&
+                !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+        if (voxelSelectionClickCandidate_ &&
+            (ImGui::IsMouseDragging(ImGuiMouseButton_Left) || !sceneFocused ||
+             io.WantTextInput))
+            voxelSelectionClickCandidate_ = false;
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        {
+            if (voxelSelectionClickCandidate_ &&
+                voxelSelection_.SelectHovered())
+                UpdateVoxelHighlights();
+            voxelSelectionClickCandidate_ = false;
+        }
+        viewportCamera_.Update(imageHovered, available.y);
+        const bool sceneActive = imageHovered || sceneFocused;
         const bool shortcutsEnabled = sceneActive &&
             !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput;
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_F, false))
             FrameVoxelViewport();
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Home, false))
             viewportCamera_.Reset();
+        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
+            voxelSelection_.ClearSelection())
+            UpdateVoxelHighlights();
         if (imageHovered &&
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             FrameVoxelViewport();
@@ -1111,10 +1177,14 @@ bool EditorWorkspace::OpenVoxInViewport(
     if (!viewportState_.Replace(
             filePath.filename().string(), *converted.Model, *built.Mesh))
     {
-        viewportRenderer_.ClearModel();
+        ClearVoxelViewport();
         AddConsoleMessage("VOX viewport load failed: the first grid is empty.");
         return false;
     }
+    viewportGrid_ = *grid;
+    voxelModelCenter_ = CalculateVoxelMeshCenter(*built.Mesh);
+    static_cast<void>(voxelSelection_.Clear());
+    UpdateVoxelHighlights();
     voxelViewportRendered_ = false;
     voxelViewportRenderFailed_ = false;
     const VoxelViewportStatistics& statistics = viewportState_.Statistics();
@@ -1150,11 +1220,57 @@ void EditorWorkspace::SetVoxelViewportView(
     viewportCamera_.SetView(view);
 }
 
+bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
+{
+    if (!viewportGrid_) return false;
+    if (frame == 0U)
+    {
+        const auto hit = RaycastVoxelGrid(
+            *viewportGrid_, {{-1.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit) return false;
+        static_cast<void>(voxelSelection_.SetHovered(hit));
+        static_cast<void>(voxelSelection_.SelectHovered());
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 20U)
+    {
+        static_cast<void>(voxelSelection_.Clear());
+        UpdateVoxelHighlights();
+    }
+    return true;
+}
+
+std::size_t EditorWorkspace::VoxelHighlightUploadCount() const noexcept
+{
+    return viewportRenderer_.HighlightUploadCount();
+}
+
+std::size_t EditorWorkspace::VoxelHighlightRenderCount() const noexcept
+{
+    return viewportRenderer_.HighlightRenderCount();
+}
+
+void EditorWorkspace::UpdateVoxelHighlights() noexcept
+{
+    const auto coordinates = [](const std::optional<VoxelRaycastHit>& hit)
+        -> std::optional<VoxelCoordinates>
+    {
+        return hit ? std::optional<VoxelCoordinates>(hit->Coordinates)
+                   : std::nullopt;
+    };
+    viewportRenderer_.ConfigureHighlights(
+        coordinates(voxelSelection_.Hovered()),
+        coordinates(voxelSelection_.Selected()), voxelModelCenter_);
+}
+
 void EditorWorkspace::ClearVoxelViewport() noexcept
 {
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();
+    viewportGrid_.reset();
+    static_cast<void>(voxelSelection_.Clear());
+    voxelModelCenter_ = {};
     voxelViewportRendered_ = false;
     voxelViewportRenderFailed_ = false;
 }

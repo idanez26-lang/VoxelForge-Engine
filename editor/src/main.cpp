@@ -25,12 +25,15 @@ namespace
 {
 constexpr std::size_t SmokeTestFrameCount = 5;
 constexpr std::size_t ViewportSmokeTestFrameCount = 30;
+constexpr std::size_t VoxelSelectionSmokeTestFrameCount = 30;
 
 struct CommandLine final
 {
     bool SmokeTest = false;
     bool ViewportSmokeTest = false;
     bool ViewportVisualTest = false;
+    bool VoxelSelectionSmokeTest = false;
+    bool VoxelSelectionVisualTest = false;
 };
 
 CommandLine ParseCommandLine(const int count, char* arguments[])
@@ -42,6 +45,10 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.SmokeTest |= argument == "--smoke-test";
         result.ViewportSmokeTest |= argument == "--viewport-smoke-test";
         result.ViewportVisualTest |= argument == "--viewport-visual-test";
+        result.VoxelSelectionSmokeTest |=
+            argument == "--voxel-selection-smoke-test";
+        result.VoxelSelectionVisualTest |=
+            argument == "--voxel-selection-visual-test";
     }
     return result;
 }
@@ -148,7 +155,9 @@ int main(const int argumentCount, char* arguments[])
             ParseCommandLine(argumentCount, arguments);
         ViewportTestFixture viewportFixture;
         const bool viewportTest =
-            commandLine.ViewportSmokeTest || commandLine.ViewportVisualTest;
+            commandLine.ViewportSmokeTest || commandLine.ViewportVisualTest ||
+            commandLine.VoxelSelectionSmokeTest ||
+            commandLine.VoxelSelectionVisualTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
             std::cerr << "[FATAL] Unable to prepare viewport test fixture.\n";
@@ -175,12 +184,17 @@ int main(const int argumentCount, char* arguments[])
                     return application.GetWindow().SetTitle(std::move(title));
                 },
                 [&application]() noexcept { application.Close(); },
-                commandLine.ViewportSmokeTest
+                commandLine.VoxelSelectionSmokeTest
+                    ? VoxelSelectionSmokeTestFrameCount
+                    : commandLine.ViewportSmokeTest
                     ? ViewportSmokeTestFrameCount
                     : (commandLine.SmokeTest ? SmokeTestFrameCount : 0U),
                 viewportTest ? viewportFixture.VoxPath()
                              : std::filesystem::path{},
-                commandLine.ViewportSmokeTest));
+                commandLine.ViewportSmokeTest ||
+                    commandLine.VoxelSelectionSmokeTest,
+                commandLine.VoxelSelectionSmokeTest,
+                commandLine.VoxelSelectionVisualTest));
 
         const int result = application.Run();
         projectManager.CloseProject();

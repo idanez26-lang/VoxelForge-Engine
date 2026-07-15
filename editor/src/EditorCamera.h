@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorMath.h"
+#include "VoxelSelection/VoxelRay.h"
 
 #include <array>
 #include <cstdint>
@@ -40,6 +41,9 @@ public:
     [[nodiscard]] float GetDistance() const noexcept;
     [[nodiscard]] float GetFieldOfViewDegrees() const noexcept;
     [[nodiscard]] EditorCameraView GetView() const noexcept;
+    [[nodiscard]] VoxelRay CreateViewportRay(
+        float normalizedX,
+        float normalizedY) const noexcept;
     [[nodiscard]] std::array<float, 16> GetViewProjection() const noexcept;
 
 private:

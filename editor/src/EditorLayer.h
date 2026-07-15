@@ -32,7 +32,9 @@ public:
         ApplicationCloseCallback applicationCloseCallback,
         std::size_t smokeTestFrameLimit = 0,
         std::filesystem::path startupVoxPath = {},
-        bool requireVoxelViewportRender = false);
+        bool requireVoxelViewportRender = false,
+        bool voxelSelectionSmokeTest = false,
+        bool voxelSelectionVisualTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -65,6 +67,9 @@ private:
     std::size_t renderedFrameCount_ = 0;
     std::filesystem::path startupVoxPath_;
     bool requireVoxelViewportRender_ = false;
+    bool voxelSelectionSmokeTest_ = false;
+    bool voxelSelectionVisualTest_ = false;
+    bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 
     float deltaTime_ = 1.0F / 60.0F;

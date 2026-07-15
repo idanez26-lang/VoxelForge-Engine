@@ -21,13 +21,17 @@ EditorLayer::EditorLayer(
     ApplicationCloseCallback applicationCloseCallback,
     const std::size_t smokeTestFrameLimit,
     std::filesystem::path startupVoxPath,
-    const bool requireVoxelViewportRender)
+    const bool requireVoxelViewportRender,
+    const bool voxelSelectionSmokeTest,
+    const bool voxelSelectionVisualTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(projectManager, std::move(windowTitleCallback)),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
-      requireVoxelViewportRender_(requireVoxelViewportRender)
+      requireVoxelViewportRender_(requireVoxelViewportRender),
+      voxelSelectionSmokeTest_(voxelSelectionSmokeTest),
+      voxelSelectionVisualTest_(voxelSelectionVisualTest)
 {
 }
 
@@ -84,6 +88,12 @@ void EditorLayer::OnImGuiRender()
         workspace_.SetVoxelViewportView(EditorCameraView::Front);
     if (requireVoxelViewportRender_ && renderedFrameCount_ == 15U)
         workspace_.SetVoxelViewportView(EditorCameraView::Top);
+    if (voxelSelectionSmokeTest_ ||
+        (voxelSelectionVisualTest_ && renderedFrameCount_ == 0U))
+    {
+        voxelSelectionRayHit_ |=
+            workspace_.RunVoxelSelectionSmokeStep(renderedFrameCount_);
+    }
     workspace_.Draw();
 
     ++renderedFrameCount_;
@@ -97,6 +107,14 @@ void EditorLayer::OnImGuiRender()
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport())))
     {
         throw std::runtime_error("Viewport smoke test did not render a GPU frame.");
+    }
+    if (voxelSelectionSmokeTest_ && smokeTestComplete &&
+        (!voxelSelectionRayHit_ ||
+         workspace_.VoxelHighlightUploadCount() == 0U ||
+         workspace_.VoxelHighlightRenderCount() < 5U))
+    {
+        throw std::runtime_error(
+            "Voxel selection smoke test did not raycast, upload, and render highlights.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

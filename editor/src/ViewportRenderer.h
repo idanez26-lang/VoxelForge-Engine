@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorCamera.h"
+#include "VoxelSelection/VoxelRaycast.h"
 
 #include "VoxelForge/Mesh/MeshData.h"
 #include "VoxelForge/Voxel/VoxelPalette.h"
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <optional>
 
 struct SDL_GPUBuffer;
 struct SDL_GPUDevice;
@@ -28,6 +30,10 @@ public:
         const Mesh::MeshData& mesh,
         const Voxel::VoxelPalette& palette);
     void ConfigureGuides(float width, float height, float depth) noexcept;
+    void ConfigureHighlights(
+        std::optional<VoxelCoordinates> hovered,
+        std::optional<VoxelCoordinates> selected,
+        Vec3 modelCenter) noexcept;
     void ClearModel() noexcept;
     [[nodiscard]] bool Render(
         std::uint32_t width,
@@ -40,10 +46,13 @@ public:
 
     [[nodiscard]] SDL_GPUTexture* Texture() const noexcept;
     [[nodiscard]] const std::string& LastError() const noexcept;
+    [[nodiscard]] std::size_t HighlightUploadCount() const noexcept;
+    [[nodiscard]] std::size_t HighlightRenderCount() const noexcept;
 
 private:
     [[nodiscard]] bool EnsurePipeline();
     [[nodiscard]] bool EnsureGuides();
+    [[nodiscard]] bool EnsureHighlights();
     [[nodiscard]] bool EnsureTargets(std::uint32_t width, std::uint32_t height);
     [[nodiscard]] bool UploadBufferPair(
         const void* vertexData,
@@ -54,6 +63,7 @@ private:
         SDL_GPUBuffer*& indexBuffer,
         std::string_view label);
     void ReleaseGuides() noexcept;
+    void ReleaseHighlights() noexcept;
     void ReleaseTargets() noexcept;
     void SetError(std::string message);
 
@@ -63,6 +73,8 @@ private:
     SDL_GPUBuffer* indexBuffer_ = nullptr;
     SDL_GPUBuffer* guideVertexBuffer_ = nullptr;
     SDL_GPUBuffer* guideIndexBuffer_ = nullptr;
+    SDL_GPUBuffer* highlightVertexBuffer_ = nullptr;
+    SDL_GPUBuffer* highlightIndexBuffer_ = nullptr;
     SDL_GPUTexture* colorTarget_ = nullptr;
     SDL_GPUTexture* depthTarget_ = nullptr;
     std::uint32_t width_ = 0;
@@ -70,10 +82,17 @@ private:
     std::uint32_t indexCount_ = 0;
     std::uint32_t gridIndexCount_ = 0;
     std::uint32_t axesIndexCount_ = 0;
+    std::uint32_t highlightIndexCount_ = 0;
     float guideWidth_ = 0.0F;
     float guideHeight_ = 0.0F;
     float guideDepth_ = 0.0F;
     bool guidesDirty_ = true;
+    bool highlightsDirty_ = false;
+    std::optional<VoxelCoordinates> hoveredHighlight_;
+    std::optional<VoxelCoordinates> selectedHighlight_;
+    Vec3 modelCenter_{};
+    std::size_t highlightUploadCount_ = 0U;
+    std::size_t highlightRenderCount_ = 0U;
     std::string lastError_;
 };
 

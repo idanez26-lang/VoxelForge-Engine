@@ -93,6 +93,20 @@ add_test(
     NAME VoxelForge.Editor.VoxelViewport
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelViewportTests>
 )
+
+add_executable(
+    VoxelForgeEditorVoxelSelectionTests
+    Editor/VoxelSelectionTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelSelectionTests
+    PRIVATE VoxelForgeEditorVoxelSelection
+)
+vf_configure_test(VoxelForgeEditorVoxelSelectionTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelSelection
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelSelectionTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -156,6 +170,7 @@ set_tests_properties(
     VoxelForge.Editor.WindowTitle
     VoxelForge.Editor.AssetBrowser
     VoxelForge.Editor.VoxelViewport
+    VoxelForge.Editor.VoxelSelection
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Voxel.Core
@@ -172,9 +187,14 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelViewportSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --viewport-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelSelectionSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-selection-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
+        VoxelForge.Editor.VoxelSelectionSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

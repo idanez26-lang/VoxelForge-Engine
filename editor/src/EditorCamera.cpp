@@ -183,6 +183,19 @@ EditorCameraView EditorCamera::GetView() const noexcept
     return view_;
 }
 
+VoxelRay EditorCamera::CreateViewportRay(
+    const float normalizedX,
+    const float normalizedY) const noexcept
+{
+    const float halfHeight =
+        std::tan(DegreesToRadians(fieldOfViewDegrees_) * 0.5F);
+    const Vec3 direction = Normalize(
+        GetForward() +
+        GetRight() * (normalizedX * halfHeight * aspectRatio_) +
+        GetUp() * (normalizedY * halfHeight));
+    return {GetPosition(), direction};
+}
+
 std::array<float, 16> EditorCamera::GetViewProjection() const noexcept
 {
     const Vec3 eye = GetPosition();

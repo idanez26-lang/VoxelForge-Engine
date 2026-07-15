@@ -5,6 +5,9 @@
 #include "EditorExitRequest.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
+#include "VoxelSelection/VoxelSelectionState.h"
+
+#include "VoxelForge/Voxel/VoxelGrid.h"
 
 #include <array>
 #include <filesystem>
@@ -40,6 +43,9 @@ public:
     [[nodiscard]] bool HasRenderedVoxelViewport() const noexcept;
     [[nodiscard]] bool HasVoxelViewportRenderError() const noexcept;
     void SetVoxelViewportView(EditorCameraView view) noexcept;
+    [[nodiscard]] bool RunVoxelSelectionSmokeStep(std::size_t frame);
+    [[nodiscard]] std::size_t VoxelHighlightUploadCount() const noexcept;
+    [[nodiscard]] std::size_t VoxelHighlightRenderCount() const noexcept;
 
 private:
     void DrawMainMenuBar();
@@ -76,6 +82,7 @@ private:
     void UpdateWindowTitle();
     void ClearVoxelViewport() noexcept;
     void FrameVoxelViewport() noexcept;
+    void UpdateVoxelHighlights() noexcept;
 
     void AddConsoleMessage(std::string message);
     [[nodiscard]] std::string GetBackendDisplayName() const;
@@ -86,6 +93,9 @@ private:
     EditorCamera viewportCamera_;
     ViewportRenderer viewportRenderer_;
     VoxelViewportState viewportState_;
+    std::optional<Voxel::VoxelGrid> viewportGrid_;
+    VoxelSelectionState voxelSelection_;
+    Vec3 voxelModelCenter_{};
     std::vector<std::string> consoleMessages_;
     EditorExitRequest exitRequest_{};
 
@@ -109,6 +119,7 @@ private:
     bool resetLayoutRequested_ = false;
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
+    bool voxelSelectionClickCandidate_ = false;
 };
 
 } // namespace VoxelForge::Editor

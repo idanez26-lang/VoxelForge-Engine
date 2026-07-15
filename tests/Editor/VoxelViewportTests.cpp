@@ -1,4 +1,5 @@
 #include "EditorCamera.h"
+#include "VoxelModelTransform.h"
 #include "VoxelViewportState.h"
 
 #include "VoxelForge/Mesh/VoxelMeshBuilder.h"
@@ -79,6 +80,20 @@ int main()
     const Mesh::MeshBuildResult mesh =
         Mesh::VoxelMeshBuilder::Build(*model.GetGrid(0U));
     passed &= Check(mesh.Succeeded && mesh.Mesh.has_value(), "Mesh build failed.");
+    passed &= Check(SamePoint(
+        Editor::CalculateVoxelMeshCenter(*mesh.Mesh), {0.5F, 0.5F, 0.5F}),
+        "The occupied mesh center is incorrect for an asymmetric grid.");
+    const Editor::Vec3 asymmetricCenter =
+        Editor::CalculateVoxelMeshCenter(*mesh.Mesh);
+    passed &= Check(SamePoint(
+        Editor::VoxelGridToViewport({0.0F, 0.0F, 0.0F}, asymmetricCenter),
+        {-0.5F, -0.5F, -0.5F}),
+        "Grid-to-viewport recentering is incorrect.");
+    const Editor::VoxelRay recenteredRay = Editor::ViewportToVoxelGrid(
+        {{-2.0F, 0.0F, 0.0F}, {1.0F, 0.0F, 0.0F}}, asymmetricCenter);
+    passed &= Check(SamePoint(recenteredRay.Origin, {-1.5F, 0.5F, 0.5F}) &&
+        SamePoint(recenteredRay.Direction, {1.0F, 0.0F, 0.0F}),
+        "Viewport-to-grid ray recentering is incorrect.");
     passed &= Check(
         state.Replace("first.vox", model, *mesh.Mesh), "State replacement failed.");
     const Editor::VoxelViewportStatistics first = state.Statistics();
@@ -127,6 +142,37 @@ int main()
     const auto matrix = camera.GetViewProjection();
     passed &= Check(IsFinite(matrix),
         "Projection contains non-finite values.");
+    const Editor::VoxelRay centerRay = camera.CreateViewportRay(0.0F, 0.0F);
+    const Editor::VoxelRay upperRightRay =
+        camera.CreateViewportRay(1.0F, 1.0F);
+    const Editor::VoxelRay lowerLeftRay =
+        camera.CreateViewportRay(-1.0F, -1.0F);
+    passed &= Check(SamePoint(centerRay.Direction, camera.GetForward()) &&
+        Editor::Dot(upperRightRay.Direction, camera.GetRight()) > 0.0F &&
+        Editor::Dot(upperRightRay.Direction, camera.GetUp()) > 0.0F &&
+        Editor::Dot(lowerLeftRay.Direction, camera.GetRight()) < 0.0F &&
+        Editor::Dot(lowerLeftRay.Direction, camera.GetUp()) < 0.0F,
+        "Viewport coordinates do not produce camera-space rays correctly.");
+    camera.SetAspectRatio(4.0F);
+    const float wideHorizontal = Editor::Dot(
+        camera.CreateViewportRay(1.0F, 0.0F).Direction, camera.GetRight());
+    camera.SetAspectRatio(0.25F);
+    const float verticalHorizontal = Editor::Dot(
+        camera.CreateViewportRay(1.0F, 0.0F).Direction, camera.GetRight());
+    passed &= Check(wideHorizontal > verticalHorizontal,
+        "Wide and vertical viewport ray aspects are inconsistent.");
+    for (const Editor::EditorCameraView view : {
+             Editor::EditorCameraView::Front,
+             Editor::EditorCameraView::Top,
+             Editor::EditorCameraView::Perspective})
+    {
+        camera.SetView(view);
+        passed &= Check(SamePoint(
+            camera.CreateViewportRay(0.0F, 0.0F).Direction,
+            camera.GetForward()),
+            "A named camera view does not center its ray on forward.");
+    }
+    camera.SetAspectRatio(16.0F / 9.0F);
     const Editor::Vec3 target = camera.GetTarget();
     const float clipX = matrix[0] * target.X + matrix[1] * target.Y +
         matrix[2] * target.Z + matrix[3];

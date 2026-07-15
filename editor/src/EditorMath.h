@@ -16,6 +16,8 @@ struct Vec3
     float X = 0.0F;
     float Y = 0.0F;
     float Z = 0.0F;
+
+    [[nodiscard]] bool operator==(const Vec3&) const noexcept = default;
 };
 
 [[nodiscard]] inline Vec3 operator+(const Vec3& left, const Vec3& right)

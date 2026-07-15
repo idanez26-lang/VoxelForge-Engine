@@ -1,4 +1,5 @@
 #include "ViewportRenderer.h"
+#include "VoxelModelTransform.h"
 #include "VoxelViewportState.h"
 
 #include "VoxelForge/Renderer/Renderer.h"
@@ -70,6 +71,42 @@ void AppendBox(
         constexpr std::array<std::uint32_t, 6> local{0U, 1U, 2U, 0U, 2U, 3U};
         for (const std::uint32_t index : local) indices.push_back(first + index);
     }
+}
+
+void AppendVoxelOutline(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const VoxelCoordinates coordinates,
+    const Vec3 center,
+    const std::array<float, 4>& color)
+{
+    constexpr float expansion = 0.018F;
+    constexpr float thickness = 0.035F;
+    const Vec3 minimum = VoxelGridToViewport(
+        {static_cast<float>(coordinates.X),
+         static_cast<float>(coordinates.Y),
+         static_cast<float>(coordinates.Z)}, center);
+    const float x0 = minimum.X - expansion;
+    const float y0 = minimum.Y - expansion;
+    const float z0 = minimum.Z - expansion;
+    const float x1 = minimum.X + 1.0F + expansion;
+    const float y1 = minimum.Y + 1.0F + expansion;
+    const float z1 = minimum.Z + 1.0F + expansion;
+    for (const float y : {y0, y1})
+        for (const float z : {z0, z1})
+            AppendBox(vertices, indices,
+                {x0, y - thickness, z - thickness},
+                {x1, y + thickness, z + thickness}, color);
+    for (const float x : {x0, x1})
+        for (const float z : {z0, z1})
+            AppendBox(vertices, indices,
+                {x - thickness, y0, z - thickness},
+                {x + thickness, y1, z + thickness}, color);
+    for (const float x : {x0, x1})
+        for (const float y : {y0, y1})
+            AppendBox(vertices, indices,
+                {x - thickness, y - thickness, z0},
+                {x + thickness, y + thickness, z1}, color);
 }
 
 std::vector<unsigned char> ReadBinary(const char* path)
@@ -204,29 +241,17 @@ bool ViewportRenderer::Upload(
 
     std::vector<GPUVertex> vertices;
     vertices.reserve(mesh.VertexCount());
-    std::array<float, 3> minimum = mesh.Vertices().front().Position;
-    std::array<float, 3> maximum = minimum;
-    for (const Mesh::MeshVertex& source : mesh.Vertices())
-    {
-        for (std::size_t axis = 0U; axis < 3U; ++axis)
-        {
-            minimum[axis] = std::min(minimum[axis], source.Position[axis]);
-            maximum[axis] = std::max(maximum[axis], source.Position[axis]);
-        }
-    }
-    const std::array<float, 3> center{
-        (minimum[0] + maximum[0]) * 0.5F,
-        (minimum[1] + maximum[1]) * 0.5F,
-        (minimum[2] + maximum[2]) * 0.5F};
+    const Vec3 center = CalculateVoxelMeshCenter(mesh);
     for (const Mesh::MeshVertex& source : mesh.Vertices())
     {
         const Voxel::VoxelColor* color = palette.Get(source.ColorIndex);
         const Voxel::VoxelColor fallback{255U, 0U, 255U, 255U};
         const Voxel::VoxelColor& value = color != nullptr ? *color : fallback;
+        const Vec3 position = VoxelGridToViewport(
+            {source.Position[0], source.Position[1], source.Position[2]},
+            center);
         vertices.push_back({
-            {source.Position[0] - center[0],
-             source.Position[1] - center[1],
-             source.Position[2] - center[2]},
+            {position.X, position.Y, position.Z},
             source.Normal,
             ToViewportColor(value)});
     }
@@ -363,6 +388,58 @@ void ViewportRenderer::ConfigureGuides(
     ReleaseGuides();
 }
 
+void ViewportRenderer::ConfigureHighlights(
+    std::optional<VoxelCoordinates> hovered,
+    std::optional<VoxelCoordinates> selected,
+    const Vec3 modelCenter) noexcept
+{
+    if (hovered == selected) hovered.reset();
+    if (hoveredHighlight_ == hovered && selectedHighlight_ == selected &&
+        modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
+        modelCenter_.Z == modelCenter.Z)
+    {
+        return;
+    }
+    hoveredHighlight_ = hovered;
+    selectedHighlight_ = selected;
+    modelCenter_ = modelCenter;
+    highlightsDirty_ = hoveredHighlight_.has_value() ||
+        selectedHighlight_.has_value();
+    if (!highlightsDirty_) ReleaseHighlights();
+}
+
+bool ViewportRenderer::EnsureHighlights()
+{
+    if (!highlightsDirty_) return true;
+    std::vector<GPUVertex> vertices;
+    std::vector<std::uint32_t> indices;
+    vertices.reserve(24U * 12U * 2U);
+    indices.reserve(36U * 12U * 2U);
+    if (hoveredHighlight_)
+        AppendVoxelOutline(vertices, indices, *hoveredHighlight_, modelCenter_,
+            {1.0F, 0.88F, 0.12F, 1.0F});
+    if (selectedHighlight_)
+        AppendVoxelOutline(vertices, indices, *selectedHighlight_, modelCenter_,
+            {1.0F, 0.38F, 0.08F, 1.0F});
+    if (indices.empty())
+    {
+        highlightsDirty_ = false;
+        return true;
+    }
+    if (!UploadBufferPair(
+            vertices.data(), vertices.size() * sizeof(GPUVertex),
+            indices.data(), indices.size() * sizeof(std::uint32_t),
+            highlightVertexBuffer_, highlightIndexBuffer_,
+            "voxel selection highlights"))
+    {
+        return false;
+    }
+    highlightIndexCount_ = static_cast<std::uint32_t>(indices.size());
+    highlightsDirty_ = false;
+    ++highlightUploadCount_;
+    return true;
+}
+
 bool ViewportRenderer::EnsureGuides()
 {
     if (!guidesDirty_ && guideVertexBuffer_ != nullptr &&
@@ -472,7 +549,8 @@ bool ViewportRenderer::Render(
 {
     if (width == 0U || height == 0U || !EnsurePipeline() ||
         !EnsureTargets(width, height) ||
-        ((showGrid || showAxes) && !EnsureGuides()))
+        ((showGrid || showAxes) && !EnsureGuides()) ||
+        (highlightsDirty_ && !EnsureHighlights()))
     {
         return false;
     }
@@ -545,6 +623,17 @@ bool ViewportRenderer::Render(
             pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
         SDL_DrawGPUIndexedPrimitives(pass, indexCount_, 1U, 0U, 0, 0U);
     }
+    if (highlightIndexCount_ > 0U)
+    {
+        const SDL_GPUBufferBinding vertexBinding{highlightVertexBuffer_, 0U};
+        const SDL_GPUBufferBinding indexBinding{highlightIndexBuffer_, 0U};
+        SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+        SDL_BindGPUIndexBuffer(
+            pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        SDL_DrawGPUIndexedPrimitives(
+            pass, highlightIndexCount_, 1U, 0U, 0, 0U);
+        ++highlightRenderCount_;
+    }
     SDL_EndGPURenderPass(pass);
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
     {
@@ -565,6 +654,21 @@ void ViewportRenderer::ClearModel() noexcept
     vertexBuffer_ = nullptr;
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
+    ConfigureHighlights(std::nullopt, std::nullopt, {});
+}
+
+void ViewportRenderer::ReleaseHighlights() noexcept
+{
+    if (device_ != nullptr)
+    {
+        if (highlightVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, highlightVertexBuffer_);
+        if (highlightIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, highlightIndexBuffer_);
+    }
+    highlightVertexBuffer_ = nullptr;
+    highlightIndexBuffer_ = nullptr;
+    highlightIndexCount_ = 0U;
 }
 
 void ViewportRenderer::ReleaseGuides() noexcept
@@ -601,6 +705,7 @@ void ViewportRenderer::Shutdown() noexcept
     if (device_ != nullptr) SDL_WaitForGPUIdle(device_);
     ClearModel();
     ReleaseGuides();
+    ReleaseHighlights();
     ReleaseTargets();
     if (device_ != nullptr && pipeline_ != nullptr)
     {
@@ -618,6 +723,16 @@ SDL_GPUTexture* ViewportRenderer::Texture() const noexcept
 const std::string& ViewportRenderer::LastError() const noexcept
 {
     return lastError_;
+}
+
+std::size_t ViewportRenderer::HighlightUploadCount() const noexcept
+{
+    return highlightUploadCount_;
+}
+
+std::size_t ViewportRenderer::HighlightRenderCount() const noexcept
+{
+    return highlightRenderCount_;
 }
 
 void ViewportRenderer::SetError(std::string message)
