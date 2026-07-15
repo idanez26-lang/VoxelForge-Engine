@@ -3,6 +3,7 @@ target_sources(
     VoxelForgeEditorAssetBrowser
     PRIVATE
         src/AssetBrowser/AssetBrowser.cpp
+        src/AssetBrowser/AssetBrowserViewModel.cpp
         src/AssetBrowser/AssetDirectory.cpp
         src/AssetBrowser/AssetEntry.cpp
 )

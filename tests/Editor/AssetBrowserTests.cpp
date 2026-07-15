@@ -1,5 +1,6 @@
 #include "AssetBrowser/AssetBrowser.h"
 #include "AssetBrowser/AssetDirectory.h"
+#include "AssetBrowser/AssetBrowserViewModel.h"
 
 #include <algorithm>
 #include <array>
@@ -79,6 +80,48 @@ void WriteFile(const fs::path& path, const std::string& contents)
         throw std::runtime_error(
             "Unable to write a temporary test file: " + path.string());
     }
+}
+
+VoxelForge::Editor::AssetEntry MakeViewEntry(
+    const std::string& name,
+    const VoxelForge::Editor::AssetEntryType type,
+    const std::optional<std::uintmax_t> size = std::nullopt,
+    const int modifiedSeconds = 0,
+    const fs::path& relativePath = {})
+{
+    const fs::path effectiveRelativePath = relativePath.empty()
+        ? fs::path(name)
+        : relativePath;
+    const std::string extension = type ==
+        VoxelForge::Editor::AssetEntryType::Directory
+        ? std::string{}
+        : fs::path(name).extension().string();
+    const std::optional<fs::file_time_type> modified =
+        fs::file_time_type{} + std::chrono::seconds(modifiedSeconds);
+    return {
+        name,
+        fs::path("Assets") / effectiveRelativePath,
+        effectiveRelativePath,
+        type,
+        extension,
+        type == VoxelForge::Editor::AssetEntryType::Directory
+            ? std::nullopt
+            : size,
+        modified};
+}
+
+std::vector<std::string> ViewNames(
+    const std::vector<const VoxelForge::Editor::AssetEntry*>& entries)
+{
+    std::vector<std::string> names;
+    names.reserve(entries.size());
+
+    for (const VoxelForge::Editor::AssetEntry* entry : entries)
+    {
+        names.push_back(entry->Name());
+    }
+
+    return names;
 }
 
 int TestEmptyFolder()
@@ -601,6 +644,257 @@ int TestProjectSwitchRejectsPreparedOperation()
 
     return 0;
 }
+
+int TestViewSearchFiltersAndMarkers()
+{
+    using namespace VoxelForge::Editor;
+    const std::vector<AssetEntry> entries = {
+        MakeViewEntry("Props", AssetEntryType::Directory),
+        MakeViewEntry("castle.vox", AssetEntryType::File, 10U),
+        MakeViewEntry("model.qb", AssetEntryType::File, 20U),
+        MakeViewEntry("mesh.obj", AssetEntryType::File, 30U),
+        MakeViewEntry("preview.PNG", AssetEntryType::File, 40U),
+        MakeViewEntry("notes.txt", AssetEntryType::File, 50U),
+        MakeViewEntry("README.MD", AssetEntryType::File, 60U),
+        MakeViewEntry("unknown.bin", AssetEntryType::File, 70U)};
+    AssetBrowserViewModel viewModel;
+
+    viewModel.SetSearchText("CAST");
+
+    if (ViewNames(viewModel.VisibleEntries(entries)) !=
+        std::vector<std::string>{"castle.vox"})
+    {
+        return 38;
+    }
+
+    viewModel.SetSearchText("missing");
+
+    if (!viewModel.VisibleEntries(entries).empty())
+    {
+        return 39;
+    }
+
+    viewModel.ClearSearch();
+    const std::array filterExpectations = {
+        std::pair{AssetBrowserFilter::Folders,
+                  std::vector<std::string>{"Props"}},
+        std::pair{AssetBrowserFilter::Voxel,
+                  std::vector<std::string>{"castle.vox", "model.qb"}},
+        std::pair{AssetBrowserFilter::Models,
+                  std::vector<std::string>{"mesh.obj"}},
+        std::pair{AssetBrowserFilter::Images,
+                  std::vector<std::string>{"preview.PNG"}},
+        std::pair{AssetBrowserFilter::Text,
+                  std::vector<std::string>{"notes.txt", "README.MD"}},
+        std::pair{AssetBrowserFilter::Other,
+                  std::vector<std::string>{"unknown.bin"}}};
+
+    for (const auto& [filter, expectedNames] : filterExpectations)
+    {
+        viewModel.Settings().Filter = filter;
+
+        if (ViewNames(viewModel.VisibleEntries(entries)) != expectedNames)
+        {
+            return 40;
+        }
+    }
+
+    viewModel.Settings().Filter = AssetBrowserFilter::Voxel;
+    viewModel.SetSearchText("MODEL");
+
+    if (ViewNames(viewModel.VisibleEntries(entries)) !=
+        std::vector<std::string>{"model.qb"})
+    {
+        return 41;
+    }
+
+    const std::array expectedMarkers = {
+        std::string_view{"[DIR]"},
+        std::string_view{"[VOX]"},
+        std::string_view{"[QB]"},
+        std::string_view{"[OBJ]"},
+        std::string_view{"[IMG]"},
+        std::string_view{"[TXT]"},
+        std::string_view{"[TXT]"},
+        std::string_view{"[FILE]"}};
+
+    for (std::size_t index = 0; index < entries.size(); ++index)
+    {
+        if (AssetEntryMarker(entries[index]) != expectedMarkers[index])
+        {
+            return 42;
+        }
+    }
+
+    return 0;
+}
+
+int TestViewSorting()
+{
+    using namespace VoxelForge::Editor;
+    const std::vector<AssetEntry> entries = {
+        MakeViewEntry("ZetaFolder", AssetEntryType::Directory),
+        MakeViewEntry("AlphaFolder", AssetEntryType::Directory),
+        MakeViewEntry("large.txt", AssetEntryType::File, 90U, 40),
+        MakeViewEntry("small.obj", AssetEntryType::File, 10U, 30),
+        MakeViewEntry("same-b.vox", AssetEntryType::File, 20U, 20),
+        MakeViewEntry("same-a.vox", AssetEntryType::File, 20U, 20),
+        MakeViewEntry("image.png", AssetEntryType::File, 40U, 10),
+        MakeViewEntry(
+            "equal.bin",
+            AssetEntryType::File,
+            50U,
+            50,
+            fs::path("B") / "equal.bin"),
+        MakeViewEntry(
+            "equal.bin",
+            AssetEntryType::File,
+            50U,
+            50,
+            fs::path("A") / "equal.bin")};
+    AssetBrowserViewModel viewModel;
+    AssetBrowserViewSettings& settings = viewModel.Settings();
+
+    settings.SortMode = AssetBrowserSortMode::Name;
+    const std::vector<std::string> nameOrder =
+        ViewNames(viewModel.VisibleEntries(entries));
+
+    if (nameOrder[0] != "AlphaFolder" ||
+        nameOrder[1] != "ZetaFolder" ||
+        nameOrder[2] != "equal.bin" ||
+        nameOrder[3] != "equal.bin" ||
+        nameOrder.back() != "small.obj")
+    {
+        return 43;
+    }
+
+    settings.SortMode = AssetBrowserSortMode::Type;
+    const std::vector<std::string> typeOrder =
+        ViewNames(viewModel.VisibleEntries(entries));
+
+    if (typeOrder[0] != "AlphaFolder" ||
+        typeOrder[1] != "ZetaFolder" ||
+        typeOrder[2] != "same-a.vox" ||
+        typeOrder[3] != "same-b.vox" ||
+        typeOrder[4] != "small.obj" ||
+        typeOrder[5] != "image.png")
+    {
+        return 44;
+    }
+
+    settings.SortMode = AssetBrowserSortMode::Size;
+    const std::vector<std::string> sizeOrder =
+        ViewNames(viewModel.VisibleEntries(entries));
+
+    if (sizeOrder[0] != "AlphaFolder" ||
+        sizeOrder[1] != "ZetaFolder" ||
+        sizeOrder[2] != "small.obj" ||
+        sizeOrder[3] != "same-a.vox" ||
+        sizeOrder[4] != "same-b.vox" ||
+        sizeOrder.back() != "large.txt")
+    {
+        return 45;
+    }
+
+    settings.SortMode = AssetBrowserSortMode::Modified;
+    const std::vector<std::string> modifiedOrder =
+        ViewNames(viewModel.VisibleEntries(entries));
+
+    if (modifiedOrder[2] != "image.png" ||
+        modifiedOrder[3] != "same-a.vox" ||
+        modifiedOrder[4] != "same-b.vox" ||
+        modifiedOrder.back() != "equal.bin")
+    {
+        return 46;
+    }
+
+    settings.SortAscending = false;
+    const std::vector<const AssetEntry*> descending =
+        viewModel.VisibleEntries(entries);
+
+    if (!descending[0]->IsDirectory() || !descending[1]->IsDirectory() ||
+        descending[0]->Name() != "ZetaFolder" ||
+        descending[2]->Name() != "equal.bin" ||
+        descending.back()->Name() != "image.png")
+    {
+        return 47;
+    }
+
+    const std::vector<const AssetEntry*> repeated =
+        viewModel.VisibleEntries(entries);
+
+    for (std::size_t index = 0; index < descending.size(); ++index)
+    {
+        if (descending[index]->RelativePath() !=
+            repeated[index]->RelativePath())
+        {
+            return 48;
+        }
+    }
+
+    return 0;
+}
+
+int TestViewStateAndHiddenSelection()
+{
+    using namespace VoxelForge::Editor;
+    TemporaryAssetTree firstTree("view-state-first");
+    TemporaryAssetTree secondTree("view-state-second");
+    WriteFile(firstTree.Assets() / "castle.vox", "castle");
+    WriteFile(secondTree.Assets() / "preview.png", "preview");
+    AssetBrowser browser;
+
+    if (!browser.SetAssetsRoot(firstTree.Assets()) ||
+        !browser.SelectEntry("castle.vox"))
+    {
+        return 49;
+    }
+
+    AssetBrowserViewSettings& settings = browser.ViewSettings();
+    settings.DisplayMode = AssetBrowserDisplayMode::List;
+    settings.Filter = AssetBrowserFilter::Images;
+    settings.SortMode = AssetBrowserSortMode::Size;
+    settings.SortAscending = false;
+    browser.SetSearchText("CASTLE");
+
+    if (!browser.VisibleEntries().empty() ||
+        !browser.SelectedRelativePath() ||
+        *browser.SelectedRelativePath() != fs::path("castle.vox"))
+    {
+        return 50;
+    }
+
+    const AssetBrowserViewModel navigationViewModel = []
+    {
+        AssetBrowserViewModel model;
+        model.SetSearchText("Props");
+        return model;
+    }();
+    static_cast<void>(navigationViewModel.VisibleEntries({}));
+
+    if (navigationViewModel.SearchText() != "Props")
+    {
+        return 51;
+    }
+
+    if (!browser.SetAssetsRoot(secondTree.Assets()) ||
+        browser.SelectedRelativePath() ||
+        browser.ViewSettings().SearchText[0] != '\0')
+    {
+        return 52;
+    }
+
+    if (browser.ViewSettings().SearchText[0] != '\0' ||
+        browser.ViewSettings().DisplayMode != AssetBrowserDisplayMode::List ||
+        browser.ViewSettings().Filter != AssetBrowserFilter::Images ||
+        browser.ViewSettings().SortMode != AssetBrowserSortMode::Size ||
+        browser.ViewSettings().SortAscending)
+    {
+        return 53;
+    }
+
+    return 0;
+}
 }
 
 int main()
@@ -668,7 +962,23 @@ int main()
             return result;
         }
 
-        return TestProjectSwitchRejectsPreparedOperation();
+        if (const int result = TestProjectSwitchRejectsPreparedOperation();
+            result != 0)
+        {
+            return result;
+        }
+
+        if (const int result = TestViewSearchFiltersAndMarkers(); result != 0)
+        {
+            return result;
+        }
+
+        if (const int result = TestViewSorting(); result != 0)
+        {
+            return result;
+        }
+
+        return TestViewStateAndHiddenSelection();
     }
     catch (const std::exception& exception)
     {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetDirectory.h"
+#include "AssetBrowserViewModel.h"
 
 #include <array>
 #include <filesystem>
@@ -31,6 +32,10 @@ public:
     [[nodiscard]] const AssetDirectory& Directory() const noexcept;
     [[nodiscard]] const std::optional<std::filesystem::path>&
         SelectedRelativePath() const noexcept;
+    [[nodiscard]] AssetBrowserViewSettings& ViewSettings() noexcept;
+    [[nodiscard]] const AssetBrowserViewSettings& ViewSettings() const noexcept;
+    void SetSearchText(std::string_view searchText) noexcept;
+    [[nodiscard]] std::vector<const AssetEntry*> VisibleEntries() const;
 
 private:
     struct PendingEntryOperation final
@@ -43,6 +48,15 @@ private:
 
     void DrawToolbar();
     void DrawEntries();
+    void DrawGrid(
+        const std::vector<const AssetEntry*>& entries,
+        std::optional<std::filesystem::path>& directoryToEnter);
+    void DrawList(
+        const std::vector<const AssetEntry*>& entries,
+        std::optional<std::filesystem::path>& directoryToEnter);
+    void DrawEntryContextMenu(
+        const AssetEntry& entry,
+        std::optional<std::filesystem::path>& directoryToEnter);
     void DrawSelection() const;
     void DrawStatusMessage() const;
     void DrawBackgroundContextMenu();
@@ -60,6 +74,7 @@ private:
     void SetStatus(std::string message);
 
     AssetDirectory directory_;
+    AssetBrowserViewModel viewModel_;
     std::optional<std::filesystem::path> selectedRelativePath_;
     std::optional<std::filesystem::path> newFolderAssetsRoot_;
     std::optional<PendingEntryOperation> pendingRename_;
