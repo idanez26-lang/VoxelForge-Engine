@@ -27,6 +27,7 @@ constexpr std::size_t SmokeTestFrameCount = 5;
 constexpr std::size_t ViewportSmokeTestFrameCount = 30;
 constexpr std::size_t VoxelSelectionSmokeTestFrameCount = 30;
 constexpr std::size_t EraseVoxelSmokeTestFrameCount = 35;
+constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
 {
@@ -37,6 +38,7 @@ struct CommandLine final
     bool VoxelSelectionVisualTest = false;
     bool EraseVoxelSmokeTest = false;
     bool EraseVoxelVisualTest = false;
+    bool QualityOfLifeSmokeTest = false;
 };
 
 CommandLine ParseCommandLine(const int count, char* arguments[])
@@ -56,6 +58,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--erase-voxel-smoke-test";
         result.EraseVoxelVisualTest |=
             argument == "--erase-voxel-visual-test";
+        result.QualityOfLifeSmokeTest |=
+            argument == "--quality-of-life-smoke-test";
     }
     return result;
 }
@@ -148,6 +152,11 @@ public:
         return parent_ / "recent-projects.txt";
     }
 
+    [[nodiscard]] const std::filesystem::path& Parent() const noexcept
+    {
+        return parent_;
+    }
+
 private:
     std::filesystem::path parent_;
     std::filesystem::path voxPath_;
@@ -166,7 +175,8 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelSelectionSmokeTest ||
             commandLine.VoxelSelectionVisualTest ||
             commandLine.EraseVoxelSmokeTest ||
-            commandLine.EraseVoxelVisualTest;
+            commandLine.EraseVoxelVisualTest ||
+            commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
             std::cerr << "[FATAL] Unable to prepare viewport test fixture.\n";
@@ -185,8 +195,7 @@ int main(const int argumentCount, char* arguments[])
         VoxelForge::Core::ApplicationSpecification specification;
         specification.Name = VoxelForge::Editor::FormatEditorWindowTitle();
         VoxelForge::Core::Application application(std::move(specification));
-        application.PushLayer(
-            std::make_unique<VoxelForge::Editor::EditorLayer>(
+        auto editorLayer = std::make_unique<VoxelForge::Editor::EditorLayer>(
                 projectManager,
                 [&application](std::string title)
                 {
@@ -195,6 +204,8 @@ int main(const int argumentCount, char* arguments[])
                 [&application]() noexcept { application.Close(); },
                 commandLine.EraseVoxelSmokeTest
                     ? EraseVoxelSmokeTestFrameCount
+                    : commandLine.QualityOfLifeSmokeTest
+                    ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
                     ? VoxelSelectionSmokeTestFrameCount
                     : commandLine.ViewportSmokeTest
@@ -208,7 +219,18 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
-                commandLine.EraseVoxelVisualTest));
+                commandLine.EraseVoxelVisualTest,
+                commandLine.QualityOfLifeSmokeTest,
+                commandLine.QualityOfLifeSmokeTest
+                    ? viewportFixture.Parent() : std::filesystem::path{});
+        VoxelForge::Editor::EditorLayer* const editorLayerPointer =
+            editorLayer.get();
+        application.SetWindowCloseRequestCallback(
+            [editorLayerPointer]()
+            {
+                return editorLayerPointer->RequestWindowClose();
+            });
+        application.PushLayer(std::move(editorLayer));
 
         const int result = application.Run();
         projectManager.CloseProject();

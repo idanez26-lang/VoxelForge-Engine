@@ -29,6 +29,7 @@ constexpr float StatusBarHeight = 26.0F;
 constexpr std::size_t MaximumConsoleMessageCount = 200;
 constexpr const char* WorkspaceDockspaceName = "VoxelForgeStudioDockSpace";
 constexpr const char* AboutPopupName = "About VoxelForge Studio";
+constexpr const char* DirtyConfirmationPopupName = "Unsaved Voxel Model";
 
 bool HasProjectExtension(const std::filesystem::path& path)
 {
@@ -64,13 +65,39 @@ void DrawErrorMessage(const std::string_view error)
     ImGui::TextWrapped("%.*s", static_cast<int>(error.size()), error.data());
     ImGui::PopStyleColor();
 }
+
+void DrawTooltip(const char* text)
+{
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    {
+        ImGui::SetTooltip("%s", text);
+    }
+}
+
+bool CopyPathToBuffer(
+    const std::filesystem::path& path,
+    std::array<char, 1024>& buffer)
+{
+    const std::string value = path.string();
+    if (value.size() >= buffer.size()) return false;
+    buffer.fill('\0');
+    std::copy(value.begin(), value.end(), buffer.begin());
+    return true;
+}
 }
 
 EditorWorkspace::EditorWorkspace(
     Project::ProjectManager& projectManager,
-    WindowTitleCallback windowTitleCallback)
+    WindowTitleCallback windowTitleCallback,
+    std::filesystem::path preferencesFilePath,
+    const bool simulatedFileDialogs)
     : projectManager_(projectManager),
       windowTitleCallback_(std::move(windowTitleCallback)),
+      fileDialogService_(simulatedFileDialogs
+          ? CreateSimulatedFileDialogService()
+          : CreateSDLFileDialogService()),
+      projectFolderOpener_(CreateSDLProjectFolderOpener()),
+      projectDialogPreferences_(std::move(preferencesFilePath)),
       consoleMessages_{
           "Console ready",
           "VoxelForge Studio initialized"}
@@ -85,6 +112,11 @@ EditorWorkspace::EditorWorkspace(
         {
             static_cast<void>(OpenVoxInViewport(filePath));
         });
+    if (!projectDialogPreferences_.Load())
+    {
+        AddConsoleMessage(
+            "Preferences load warning: " + projectDialogPreferences_.LastError());
+    }
 }
 
 EditorWorkspace::~EditorWorkspace()
@@ -94,6 +126,7 @@ EditorWorkspace::~EditorWorkspace()
 
 void EditorWorkspace::Draw()
 {
+    ConsumeFileDialogResult();
     HandleCommandShortcuts();
     DrawMainMenuBar();
 
@@ -124,10 +157,17 @@ void EditorWorkspace::Draw()
     DrawStatusBar();
     DrawAboutPopup();
     DrawProjectDialogs();
+    DrawDirtyConfirmationDialog();
 }
 
 bool EditorWorkspace::ConsumeExitRequest() noexcept
 {
+    return exitRequest_.ConsumeExitRequest();
+}
+
+bool EditorWorkspace::RequestApplicationExit()
+{
+    RequestExit();
     return exitRequest_.ConsumeExitRequest();
 }
 
@@ -144,11 +184,13 @@ void EditorWorkspace::DrawMainMenuBar()
         {
             RequestNewProjectDialog();
         }
+        DrawTooltip("Create a project (Ctrl+N)");
 
         if (ImGui::MenuItem("Open Project", "Ctrl+O"))
         {
             RequestOpenProjectDialog();
         }
+        DrawTooltip("Open a project (Ctrl+O)");
 
         std::optional<std::filesystem::path> recentProjectToOpen;
 
@@ -192,7 +234,7 @@ void EditorWorkspace::DrawMainMenuBar()
 
         if (recentProjectToOpen)
         {
-            static_cast<void>(OpenProject(*recentProjectToOpen, true));
+            RequestOpenProject(*recentProjectToOpen, true);
         }
 
         ImGui::Separator();
@@ -206,21 +248,35 @@ void EditorWorkspace::DrawMainMenuBar()
         {
             SaveProject();
         }
+        DrawTooltip("Save the active project (Ctrl+S)");
+
+        ImGui::BeginDisabled();
+        ImGui::MenuItem("Save Project As...", "Ctrl+Shift+S");
+        ImGui::EndDisabled();
+        DrawTooltip("Not implemented yet");
+
+        if (ImGui::MenuItem(
+                "Open Project Folder", nullptr, false, hasActiveProject))
+        {
+            OpenProjectFolder();
+        }
+        DrawTooltip("Open the active project folder");
 
         if (ImGui::MenuItem(
                 "Close Project",
-                nullptr,
+                "Ctrl+W",
                 false,
                 hasActiveProject))
         {
-            CloseProject();
+            RequestCloseProject();
         }
+        DrawTooltip("Close the active project (Ctrl+W)");
 
         ImGui::Separator();
 
         if (ImGui::MenuItem("Exit"))
         {
-            exitRequest_.RequestExit();
+            RequestExit();
         }
 
         ImGui::EndMenu();
@@ -237,6 +293,7 @@ void EditorWorkspace::DrawMainMenuBar()
         {
             UndoCommand();
         }
+        DrawTooltip("Undo the last edit (Ctrl+Z)");
 
         const std::string redoLabel = commandHistory_.CanRedo()
             ? "Redo " + std::string(commandHistory_.RedoName())
@@ -247,6 +304,7 @@ void EditorWorkspace::DrawMainMenuBar()
         {
             RedoCommand();
         }
+        DrawTooltip("Redo the last edit (Ctrl+Y)");
 
         ImGui::Separator();
 
@@ -316,13 +374,45 @@ void EditorWorkspace::HandleCommandShortcuts()
     const bool incompatiblePopupOpen = ImGui::IsPopupOpen(
         nullptr,
         ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-    if (io.WantTextInput || ImGui::IsAnyItemActive() || incompatiblePopupOpen)
+    const ShortcutContext context{
+        io.WantTextInput,
+        ImGui::IsAnyItemActive(),
+        incompatiblePopupOpen,
+        projectManager_.HasActiveProject()};
+    if (context.TextInput || context.ActiveItem || context.PopupOpen)
     {
         return;
     }
 
     constexpr ImGuiInputFlags shortcutFlags = ImGuiInputFlags_RouteGlobal;
-    if (ImGui::Shortcut(
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, shortcutFlags) &&
+        CanRunProjectShortcut(ProjectShortcut::NewProject, context))
+    {
+        RequestNewProjectDialog();
+    }
+    else if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, shortcutFlags) &&
+        CanRunProjectShortcut(ProjectShortcut::OpenProject, context))
+    {
+        RequestOpenProjectDialog();
+    }
+    else if (ImGui::Shortcut(
+                 ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S,
+                 shortcutFlags) &&
+             CanRunProjectShortcut(ProjectShortcut::SaveAs, context))
+    {
+        AddConsoleMessage("Save As is not implemented yet.");
+    }
+    else if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, shortcutFlags) &&
+             CanRunProjectShortcut(ProjectShortcut::SaveProject, context))
+    {
+        SaveProject();
+    }
+    else if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_W, shortcutFlags) &&
+             CanRunProjectShortcut(ProjectShortcut::CloseProject, context))
+    {
+        RequestCloseProject();
+    }
+    else if (ImGui::Shortcut(
             ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, shortcutFlags))
     {
         if (commandHistory_.CanRedo()) RedoCommand();
@@ -507,6 +597,7 @@ void EditorWorkspace::DrawScenePanel()
     {
         FrameVoxelViewport();
     }
+    DrawTooltip("Frame the active voxel model (F)");
     ImGui::SameLine();
     const char* viewNames[] = {
         "Perspective", "Front", "Back", "Left", "Right", "Top", "Bottom"};
@@ -520,10 +611,12 @@ void EditorWorkspace::DrawScenePanel()
     bool showGrid = viewportState_.IsGridVisible();
     if (ImGui::Checkbox("Grid", &showGrid))
         viewportState_.SetGridVisible(showGrid);
+    DrawTooltip("Show or hide the ground grid");
     ImGui::SameLine();
     bool showAxes = viewportState_.AreAxesVisible();
     if (ImGui::Checkbox("Axes", &showAxes))
         viewportState_.SetAxesVisible(showAxes);
+    DrawTooltip("Show or hide the world axes");
     if (toolbarWidth >= 300.0F) ImGui::SameLine();
     const char* backgroundNames[] = {"Dark", "Neutral", "Light"};
     int selectedBackground = static_cast<int>(viewportState_.Background());
@@ -535,6 +628,7 @@ void EditorWorkspace::DrawScenePanel()
         viewportState_.SetBackground(
             static_cast<ViewportBackground>(selectedBackground));
     }
+    DrawTooltip("Choose the viewport background");
 
     bool eraseRequested = false;
     const bool canErase = hasModel && voxelSelection_.Selected().has_value();
@@ -542,6 +636,7 @@ void EditorWorkspace::DrawScenePanel()
     if (ImGui::Button("Erase Selected"))
         eraseRequested = true;
     ImGui::EndDisabled();
+    DrawTooltip("Erase the selected voxel (Delete)");
     ImGui::SameLine();
     ImGui::TextDisabled("Delete");
     if (voxelModelModified_)
@@ -606,6 +701,7 @@ void EditorWorkspace::DrawScenePanel()
             available,
             ImVec2(0.0F, 0.0F),
             ImVec2(1.0F, 1.0F));
+        DrawTooltip("Click a voxel to select it");
         ImGui::GetWindowDrawList()->AddRect(
             imageOrigin,
             ImVec2(imageOrigin.x + available.x, imageOrigin.y + available.y),
@@ -725,6 +821,7 @@ void EditorWorkspace::DrawWelcomeScreen()
     {
         RequestNewProjectDialog();
     }
+    DrawTooltip("Create a project (Ctrl+N)");
 
     ImGui::SameLine(0.0F, ActionSpacing);
 
@@ -732,6 +829,7 @@ void EditorWorkspace::DrawWelcomeScreen()
     {
         RequestOpenProjectDialog();
     }
+    DrawTooltip("Open a project (Ctrl+O)");
 
     ImGui::Spacing();
     ImGui::Spacing();
@@ -796,7 +894,7 @@ void EditorWorkspace::DrawWelcomeScreen()
     }
     else if (recentProjectToOpen)
     {
-        static_cast<void>(OpenProject(*recentProjectToOpen, true));
+        RequestOpenProject(*recentProjectToOpen, true);
     }
 
     ImGui::EndChild();
@@ -946,6 +1044,67 @@ void EditorWorkspace::DrawProjectDialogs()
     DrawOpenProjectDialog();
 }
 
+void EditorWorkspace::ConsumeFileDialogResult()
+{
+    const std::optional<FileDialogResult> result =
+        fileDialogService_->ConsumeResult();
+    if (!result || result->Status == FileDialogStatus::Cancelled) return;
+
+    if (result->Status == FileDialogStatus::Error)
+    {
+        projectDialogError_ = result->Error.empty()
+            ? "The system file dialog failed." : result->Error;
+        AddConsoleMessage("File dialog failed: " + projectDialogError_);
+        return;
+    }
+
+    std::array<char, 1024>& destination =
+        result->Kind == FileDialogKind::ProjectParentFolder
+        ? newProjectParentPath_ : openProjectFilePath_;
+    if (!CopyPathToBuffer(result->Path, destination))
+    {
+        projectDialogError_ = "The selected path is too long.";
+        return;
+    }
+    projectDialogError_.clear();
+}
+
+void EditorWorkspace::DrawDirtyConfirmationDialog()
+{
+    if (showDirtyConfirmationPopup_)
+    {
+        ImGui::OpenPopup(DirtyConfirmationPopupName);
+        showDirtyConfirmationPopup_ = false;
+    }
+    ImGui::SetNextWindowPos(
+        ImGui::GetMainViewport()->GetCenter(),
+        ImGuiCond_Always,
+        ImVec2(0.5F, 0.5F));
+    if (!ImGui::BeginPopupModal(
+            DirtyConfirmationPopupName, nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+
+    ImGui::TextWrapped("The active voxel model has unsaved changes.");
+    ImGui::TextUnformatted("Discard changes?");
+    ImGui::Spacing();
+    if (ImGui::Button("Discard"))
+    {
+        const auto action = dirtyActionConfirmation_.Discard();
+        ImGui::CloseCurrentPopup();
+        if (action) ExecutePendingDirtyAction(*action);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+    {
+        dirtyActionConfirmation_.Cancel();
+        pendingProjectPath_.clear();
+        pendingVoxelPath_.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 void EditorWorkspace::DrawNewProjectDialog()
 {
     constexpr const char* PopupName = "New VoxelForge Project";
@@ -956,21 +1115,41 @@ void EditorWorkspace::DrawNewProjectDialog()
         showNewProjectPopup_ = false;
     }
 
-    if (!ImGui::BeginPopupModal(
-            PopupName,
-            nullptr,
+    ImGui::SetNextWindowSizeConstraints(
+        ImVec2(440.0F, 0.0F), ImVec2(760.0F, 600.0F));
+    ImGui::SetNextWindowPos(
+        ImGui::GetMainViewport()->GetCenter(),
+        ImGuiCond_Always,
+        ImVec2(0.5F, 0.5F));
+    if (!ImGui::BeginPopupModal(PopupName, nullptr,
             ImGuiWindowFlags_AlwaysAutoResize))
     {
         return;
     }
 
+    ImGui::TextDisabled("Create a project folder and its Assets directory.");
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(std::max(260.0F, ImGui::GetContentRegionAvail().x));
     bool fieldsChanged = ImGui::InputText(
-        "Project Name",
-        newProjectName_.data(),
-        newProjectName_.size());
+        "##NewProjectName", newProjectName_.data(), newProjectName_.size());
+    ImGui::TextDisabled("Project Name");
+    ImGui::SetNextItemWidth(std::max(
+        180.0F, ImGui::GetContentRegionAvail().x - 92.0F));
     fieldsChanged = DrawPathInput(
-        "Parent Folder",
-        newProjectParentPath_) || fieldsChanged;
+        "##NewProjectParent", newProjectParentPath_) || fieldsChanged;
+    ImGui::SameLine();
+    ImGui::BeginDisabled(fileDialogService_->IsPending());
+    if (ImGui::Button("Browse...##NewProject"))
+    {
+        const std::filesystem::path current(newProjectParentPath_.data());
+        const std::filesystem::path initial = current.empty()
+            ? projectDialogPreferences_.LastCreateParent() : current;
+        if (!fileDialogService_->ChooseProjectParentFolder(initial))
+            projectDialogError_ = "A file dialog is already open.";
+    }
+    ImGui::EndDisabled();
+    DrawTooltip("Choose the project parent folder");
+    ImGui::TextDisabled("Parent Folder");
 
     if (fieldsChanged)
     {
@@ -993,9 +1172,9 @@ void EditorWorkspace::DrawNewProjectDialog()
     }
     else
     {
-        ImGui::TextWrapped(
-            "%s",
-            validation.DestinationPath.string().c_str());
+        ImGui::BeginChild("##FinalProjectPath", ImVec2(0.0F, 42.0F), true);
+        ImGui::TextWrapped("%s", validation.DestinationPath.string().c_str());
+        ImGui::EndChild();
     }
 
     const std::string_view displayedError = projectDialogError_.empty()
@@ -1003,11 +1182,16 @@ void EditorWorkspace::DrawNewProjectDialog()
         : std::string_view(projectDialogError_);
     DrawErrorMessage(displayedError);
 
+    ImGui::Spacing();
+    ImGui::Separator();
     ImGui::BeginDisabled(!validation.IsValid());
 
     if (ImGui::Button("Create"))
     {
         CreateProject();
+        if (projectDialogError_.empty() &&
+            !dirtyActionConfirmation_.IsPending())
+            ImGui::CloseCurrentPopup();
     }
 
     ImGui::EndDisabled();
@@ -1035,18 +1219,40 @@ void EditorWorkspace::DrawOpenProjectDialog()
         showOpenProjectPopup_ = false;
     }
 
-    if (!ImGui::BeginPopupModal(
-            PopupName,
-            nullptr,
+    ImGui::SetNextWindowSizeConstraints(
+        ImVec2(440.0F, 0.0F), ImVec2(760.0F, 500.0F));
+    ImGui::SetNextWindowPos(
+        ImGui::GetMainViewport()->GetCenter(),
+        ImGuiCond_Always,
+        ImVec2(0.5F, 0.5F));
+    if (!ImGui::BeginPopupModal(PopupName, nullptr,
             ImGuiWindowFlags_AlwaysAutoResize))
     {
         return;
     }
 
-    if (DrawPathInput("Project File", openProjectFilePath_))
+    ImGui::TextDisabled("Select a VoxelForge project file.");
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(std::max(
+        180.0F, ImGui::GetContentRegionAvail().x - 92.0F));
+    if (DrawPathInput("##OpenProjectFile", openProjectFilePath_))
     {
         projectDialogError_.clear();
     }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(fileDialogService_->IsPending());
+    if (ImGui::Button("Browse...##OpenProject"))
+    {
+        const std::filesystem::path current(openProjectFilePath_.data());
+        const std::filesystem::path initial = current.empty()
+            ? projectDialogPreferences_.LastOpenDirectory()
+            : current.parent_path();
+        if (!fileDialogService_->ChooseProjectFile(initial))
+            projectDialogError_ = "A file dialog is already open.";
+    }
+    ImGui::EndDisabled();
+    DrawTooltip("Choose a .vfproject file");
+    ImGui::TextDisabled("Project File");
 
     ImGui::TextDisabled("Expected extension: .vfproject");
 
@@ -1068,11 +1274,18 @@ void EditorWorkspace::DrawOpenProjectDialog()
         : std::string_view(projectDialogError_);
     DrawErrorMessage(displayedError);
 
+    ImGui::Spacing();
+    ImGui::Separator();
     ImGui::BeginDisabled(!inputError.empty());
 
     if (ImGui::Button("Open"))
     {
-        if (OpenProject(projectFilePath, false))
+        if (voxelModelModified_)
+        {
+            RequestOpenProject(projectFilePath, false);
+            ImGui::CloseCurrentPopup();
+        }
+        else if (OpenProject(projectFilePath, false))
         {
             openProjectFilePath_.fill('\0');
             ImGui::CloseCurrentPopup();
@@ -1105,6 +1318,10 @@ bool EditorWorkspace::DrawPathInput(
 void EditorWorkspace::RequestNewProjectDialog()
 {
     projectDialogError_.clear();
+    if (newProjectParentPath_[0] == '\0')
+        static_cast<void>(CopyPathToBuffer(
+            projectDialogPreferences_.LastCreateParent(),
+            newProjectParentPath_));
     showNewProjectPopup_ = true;
 }
 
@@ -1116,9 +1333,22 @@ void EditorWorkspace::RequestOpenProjectDialog()
 
 void EditorWorkspace::CreateProject()
 {
+    if (!dirtyActionConfirmation_.Request(
+            DestructiveAction::CreateProject, voxelModelModified_))
+    {
+        showDirtyConfirmationPopup_ = true;
+        ImGui::CloseCurrentPopup();
+        return;
+    }
+    CreateProjectNow();
+}
+
+void EditorWorkspace::CreateProjectNow()
+{
+    const std::filesystem::path parent(newProjectParentPath_.data());
     const auto project = projectManager_.CreateProject(
         newProjectName_.data(),
-        std::filesystem::path(newProjectParentPath_.data()));
+        parent);
 
     if (!project)
     {
@@ -1133,10 +1363,12 @@ void EditorWorkspace::CreateProject()
     projectDialogError_.clear();
     welcomeError_.clear();
     failedRecentProjectPath_.reset();
+    if (!projectDialogPreferences_.SetLastCreateParent(parent))
+        AddConsoleMessage(
+            "Preferences save warning: " + projectDialogPreferences_.LastError());
     newProjectName_.fill('\0');
     newProjectParentPath_.fill('\0');
     UpdateWindowTitle();
-    ImGui::CloseCurrentPopup();
 }
 
 bool EditorWorkspace::OpenProject(
@@ -1164,6 +1396,10 @@ bool EditorWorkspace::OpenProject(
     welcomeError_.clear();
     failedRecentProjectPath_.reset();
     ClearVoxelViewport();
+    if (!projectDialogPreferences_.SetLastOpenDirectory(
+            projectFilePath.parent_path()))
+        AddConsoleMessage(
+            "Preferences save warning: " + projectDialogPreferences_.LastError());
     AddConsoleMessage("Project opened: " + project->Name());
     UpdateWindowTitle();
     return true;
@@ -1206,6 +1442,94 @@ void EditorWorkspace::SaveProject()
         "Project saved: " + projectManager_.ActiveProject()->Name());
 }
 
+void EditorWorkspace::RequestExit()
+{
+    if (dirtyActionConfirmation_.Request(
+            DestructiveAction::ExitApplication, voxelModelModified_))
+    {
+        exitRequest_.RequestExit();
+        return;
+    }
+    showDirtyConfirmationPopup_ = true;
+}
+
+void EditorWorkspace::RequestCloseProject()
+{
+    if (dirtyActionConfirmation_.Request(
+            DestructiveAction::CloseProject, voxelModelModified_))
+    {
+        CloseProject();
+        return;
+    }
+    showDirtyConfirmationPopup_ = true;
+}
+
+void EditorWorkspace::RequestOpenProject(
+    std::filesystem::path projectFilePath,
+    const bool recentProject)
+{
+    if (dirtyActionConfirmation_.IsPending()) return;
+    pendingProjectPath_ = std::move(projectFilePath);
+    pendingRecentProject_ = recentProject;
+    if (dirtyActionConfirmation_.Request(
+            DestructiveAction::OpenProject, voxelModelModified_))
+    {
+        static_cast<void>(OpenProject(
+            pendingProjectPath_, pendingRecentProject_));
+        pendingProjectPath_.clear();
+        return;
+    }
+    showDirtyConfirmationPopup_ = true;
+}
+
+void EditorWorkspace::RequestReplaceVoxelModel(std::filesystem::path filePath)
+{
+    if (dirtyActionConfirmation_.IsPending()) return;
+    pendingVoxelPath_ = std::move(filePath);
+    if (dirtyActionConfirmation_.Request(
+            DestructiveAction::ReplaceVoxelModel, voxelModelModified_))
+    {
+        static_cast<void>(OpenVoxInViewportNow(pendingVoxelPath_));
+        pendingVoxelPath_.clear();
+        return;
+    }
+    showDirtyConfirmationPopup_ = true;
+}
+
+void EditorWorkspace::ExecutePendingDirtyAction(const DestructiveAction action)
+{
+    switch (action)
+    {
+    case DestructiveAction::CloseProject:
+        CloseProject();
+        break;
+    case DestructiveAction::OpenProject:
+        static_cast<void>(OpenProject(
+            pendingProjectPath_, pendingRecentProject_));
+        pendingProjectPath_.clear();
+        break;
+    case DestructiveAction::CreateProject:
+        CreateProjectNow();
+        break;
+    case DestructiveAction::ExitApplication:
+        exitRequest_.RequestExit();
+        break;
+    case DestructiveAction::ReplaceVoxelModel:
+        static_cast<void>(OpenVoxInViewportNow(pendingVoxelPath_));
+        pendingVoxelPath_.clear();
+        break;
+    }
+}
+
+void EditorWorkspace::OpenProjectFolder()
+{
+    const auto& project = projectManager_.ActiveProject();
+    if (!project) return;
+    std::string error;
+    if (!projectFolderOpener_->Open(project->RootPath(), error))
+        AddConsoleMessage("Open project folder failed: " + error);
+}
+
 void EditorWorkspace::CloseProject()
 {
     const auto& activeProject = projectManager_.ActiveProject();
@@ -1225,6 +1549,17 @@ void EditorWorkspace::CloseProject()
 }
 
 bool EditorWorkspace::OpenVoxInViewport(
+    const std::filesystem::path& filePath)
+{
+    if (voxelModelModified_)
+    {
+        RequestReplaceVoxelModel(filePath);
+        return true;
+    }
+    return OpenVoxInViewportNow(filePath);
+}
+
+bool EditorWorkspace::OpenVoxInViewportNow(
     const std::filesystem::path& filePath)
 {
     Asset::Vox::VoxImporter importer;
@@ -1386,6 +1721,73 @@ bool EditorWorkspace::EraseVoxelSmokePassed() const noexcept
         viewportRenderer_.ModelRenderCount() > eraseSmokeRedoRenderBaseline_ &&
         viewportState_.Statistics().OccupiedVoxelCount + 1U ==
             eraseSmokeInitialVoxelCount_;
+}
+
+bool EditorWorkspace::RunQualityOfLifeSmokeStep(
+    const std::size_t frame,
+    const std::filesystem::path& parentDirectory)
+{
+    if (frame == 0U)
+    {
+        CloseProject();
+        RequestNewProjectDialog();
+        constexpr std::string_view Name = "QualityOfLifeCreated";
+        std::copy(Name.begin(), Name.end(), newProjectName_.begin());
+        if (!fileDialogService_->ChooseProjectParentFolder(parentDirectory) ||
+            !fileDialogService_->InjectSimulatedResult({
+                FileDialogStatus::Success,
+                FileDialogKind::ProjectParentFolder,
+                parentDirectory,
+                {}}))
+            return false;
+    }
+    else if (frame == 1U)
+    {
+        ConsumeFileDialogResult();
+        CreateProjectNow();
+        if (!projectManager_.HasActiveProject()) return false;
+        const std::filesystem::path projectFile =
+            projectManager_.ActiveProject()->ProjectFilePath();
+        RequestOpenProjectDialog();
+        if (!fileDialogService_->ChooseProjectFile(parentDirectory) ||
+            !fileDialogService_->InjectSimulatedResult({
+                FileDialogStatus::Success,
+                FileDialogKind::ProjectFile,
+                projectFile,
+                {}}))
+            return false;
+    }
+    else if (frame == 2U)
+    {
+        ConsumeFileDialogResult();
+        RequestOpenProject(openProjectFilePath_.data(), false);
+        if (!projectManager_.HasActiveProject()) return false;
+        voxelModelModified_ = true;
+        RequestCloseProject();
+        if (!dirtyActionConfirmation_.IsPending()) return false;
+    }
+    else if (frame == 3U)
+    {
+        dirtyActionConfirmation_.Cancel();
+        if (!projectManager_.HasActiveProject() || !voxelModelModified_)
+            return false;
+        RequestCloseProject();
+        if (!dirtyActionConfirmation_.IsPending()) return false;
+    }
+    else if (frame == 4U)
+    {
+        const auto action = dirtyActionConfirmation_.Discard();
+        if (!action) return false;
+        ExecutePendingDirtyAction(*action);
+        qualityOfLifeSmokePassed_ =
+            !projectManager_.HasActiveProject() && !voxelModelModified_;
+    }
+    return qualityOfLifeSmokePassed_;
+}
+
+bool EditorWorkspace::QualityOfLifeSmokePassed() const noexcept
+{
+    return qualityOfLifeSmokePassed_;
 }
 
 bool EditorWorkspace::EraseSelectedVoxel()

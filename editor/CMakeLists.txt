@@ -77,6 +77,28 @@ else()
         VoxelForgeEditorCommands PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorQualityOfLife STATIC)
+target_sources(
+    VoxelForgeEditorQualityOfLife
+    PRIVATE
+        src/Platform/SDLFileDialogService.cpp
+        src/Platform/SDLProjectFolderOpener.cpp
+        src/Project/ProjectDialogPreferences.cpp
+)
+target_include_directories(
+    VoxelForgeEditorQualityOfLife
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(VoxelForgeEditorQualityOfLife PUBLIC SDL3::SDL3)
+target_compile_features(VoxelForgeEditorQualityOfLife PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorQualityOfLife PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorQualityOfLife PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(VoxelForgeEditor)
 
 if(WIN32)
@@ -165,6 +187,7 @@ target_link_libraries(
     PRIVATE
         VoxelForgeEditorAssetBrowser
         VoxelForgeEditorCommands
+        VoxelForgeEditorQualityOfLife
         VoxelForgeEditorVoxelSelection
         VoxelForgeProject
         VoxelForgeRenderer

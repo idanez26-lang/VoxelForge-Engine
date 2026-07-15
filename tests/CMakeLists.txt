@@ -134,6 +134,19 @@ add_test(
     NAME VoxelForge.Editor.EraseVoxel
     COMMAND $<TARGET_FILE:VoxelForgeEditorEraseVoxelTests>
 )
+add_executable(
+    VoxelForgeEditorQualityOfLifeTests
+    Editor/QualityOfLifeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorQualityOfLifeTests
+    PRIVATE VoxelForgeEditorQualityOfLife
+)
+vf_configure_test(VoxelForgeEditorQualityOfLifeTests)
+add_test(
+    NAME VoxelForge.Editor.QualityOfLife
+    COMMAND $<TARGET_FILE:VoxelForgeEditorQualityOfLifeTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -200,6 +213,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelSelection
     VoxelForge.Editor.CommandHistory
     VoxelForge.Editor.EraseVoxel
+    VoxelForge.Editor.QualityOfLife
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Voxel.Core
@@ -224,15 +238,20 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.EraseVoxelSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --erase-voxel-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.QualityOfLifeSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --quality-of-life-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
         VoxelForge.Editor.VoxelSelectionSmoke
         VoxelForge.Editor.EraseVoxelSmoke
+        VoxelForge.Editor.QualityOfLifeSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             ENVIRONMENT
-                "VOXELFORGE_RECENT_PROJECTS_FILE=${CMAKE_CURRENT_BINARY_DIR}/smoke-recent-projects.txt"
+                "VOXELFORGE_RECENT_PROJECTS_FILE=${CMAKE_CURRENT_BINARY_DIR}/smoke-recent-projects.txt;VOXELFORGE_PREFERENCES_FILE=${CMAKE_CURRENT_BINARY_DIR}/smoke-preferences.ini"
     )
 endif()

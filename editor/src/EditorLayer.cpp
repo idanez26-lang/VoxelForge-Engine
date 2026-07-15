@@ -25,9 +25,17 @@ EditorLayer::EditorLayer(
     const bool voxelSelectionSmokeTest,
     const bool voxelSelectionVisualTest,
     const bool eraseVoxelSmokeTest,
-    const bool eraseVoxelVisualTest)
+    const bool eraseVoxelVisualTest,
+    const bool qualityOfLifeSmokeTest,
+    std::filesystem::path qualityOfLifeParent)
     : Layer("VoxelForge Editor Layer"),
-      workspace_(projectManager, std::move(windowTitleCallback)),
+      workspace_(
+          projectManager,
+          std::move(windowTitleCallback),
+          qualityOfLifeSmokeTest
+              ? qualityOfLifeParent / "preferences.ini"
+              : ProjectDialogPreferences::DefaultStorageFilePath(),
+          qualityOfLifeSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -35,7 +43,9 @@ EditorLayer::EditorLayer(
       voxelSelectionSmokeTest_(voxelSelectionSmokeTest),
       voxelSelectionVisualTest_(voxelSelectionVisualTest),
       eraseVoxelSmokeTest_(eraseVoxelSmokeTest),
-      eraseVoxelVisualTest_(eraseVoxelVisualTest)
+      eraseVoxelVisualTest_(eraseVoxelVisualTest),
+      qualityOfLifeSmokeTest_(qualityOfLifeSmokeTest),
+      qualityOfLifeParent_(std::move(qualityOfLifeParent))
 {
 }
 
@@ -104,6 +114,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(
             workspace_.RunEraseVoxelSmokeStep(renderedFrameCount_));
     }
+    if (qualityOfLifeSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunQualityOfLifeSmokeStep(
+            renderedFrameCount_, qualityOfLifeParent_));
+    }
     workspace_.Draw();
 
     ++renderedFrameCount_;
@@ -132,11 +147,22 @@ void EditorLayer::OnImGuiRender()
         throw std::runtime_error(
             "Erase voxel smoke test did not execute, undo, redo, and render.");
     }
+    if (qualityOfLifeSmokeTest_ && smokeTestComplete &&
+        !workspace_.QualityOfLifeSmokePassed())
+    {
+        throw std::runtime_error(
+            "Quality of Life smoke test did not complete its controlled flow.");
+    }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)
     {
         RequestApplicationClose();
     }
+}
+
+bool EditorLayer::RequestWindowClose()
+{
+    return workspace_.RequestApplicationExit();
 }
 
 void EditorLayer::RequestApplicationClose()

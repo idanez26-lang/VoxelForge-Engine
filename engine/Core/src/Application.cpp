@@ -165,6 +165,12 @@ void Application::OnEvent(VoxelForge::Event& event)
     }
 }
 
+void Application::SetWindowCloseRequestCallback(
+    WindowCloseRequestCallback callback)
+{
+    windowCloseRequestCallback_ = std::move(callback);
+}
+
 Layer& Application::PushLayer(std::unique_ptr<Layer> layer)
 {
     return layerStack_->PushLayer(std::move(layer));
@@ -233,6 +239,10 @@ void Application::RenderLayerInterfaces()
 
 bool Application::OnWindowClose(VoxelForge::WindowCloseEvent&)
 {
+    if (windowCloseRequestCallback_ && !windowCloseRequestCallback_())
+    {
+        return true;
+    }
     Close();
     return true;
 }

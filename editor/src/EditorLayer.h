@@ -36,12 +36,15 @@ public:
         bool voxelSelectionSmokeTest = false,
         bool voxelSelectionVisualTest = false,
         bool eraseVoxelSmokeTest = false,
-        bool eraseVoxelVisualTest = false);
+        bool eraseVoxelVisualTest = false,
+        bool qualityOfLifeSmokeTest = false,
+        std::filesystem::path qualityOfLifeParent = {});
 
     void OnAttach() override;
     void OnDetach() override;
     void OnUpdate() override;
     void OnImGuiRender() override;
+    [[nodiscard]] bool RequestWindowClose();
 
 private:
     void RequestApplicationClose();
@@ -73,6 +76,8 @@ private:
     bool voxelSelectionVisualTest_ = false;
     bool eraseVoxelSmokeTest_ = false;
     bool eraseVoxelVisualTest_ = false;
+    bool qualityOfLifeSmokeTest_ = false;
+    std::filesystem::path qualityOfLifeParent_;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

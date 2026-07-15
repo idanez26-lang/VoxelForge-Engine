@@ -3,6 +3,7 @@
 #include "VoxelForge/Core/ApplicationSpecification.h"
 
 #include <memory>
+#include <functional>
 
 namespace VoxelForge
 {
@@ -20,6 +21,7 @@ class Window;
 class Application final
 {
 public:
+    using WindowCloseRequestCallback = std::function<bool()>;
     explicit Application(ApplicationSpecification specification = {});
     ~Application();
 
@@ -31,6 +33,7 @@ public:
     [[nodiscard]] int Run();
     void Close() noexcept;
     void OnEvent(VoxelForge::Event& event);
+    void SetWindowCloseRequestCallback(WindowCloseRequestCallback callback);
 
     Layer& PushLayer(std::unique_ptr<Layer> layer);
     Layer& PushOverlay(std::unique_ptr<Layer> overlay);
@@ -54,6 +57,7 @@ private:
     ApplicationSpecification specification_;
     std::unique_ptr<LayerStack> layerStack_;
     std::unique_ptr<Window> window_;
+    WindowCloseRequestCallback windowCloseRequestCallback_;
     bool initialized_;
     bool running_;
 };

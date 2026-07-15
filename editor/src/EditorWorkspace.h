@@ -5,6 +5,10 @@
 #include "Commands/Voxel/EraseVoxelCommand.h"
 #include "EditorCamera.h"
 #include "EditorExitRequest.h"
+#include "Platform/FileDialogService.h"
+#include "Platform/ProjectFolderOpener.h"
+#include "Project/ProjectDialogPreferences.h"
+#include "Project/QualityOfLifeLogic.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
 #include "VoxelSelection/VoxelSelectionState.h"
@@ -17,6 +21,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -37,11 +42,15 @@ public:
 
     EditorWorkspace(
         Project::ProjectManager& projectManager,
-        WindowTitleCallback windowTitleCallback);
+        WindowTitleCallback windowTitleCallback,
+        std::filesystem::path preferencesFilePath =
+            ProjectDialogPreferences::DefaultStorageFilePath(),
+        bool simulatedFileDialogs = false);
     ~EditorWorkspace();
 
     void Draw();
     [[nodiscard]] bool ConsumeExitRequest() noexcept;
+    [[nodiscard]] bool RequestApplicationExit();
     [[nodiscard]] bool OpenVoxInViewport(
         const std::filesystem::path& filePath);
     [[nodiscard]] bool HasRenderedVoxelViewport() const noexcept;
@@ -50,6 +59,10 @@ public:
     [[nodiscard]] bool RunVoxelSelectionSmokeStep(std::size_t frame);
     [[nodiscard]] bool RunEraseVoxelSmokeStep(std::size_t frame);
     [[nodiscard]] bool EraseVoxelSmokePassed() const noexcept;
+    [[nodiscard]] bool RunQualityOfLifeSmokeStep(
+        std::size_t frame,
+        const std::filesystem::path& parentDirectory);
+    [[nodiscard]] bool QualityOfLifeSmokePassed() const noexcept;
     [[nodiscard]] std::size_t VoxelHighlightUploadCount() const noexcept;
     [[nodiscard]] std::size_t VoxelHighlightRenderCount() const noexcept;
 
@@ -73,14 +86,24 @@ private:
     void DrawProjectDialogs();
     void DrawNewProjectDialog();
     void DrawOpenProjectDialog();
+    void DrawDirtyConfirmationDialog();
+    void ConsumeFileDialogResult();
     [[nodiscard]] bool DrawPathInput(
         const char* label,
         std::array<char, 1024>& buffer);
 
     void RequestNewProjectDialog();
     void RequestOpenProjectDialog();
+    void RequestExit();
+    void RequestCloseProject();
+    void RequestOpenProject(
+        std::filesystem::path projectFilePath,
+        bool recentProject);
+    void RequestReplaceVoxelModel(std::filesystem::path filePath);
+    void ExecutePendingDirtyAction(DestructiveAction action);
 
     void CreateProject();
+    void CreateProjectNow();
     [[nodiscard]] bool OpenProject(
         const std::filesystem::path& projectFilePath,
         bool recentProject);
@@ -88,6 +111,9 @@ private:
         const std::filesystem::path& projectFilePath);
     void SaveProject();
     void CloseProject();
+    [[nodiscard]] bool OpenVoxInViewportNow(
+        const std::filesystem::path& filePath);
+    void OpenProjectFolder();
     void UpdateWindowTitle();
     void ClearVoxelViewport() noexcept;
     void FrameVoxelViewport() noexcept;
@@ -118,6 +144,13 @@ private:
     Vec3 voxelModelCenter_{};
     std::vector<std::string> consoleMessages_;
     EditorExitRequest exitRequest_{};
+    std::unique_ptr<FileDialogService> fileDialogService_;
+    std::unique_ptr<ProjectFolderOpener> projectFolderOpener_;
+    ProjectDialogPreferences projectDialogPreferences_;
+    DirtyActionConfirmation dirtyActionConfirmation_;
+    std::filesystem::path pendingProjectPath_;
+    std::filesystem::path pendingVoxelPath_;
+    bool pendingRecentProject_ = false;
 
     std::array<char, 128> newProjectName_{};
     std::array<char, 1024> newProjectParentPath_{};
@@ -136,6 +169,7 @@ private:
     bool showAboutPopup_ = false;
     bool showNewProjectPopup_ = false;
     bool showOpenProjectPopup_ = false;
+    bool showDirtyConfirmationPopup_ = false;
     bool resetLayoutRequested_ = false;
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
@@ -145,6 +179,7 @@ private:
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;
     bool eraseSmokeRedone_ = false;
+    bool qualityOfLifeSmokePassed_ = false;
     std::size_t eraseSmokeInitialVoxelCount_ = 0U;
     std::size_t eraseSmokeEraseRenderBaseline_ = 0U;
     std::size_t eraseSmokeUndoRenderBaseline_ = 0U;
