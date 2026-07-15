@@ -1,13 +1,18 @@
 #include "EditorLayer.h"
+#include "EditorWindowTitle.h"
 
 #include "VoxelForge/Core/Application.h"
+#include "VoxelForge/Core/ApplicationSpecification.h"
+#include "VoxelForge/Core/Window/Window.h"
 #include "VoxelForge/Project/ProjectManager.h"
 
 #include <cstddef>
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <utility>
 
 namespace
 {
@@ -38,10 +43,18 @@ int main(const int argumentCount, char* arguments[])
 
         VoxelForge::Project::ProjectManager projectManager;
 
-        VoxelForge::Core::Application application;
+        VoxelForge::Core::ApplicationSpecification applicationSpecification;
+        applicationSpecification.Name =
+            VoxelForge::Editor::FormatEditorWindowTitle();
+        VoxelForge::Core::Application application(
+            std::move(applicationSpecification));
         application.PushLayer(
             std::make_unique<VoxelForge::Editor::EditorLayer>(
                 projectManager,
+                [&application](std::string title)
+                {
+                    return application.GetWindow().SetTitle(std::move(title));
+                },
                 [&application]() noexcept
                 {
                     application.Close();

@@ -229,6 +229,51 @@ bool RecentProjects::Add(const std::filesystem::path& projectFilePath)
     return Save();
 }
 
+bool RecentProjects::Remove(const std::filesystem::path& projectFilePath)
+{
+    lastError_.clear();
+
+    if (projectFilePath.empty())
+    {
+        lastError_ = "Recent project path cannot be empty.";
+        return false;
+    }
+
+    std::error_code error;
+    std::filesystem::path normalized = std::filesystem::weakly_canonical(
+        projectFilePath,
+        error);
+
+    if (error)
+    {
+        error.clear();
+        normalized = std::filesystem::absolute(projectFilePath, error);
+    }
+
+    if (error)
+    {
+        lastError_ = "Unable to resolve the recent project path: " +
+            error.message();
+        return false;
+    }
+
+    const std::string projectKey = PathKey(normalized);
+    const std::size_t previousSize = projects_.size();
+    std::erase_if(
+        projects_,
+        [&projectKey](const std::filesystem::path& existing)
+        {
+            return PathKey(existing) == projectKey;
+        });
+
+    if (projects_.size() == previousSize)
+    {
+        return true;
+    }
+
+    return Save();
+}
+
 const std::vector<std::filesystem::path>& RecentProjects::Projects() const noexcept
 {
     return projects_;

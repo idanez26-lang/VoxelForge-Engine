@@ -40,6 +40,21 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorWindowTitleTests
+    Editor/EditorWindowTitleTests.cpp
+)
+target_include_directories(
+    VoxelForgeEditorWindowTitleTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/src
+)
+vf_configure_test(VoxelForgeEditorWindowTitleTests)
+add_test(
+    NAME VoxelForge.Editor.WindowTitle
+    COMMAND $<TARGET_FILE:VoxelForgeEditorWindowTitleTests>
+)
+
+add_executable(
     VoxelForgeProjectManagerTests
     Project/ProjectManagerTests.cpp
 )
@@ -58,6 +73,7 @@ set_tests_properties(
     VoxelForge.Core.Events
     VoxelForge.Core.Layers
     VoxelForge.Editor.ExitRequest
+    VoxelForge.Editor.WindowTitle
     VoxelForge.Project.Manager
     PROPERTIES TIMEOUT 10
 )
@@ -72,5 +88,7 @@ if(TARGET VoxelForgeEditor)
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            ENVIRONMENT
+                "VOXELFORGE_RECENT_PROJECTS_FILE=${CMAKE_CURRENT_BINARY_DIR}/smoke-recent-projects.txt"
     )
 endif()

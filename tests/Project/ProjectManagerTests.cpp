@@ -7,6 +7,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -222,12 +223,54 @@ int RunProjectManagerTests(const std::filesystem::path& temporaryRoot)
         return 13;
     }
 
+    const std::vector<fs::path> recentProjectsBeforeRemoval(
+        recentProjects.begin(),
+        recentProjects.end());
+    const fs::path removedRecentProject = recentProjectsBeforeRemoval[4];
+
+    if (!manager.RemoveRecentProject(removedRecentProject) ||
+        !fs::is_regular_file(removedRecentProject))
+    {
+        return 20;
+    }
+
+    const auto& recentProjectsAfterRemoval = manager.RecentProjectPaths();
+
+    if (recentProjectsAfterRemoval.size() != 9)
+    {
+        return 21;
+    }
+
+    std::size_t expectedIndex = 0;
+
+    for (const fs::path& projectPath : recentProjectsBeforeRemoval)
+    {
+        if (projectPath == removedRecentProject)
+        {
+            continue;
+        }
+
+        if (recentProjectsAfterRemoval[expectedIndex] != projectPath)
+        {
+            return 22;
+        }
+
+        ++expectedIndex;
+    }
+
+    if (!manager.OpenProject(removedRecentProject) ||
+        manager.RecentProjectPaths().size() != 10 ||
+        manager.RecentProjectPaths().front() != removedRecentProject)
+    {
+        return 23;
+    }
+
     ProjectManager reloadedManager(recentProjectsFile);
     const VoxelForge::Project::RecentProjects reloadedRecentProjects(
         recentProjectsFile);
 
     if (reloadedManager.RecentProjectPaths().size() != 10 ||
-        reloadedManager.RecentProjectPaths().front().stem() != "Recent10" ||
+        reloadedManager.RecentProjectPaths().front() != removedRecentProject ||
         !reloadedRecentProjects.LastError().empty())
     {
         return 14;

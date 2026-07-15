@@ -38,6 +38,7 @@ public:
     virtual void BeginFrame() = 0;
     virtual void EndFrame() = 0;
     virtual void SetEventCallback(EventCallback callback) = 0;
+    [[nodiscard]] virtual bool SetTitle(std::string title) = 0;
 
     [[nodiscard]] virtual const WindowSpecification& GetSpecification() const noexcept = 0;
     [[nodiscard]] virtual std::uint32_t GetWidth() const noexcept = 0;

@@ -18,6 +18,7 @@ public:
     void BeginFrame() override;
     void EndFrame() override;
     void SetEventCallback(EventCallback callback) override;
+    [[nodiscard]] bool SetTitle(std::string title) override;
 
     [[nodiscard]] const WindowSpecification& GetSpecification() const noexcept override;
     [[nodiscard]] std::uint32_t GetWidth() const noexcept override;

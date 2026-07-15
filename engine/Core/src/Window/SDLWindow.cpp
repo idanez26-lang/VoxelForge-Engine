@@ -409,6 +409,27 @@ void SDLWindow::SetEventCallback(EventCallback callback)
     eventCallback_ = std::move(callback);
 }
 
+bool SDLWindow::SetTitle(std::string title)
+{
+    if (window_ == nullptr)
+    {
+        Logger::Instance().Error(
+            "Cannot change the title of an unavailable SDL window.");
+        return false;
+    }
+
+    if (!SDL_SetWindowTitle(window_, title.c_str()))
+    {
+        Logger::Instance().Error(
+            std::string("SDL window title update failed: ") +
+            SDL_GetError());
+        return false;
+    }
+
+    specification_.Title = std::move(title);
+    return true;
+}
+
 const WindowSpecification& SDLWindow::GetSpecification() const noexcept
 {
     return specification_;

@@ -148,21 +148,37 @@ ProjectManager::ProjectManager(std::filesystem::path recentProjectsFilePath)
     }
 }
 
-std::shared_ptr<Project> ProjectManager::CreateProject(
-    std::string name,
-    const std::filesystem::path& parentDirectory)
+ProjectCreationValidation ProjectManager::ValidateProjectCreation(
+    const std::string& name,
+    const std::filesystem::path& parentDirectory) const
 {
-    lastError_.clear();
+    ProjectCreationValidation validation;
 
-    if (!ValidateProjectName(name, lastError_))
+    if (!parentDirectory.empty())
     {
-        return {};
+        std::error_code previewError;
+        std::filesystem::path previewParent = std::filesystem::absolute(
+            parentDirectory,
+            previewError);
+
+        if (previewError)
+        {
+            previewParent = parentDirectory;
+        }
+
+        validation.DestinationPath =
+            previewParent.lexically_normal() / name;
+    }
+
+    if (!ValidateProjectName(name, validation.Error))
+    {
+        return validation;
     }
 
     if (parentDirectory.empty())
     {
-        SetError("Project parent directory cannot be empty.");
-        return {};
+        validation.Error = "Project parent directory cannot be empty.";
+        return validation;
     }
 
     std::error_code filesystemError;
@@ -174,15 +190,71 @@ std::shared_ptr<Project> ProjectManager::CreateProject(
         !std::filesystem::is_directory(absoluteParent, filesystemError) ||
         filesystemError)
     {
-        SetError("Project parent directory does not exist or is not accessible.");
-        return {};
+        validation.Error =
+            "Project parent directory does not exist or is not accessible.";
+        return validation;
     }
 
     absoluteParent = absoluteParent.lexically_normal();
-    const std::filesystem::path rootPath = absoluteParent / name;
+    validation.DestinationPath = absoluteParent / name;
+    const bool destinationExists = std::filesystem::exists(
+        validation.DestinationPath,
+        filesystemError);
+
+    if (filesystemError)
+    {
+        validation.Error =
+            "Unable to inspect the destination project directory: " +
+            filesystemError.message();
+        return validation;
+    }
+
+    if (!destinationExists)
+    {
+        return validation;
+    }
+
+    if (!std::filesystem::is_directory(
+            validation.DestinationPath,
+            filesystemError) || filesystemError)
+    {
+        validation.Error =
+            "The project destination exists and is not a directory.";
+        return validation;
+    }
+
+    const bool destinationIsEmpty = std::filesystem::is_empty(
+        validation.DestinationPath,
+        filesystemError);
+
+    if (filesystemError || !destinationIsEmpty)
+    {
+        validation.Error =
+            "The project destination directory is not empty.";
+    }
+
+    return validation;
+}
+
+std::shared_ptr<Project> ProjectManager::CreateProject(
+    std::string name,
+    const std::filesystem::path& parentDirectory)
+{
+    lastError_.clear();
+    const ProjectCreationValidation validation =
+        ValidateProjectCreation(name, parentDirectory);
+
+    if (!validation.IsValid())
+    {
+        SetError(validation.Error);
+        return {};
+    }
+
+    const std::filesystem::path& rootPath = validation.DestinationPath;
     const std::filesystem::path projectFilePath =
         rootPath / (name + std::string(ProjectExtension));
     bool rootWasCreated = false;
+    std::error_code filesystemError;
 
     const bool rootExists = std::filesystem::exists(
         rootPath,
@@ -358,6 +430,20 @@ bool ProjectManager::SaveActiveProject()
 
     Core::Logger::Instance().Info(
         "Project saved: " + activeProject_->Name());
+    return true;
+}
+
+bool ProjectManager::RemoveRecentProject(
+    const std::filesystem::path& projectFilePath)
+{
+    lastError_.clear();
+
+    if (!recentProjects_.Remove(projectFilePath))
+    {
+        SetError(recentProjects_.LastError());
+        return false;
+    }
+
     return true;
 }
 

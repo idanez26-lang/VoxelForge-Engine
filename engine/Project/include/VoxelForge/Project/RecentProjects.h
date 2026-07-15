@@ -17,6 +17,7 @@ public:
 
     [[nodiscard]] bool Load();
     [[nodiscard]] bool Add(const std::filesystem::path& projectFilePath);
+    [[nodiscard]] bool Remove(const std::filesystem::path& projectFilePath);
 
     [[nodiscard]] const std::vector<std::filesystem::path>& Projects() const noexcept;
     [[nodiscard]] const std::filesystem::path& StorageFilePath() const noexcept;

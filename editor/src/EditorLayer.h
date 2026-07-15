@@ -25,9 +25,11 @@ class EditorLayer final : public Core::Layer
 {
 public:
     using ApplicationCloseCallback = std::function<void()>;
+    using WindowTitleCallback = EditorWorkspace::WindowTitleCallback;
 
     explicit EditorLayer(
         Project::ProjectManager& projectManager,
+        WindowTitleCallback windowTitleCallback,
         ApplicationCloseCallback applicationCloseCallback,
         std::size_t smokeTestFrameLimit = 0);
 

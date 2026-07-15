@@ -4,6 +4,8 @@
 
 #include <array>
 #include <filesystem>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,7 +22,11 @@ namespace VoxelForge::Editor
 class EditorWorkspace final
 {
 public:
-    explicit EditorWorkspace(Project::ProjectManager& projectManager);
+    using WindowTitleCallback = std::function<bool(std::string)>;
+
+    EditorWorkspace(
+        Project::ProjectManager& projectManager,
+        WindowTitleCallback windowTitleCallback);
 
     void Draw();
     [[nodiscard]] bool ConsumeExitRequest() noexcept;
@@ -32,6 +38,7 @@ private:
 
     void DrawExplorerPanel();
     void DrawScenePanel();
+    void DrawWelcomeScreen();
     void DrawInspectorPanel();
     void DrawAssetBrowserPanel();
     void DrawConsolePanel();
@@ -41,16 +48,28 @@ private:
     void DrawProjectDialogs();
     void DrawNewProjectDialog();
     void DrawOpenProjectDialog();
+    [[nodiscard]] bool DrawPathInput(
+        const char* label,
+        std::array<char, 1024>& buffer);
+
+    void RequestNewProjectDialog();
+    void RequestOpenProjectDialog();
 
     void CreateProject();
-    void OpenProject(const std::filesystem::path& projectFilePath);
+    [[nodiscard]] bool OpenProject(
+        const std::filesystem::path& projectFilePath,
+        bool recentProject);
+    void RemoveRecentProject(
+        const std::filesystem::path& projectFilePath);
     void SaveProject();
     void CloseProject();
+    void UpdateWindowTitle();
 
     void AddConsoleMessage(std::string message);
     [[nodiscard]] std::string GetBackendDisplayName() const;
 
     Project::ProjectManager& projectManager_;
+    WindowTitleCallback windowTitleCallback_;
     std::vector<std::string> consoleMessages_;
     EditorExitRequest exitRequest_{};
 
@@ -58,6 +77,8 @@ private:
     std::array<char, 1024> newProjectParentPath_{};
     std::array<char, 1024> openProjectFilePath_{};
     std::string projectDialogError_;
+    std::string welcomeError_;
+    std::optional<std::filesystem::path> failedRecentProjectPath_;
 
     bool showExplorer_ = true;
     bool showScene_ = true;
