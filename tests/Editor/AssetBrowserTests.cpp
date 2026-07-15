@@ -2,12 +2,14 @@
 #include "AssetBrowser/AssetDirectory.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace
 {
@@ -256,8 +258,14 @@ int TestExternalSymlinkConfinement()
     }
 
     VoxelForge::Editor::AssetDirectory directory;
+    const VoxelForge::Editor::AssetOperationResult renameResult =
+        directory.SetAssetsRoot(tree.Assets())
+        ? directory.RenameEntry(externalLink, "RenamedLink")
+        : VoxelForge::Editor::AssetOperationResult{};
+    const VoxelForge::Editor::AssetOperationResult deleteResult =
+        directory.DeleteEntry(externalLink);
 
-    if (!directory.SetAssetsRoot(tree.Assets()) ||
+    if (!directory.HasAssetsRoot() ||
         std::ranges::any_of(
             directory.Entries(),
             [](const VoxelForge::Editor::AssetEntry& entry)
@@ -265,7 +273,9 @@ int TestExternalSymlinkConfinement()
                 return entry.Name() == "OutsideLink";
             }) ||
         directory.EnterDirectory(externalLink) ||
-        !directory.CurrentRelativePath().empty())
+        !directory.CurrentRelativePath().empty() ||
+        renameResult.Succeeded || deleteResult.Succeeded ||
+        !fs::exists(outsideDirectory) || !fs::is_symlink(externalLink))
     {
         return 12;
     }
@@ -321,6 +331,276 @@ int TestSelectionSurvivesRefresh()
 
     return 0;
 }
+
+int TestRenameOperations()
+{
+    TemporaryAssetTree tree("rename-operations");
+    WriteFile(tree.Assets() / "crate.txt", "crate");
+    fs::create_directories(tree.Assets() / "Props" / "Nested");
+    VoxelForge::Editor::AssetDirectory directory;
+
+    if (!directory.SetAssetsRoot(tree.Assets()))
+    {
+        return 18;
+    }
+
+    const VoxelForge::Editor::AssetOperationResult fileRename =
+        directory.RenameEntry("crate.txt", "barrel");
+
+    if (!fileRename.Succeeded || !fileRename.ResultingRelativePath ||
+        *fileRename.ResultingRelativePath != fs::path("barrel.txt") ||
+        fs::exists(tree.Assets() / "crate.txt") ||
+        !fs::is_regular_file(tree.Assets() / "barrel.txt"))
+    {
+        std::cerr << "File rename failed: " << fileRename.Message;
+
+        if (fileRename.ResultingRelativePath)
+        {
+            std::cerr << " (result: "
+                      << fileRename.ResultingRelativePath->string()
+                      << ')';
+        }
+
+        std::cerr << '\n';
+        return 19;
+    }
+
+    const VoxelForge::Editor::AssetOperationResult extensionRename =
+        directory.RenameEntry("barrel.txt", "barrel.md");
+
+    if (!extensionRename.Succeeded ||
+        !extensionRename.ResultingRelativePath ||
+        *extensionRename.ResultingRelativePath != fs::path("barrel.md") ||
+        fs::exists(tree.Assets() / "barrel.txt") ||
+        !fs::is_regular_file(tree.Assets() / "barrel.md"))
+    {
+        return 37;
+    }
+
+    if (!directory.EnterDirectory("Props") ||
+        !directory.EnterDirectory("Nested"))
+    {
+        return 20;
+    }
+
+    const VoxelForge::Editor::AssetOperationResult folderRename =
+        directory.RenameEntry(
+            tree.Assets() / "Props",
+            "Environment");
+
+    if (!folderRename.Succeeded ||
+        !folderRename.ResultingRelativePath ||
+        *folderRename.ResultingRelativePath != fs::path("Environment") ||
+        directory.CurrentRelativePath() !=
+            fs::path("Environment") / "Nested" ||
+        fs::exists(tree.Assets() / "Props") ||
+        !fs::is_directory(
+            tree.Assets() / "Environment" / "Nested"))
+    {
+        return 21;
+    }
+
+    return 0;
+}
+
+int TestRenameSelectionAndValidation()
+{
+    TemporaryAssetTree tree("rename-validation");
+    WriteFile(tree.Assets() / "crate.txt", "crate");
+    WriteFile(tree.Assets() / "duplicate.txt", "duplicate");
+    VoxelForge::Editor::AssetBrowser browser;
+
+    if (!browser.SetAssetsRoot(tree.Assets()) ||
+        !browser.SelectEntry("crate.txt"))
+    {
+        return 22;
+    }
+
+    const VoxelForge::Editor::AssetOperationResult renameResult =
+        browser.RenameSelectedEntry("renamed");
+
+    if (!renameResult.Succeeded ||
+        !browser.SelectedRelativePath() ||
+        *browser.SelectedRelativePath() != fs::path("renamed.txt") ||
+        !fs::is_regular_file(tree.Assets() / "renamed.txt"))
+    {
+        return 23;
+    }
+
+    if (browser.RenameSelectedEntry("duplicate.txt").Succeeded ||
+        !browser.SelectedRelativePath() ||
+        *browser.SelectedRelativePath() != fs::path("renamed.txt") ||
+        !fs::exists(tree.Assets() / "renamed.txt") ||
+        !fs::exists(tree.Assets() / "duplicate.txt"))
+    {
+        return 24;
+    }
+
+    constexpr std::array<std::string_view, 8> InvalidNames = {
+        "",
+        ".",
+        "..",
+        "Bad/Name",
+        "Bad\\Name",
+        "Bad<Name",
+        "CON",
+        "Trailing."};
+
+    for (const std::string_view invalidName : InvalidNames)
+    {
+        if (browser.RenameSelectedEntry(invalidName).Succeeded ||
+            !fs::exists(tree.Assets() / "renamed.txt"))
+        {
+            return 25;
+        }
+    }
+
+    VoxelForge::Editor::AssetDirectory directory;
+
+    if (!directory.SetAssetsRoot(tree.Assets()) ||
+        directory.RenameEntry(tree.Assets(), "RenamedAssets").Succeeded ||
+        directory.DeleteEntry(tree.Assets()).Succeeded ||
+        !fs::is_directory(tree.Assets()))
+    {
+        return 26;
+    }
+
+    return 0;
+}
+
+int TestDeleteOperations()
+{
+    TemporaryAssetTree tree("delete-operations");
+    WriteFile(tree.Assets() / "temporary.txt", "temporary");
+    fs::create_directory(tree.Assets() / "EmptyFolder");
+    fs::create_directories(tree.Assets() / "NonEmpty" / "Nested");
+    WriteFile(
+        tree.Assets() / "NonEmpty" / "Nested" / "keep.txt",
+        "keep");
+    VoxelForge::Editor::AssetBrowser browser;
+
+    if (!browser.SetAssetsRoot(tree.Assets()) ||
+        !browser.SelectEntry("temporary.txt") ||
+        !browser.CanDeleteSelectedEntry().CanDelete ||
+        !browser.DeleteSelectedEntry().Succeeded ||
+        browser.SelectedRelativePath() ||
+        fs::exists(tree.Assets() / "temporary.txt"))
+    {
+        return 27;
+    }
+
+    if (!browser.SelectEntry("EmptyFolder"))
+    {
+        return 28;
+    }
+
+    const VoxelForge::Editor::AssetDeleteAssessment emptyAssessment =
+        browser.CanDeleteSelectedEntry();
+
+    if (!emptyAssessment.CanDelete || !emptyAssessment.IsDirectory ||
+        !browser.DeleteSelectedEntry().Succeeded ||
+        browser.SelectedRelativePath() ||
+        fs::exists(tree.Assets() / "EmptyFolder"))
+    {
+        return 29;
+    }
+
+    if (!browser.SelectEntry("NonEmpty"))
+    {
+        return 30;
+    }
+
+    const VoxelForge::Editor::AssetDeleteAssessment nonEmptyAssessment =
+        browser.CanDeleteSelectedEntry();
+    const VoxelForge::Editor::AssetOperationResult refusedDelete =
+        browser.DeleteSelectedEntry();
+
+    if (nonEmptyAssessment.CanDelete ||
+        !nonEmptyAssessment.IsNonEmptyDirectory ||
+        refusedDelete.Succeeded || !browser.SelectedRelativePath() ||
+        *browser.SelectedRelativePath() != fs::path("NonEmpty") ||
+        !fs::is_regular_file(
+            tree.Assets() / "NonEmpty" / "Nested" / "keep.txt"))
+    {
+        return 31;
+    }
+
+    return 0;
+}
+
+int TestDisappearedEntryAndConfinement()
+{
+    TemporaryAssetTree tree("operation-confinement");
+    WriteFile(tree.Assets() / "gone.txt", "gone");
+    const fs::path outsideFile = tree.Root() / "outside.txt";
+    WriteFile(outsideFile, "outside");
+    VoxelForge::Editor::AssetDirectory directory;
+
+    if (!directory.SetAssetsRoot(tree.Assets()))
+    {
+        return 32;
+    }
+
+    std::error_code error;
+    fs::remove(tree.Assets() / "gone.txt", error);
+
+    if (error || directory.DeleteEntry("gone.txt").Succeeded ||
+        std::ranges::any_of(
+            directory.Entries(),
+            [](const VoxelForge::Editor::AssetEntry& entry)
+            {
+                return entry.Name() == "gone.txt";
+            }))
+    {
+        return 33;
+    }
+
+    if (directory.RenameEntry(outsideFile, "escaped.txt").Succeeded ||
+        directory.DeleteEntry(outsideFile).Succeeded ||
+        directory.RenameEntry("../outside.txt", "escaped.txt").Succeeded ||
+        directory.DeleteEntry("../outside.txt").Succeeded ||
+        !fs::is_regular_file(outsideFile) ||
+        fs::exists(tree.Root() / "escaped.txt"))
+    {
+        return 34;
+    }
+
+    return 0;
+}
+
+int TestProjectSwitchRejectsPreparedOperation()
+{
+    TemporaryAssetTree firstTree("prepared-first");
+    TemporaryAssetTree secondTree("prepared-second");
+    const fs::path preparedPath = firstTree.Assets() / "prepared.txt";
+    WriteFile(preparedPath, "prepared");
+    WriteFile(secondTree.Assets() / "other.txt", "other");
+    VoxelForge::Editor::AssetDirectory directory;
+
+    if (!directory.SetAssetsRoot(firstTree.Assets()) ||
+        !directory.SetAssetsRoot(secondTree.Assets()) ||
+        directory.RenameEntry(preparedPath, "renamed.txt").Succeeded ||
+        directory.DeleteEntry(preparedPath).Succeeded ||
+        !fs::is_regular_file(preparedPath))
+    {
+        return 35;
+    }
+
+    VoxelForge::Editor::AssetBrowser browser;
+
+    if (!browser.SetAssetsRoot(firstTree.Assets()) ||
+        !browser.SelectEntry("prepared.txt") ||
+        !browser.SetAssetsRoot(secondTree.Assets()) ||
+        browser.SelectedRelativePath() ||
+        browser.RenameSelectedEntry("renamed.txt").Succeeded ||
+        browser.DeleteSelectedEntry().Succeeded ||
+        !fs::is_regular_file(preparedPath))
+    {
+        return 36;
+    }
+
+    return 0;
+}
 }
 
 int main()
@@ -362,7 +642,33 @@ int main()
             return result;
         }
 
-        return TestSelectionSurvivesRefresh();
+        if (const int result = TestSelectionSurvivesRefresh(); result != 0)
+        {
+            return result;
+        }
+
+        if (const int result = TestRenameOperations(); result != 0)
+        {
+            return result;
+        }
+
+        if (const int result = TestRenameSelectionAndValidation(); result != 0)
+        {
+            return result;
+        }
+
+        if (const int result = TestDeleteOperations(); result != 0)
+        {
+            return result;
+        }
+
+        if (const int result = TestDisappearedEntryAndConfinement();
+            result != 0)
+        {
+            return result;
+        }
+
+        return TestProjectSwitchRejectsPreparedOperation();
     }
     catch (const std::exception& exception)
     {

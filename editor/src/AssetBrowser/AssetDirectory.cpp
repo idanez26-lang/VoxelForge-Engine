@@ -64,35 +64,35 @@ bool IsReservedWindowsName(const std::string_view name)
         baseName.back() <= '9';
 }
 
-bool IsValidFolderName(const std::string_view name, std::string& error)
+bool IsValidEntryName(const std::string_view name, std::string& error)
 {
     if (name.empty())
     {
-        error = "Folder name cannot be empty.";
+        error = "Name cannot be empty.";
         return false;
     }
 
     if (name == "." || name == "..")
     {
-        error = "Folder name cannot be . or ...";
+        error = "Name cannot be '.' or '..'.";
         return false;
     }
 
     if (ContainsInvalidWindowsCharacter(name))
     {
-        error = "Folder name contains a character forbidden on Windows.";
+        error = "Name contains a character forbidden on Windows.";
         return false;
     }
 
     if (name.back() == ' ' || name.back() == '.')
     {
-        error = "Folder name cannot end with a space or a period.";
+        error = "Name cannot end with a space or a period.";
         return false;
     }
 
     if (IsReservedWindowsName(name))
     {
-        error = "Folder name is reserved on Windows.";
+        error = "Name is reserved on Windows.";
         return false;
     }
 
@@ -116,7 +116,67 @@ bool AssetEntryLess(const AssetEntry& left, const AssetEntry& right)
 
     return left.Name() < right.Name();
 }
+
+bool IsPathSameOrWithin(
+    const std::filesystem::path& path,
+    const std::filesystem::path& parent)
+{
+    const std::filesystem::path relative = path.lexically_relative(parent);
+
+    if (relative.empty() || relative.is_absolute())
+    {
+        return path == parent;
+    }
+
+    return std::none_of(
+        relative.begin(),
+        relative.end(),
+        [](const std::filesystem::path& component)
+        {
+            return component == "..";
+        });
 }
+
+bool InspectEntryExistence(
+    const std::filesystem::path& path,
+    bool& entryExists,
+    std::error_code& error)
+{
+    entryExists = std::filesystem::exists(path, error);
+
+    if (error || entryExists)
+    {
+        return !error;
+    }
+
+    const std::filesystem::file_status linkStatus =
+        std::filesystem::symlink_status(path, error);
+
+    if (error == std::errc::no_such_file_or_directory)
+    {
+        error.clear();
+        return true;
+    }
+
+    if (error)
+    {
+        return false;
+    }
+
+    entryExists = std::filesystem::is_symlink(linkStatus);
+    return true;
+}
+}
+
+struct AssetDirectory::ResolvedEntryPath final
+{
+    std::filesystem::path OperationPath;
+    std::filesystem::path CanonicalPath;
+    std::filesystem::path RelativePath;
+    bool IsDirectory = false;
+    bool IsRegularFile = false;
+    bool IsSymbolicLink = false;
+};
 
 bool AssetDirectory::SetAssetsRoot(
     const std::filesystem::path& assetsRoot)
@@ -233,9 +293,21 @@ bool AssetDirectory::Refresh()
 
         if (isDirectory || isFile)
         {
-            std::filesystem::path absolutePath =
-                std::filesystem::weakly_canonical(
+            std::filesystem::path operationPath =
+                std::filesystem::absolute(
                     directoryEntry.path(),
+                    entryError).lexically_normal();
+
+            if (entryError)
+            {
+                SetError("Unable to resolve an asset entry path: " +
+                    entryError.message());
+                return false;
+            }
+
+            const std::filesystem::path canonicalPath =
+                std::filesystem::weakly_canonical(
+                    operationPath,
                     entryError);
 
             if (entryError)
@@ -245,7 +317,8 @@ bool AssetDirectory::Refresh()
                 return false;
             }
 
-            if (IsWithinAssetsRoot(absolutePath))
+            if (IsWithinAssetsRoot(operationPath) &&
+                IsWithinAssetsRoot(canonicalPath))
             {
                 std::optional<std::uintmax_t> fileSize;
 
@@ -273,10 +346,10 @@ bool AssetDirectory::Refresh()
 
                 entryError.clear();
                 const std::filesystem::path relativePath =
-                    absolutePath.lexically_relative(assetsRoot_);
+                    operationPath.lexically_relative(assetsRoot_);
                 refreshedEntries.emplace_back(
-                    absolutePath.filename().string(),
-                    std::move(absolutePath),
+                    operationPath.filename().string(),
+                    std::move(operationPath),
                     relativePath,
                     isDirectory ? AssetEntryType::Directory
                                 : AssetEntryType::File,
@@ -365,7 +438,7 @@ bool AssetDirectory::CreateFolder(const std::string_view folderName)
 
     std::string validationError;
 
-    if (!IsValidFolderName(folderName, validationError))
+    if (!IsValidEntryName(folderName, validationError))
     {
         SetError(std::move(validationError));
         return false;
@@ -374,6 +447,17 @@ bool AssetDirectory::CreateFolder(const std::string_view folderName)
     const std::filesystem::path folderPath =
         currentPath_ / std::string(folderName);
     std::error_code error;
+    const std::filesystem::path resolvedParent =
+        std::filesystem::weakly_canonical(folderPath.parent_path(), error);
+    const std::filesystem::path resolvedFolderPath =
+        (resolvedParent / folderPath.filename()).lexically_normal();
+
+    if (error || !IsStrictlyWithinAssetsRoot(resolvedFolderPath))
+    {
+        SetError("The new folder must stay inside the Assets root.");
+        return false;
+    }
+
     const bool alreadyExists = std::filesystem::exists(folderPath, error);
 
     if (error)
@@ -405,6 +489,282 @@ bool AssetDirectory::CreateFolder(const std::string_view folderName)
     }
 
     return Refresh();
+}
+
+AssetOperationResult AssetDirectory::RenameEntry(
+    const std::filesystem::path& entryPath,
+    const std::string_view newName)
+{
+    ResolvedEntryPath source;
+    std::string operationError;
+
+    if (!ResolveEntryForOperation(entryPath, source, operationError))
+    {
+        return OperationFailure(std::move(operationError), true);
+    }
+
+    std::string validationError;
+
+    if (!IsValidEntryName(newName, validationError))
+    {
+        return OperationFailure(std::move(validationError), false);
+    }
+
+    std::string effectiveName(newName);
+    const std::filesystem::path requestedName(effectiveName);
+
+    if (source.IsRegularFile && requestedName.extension().empty())
+    {
+        effectiveName += source.OperationPath.extension().string();
+    }
+
+    if (!IsValidEntryName(effectiveName, validationError))
+    {
+        return OperationFailure(std::move(validationError), false);
+    }
+
+    const std::filesystem::path destination =
+        (source.OperationPath.parent_path() / effectiveName)
+            .lexically_normal();
+
+    if (!IsStrictlyWithinAssetsRoot(destination))
+    {
+        return OperationFailure(
+            "Rename destination must stay inside the Assets root.",
+            false);
+    }
+
+    std::error_code error;
+    const std::filesystem::path resolvedParent =
+        std::filesystem::weakly_canonical(
+            destination.parent_path(),
+            error);
+
+    if (error || !IsWithinAssetsRoot(resolvedParent))
+    {
+        return OperationFailure(
+            "Unable to validate the rename destination.",
+            false);
+    }
+
+    if (source.OperationPath == destination)
+    {
+        lastError_.clear();
+        return {
+            true,
+            "Name is unchanged.",
+            source.RelativePath};
+    }
+
+    bool destinationExists = false;
+
+    if (!InspectEntryExistence(destination, destinationExists, error))
+    {
+        return OperationFailure(
+            "Unable to inspect the rename destination: " +
+                error.message(),
+            true);
+    }
+
+    if (destinationExists)
+    {
+        error.clear();
+        const bool sameEntry = std::filesystem::equivalent(
+            source.OperationPath,
+            destination,
+            error);
+
+        if (error || !sameEntry)
+        {
+            return OperationFailure(
+                "A file or folder with this name already exists.",
+                true);
+        }
+    }
+
+    ResolvedEntryPath freshSource;
+
+    if (!ResolveEntryForOperation(entryPath, freshSource, operationError))
+    {
+        return OperationFailure(std::move(operationError), true);
+    }
+
+    error.clear();
+    destinationExists = false;
+
+    if (!InspectEntryExistence(destination, destinationExists, error))
+    {
+        return OperationFailure(
+            "Unable to revalidate the rename destination: " +
+                error.message(),
+            true);
+    }
+
+    if (destinationExists)
+    {
+        error.clear();
+        const bool sameEntry = std::filesystem::equivalent(
+            freshSource.OperationPath,
+            destination,
+            error);
+
+        if (error || !sameEntry)
+        {
+            return OperationFailure(
+                "Rename destination appeared before confirmation.",
+                true);
+        }
+    }
+
+    const bool currentPathMoves = freshSource.IsDirectory &&
+        !freshSource.IsSymbolicLink &&
+        IsPathSameOrWithin(currentPath_, freshSource.OperationPath);
+    const std::filesystem::path currentSuffix = currentPathMoves
+        ? currentPath_.lexically_relative(freshSource.OperationPath)
+        : std::filesystem::path{};
+
+    std::filesystem::rename(
+        freshSource.OperationPath,
+        destination,
+        error);
+
+    if (error)
+    {
+        return OperationFailure(
+            "Unable to rename the asset entry: " + error.message(),
+            true);
+    }
+
+    if (currentPathMoves)
+    {
+        error.clear();
+        const std::filesystem::path movedCurrentPath =
+            currentSuffix == "."
+            ? destination
+            : destination / currentSuffix;
+        currentPath_ = std::filesystem::weakly_canonical(
+            movedCurrentPath,
+            error);
+
+        if (error)
+        {
+            currentPath_ = assetsRoot_;
+        }
+    }
+
+    const std::filesystem::path resultingRelativePath =
+        destination.lexically_relative(assetsRoot_);
+    const bool refreshed = Refresh();
+    std::string message = "Renamed to " + effectiveName + ".";
+
+    if (!refreshed)
+    {
+        message += " Refresh failed: " + lastError_;
+    }
+
+    return {true, std::move(message), resultingRelativePath};
+}
+
+AssetDeleteAssessment AssetDirectory::CanDeleteEntry(
+    const std::filesystem::path& entryPath) const
+{
+    ResolvedEntryPath entry;
+    std::string operationError;
+
+    if (!ResolveEntryForOperation(entryPath, entry, operationError))
+    {
+        return {
+            false,
+            false,
+            false,
+            false,
+            {},
+            std::move(operationError)};
+    }
+
+    AssetDeleteAssessment assessment;
+    assessment.IsDirectory = entry.IsDirectory;
+    assessment.IsSymbolicLink = entry.IsSymbolicLink;
+    assessment.RelativePath = entry.RelativePath;
+
+    if (entry.IsDirectory && !entry.IsSymbolicLink)
+    {
+        std::error_code error;
+        std::filesystem::directory_iterator iterator(
+            entry.OperationPath,
+            error);
+
+        if (error)
+        {
+            assessment.Message =
+                "Unable to inspect the folder before deletion: " +
+                error.message();
+            return assessment;
+        }
+
+        if (iterator != std::filesystem::directory_iterator{})
+        {
+            assessment.IsNonEmptyDirectory = true;
+            assessment.Message = "Folder is not empty.";
+            return assessment;
+        }
+    }
+
+    assessment.CanDelete = true;
+    assessment.Message = "Deletion is allowed after confirmation.";
+    return assessment;
+}
+
+AssetOperationResult AssetDirectory::DeleteEntry(
+    const std::filesystem::path& entryPath)
+{
+    const AssetDeleteAssessment assessment = CanDeleteEntry(entryPath);
+
+    if (!assessment.CanDelete)
+    {
+        return OperationFailure(assessment.Message, true);
+    }
+
+    ResolvedEntryPath freshEntry;
+    std::string operationError;
+
+    if (!ResolveEntryForOperation(entryPath, freshEntry, operationError))
+    {
+        return OperationFailure(std::move(operationError), true);
+    }
+
+    std::error_code error;
+    const bool removed = std::filesystem::remove(
+        freshEntry.OperationPath,
+        error);
+
+    if (error)
+    {
+        return OperationFailure(
+            "Unable to delete the asset entry: " + error.message(),
+            true);
+    }
+
+    if (!removed)
+    {
+        return OperationFailure(
+            freshEntry.IsDirectory
+                ? "Folder is not empty."
+                : "Asset entry no longer exists.",
+            true);
+    }
+
+    const bool refreshed = Refresh();
+    std::string message = "Deleted " +
+        std::string(freshEntry.IsDirectory ? "folder " : "file ") +
+        freshEntry.OperationPath.filename().string() + ".";
+
+    if (!refreshed)
+    {
+        message += " Refresh failed: " + lastError_;
+    }
+
+    return {true, std::move(message), std::nullopt};
 }
 
 bool AssetDirectory::HasAssetsRoot() const noexcept
@@ -499,29 +859,116 @@ bool AssetDirectory::ChangeDirectory(
     return false;
 }
 
-bool AssetDirectory::IsWithinAssetsRoot(
-    const std::filesystem::path& path) const
+bool AssetDirectory::ResolveEntryForOperation(
+    const std::filesystem::path& entryPath,
+    ResolvedEntryPath& resolvedEntry,
+    std::string& errorMessage) const
 {
     if (!HasAssetsRoot())
     {
+        errorMessage = "No Assets root is configured.";
         return false;
     }
 
-    const std::filesystem::path relative =
-        path.lexically_relative(assetsRoot_);
-
-    if (relative.empty() || relative.is_absolute())
+    if (entryPath.empty())
     {
-        return path == assetsRoot_;
+        errorMessage = "Asset entry path cannot be empty.";
+        return false;
     }
 
-    return std::none_of(
-        relative.begin(),
-        relative.end(),
-        [](const std::filesystem::path& component)
-        {
-            return component == "..";
-        });
+    const std::filesystem::path candidate = entryPath.is_absolute()
+        ? entryPath
+        : assetsRoot_ / entryPath;
+    std::error_code error;
+    const std::filesystem::path operationPath =
+        std::filesystem::absolute(candidate, error).lexically_normal();
+
+    if (error || !IsStrictlyWithinAssetsRoot(operationPath))
+    {
+        errorMessage =
+            "Asset operation cannot leave the Assets root or target its root.";
+        return false;
+    }
+
+    const std::filesystem::file_status linkStatus =
+        std::filesystem::symlink_status(operationPath, error);
+
+    if (error || !std::filesystem::exists(linkStatus))
+    {
+        errorMessage = "Asset entry no longer exists or is not accessible.";
+        return false;
+    }
+
+    const std::filesystem::path canonicalPath =
+        std::filesystem::weakly_canonical(operationPath, error);
+
+    if (error || !IsStrictlyWithinAssetsRoot(canonicalPath))
+    {
+        errorMessage =
+            "Asset operation cannot follow a path outside the Assets root.";
+        return false;
+    }
+
+    const bool isSymbolicLink = std::filesystem::is_symlink(linkStatus);
+    const bool isDirectory =
+        std::filesystem::is_directory(operationPath, error);
+
+    if (error)
+    {
+        errorMessage = "Unable to inspect the asset entry: " +
+            error.message();
+        return false;
+    }
+
+    const bool isRegularFile = !isDirectory &&
+        std::filesystem::is_regular_file(operationPath, error);
+
+    if (error)
+    {
+        errorMessage = "Unable to inspect the asset entry: " +
+            error.message();
+        return false;
+    }
+
+    if (!isDirectory && !isRegularFile && !isSymbolicLink)
+    {
+        errorMessage = "Unsupported asset entry type.";
+        return false;
+    }
+
+    resolvedEntry.OperationPath = operationPath;
+    resolvedEntry.CanonicalPath = canonicalPath;
+    resolvedEntry.RelativePath =
+        operationPath.lexically_relative(assetsRoot_);
+    resolvedEntry.IsDirectory = isDirectory;
+    resolvedEntry.IsRegularFile = isRegularFile;
+    resolvedEntry.IsSymbolicLink = isSymbolicLink;
+    return true;
+}
+
+bool AssetDirectory::IsWithinAssetsRoot(
+    const std::filesystem::path& path) const
+{
+    return HasAssetsRoot() && IsPathSameOrWithin(path, assetsRoot_);
+}
+
+bool AssetDirectory::IsStrictlyWithinAssetsRoot(
+    const std::filesystem::path& path) const
+{
+    return path != assetsRoot_ && IsWithinAssetsRoot(path);
+}
+
+AssetOperationResult AssetDirectory::OperationFailure(
+    std::string message,
+    const bool refreshEntries)
+{
+    if (refreshEntries && HasAssetsRoot())
+    {
+        static_cast<void>(Refresh());
+    }
+
+    SetError(message);
+    return {false, std::move(message), std::nullopt};
 }
 
 void AssetDirectory::SetError(std::string error)

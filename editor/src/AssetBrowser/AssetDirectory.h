@@ -3,12 +3,30 @@
 #include "AssetEntry.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace VoxelForge::Editor
 {
+
+struct AssetOperationResult final
+{
+    bool Succeeded = false;
+    std::string Message;
+    std::optional<std::filesystem::path> ResultingRelativePath;
+};
+
+struct AssetDeleteAssessment final
+{
+    bool CanDelete = false;
+    bool IsDirectory = false;
+    bool IsSymbolicLink = false;
+    bool IsNonEmptyDirectory = false;
+    std::filesystem::path RelativePath;
+    std::string Message;
+};
 
 class AssetDirectory final
 {
@@ -23,6 +41,13 @@ public:
     [[nodiscard]] bool Back();
     [[nodiscard]] bool GoToAssetsRoot();
     [[nodiscard]] bool CreateFolder(std::string_view folderName);
+    [[nodiscard]] AssetOperationResult RenameEntry(
+        const std::filesystem::path& entryPath,
+        std::string_view newName);
+    [[nodiscard]] AssetDeleteAssessment CanDeleteEntry(
+        const std::filesystem::path& entryPath) const;
+    [[nodiscard]] AssetOperationResult DeleteEntry(
+        const std::filesystem::path& entryPath);
 
     [[nodiscard]] bool HasAssetsRoot() const noexcept;
     [[nodiscard]] bool CanGoBack() const noexcept;
@@ -36,10 +61,21 @@ public:
     [[nodiscard]] const std::string& LastError() const noexcept;
 
 private:
+    struct ResolvedEntryPath;
+
     [[nodiscard]] bool ChangeDirectory(
         const std::filesystem::path& directoryPath);
+    [[nodiscard]] bool ResolveEntryForOperation(
+        const std::filesystem::path& entryPath,
+        ResolvedEntryPath& resolvedEntry,
+        std::string& error) const;
     [[nodiscard]] bool IsWithinAssetsRoot(
         const std::filesystem::path& path) const;
+    [[nodiscard]] bool IsStrictlyWithinAssetsRoot(
+        const std::filesystem::path& path) const;
+    [[nodiscard]] AssetOperationResult OperationFailure(
+        std::string message,
+        bool refreshEntries);
     void SetError(std::string error);
 
     std::filesystem::path assetsRoot_;
