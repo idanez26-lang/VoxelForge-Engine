@@ -15,9 +15,11 @@ namespace VoxelForge::Editor
 {
 
 EditorLayer::EditorLayer(
+    Project::ProjectManager& projectManager,
     ApplicationCloseCallback applicationCloseCallback,
     const std::size_t smokeTestFrameLimit)
     : Layer("VoxelForge Editor Layer"),
+      workspace_(projectManager),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit)
 {

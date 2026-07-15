@@ -5,6 +5,8 @@ target_sources(
     PRIVATE
         src/Project.cpp
         src/ProjectManager.cpp
+        src/ProjectSerializer.cpp
+        src/RecentProjects.cpp
 )
 
 target_include_directories(

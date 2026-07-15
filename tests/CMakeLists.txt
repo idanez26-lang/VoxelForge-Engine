@@ -39,10 +39,26 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorExitRequestTests>
 )
 
+add_executable(
+    VoxelForgeProjectManagerTests
+    Project/ProjectManagerTests.cpp
+)
+target_link_libraries(
+    VoxelForgeProjectManagerTests
+    PRIVATE
+        VoxelForgeProject
+)
+vf_configure_test(VoxelForgeProjectManagerTests)
+add_test(
+    NAME VoxelForge.Project.Manager
+    COMMAND $<TARGET_FILE:VoxelForgeProjectManagerTests>
+)
+
 set_tests_properties(
     VoxelForge.Core.Events
     VoxelForge.Core.Layers
     VoxelForge.Editor.ExitRequest
+    VoxelForge.Project.Manager
     PROPERTIES TIMEOUT 10
 )
 

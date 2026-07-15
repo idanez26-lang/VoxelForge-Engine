@@ -1,11 +1,14 @@
 #include "EditorWorkspace.h"
 
+#include "VoxelForge/Project/Project.h"
+#include "VoxelForge/Project/ProjectManager.h"
 #include "VoxelForge/Renderer/Renderer.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 namespace VoxelForge::Editor
@@ -14,12 +17,14 @@ namespace VoxelForge::Editor
 namespace
 {
 constexpr float StatusBarHeight = 26.0F;
+constexpr std::size_t MaximumConsoleMessageCount = 200;
 constexpr const char* WorkspaceDockspaceName = "VoxelForgeStudioDockSpace";
 constexpr const char* AboutPopupName = "About VoxelForge Studio";
 }
 
-EditorWorkspace::EditorWorkspace()
-    : consoleMessages_{
+EditorWorkspace::EditorWorkspace(Project::ProjectManager& projectManager)
+    : projectManager_(projectManager),
+      consoleMessages_{
           "Console ready",
           "VoxelForge Studio initialized"}
 {
@@ -55,6 +60,7 @@ void EditorWorkspace::Draw()
 
     DrawStatusBar();
     DrawAboutPopup();
+    DrawProjectDialogs();
 }
 
 bool EditorWorkspace::ConsumeExitRequest() noexcept
@@ -73,24 +79,73 @@ void EditorWorkspace::DrawMainMenuBar()
     {
         if (ImGui::MenuItem("New Project", "Ctrl+N"))
         {
-            AddConsoleMessage("New Project is not available yet.");
+            projectDialogError_.clear();
+            showNewProjectPopup_ = true;
         }
 
         if (ImGui::MenuItem("Open Project", "Ctrl+O"))
         {
-            AddConsoleMessage("Open Project is not available yet.");
+            projectDialogError_.clear();
+            showOpenProjectPopup_ = true;
+        }
+
+        std::optional<std::filesystem::path> recentProjectToOpen;
+
+        if (ImGui::BeginMenu("Recent Projects"))
+        {
+            const auto& recentProjects = projectManager_.RecentProjectPaths();
+
+            if (recentProjects.empty())
+            {
+                ImGui::MenuItem("No recent projects", nullptr, false, false);
+            }
+
+            for (const std::filesystem::path& projectPath : recentProjects)
+            {
+                const std::string pathText = projectPath.string();
+                const std::string label = projectPath.stem().string();
+                ImGui::PushID(pathText.c_str());
+
+                if (ImGui::MenuItem(label.c_str()))
+                {
+                    recentProjectToOpen = projectPath;
+                }
+
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("%s", pathText.c_str());
+                }
+
+                ImGui::PopID();
+            }
+
+            ImGui::EndMenu();
+        }
+
+        if (recentProjectToOpen)
+        {
+            OpenProject(*recentProjectToOpen);
         }
 
         ImGui::Separator();
+        const bool hasActiveProject = projectManager_.HasActiveProject();
 
-        if (ImGui::MenuItem("Save", "Ctrl+S"))
+        if (ImGui::MenuItem(
+                "Save Project",
+                "Ctrl+S",
+                false,
+                hasActiveProject))
         {
-            AddConsoleMessage("Save is not available yet.");
+            SaveProject();
         }
 
-        if (ImGui::MenuItem("Save As", "Ctrl+Shift+S"))
+        if (ImGui::MenuItem(
+                "Close Project",
+                nullptr,
+                false,
+                hasActiveProject))
         {
-            AddConsoleMessage("Save As is not available yet.");
+            CloseProject();
         }
 
         ImGui::Separator();
@@ -279,7 +334,22 @@ void EditorWorkspace::DrawExplorerPanel()
     ImGui::Begin("Explorer", &showExplorer_);
     ImGui::TextUnformatted("Project Explorer");
     ImGui::Separator();
-    ImGui::TextDisabled("No project loaded");
+
+    const auto& activeProject = projectManager_.ActiveProject();
+
+    if (!activeProject)
+    {
+        ImGui::TextDisabled("No project loaded");
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Text("%s", activeProject->Name().c_str());
+    ImGui::TextWrapped("%s", activeProject->RootPath().string().c_str());
+    ImGui::Separator();
+    ImGui::BulletText("Assets");
+    ImGui::BulletText("Scenes");
+    ImGui::BulletText("Cache");
     ImGui::End();
 }
 
@@ -368,9 +438,14 @@ void EditorWorkspace::DrawStatusBar()
         const float frameTime =
             io.Framerate > 0.0F ? 1000.0F / io.Framerate : 0.0F;
         const std::string backendName = GetBackendDisplayName();
+        const auto& activeProject = projectManager_.ActiveProject();
+        const std::string projectStatus = activeProject
+            ? "Project: " + activeProject->Name()
+            : "No project loaded";
 
         ImGui::Text(
-            "Ready | FPS %.1f | %.2f ms | Backend: %s | ImGui %s",
+            "Ready | %s | FPS %.1f | %.2f ms | Backend: %s | ImGui %s",
+            projectStatus.c_str(),
             io.Framerate,
             frameTime,
             backendName.c_str(),
@@ -412,8 +487,192 @@ void EditorWorkspace::DrawAboutPopup()
     }
 }
 
+void EditorWorkspace::DrawProjectDialogs()
+{
+    DrawNewProjectDialog();
+    DrawOpenProjectDialog();
+}
+
+void EditorWorkspace::DrawNewProjectDialog()
+{
+    constexpr const char* PopupName = "New VoxelForge Project";
+
+    if (showNewProjectPopup_)
+    {
+        ImGui::OpenPopup(PopupName);
+        showNewProjectPopup_ = false;
+    }
+
+    if (!ImGui::BeginPopupModal(
+            PopupName,
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        return;
+    }
+
+    ImGui::InputText(
+        "Project name",
+        newProjectName_.data(),
+        newProjectName_.size());
+    ImGui::InputText(
+        "Parent folder",
+        newProjectParentPath_.data(),
+        newProjectParentPath_.size());
+
+    if (!projectDialogError_.empty())
+    {
+        ImGui::PushStyleColor(
+            ImGuiCol_Text,
+            ImVec4(0.95F, 0.35F, 0.30F, 1.0F));
+        ImGui::TextWrapped("%s", projectDialogError_.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    if (ImGui::Button("Create"))
+    {
+        CreateProject();
+    }
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("Cancel"))
+    {
+        projectDialogError_.clear();
+        newProjectName_.fill('\0');
+        newProjectParentPath_.fill('\0');
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
+void EditorWorkspace::DrawOpenProjectDialog()
+{
+    constexpr const char* PopupName = "Open VoxelForge Project";
+
+    if (showOpenProjectPopup_)
+    {
+        ImGui::OpenPopup(PopupName);
+        showOpenProjectPopup_ = false;
+    }
+
+    if (!ImGui::BeginPopupModal(
+            PopupName,
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        return;
+    }
+
+    ImGui::InputText(
+        "Project file",
+        openProjectFilePath_.data(),
+        openProjectFilePath_.size());
+
+    if (!projectDialogError_.empty())
+    {
+        ImGui::PushStyleColor(
+            ImGuiCol_Text,
+            ImVec4(0.95F, 0.35F, 0.30F, 1.0F));
+        ImGui::TextWrapped("%s", projectDialogError_.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    if (ImGui::Button("Open"))
+    {
+        OpenProject(openProjectFilePath_.data());
+
+        if (projectDialogError_.empty())
+        {
+            openProjectFilePath_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        }
+    }
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("Cancel"))
+    {
+        projectDialogError_.clear();
+        openProjectFilePath_.fill('\0');
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
+void EditorWorkspace::CreateProject()
+{
+    const auto project = projectManager_.CreateProject(
+        newProjectName_.data(),
+        std::filesystem::path(newProjectParentPath_.data()));
+
+    if (!project)
+    {
+        projectDialogError_ = projectManager_.LastError();
+        AddConsoleMessage(
+            "Project creation failed: " + projectDialogError_);
+        return;
+    }
+
+    AddConsoleMessage("Project created: " + project->Name());
+    projectDialogError_.clear();
+    newProjectName_.fill('\0');
+    newProjectParentPath_.fill('\0');
+    ImGui::CloseCurrentPopup();
+}
+
+void EditorWorkspace::OpenProject(
+    const std::filesystem::path& projectFilePath)
+{
+    const auto project = projectManager_.OpenProject(projectFilePath);
+
+    if (!project)
+    {
+        projectDialogError_ = projectManager_.LastError();
+        AddConsoleMessage("Project open failed: " + projectDialogError_);
+        return;
+    }
+
+    projectDialogError_.clear();
+    AddConsoleMessage("Project opened: " + project->Name());
+}
+
+void EditorWorkspace::SaveProject()
+{
+    if (!projectManager_.SaveActiveProject())
+    {
+        AddConsoleMessage(
+            "Project save failed: " + projectManager_.LastError());
+        return;
+    }
+
+    AddConsoleMessage(
+        "Project saved: " + projectManager_.ActiveProject()->Name());
+}
+
+void EditorWorkspace::CloseProject()
+{
+    const auto& activeProject = projectManager_.ActiveProject();
+
+    if (!activeProject)
+    {
+        return;
+    }
+
+    const std::string projectName = activeProject->Name();
+    projectManager_.CloseProject();
+    AddConsoleMessage("Project closed: " + projectName);
+}
+
 void EditorWorkspace::AddConsoleMessage(std::string message)
 {
+    if (consoleMessages_.size() >= MaximumConsoleMessageCount)
+    {
+        consoleMessages_.erase(consoleMessages_.begin());
+    }
+
     consoleMessages_.push_back(std::move(message));
     showConsole_ = true;
 }

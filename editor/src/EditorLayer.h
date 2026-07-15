@@ -13,6 +13,11 @@
 struct ImGuiViewport;
 using ImGuiID = unsigned int;
 
+namespace VoxelForge::Project
+{
+class ProjectManager;
+}
+
 namespace VoxelForge::Editor
 {
 
@@ -22,6 +27,7 @@ public:
     using ApplicationCloseCallback = std::function<void()>;
 
     explicit EditorLayer(
+        Project::ProjectManager& projectManager,
         ApplicationCloseCallback applicationCloseCallback,
         std::size_t smokeTestFrameLimit = 0);
 
@@ -51,7 +57,7 @@ private:
 
     EditorCamera editorCamera_{};
     ViewportRenderer viewportRenderer_{};
-    EditorWorkspace workspace_{};
+    EditorWorkspace workspace_;
     ApplicationCloseCallback applicationCloseCallback_;
 
     std::size_t smokeTestFrameLimit_ = 0;
