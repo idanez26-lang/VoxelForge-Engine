@@ -3,15 +3,33 @@
 #include "EditorMath.h"
 
 #include <array>
+#include <cstdint>
 
 namespace VoxelForge::Editor
 {
 
+enum class EditorCameraView : std::uint8_t
+{
+    // X points right, Y points up and Z points forward. Front observes the
+    // origin from +Z; Back from -Z; Left from -X; Right from +X; Top from +Y;
+    // Bottom from -Y. Perspective uses the default three-quarter view.
+    Perspective,
+    Front,
+    Back,
+    Left,
+    Right,
+    Top,
+    Bottom
+};
+
 class EditorCamera final
 {
 public:
-    void Update(bool viewportHovered);
+    void Update(bool viewportHovered, float viewportHeight);
+    void Pan(float horizontalPixels, float verticalPixels, float viewportHeight) noexcept;
     void Frame(float width, float height, float depth) noexcept;
+    void Reset() noexcept;
+    void SetView(EditorCameraView view) noexcept;
     void SetAspectRatio(float aspectRatio) noexcept;
 
     [[nodiscard]] Vec3 GetPosition() const noexcept;
@@ -21,6 +39,7 @@ public:
     [[nodiscard]] const Vec3& GetTarget() const noexcept;
     [[nodiscard]] float GetDistance() const noexcept;
     [[nodiscard]] float GetFieldOfViewDegrees() const noexcept;
+    [[nodiscard]] EditorCameraView GetView() const noexcept;
     [[nodiscard]] std::array<float, 16> GetViewProjection() const noexcept;
 
 private:
@@ -31,6 +50,7 @@ private:
     float aspectRatio_ = 1.0F;
     float fieldOfViewDegrees_ = 45.0F;
     float orbitSensitivity_ = 0.25F;
+    EditorCameraView view_ = EditorCameraView::Perspective;
 };
 
 } // namespace VoxelForge::Editor

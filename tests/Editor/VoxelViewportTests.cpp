@@ -16,6 +16,18 @@ bool Check(const bool condition, const char* message)
     return condition;
 }
 
+bool Near(const float left, const float right, const float epsilon = 0.001F)
+{
+    return std::abs(left - right) <= epsilon;
+}
+
+bool SamePoint(
+    const VoxelForge::Editor::Vec3 left,
+    const VoxelForge::Editor::Vec3 right)
+{
+    return Near(left.X, right.X) && Near(left.Y, right.Y) && Near(left.Z, right.Z);
+}
+
 bool IsFinite(const std::array<float, 16>& matrix)
 {
     for (const float value : matrix)
@@ -44,6 +56,18 @@ int main()
 
     Editor::VoxelViewportState state;
     passed &= Check(!state.HasModel(), "Viewport must start empty.");
+    passed &= Check(state.IsGridVisible() && state.AreAxesVisible() &&
+        state.Background() == Editor::ViewportBackground::Dark,
+        "Viewport guide defaults are incorrect.");
+    state.SetGridVisible(false);
+    state.SetAxesVisible(false);
+    state.SetBackground(Editor::ViewportBackground::Light);
+    passed &= Check(!state.IsGridVisible() && !state.AreAxesVisible() &&
+        state.BackgroundColor()[0] > 0.6F,
+        "Viewport session settings did not change.");
+    state.SetGridVisible(true);
+    state.SetAxesVisible(true);
+    state.SetBackground(Editor::ViewportBackground::Neutral);
 
     Voxel::VoxelModel model;
     model.SetName("first");
@@ -126,6 +150,38 @@ int main()
         IsFinite(camera.GetViewProjection()),
         "Flat model framing is unstable.");
 
+    const float distanceBeforePan = camera.GetDistance();
+    const Editor::Vec3 targetBeforePan = camera.GetTarget();
+    camera.Pan(24.0F, -12.0F, 720.0F);
+    const Editor::Vec3 pannedTarget = camera.GetTarget();
+    passed &= Check(!SamePoint(targetBeforePan, pannedTarget) &&
+        Near(distanceBeforePan, camera.GetDistance()),
+        "Camera pan must move only the target.");
+
+    camera.SetView(Editor::EditorCameraView::Front);
+    passed &= Check(camera.GetForward().Z < -0.99F &&
+        SamePoint(camera.GetTarget(), pannedTarget),
+        "Front view is incorrect or changed the target.");
+    camera.SetView(Editor::EditorCameraView::Back);
+    passed &= Check(camera.GetForward().Z > 0.99F,
+        "Back view is incorrect.");
+    camera.SetView(Editor::EditorCameraView::Left);
+    passed &= Check(camera.GetForward().X > 0.99F,
+        "Left view is incorrect.");
+    camera.SetView(Editor::EditorCameraView::Right);
+    passed &= Check(camera.GetForward().X < -0.99F,
+        "Right view is incorrect.");
+    camera.SetView(Editor::EditorCameraView::Top);
+    passed &= Check(camera.GetForward().Y < -0.99F,
+        "Top view is incorrect.");
+    camera.SetView(Editor::EditorCameraView::Bottom);
+    passed &= Check(camera.GetForward().Y > 0.99F,
+        "Bottom view is incorrect.");
+    camera.SetView(Editor::EditorCameraView::Perspective);
+    passed &= Check(camera.GetView() == Editor::EditorCameraView::Perspective &&
+        SamePoint(camera.GetTarget(), pannedTarget),
+        "Perspective view is incorrect or changed the target.");
+
     camera.Frame(10000.0F, 1.0F, 1.0F);
     camera.SetAspectRatio(0.01F);
     const auto longModelMatrix = camera.GetViewProjection();
@@ -138,5 +194,14 @@ int main()
     state.Clear();
     passed &= Check(!state.HasModel() && state.Name().empty(),
         "Viewport clear failed.");
+    passed &= Check(state.IsGridVisible() && state.AreAxesVisible() &&
+        state.Background() == Editor::ViewportBackground::Neutral,
+        "Session settings must survive model and project clearing.");
+
+    camera.Reset();
+    passed &= Check(SamePoint(camera.GetTarget(), {}) &&
+        Near(camera.GetDistance(), 12.0F) &&
+        camera.GetView() == Editor::EditorCameraView::Perspective,
+        "Camera reset is incorrect.");
     return passed ? 0 : 1;
 }

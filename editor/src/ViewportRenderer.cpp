@@ -33,6 +33,45 @@ static_assert(offsetof(GPUVertex, Position) == 0U);
 static_assert(offsetof(GPUVertex, Normal) == 12U);
 static_assert(offsetof(GPUVertex, Color) == 24U);
 
+struct GuideFace final
+{
+    std::array<float, 3> Normal{};
+    std::array<std::array<float, 3>, 4> Corners{};
+};
+
+constexpr std::array<GuideFace, 6> GuideFaces{{
+    {{-1.0F, 0.0F, 0.0F}, {{{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}}}},
+    {{1.0F, 0.0F, 0.0F}, {{{1, 0, 1}, {1, 0, 0}, {1, 1, 0}, {1, 1, 1}}}},
+    {{0.0F, -1.0F, 0.0F}, {{{0, 0, 1}, {0, 0, 0}, {1, 0, 0}, {1, 0, 1}}}},
+    {{0.0F, 1.0F, 0.0F}, {{{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}}}},
+    {{0.0F, 0.0F, -1.0F}, {{{1, 0, 0}, {0, 0, 0}, {0, 1, 0}, {1, 1, 0}}}},
+    {{0.0F, 0.0F, 1.0F}, {{{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}}}}
+}};
+
+void AppendBox(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const std::array<float, 3>& minimum,
+    const std::array<float, 3>& maximum,
+    const std::array<float, 4>& color)
+{
+    for (const GuideFace& face : GuideFaces)
+    {
+        const auto first = static_cast<std::uint32_t>(vertices.size());
+        for (const auto& corner : face.Corners)
+        {
+            vertices.push_back({
+                {minimum[0] + (maximum[0] - minimum[0]) * corner[0],
+                 minimum[1] + (maximum[1] - minimum[1]) * corner[1],
+                 minimum[2] + (maximum[2] - minimum[2]) * corner[2]},
+                face.Normal,
+                color});
+        }
+        constexpr std::array<std::uint32_t, 6> local{0U, 1U, 2U, 0U, 2U, 3U};
+        for (const std::uint32_t index : local) indices.push_back(first + index);
+    }
+}
+
 std::vector<unsigned char> ReadBinary(const char* path)
 {
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
@@ -200,22 +239,48 @@ bool ViewportRenderer::Upload(
         return false;
     }
 
-    ClearModel();
+    if (!UploadBufferPair(
+            vertices.data(), vertexBytes,
+            mesh.Indices().data(), indexBytes,
+            vertexBuffer_, indexBuffer_, "voxel model"))
+    {
+        return false;
+    }
+    indexCount_ = static_cast<std::uint32_t>(mesh.IndexCount());
+    lastError_.clear();
+    return true;
+}
+
+bool ViewportRenderer::UploadBufferPair(
+    const void* vertexData,
+    const std::size_t vertexBytes,
+    const std::uint32_t* indexData,
+    const std::size_t indexBytes,
+    SDL_GPUBuffer*& vertexBuffer,
+    SDL_GPUBuffer*& indexBuffer,
+    const std::string_view label)
+{
     const SDL_GPUBufferCreateInfo vertexInfo{
         SDL_GPU_BUFFERUSAGE_VERTEX, static_cast<std::uint32_t>(vertexBytes), 0U};
     const SDL_GPUBufferCreateInfo indexInfo{
         SDL_GPU_BUFFERUSAGE_INDEX, static_cast<std::uint32_t>(indexBytes), 0U};
-    vertexBuffer_ = SDL_CreateGPUBuffer(device_, &vertexInfo);
-    indexBuffer_ = SDL_CreateGPUBuffer(device_, &indexInfo);
+    SDL_GPUBuffer* newVertexBuffer = SDL_CreateGPUBuffer(device_, &vertexInfo);
+    SDL_GPUBuffer* newIndexBuffer = SDL_CreateGPUBuffer(device_, &indexInfo);
     const SDL_GPUTransferBufferCreateInfo transferInfo{
         SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
         static_cast<std::uint32_t>(vertexBytes + indexBytes), 0U};
     SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device_, &transferInfo);
-    if (vertexBuffer_ == nullptr || indexBuffer_ == nullptr || transfer == nullptr)
+    const auto releaseNewBuffers = [this, &newVertexBuffer, &newIndexBuffer]()
+    {
+        if (newVertexBuffer != nullptr) SDL_ReleaseGPUBuffer(device_, newVertexBuffer);
+        if (newIndexBuffer != nullptr) SDL_ReleaseGPUBuffer(device_, newIndexBuffer);
+    };
+    if (newVertexBuffer == nullptr || newIndexBuffer == nullptr || transfer == nullptr)
     {
         if (transfer != nullptr) SDL_ReleaseGPUTransferBuffer(device_, transfer);
-        ClearModel();
-        SetError(std::string("Unable to create voxel GPU buffers: ") + SDL_GetError());
+        releaseNewBuffers();
+        SetError("Unable to create " + std::string(label) +
+            " GPU buffers: " + SDL_GetError());
         return false;
     }
 
@@ -223,21 +288,23 @@ bool ViewportRenderer::Upload(
     if (mapped == nullptr)
     {
         SDL_ReleaseGPUTransferBuffer(device_, transfer);
-        ClearModel();
-        SetError(std::string("Unable to map voxel upload buffer: ") + SDL_GetError());
+        releaseNewBuffers();
+        SetError("Unable to map " + std::string(label) +
+            " upload buffer: " + SDL_GetError());
         return false;
     }
-    std::memcpy(mapped, vertices.data(), vertexBytes);
+    std::memcpy(mapped, vertexData, vertexBytes);
     std::memcpy(static_cast<unsigned char*>(mapped) + vertexBytes,
-        mesh.Indices().data(), indexBytes);
+        indexData, indexBytes);
     SDL_UnmapGPUTransferBuffer(device_, transfer);
 
     SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(device_);
     if (commandBuffer == nullptr)
     {
         SDL_ReleaseGPUTransferBuffer(device_, transfer);
-        ClearModel();
-        SetError(std::string("Unable to acquire voxel upload command buffer: ") + SDL_GetError());
+        releaseNewBuffers();
+        SetError("Unable to acquire " + std::string(label) +
+            " upload command buffer: " + SDL_GetError());
         return false;
     }
     SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
@@ -246,30 +313,121 @@ bool ViewportRenderer::Upload(
         const std::string error = SDL_GetError();
         SDL_CancelGPUCommandBuffer(commandBuffer);
         SDL_ReleaseGPUTransferBuffer(device_, transfer);
-        ClearModel();
-        SetError("Unable to begin voxel upload pass: " + error);
+        releaseNewBuffers();
+        SetError("Unable to begin " + std::string(label) +
+            " upload pass: " + error);
         return false;
     }
     const SDL_GPUTransferBufferLocation vertexSource{transfer, 0U};
     const SDL_GPUBufferRegion vertexDestination{
-        vertexBuffer_, 0U, static_cast<std::uint32_t>(vertexBytes)};
+        newVertexBuffer, 0U, static_cast<std::uint32_t>(vertexBytes)};
     const SDL_GPUTransferBufferLocation indexSource{
         transfer, static_cast<std::uint32_t>(vertexBytes)};
     const SDL_GPUBufferRegion indexDestination{
-        indexBuffer_, 0U, static_cast<std::uint32_t>(indexBytes)};
+        newIndexBuffer, 0U, static_cast<std::uint32_t>(indexBytes)};
     SDL_UploadToGPUBuffer(copyPass, &vertexSource, &vertexDestination, false);
     SDL_UploadToGPUBuffer(copyPass, &indexSource, &indexDestination, false);
     SDL_EndGPUCopyPass(copyPass);
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
     {
         SDL_ReleaseGPUTransferBuffer(device_, transfer);
-        ClearModel();
-        SetError(std::string("Unable to submit voxel upload: ") + SDL_GetError());
+        releaseNewBuffers();
+        SetError("Unable to submit " + std::string(label) +
+            " upload: " + SDL_GetError());
         return false;
     }
     SDL_ReleaseGPUTransferBuffer(device_, transfer);
-    indexCount_ = static_cast<std::uint32_t>(mesh.IndexCount());
-    lastError_.clear();
+    if (vertexBuffer != nullptr) SDL_ReleaseGPUBuffer(device_, vertexBuffer);
+    if (indexBuffer != nullptr) SDL_ReleaseGPUBuffer(device_, indexBuffer);
+    vertexBuffer = newVertexBuffer;
+    indexBuffer = newIndexBuffer;
+    return true;
+}
+
+void ViewportRenderer::ConfigureGuides(
+    const float width,
+    const float height,
+    const float depth) noexcept
+{
+    const float safeWidth = std::max(width, 0.0F);
+    const float safeHeight = std::max(height, 0.0F);
+    const float safeDepth = std::max(depth, 0.0F);
+    if (guideWidth_ == safeWidth && guideHeight_ == safeHeight &&
+        guideDepth_ == safeDepth)
+    {
+        return;
+    }
+    guideWidth_ = safeWidth;
+    guideHeight_ = safeHeight;
+    guideDepth_ = safeDepth;
+    ReleaseGuides();
+}
+
+bool ViewportRenderer::EnsureGuides()
+{
+    if (!guidesDirty_ && guideVertexBuffer_ != nullptr &&
+        guideIndexBuffer_ != nullptr)
+    {
+        return true;
+    }
+
+    const float modelSpan = std::max({guideWidth_, guideHeight_, guideDepth_, 1.0F});
+    const float horizontalSpan = std::max({guideWidth_, guideDepth_, 1.0F});
+    const float desiredHalfExtent = std::max(4.0F, horizontalSpan * 0.75F);
+    const float gridStep = std::max(1.0F, std::ceil(desiredHalfExtent / 20.0F));
+    const int gridHalfCount = static_cast<int>(
+        std::ceil(desiredHalfExtent / gridStep));
+    const float gridExtent = gridHalfCount * gridStep;
+    const float lineWidth = std::max(0.018F, gridStep * 0.025F);
+    const float lineHeight = std::max(0.008F, gridStep * 0.008F);
+    const float groundY = -(std::max(guideHeight_, 1.0F) * 0.5F) - lineHeight;
+
+    std::vector<GPUVertex> vertices;
+    std::vector<std::uint32_t> indices;
+    vertices.reserve(static_cast<std::size_t>(gridHalfCount * 4 + 5) * 24U);
+    indices.reserve(static_cast<std::size_t>(gridHalfCount * 4 + 5) * 36U);
+    for (int line = -gridHalfCount; line <= gridHalfCount; ++line)
+    {
+        const float offset = static_cast<float>(line) * gridStep;
+        const bool major = line == 0 || (line % 5) == 0;
+        const std::array<float, 4> color = major
+            ? std::array<float, 4>{0.34F, 0.36F, 0.40F, 1.0F}
+            : std::array<float, 4>{0.20F, 0.22F, 0.25F, 1.0F};
+        const float halfWidth = major ? lineWidth : lineWidth * 0.55F;
+        AppendBox(vertices, indices,
+            {-gridExtent, groundY - lineHeight, offset - halfWidth},
+            {gridExtent, groundY, offset + halfWidth}, color);
+        AppendBox(vertices, indices,
+            {offset - halfWidth, groundY - lineHeight, -gridExtent},
+            {offset + halfWidth, groundY, gridExtent}, color);
+    }
+    gridIndexCount_ = static_cast<std::uint32_t>(indices.size());
+
+    const float axisLength = std::max(2.0F, modelSpan * 0.65F);
+    const float axisHalfWidth = std::max(0.025F, modelSpan * 0.006F);
+    AppendBox(vertices, indices,
+        {0.0F, -axisHalfWidth, -axisHalfWidth},
+        {axisLength, axisHalfWidth, axisHalfWidth},
+        {0.95F, 0.12F, 0.10F, 1.0F});
+    AppendBox(vertices, indices,
+        {-axisHalfWidth, 0.0F, -axisHalfWidth},
+        {axisHalfWidth, axisLength, axisHalfWidth},
+        {0.12F, 0.90F, 0.22F, 1.0F});
+    AppendBox(vertices, indices,
+        {-axisHalfWidth, -axisHalfWidth, 0.0F},
+        {axisHalfWidth, axisHalfWidth, axisLength},
+        {0.12F, 0.32F, 0.98F, 1.0F});
+    axesIndexCount_ = static_cast<std::uint32_t>(indices.size()) - gridIndexCount_;
+
+    const std::size_t vertexBytes = vertices.size() * sizeof(GPUVertex);
+    const std::size_t indexBytes = indices.size() * sizeof(std::uint32_t);
+    if (!UploadBufferPair(
+            vertices.data(), vertexBytes, indices.data(), indexBytes,
+            guideVertexBuffer_, guideIndexBuffer_, "viewport guides"))
+    {
+        return false;
+    }
+    guidesDirty_ = false;
     return true;
 }
 
@@ -307,10 +465,14 @@ bool ViewportRenderer::EnsureTargets(
 bool ViewportRenderer::Render(
     const std::uint32_t width,
     const std::uint32_t height,
-    const EditorCamera& camera)
+    const EditorCamera& camera,
+    const bool showGrid,
+    const bool showAxes,
+    const std::array<float, 4>& backgroundColor)
 {
-    if (indexCount_ == 0U || width == 0U || height == 0U ||
-        !EnsurePipeline() || !EnsureTargets(width, height))
+    if (width == 0U || height == 0U || !EnsurePipeline() ||
+        !EnsureTargets(width, height) ||
+        ((showGrid || showAxes) && !EnsureGuides()))
     {
         return false;
     }
@@ -325,7 +487,9 @@ bool ViewportRenderer::Render(
         commandBuffer, 0U, viewProjection.data(), sizeof(viewProjection));
     SDL_GPUColorTargetInfo colorInfo{};
     colorInfo.texture = colorTarget_;
-    colorInfo.clear_color = {0.055F, 0.070F, 0.095F, 1.0F};
+    colorInfo.clear_color = {
+        backgroundColor[0], backgroundColor[1],
+        backgroundColor[2], backgroundColor[3]};
     colorInfo.load_op = SDL_GPU_LOADOP_CLEAR;
     colorInfo.store_op = SDL_GPU_STOREOP_STORE;
     colorInfo.cycle = true;
@@ -354,11 +518,33 @@ bool ViewportRenderer::Render(
     SDL_SetGPUViewport(pass, &viewport);
     SDL_SetGPUScissor(pass, &scissor);
     SDL_BindGPUGraphicsPipeline(pass, pipeline_);
-    const SDL_GPUBufferBinding vertexBinding{vertexBuffer_, 0U};
-    const SDL_GPUBufferBinding indexBinding{indexBuffer_, 0U};
-    SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
-    SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-    SDL_DrawGPUIndexedPrimitives(pass, indexCount_, 1U, 0U, 0, 0U);
+    if (showGrid || showAxes)
+    {
+        const SDL_GPUBufferBinding guideVertexBinding{guideVertexBuffer_, 0U};
+        const SDL_GPUBufferBinding guideIndexBinding{guideIndexBuffer_, 0U};
+        SDL_BindGPUVertexBuffers(pass, 0U, &guideVertexBinding, 1U);
+        SDL_BindGPUIndexBuffer(
+            pass, &guideIndexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        if (showGrid)
+        {
+            SDL_DrawGPUIndexedPrimitives(
+                pass, gridIndexCount_, 1U, 0U, 0, 0U);
+        }
+        if (showAxes)
+        {
+            SDL_DrawGPUIndexedPrimitives(
+                pass, axesIndexCount_, 1U, gridIndexCount_, 0, 0U);
+        }
+    }
+    if (indexCount_ > 0U)
+    {
+        const SDL_GPUBufferBinding vertexBinding{vertexBuffer_, 0U};
+        const SDL_GPUBufferBinding indexBinding{indexBuffer_, 0U};
+        SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+        SDL_BindGPUIndexBuffer(
+            pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        SDL_DrawGPUIndexedPrimitives(pass, indexCount_, 1U, 0U, 0, 0U);
+    }
     SDL_EndGPURenderPass(pass);
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
     {
@@ -381,6 +567,22 @@ void ViewportRenderer::ClearModel() noexcept
     indexCount_ = 0U;
 }
 
+void ViewportRenderer::ReleaseGuides() noexcept
+{
+    if (device_ != nullptr)
+    {
+        if (guideVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, guideVertexBuffer_);
+        if (guideIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, guideIndexBuffer_);
+    }
+    guideVertexBuffer_ = nullptr;
+    guideIndexBuffer_ = nullptr;
+    gridIndexCount_ = 0U;
+    axesIndexCount_ = 0U;
+    guidesDirty_ = true;
+}
+
 void ViewportRenderer::ReleaseTargets() noexcept
 {
     if (device_ != nullptr)
@@ -398,6 +600,7 @@ void ViewportRenderer::Shutdown() noexcept
 {
     if (device_ != nullptr) SDL_WaitForGPUIdle(device_);
     ClearModel();
+    ReleaseGuides();
     ReleaseTargets();
     if (device_ != nullptr && pipeline_ != nullptr)
     {

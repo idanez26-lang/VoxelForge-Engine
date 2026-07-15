@@ -80,6 +80,10 @@ void EditorLayer::OnImGuiRender()
         }
         startupVoxPath_.clear();
     }
+    if (requireVoxelViewportRender_ && renderedFrameCount_ == 5U)
+        workspace_.SetVoxelViewportView(EditorCameraView::Front);
+    if (requireVoxelViewportRender_ && renderedFrameCount_ == 15U)
+        workspace_.SetVoxelViewportView(EditorCameraView::Top);
     workspace_.Draw();
 
     ++renderedFrameCount_;

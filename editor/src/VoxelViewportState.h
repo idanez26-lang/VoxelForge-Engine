@@ -11,6 +11,13 @@
 namespace VoxelForge::Editor
 {
 
+enum class ViewportBackground : std::uint8_t
+{
+    Dark,
+    Neutral,
+    Light
+};
+
 struct VoxelViewportStatistics final
 {
     std::uint32_t Width = 0;
@@ -36,11 +43,21 @@ public:
     [[nodiscard]] bool HasModel() const noexcept;
     [[nodiscard]] const std::string& Name() const noexcept;
     [[nodiscard]] const VoxelViewportStatistics& Statistics() const noexcept;
+    void SetGridVisible(bool visible) noexcept;
+    void SetAxesVisible(bool visible) noexcept;
+    void SetBackground(ViewportBackground background) noexcept;
+    [[nodiscard]] bool IsGridVisible() const noexcept;
+    [[nodiscard]] bool AreAxesVisible() const noexcept;
+    [[nodiscard]] ViewportBackground Background() const noexcept;
+    [[nodiscard]] std::array<float, 4> BackgroundColor() const noexcept;
 
 private:
     std::string name_;
     VoxelViewportStatistics statistics_{};
     bool hasModel_ = false;
+    bool gridVisible_ = true;
+    bool axesVisible_ = true;
+    ViewportBackground background_ = ViewportBackground::Dark;
 };
 
 } // namespace VoxelForge::Editor

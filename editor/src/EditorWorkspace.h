@@ -39,6 +39,7 @@ public:
         const std::filesystem::path& filePath);
     [[nodiscard]] bool HasRenderedVoxelViewport() const noexcept;
     [[nodiscard]] bool HasVoxelViewportRenderError() const noexcept;
+    void SetVoxelViewportView(EditorCameraView view) noexcept;
 
 private:
     void DrawMainMenuBar();
@@ -74,6 +75,7 @@ private:
     void CloseProject();
     void UpdateWindowTitle();
     void ClearVoxelViewport() noexcept;
+    void FrameVoxelViewport() noexcept;
 
     void AddConsoleMessage(std::string message);
     [[nodiscard]] std::string GetBackendDisplayName() const;

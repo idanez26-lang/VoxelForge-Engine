@@ -30,7 +30,9 @@ Matrix Multiply(const Matrix& left, const Matrix& right) noexcept
 }
 }
 
-void EditorCamera::Update(const bool viewportHovered)
+void EditorCamera::Update(
+    const bool viewportHovered,
+    const float viewportHeight)
 {
     if (!viewportHovered)
     {
@@ -43,6 +45,12 @@ void EditorCamera::Update(const bool viewportHovered)
         yawDegrees_ += io.MouseDelta.x * orbitSensitivity_;
         pitchDegrees_ -= io.MouseDelta.y * orbitSensitivity_;
         pitchDegrees_ = std::clamp(pitchDegrees_, -89.0F, 89.0F);
+        view_ = EditorCameraView::Perspective;
+    }
+
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+    {
+        Pan(io.MouseDelta.x, io.MouseDelta.y, viewportHeight);
     }
 
     if (io.MouseWheel != 0.0F)
@@ -50,6 +58,20 @@ void EditorCamera::Update(const bool viewportHovered)
         const float factor = std::pow(0.85F, io.MouseWheel);
         distance_ = std::clamp(distance_ * factor, 0.1F, 10000.0F);
     }
+}
+
+void EditorCamera::Pan(
+    const float horizontalPixels,
+    const float verticalPixels,
+    const float viewportHeight) noexcept
+{
+    const float safeHeight = std::max(viewportHeight, 1.0F);
+    const float worldUnitsPerPixel =
+        (2.0F * distance_ *
+         std::tan(DegreesToRadians(fieldOfViewDegrees_) * 0.5F)) /
+        safeHeight;
+    target_ = target_ - (GetRight() * horizontalPixels * worldUnitsPerPixel);
+    target_ = target_ + (GetUp() * verticalPixels * worldUnitsPerPixel);
 }
 
 void EditorCamera::Frame(
@@ -64,6 +86,51 @@ void EditorCamera::Frame(
         0.5F);
     const float halfFov = DegreesToRadians(fieldOfViewDegrees_) * 0.5F;
     distance_ = std::max(1.0F, (radius / std::tan(halfFov)) * 1.40F);
+}
+
+void EditorCamera::Reset() noexcept
+{
+    target_ = {};
+    yawDegrees_ = -135.0F;
+    pitchDegrees_ = -28.0F;
+    distance_ = 12.0F;
+    view_ = EditorCameraView::Perspective;
+}
+
+void EditorCamera::SetView(const EditorCameraView view) noexcept
+{
+    view_ = view;
+    switch (view)
+    {
+    case EditorCameraView::Front:
+        yawDegrees_ = -90.0F;
+        pitchDegrees_ = 0.0F;
+        break;
+    case EditorCameraView::Back:
+        yawDegrees_ = 90.0F;
+        pitchDegrees_ = 0.0F;
+        break;
+    case EditorCameraView::Left:
+        yawDegrees_ = 0.0F;
+        pitchDegrees_ = 0.0F;
+        break;
+    case EditorCameraView::Right:
+        yawDegrees_ = 180.0F;
+        pitchDegrees_ = 0.0F;
+        break;
+    case EditorCameraView::Top:
+        yawDegrees_ = -90.0F;
+        pitchDegrees_ = -89.0F;
+        break;
+    case EditorCameraView::Bottom:
+        yawDegrees_ = -90.0F;
+        pitchDegrees_ = 89.0F;
+        break;
+    case EditorCameraView::Perspective:
+        yawDegrees_ = -135.0F;
+        pitchDegrees_ = -28.0F;
+        break;
+    }
 }
 
 void EditorCamera::SetAspectRatio(const float aspectRatio) noexcept
@@ -109,6 +176,11 @@ float EditorCamera::GetDistance() const noexcept
 float EditorCamera::GetFieldOfViewDegrees() const noexcept
 {
     return fieldOfViewDegrees_;
+}
+
+EditorCameraView EditorCamera::GetView() const noexcept
+{
+    return view_;
 }
 
 std::array<float, 16> EditorCamera::GetViewProjection() const noexcept

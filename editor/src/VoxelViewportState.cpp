@@ -60,4 +60,49 @@ const VoxelViewportStatistics& VoxelViewportState::Statistics() const noexcept
     return statistics_;
 }
 
+void VoxelViewportState::SetGridVisible(const bool visible) noexcept
+{
+    gridVisible_ = visible;
+}
+
+void VoxelViewportState::SetAxesVisible(const bool visible) noexcept
+{
+    axesVisible_ = visible;
+}
+
+void VoxelViewportState::SetBackground(
+    const ViewportBackground background) noexcept
+{
+    background_ = background;
+}
+
+bool VoxelViewportState::IsGridVisible() const noexcept
+{
+    return gridVisible_;
+}
+
+bool VoxelViewportState::AreAxesVisible() const noexcept
+{
+    return axesVisible_;
+}
+
+ViewportBackground VoxelViewportState::Background() const noexcept
+{
+    return background_;
+}
+
+std::array<float, 4> VoxelViewportState::BackgroundColor() const noexcept
+{
+    switch (background_)
+    {
+    case ViewportBackground::Neutral:
+        return {0.18F, 0.19F, 0.21F, 1.0F};
+    case ViewportBackground::Light:
+        return {0.62F, 0.64F, 0.68F, 1.0F};
+    case ViewportBackground::Dark:
+    default:
+        return {0.055F, 0.070F, 0.095F, 1.0F};
+    }
+}
+
 } // namespace VoxelForge::Editor

@@ -432,42 +432,73 @@ void EditorWorkspace::DrawScenePanel()
         return;
     }
 
-    if (!viewportState_.HasModel())
-    {
-        ImGui::TextUnformatted("No voxel model loaded.");
-        ImGui::TextDisabled(
-            "Right-click a .vox asset and choose Open in Viewport.");
-        ImGui::End();
-        return;
-    }
-
+    const bool hasModel = viewportState_.HasModel();
     const VoxelViewportStatistics& statistics = viewportState_.Statistics();
-    ImGui::TextUnformatted(viewportState_.Name().c_str());
-    ImGui::SameLine();
+    ImGui::TextUnformatted(hasModel
+        ? viewportState_.Name().c_str()
+        : "No voxel model loaded.");
+    const float toolbarWidth = ImGui::GetContentRegionAvail().x;
+    const bool narrowToolbar = toolbarWidth < 520.0F;
     if (ImGui::Button("Frame Model"))
     {
-        viewportCamera_.Frame(
-            static_cast<float>(statistics.Width),
-            static_cast<float>(statistics.Height),
-            static_cast<float>(statistics.Depth));
+        FrameVoxelViewport();
+    }
+    ImGui::SameLine();
+    const char* viewNames[] = {
+        "Perspective", "Front", "Back", "Left", "Right", "Top", "Bottom"};
+    int selectedView = static_cast<int>(viewportCamera_.GetView());
+    ImGui::SetNextItemWidth(narrowToolbar ? 90.0F : 110.0F);
+    if (ImGui::Combo("##ViewportView", &selectedView, viewNames, 7))
+    {
+        viewportCamera_.SetView(static_cast<EditorCameraView>(selectedView));
+    }
+    if (!narrowToolbar) ImGui::SameLine();
+    bool showGrid = viewportState_.IsGridVisible();
+    if (ImGui::Checkbox("Grid", &showGrid))
+        viewportState_.SetGridVisible(showGrid);
+    ImGui::SameLine();
+    bool showAxes = viewportState_.AreAxesVisible();
+    if (ImGui::Checkbox("Axes", &showAxes))
+        viewportState_.SetAxesVisible(showAxes);
+    if (toolbarWidth >= 300.0F) ImGui::SameLine();
+    const char* backgroundNames[] = {"Dark", "Neutral", "Light"};
+    int selectedBackground = static_cast<int>(viewportState_.Background());
+    ImGui::SetNextItemWidth(90.0F);
+    if (ImGui::Combo(
+            "##ViewportBackground", &selectedBackground,
+            backgroundNames, 3))
+    {
+        viewportState_.SetBackground(
+            static_cast<ViewportBackground>(selectedBackground));
+    }
+
+    if (hasModel)
+    {
+        ImGui::TextDisabled(
+            "%u x %u x %u | %zu voxels | %zu faces | %zu triangles",
+            statistics.Width, statistics.Height, statistics.Depth,
+            statistics.OccupiedVoxelCount, statistics.TriangleCount / 2U,
+            statistics.TriangleCount);
+    }
+    else
+    {
+        ImGui::TextDisabled(
+            "Right-click a .vox file and choose Open in Viewport.");
     }
     ImGui::TextDisabled(
-        "%u x %u x %u | %zu voxels | %zu vertices | %zu triangles",
-        statistics.Width, statistics.Height, statistics.Depth,
-        statistics.OccupiedVoxelCount, statistics.VertexCount,
-        statistics.TriangleCount);
-    ImGui::TextDisabled("Right mouse: orbit | Mouse wheel: zoom");
+        "Right: orbit | Middle: pan | Wheel: zoom | F/double-click: frame | Home: reset");
 
     ImVec2 available = ImGui::GetContentRegionAvail();
     available.x = std::max(available.x, 1.0F);
     available.y = std::max(available.y, 1.0F);
-    const bool hovered = ImGui::IsWindowHovered(
-        ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-    viewportCamera_.Update(hovered);
     viewportCamera_.SetAspectRatio(available.x / available.y);
     const auto width = static_cast<std::uint32_t>(available.x);
     const auto height = static_cast<std::uint32_t>(available.y);
-    if (viewportRenderer_.Render(width, height, viewportCamera_))
+    if (viewportRenderer_.Render(
+            width, height, viewportCamera_,
+            viewportState_.IsGridVisible(),
+            viewportState_.AreAxesVisible(),
+            viewportState_.BackgroundColor()))
     {
         voxelViewportRendered_ = true;
         const ImVec2 imageOrigin = ImGui::GetCursorScreenPos();
@@ -480,6 +511,20 @@ void EditorWorkspace::DrawScenePanel()
             imageOrigin,
             ImVec2(imageOrigin.x + available.x, imageOrigin.y + available.y),
             IM_COL32(55, 64, 78, 255));
+
+        const bool imageHovered = ImGui::IsItemHovered();
+        viewportCamera_.Update(imageHovered, available.y);
+        const bool sceneActive = imageHovered || ImGui::IsWindowFocused(
+            ImGuiFocusedFlags_RootAndChildWindows);
+        const bool shortcutsEnabled = sceneActive &&
+            !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput;
+        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_F, false))
+            FrameVoxelViewport();
+        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Home, false))
+            viewportCamera_.Reset();
+        if (imageHovered &&
+            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            FrameVoxelViewport();
     }
     else if (!viewportRenderer_.LastError().empty())
     {
@@ -1073,6 +1118,10 @@ bool EditorWorkspace::OpenVoxInViewport(
     voxelViewportRendered_ = false;
     voxelViewportRenderFailed_ = false;
     const VoxelViewportStatistics& statistics = viewportState_.Statistics();
+    viewportRenderer_.ConfigureGuides(
+        static_cast<float>(statistics.Width),
+        static_cast<float>(statistics.Height),
+        static_cast<float>(statistics.Depth));
     viewportCamera_.Frame(
         static_cast<float>(statistics.Width),
         static_cast<float>(statistics.Height),
@@ -1095,12 +1144,28 @@ bool EditorWorkspace::HasVoxelViewportRenderError() const noexcept
     return voxelViewportRenderFailed_;
 }
 
+void EditorWorkspace::SetVoxelViewportView(
+    const EditorCameraView view) noexcept
+{
+    viewportCamera_.SetView(view);
+}
+
 void EditorWorkspace::ClearVoxelViewport() noexcept
 {
     viewportRenderer_.ClearModel();
+    viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();
     voxelViewportRendered_ = false;
     voxelViewportRenderFailed_ = false;
+}
+
+void EditorWorkspace::FrameVoxelViewport() noexcept
+{
+    const VoxelViewportStatistics& statistics = viewportState_.Statistics();
+    viewportCamera_.Frame(
+        viewportState_.HasModel() ? static_cast<float>(statistics.Width) : 1.0F,
+        viewportState_.HasModel() ? static_cast<float>(statistics.Height) : 1.0F,
+        viewportState_.HasModel() ? static_cast<float>(statistics.Depth) : 1.0F);
 }
 
 void EditorWorkspace::UpdateWindowTitle()
