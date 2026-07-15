@@ -93,6 +93,7 @@ EditorWorkspace::~EditorWorkspace()
 
 void EditorWorkspace::Draw()
 {
+    HandleCommandShortcuts();
     DrawMainMenuBar();
 
     const ImGuiID dockspaceId = ImGui::GetID(WorkspaceDockspaceName);
@@ -226,14 +227,24 @@ void EditorWorkspace::DrawMainMenuBar()
 
     if (ImGui::BeginMenu("Edit"))
     {
-        if (ImGui::MenuItem("Undo", "Ctrl+Z"))
+        const std::string undoLabel = commandHistory_.CanUndo()
+            ? "Undo " + std::string(commandHistory_.UndoName())
+            : "Undo";
+        if (ImGui::MenuItem(
+                undoLabel.c_str(), "Ctrl+Z", false,
+                commandHistory_.CanUndo()))
         {
-            AddConsoleMessage("Undo is not available yet.");
+            UndoCommand();
         }
 
-        if (ImGui::MenuItem("Redo", "Ctrl+Y"))
+        const std::string redoLabel = commandHistory_.CanRedo()
+            ? "Redo " + std::string(commandHistory_.RedoName())
+            : "Redo";
+        if (ImGui::MenuItem(
+                redoLabel.c_str(), "Ctrl+Y / Ctrl+Shift+Z", false,
+                commandHistory_.CanRedo()))
         {
-            AddConsoleMessage("Redo is not available yet.");
+            RedoCommand();
         }
 
         ImGui::Separator();
@@ -296,6 +307,53 @@ void EditorWorkspace::DrawMainMenuBar()
     }
 
     ImGui::EndMainMenuBar();
+}
+
+void EditorWorkspace::HandleCommandShortcuts()
+{
+    const ImGuiIO& io = ImGui::GetIO();
+    const bool incompatiblePopupOpen = ImGui::IsPopupOpen(
+        nullptr,
+        ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    if (io.WantTextInput || ImGui::IsAnyItemActive() || incompatiblePopupOpen)
+    {
+        return;
+    }
+
+    constexpr ImGuiInputFlags shortcutFlags = ImGuiInputFlags_RouteGlobal;
+    if (ImGui::Shortcut(
+            ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, shortcutFlags))
+    {
+        if (commandHistory_.CanRedo()) RedoCommand();
+    }
+    else if (ImGui::Shortcut(
+                 ImGuiMod_Ctrl | ImGuiKey_Z, shortcutFlags))
+    {
+        if (commandHistory_.CanUndo()) UndoCommand();
+    }
+    else if (ImGui::Shortcut(
+                 ImGuiMod_Ctrl | ImGuiKey_Y, shortcutFlags))
+    {
+        if (commandHistory_.CanRedo()) RedoCommand();
+    }
+}
+
+void EditorWorkspace::UndoCommand()
+{
+    const std::string name(commandHistory_.UndoName());
+    const CommandResult result = commandHistory_.Undo();
+    AddConsoleMessage(result
+        ? "Undo: " + name
+        : "Undo failed: " + result.Message);
+}
+
+void EditorWorkspace::RedoCommand()
+{
+    const std::string name(commandHistory_.RedoName());
+    const CommandResult result = commandHistory_.Redo();
+    AddConsoleMessage(result
+        ? "Redo: " + name
+        : "Redo failed: " + result.Message);
 }
 
 void EditorWorkspace::DrawDockSpace(const ImGuiID dockspaceId)
@@ -1181,6 +1239,7 @@ bool EditorWorkspace::OpenVoxInViewport(
         AddConsoleMessage("VOX viewport load failed: the first grid is empty.");
         return false;
     }
+    commandHistory_.Clear();
     viewportGrid_ = *grid;
     voxelModelCenter_ = CalculateVoxelMeshCenter(*built.Mesh);
     static_cast<void>(voxelSelection_.Clear());
@@ -1265,6 +1324,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
 
 void EditorWorkspace::ClearVoxelViewport() noexcept
 {
+    commandHistory_.Clear();
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();

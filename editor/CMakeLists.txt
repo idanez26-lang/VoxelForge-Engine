@@ -57,6 +57,23 @@ else()
         VoxelForgeEditorVoxelSelection PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorCommands STATIC)
+target_sources(
+    VoxelForgeEditorCommands
+    PRIVATE src/Commands/CommandHistory.cpp
+)
+target_include_directories(
+    VoxelForgeEditorCommands
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_features(VoxelForgeEditorCommands PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorCommands PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorCommands PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(VoxelForgeEditor)
 
 if(WIN32)
@@ -144,6 +161,7 @@ target_link_libraries(
     VoxelForgeEditor
     PRIVATE
         VoxelForgeEditorAssetBrowser
+        VoxelForgeEditorCommands
         VoxelForgeEditorVoxelSelection
         VoxelForgeProject
         VoxelForgeRenderer

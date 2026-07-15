@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetBrowser/AssetBrowser.h"
+#include "Commands/CommandHistory.h"
 #include "EditorCamera.h"
 #include "EditorExitRequest.h"
 #include "ViewportRenderer.h"
@@ -49,6 +50,9 @@ public:
 
 private:
     void DrawMainMenuBar();
+    void HandleCommandShortcuts();
+    void UndoCommand();
+    void RedoCommand();
     void DrawDockSpace(ImGuiID dockspaceId);
     void BuildDefaultLayout(ImGuiID dockspaceId);
 
@@ -95,6 +99,10 @@ private:
     VoxelViewportState viewportState_;
     std::optional<Voxel::VoxelGrid> viewportGrid_;
     VoxelSelectionState voxelSelection_;
+    // Commands are scoped to the current project/model session. Clearing the
+    // history before replacement prevents future commands from retaining a
+    // handle to an obsolete model.
+    CommandHistory commandHistory_;
     Vec3 voxelModelCenter_{};
     std::vector<std::string> consoleMessages_;
     EditorExitRequest exitRequest_{};

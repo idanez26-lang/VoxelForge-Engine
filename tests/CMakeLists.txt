@@ -107,6 +107,20 @@ add_test(
     NAME VoxelForge.Editor.VoxelSelection
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelSelectionTests>
 )
+
+add_executable(
+    VoxelForgeEditorCommandHistoryTests
+    Editor/CommandHistoryTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorCommandHistoryTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorCommandHistoryTests)
+add_test(
+    NAME VoxelForge.Editor.CommandHistory
+    COMMAND $<TARGET_FILE:VoxelForgeEditorCommandHistoryTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -171,6 +185,7 @@ set_tests_properties(
     VoxelForge.Editor.AssetBrowser
     VoxelForge.Editor.VoxelViewport
     VoxelForge.Editor.VoxelSelection
+    VoxelForge.Editor.CommandHistory
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Voxel.Core
