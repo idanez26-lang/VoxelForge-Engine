@@ -4,10 +4,13 @@
 #include "AssetBrowserViewModel.h"
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace VoxelForge::Editor
 {
@@ -15,6 +18,8 @@ namespace VoxelForge::Editor
 class AssetBrowser final
 {
 public:
+    using MessageCallback = std::function<void(std::string)>;
+
     [[nodiscard]] bool SetAssetsRoot(
         const std::filesystem::path& assetsRoot);
     void ClearAssetsRoot() noexcept;
@@ -36,6 +41,7 @@ public:
     [[nodiscard]] const AssetBrowserViewSettings& ViewSettings() const noexcept;
     void SetSearchText(std::string_view searchText) noexcept;
     [[nodiscard]] std::vector<const AssetEntry*> VisibleEntries() const;
+    void SetMessageCallback(MessageCallback callback);
 
 private:
     struct PendingEntryOperation final
@@ -44,6 +50,26 @@ private:
         std::filesystem::path RelativePath;
         std::string Name;
         AssetEntryType Type = AssetEntryType::File;
+    };
+
+    struct VoxModelReport final
+    {
+        std::uint32_t X = 0;
+        std::uint32_t Y = 0;
+        std::uint32_t Z = 0;
+        std::uint32_t VoxelCount = 0;
+    };
+
+    struct VoxInspectionReport final
+    {
+        std::filesystem::path RelativePath;
+        bool Succeeded = false;
+        std::string Message;
+        std::uint32_t Version = 0;
+        std::vector<VoxModelReport> Models;
+        std::uint64_t TotalVoxelCount = 0;
+        bool HasCustomPalette = false;
+        std::vector<std::string> Warnings;
     };
 
     void DrawToolbar();
@@ -63,9 +89,12 @@ private:
     void DrawNewFolderPopup();
     void DrawRenamePopup();
     void DrawDeletePopup();
+    void DrawVoxInspectionPopup();
     void RequestNewFolder();
     void RequestRename(const AssetEntry& entry);
     void RequestDelete(const AssetEntry& entry);
+    void InspectVox(const AssetEntry& entry);
+    void EmitMessage(std::string message) const;
     void ResetPendingOperations() noexcept;
     [[nodiscard]] bool IsPendingOperationCurrent(
         const PendingEntryOperation& operation) const;
@@ -75,10 +104,12 @@ private:
 
     AssetDirectory directory_;
     AssetBrowserViewModel viewModel_;
+    MessageCallback messageCallback_;
     std::optional<std::filesystem::path> selectedRelativePath_;
     std::optional<std::filesystem::path> newFolderAssetsRoot_;
     std::optional<PendingEntryOperation> pendingRename_;
     std::optional<PendingEntryOperation> pendingDelete_;
+    std::optional<VoxInspectionReport> voxInspectionReport_;
     std::array<char, 128> newFolderName_{};
     std::array<char, 256> renameName_{};
     std::string error_;
@@ -86,6 +117,7 @@ private:
     bool openNewFolderPopup_ = false;
     bool openRenamePopup_ = false;
     bool openDeletePopup_ = false;
+    bool openVoxInspectionPopup_ = false;
 };
 
 } // namespace VoxelForge::Editor

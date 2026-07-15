@@ -125,6 +125,7 @@ endif()
 # Renderer is lower-level than Core from this sprint onward.
 add_subdirectory(engine/Renderer)
 add_subdirectory(engine/Core)
+add_subdirectory(engine/Asset)
 add_subdirectory(engine/Project)
 add_subdirectory(engine/Scene)
 

@@ -15,6 +15,7 @@ target_include_directories(
 target_link_libraries(
     VoxelForgeEditorAssetBrowser
     PRIVATE
+        VoxelForgeAsset
         VoxelForgeImGui
 )
 target_compile_features(VoxelForgeEditorAssetBrowser PUBLIC cxx_std_20)

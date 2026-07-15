@@ -1,5 +1,7 @@
 #include "AssetBrowser.h"
 
+#include "VoxelForge/Asset/Vox/VoxImporter.h"
+
 #include <imgui.h>
 
 #include <algorithm>
@@ -16,6 +18,7 @@ namespace
 constexpr const char* NewFolderPopupName = "New Asset Folder";
 constexpr const char* RenamePopupName = "Rename Asset Entry";
 constexpr const char* DeletePopupName = "Delete Asset Entry";
+constexpr const char* VoxInspectionPopupName = "VOX Inspection";
 constexpr float DeletePopupContentWidth = 420.0F;
 constexpr float MinimumSearchWidth = 120.0F;
 
@@ -108,6 +111,27 @@ std::string DisplayedFileSize(const AssetEntry& entry)
 
     return std::to_string(*entry.FileSize()) + " B";
 }
+
+bool IsVoxFile(const AssetEntry& entry)
+{
+    if (!entry.IsFile())
+    {
+        return false;
+    }
+
+    std::string extension = entry.Extension();
+    std::transform(
+        extension.begin(),
+        extension.end(),
+        extension.begin(),
+        [](const unsigned char character)
+        {
+            return character >= 'A' && character <= 'Z'
+                ? static_cast<char>(character + ('a' - 'A'))
+                : static_cast<char>(character);
+        });
+    return extension == ".vox";
+}
 }
 
 bool AssetBrowser::SetAssetsRoot(
@@ -119,6 +143,7 @@ bool AssetBrowser::SetAssetsRoot(
     }
 
     selectedRelativePath_.reset();
+    voxInspectionReport_.reset();
     ResetPendingOperations();
     viewModel_.OnProjectChanged();
 
@@ -139,6 +164,7 @@ void AssetBrowser::ClearAssetsRoot() noexcept
 {
     directory_.Clear();
     selectedRelativePath_.reset();
+    voxInspectionReport_.reset();
     newFolderName_.fill('\0');
     renameName_.fill('\0');
     error_.clear();
@@ -178,6 +204,7 @@ void AssetBrowser::Draw(bool* open)
     DrawNewFolderPopup();
     DrawRenamePopup();
     DrawDeletePopup();
+    DrawVoxInspectionPopup();
     ImGui::End();
 }
 
@@ -321,6 +348,11 @@ void AssetBrowser::SetSearchText(const std::string_view searchText) noexcept
 std::vector<const AssetEntry*> AssetBrowser::VisibleEntries() const
 {
     return viewModel_.VisibleEntries(directory_.Entries());
+}
+
+void AssetBrowser::SetMessageCallback(MessageCallback callback)
+{
+    messageCallback_ = std::move(callback);
 }
 
 void AssetBrowser::DrawToolbar()
@@ -684,6 +716,16 @@ void AssetBrowser::DrawEntryContextMenu(
         RequestDelete(entry);
     }
 
+    if (IsVoxFile(entry))
+    {
+        ImGui::Separator();
+
+        if (ImGui::MenuItem("Inspect VOX"))
+        {
+            InspectVox(entry);
+        }
+    }
+
     ImGui::EndPopup();
 }
 
@@ -984,6 +1026,84 @@ void AssetBrowser::DrawDeletePopup()
     ImGui::EndPopup();
 }
 
+void AssetBrowser::DrawVoxInspectionPopup()
+{
+    if (openVoxInspectionPopup_)
+    {
+        ImGui::OpenPopup(VoxInspectionPopupName);
+        openVoxInspectionPopup_ = false;
+    }
+
+    if (!ImGui::BeginPopupModal(
+            VoxInspectionPopupName,
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        return;
+    }
+
+    if (!voxInspectionReport_)
+    {
+        ImGui::TextDisabled("No VOX inspection report is available.");
+    }
+    else
+    {
+        const VoxInspectionReport& report = *voxInspectionReport_;
+        ImGui::TextWrapped(
+            "Relative path: %s",
+            report.RelativePath.generic_string().c_str());
+
+        if (!report.Succeeded)
+        {
+            DrawError(report.Message);
+        }
+        else
+        {
+            ImGui::Text("Version: %u", report.Version);
+            ImGui::Text("Models: %zu", report.Models.size());
+            ImGui::Text("Total voxels: %llu",
+                static_cast<unsigned long long>(report.TotalVoxelCount));
+            ImGui::Text(
+                "Palette: %s",
+                report.HasCustomPalette ? "Custom RGBA" : "Default");
+            ImGui::Separator();
+
+            for (std::size_t index = 0; index < report.Models.size(); ++index)
+            {
+                const VoxModelReport& model = report.Models[index];
+                ImGui::BulletText(
+                    "Model %zu: %u x %u x %u, %u voxels",
+                    index + 1U,
+                    model.X,
+                    model.Y,
+                    model.Z,
+                    model.VoxelCount);
+            }
+        }
+
+        if (!report.Warnings.empty())
+        {
+            ImGui::Separator();
+            ImGui::TextUnformatted("Warnings:");
+
+            for (const std::string& warning : report.Warnings)
+            {
+                ImGui::BulletText("%s", warning.c_str());
+            }
+        }
+    }
+
+    ImGui::Spacing();
+
+    if (ImGui::Button("Close"))
+    {
+        ImGui::CloseCurrentPopup();
+        voxInspectionReport_.reset();
+    }
+
+    ImGui::EndPopup();
+}
+
 void AssetBrowser::RequestNewFolder()
 {
     newFolderName_.fill('\0');
@@ -1018,6 +1138,69 @@ void AssetBrowser::RequestDelete(const AssetEntry& entry)
     error_.clear();
     statusMessage_.clear();
     openDeletePopup_ = true;
+}
+
+void AssetBrowser::InspectVox(const AssetEntry& entry)
+{
+    using Asset::AssetImportOutcome;
+    using Asset::Vox::VoxImporter;
+    using Asset::Vox::VoxModel;
+
+    const std::string relativePath = entry.RelativePath().generic_string();
+    EmitMessage("VOX inspection started: " + relativePath);
+
+    const AssetImportOutcome<VoxModel> outcome =
+        VoxImporter{}.Inspect(entry.AbsolutePath());
+    VoxInspectionReport report;
+    report.RelativePath = entry.RelativePath();
+    report.Succeeded = outcome.Result.Succeeded;
+    report.Message = outcome.Result.Message;
+    report.Warnings = outcome.Result.Warnings;
+
+    if (outcome.Asset)
+    {
+        report.Version = outcome.Asset->Version;
+        report.TotalVoxelCount = outcome.Asset->TotalVoxelCount();
+        report.HasCustomPalette = outcome.Asset->HasCustomPalette;
+        report.Models.reserve(outcome.Asset->Models.size());
+
+        for (const Asset::Vox::VoxModelMetadata& model :
+             outcome.Asset->Models)
+        {
+            report.Models.push_back({
+                model.Dimensions.X,
+                model.Dimensions.Y,
+                model.Dimensions.Z,
+                model.VoxelCount});
+        }
+    }
+
+    if (outcome.Result.Succeeded)
+    {
+        EmitMessage("VOX inspection succeeded: " + relativePath);
+    }
+    else
+    {
+        EmitMessage(
+            "VOX inspection failed: " + relativePath + " - " +
+            outcome.Result.Message);
+    }
+
+    for (const std::string& warning : outcome.Result.Warnings)
+    {
+        EmitMessage("VOX inspection warning: " + warning);
+    }
+
+    voxInspectionReport_ = std::move(report);
+    openVoxInspectionPopup_ = true;
+}
+
+void AssetBrowser::EmitMessage(std::string message) const
+{
+    if (messageCallback_)
+    {
+        messageCallback_(std::move(message));
+    }
 }
 
 void AssetBrowser::ResetPendingOperations() noexcept

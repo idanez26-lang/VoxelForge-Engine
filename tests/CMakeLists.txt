@@ -84,6 +84,21 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeProjectManagerTests>
 )
 
+add_executable(
+    VoxelForgeAssetVoxImporterTests
+    Asset/VoxImporterTests.cpp
+)
+target_link_libraries(
+    VoxelForgeAssetVoxImporterTests
+    PRIVATE
+        VoxelForgeAsset
+)
+vf_configure_test(VoxelForgeAssetVoxImporterTests)
+add_test(
+    NAME VoxelForge.Asset.VoxImporter
+    COMMAND $<TARGET_FILE:VoxelForgeAssetVoxImporterTests>
+)
+
 set_tests_properties(
     VoxelForge.Core.Events
     VoxelForge.Core.Layers
@@ -91,6 +106,7 @@ set_tests_properties(
     VoxelForge.Editor.WindowTitle
     VoxelForge.Editor.AssetBrowser
     VoxelForge.Project.Manager
+    VoxelForge.Asset.VoxImporter
     PROPERTIES TIMEOUT 10
 )
 

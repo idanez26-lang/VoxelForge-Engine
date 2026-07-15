@@ -69,6 +69,11 @@ EditorWorkspace::EditorWorkspace(
           "Console ready",
           "VoxelForge Studio initialized"}
 {
+    assetBrowser_.SetMessageCallback(
+        [this](std::string message)
+        {
+            AddConsoleMessage(std::move(message));
+        });
 }
 
 void EditorWorkspace::Draw()
