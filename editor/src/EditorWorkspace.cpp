@@ -546,11 +546,19 @@ void EditorWorkspace::DrawInspectorPanel()
 
 void EditorWorkspace::DrawAssetBrowserPanel()
 {
-    ImGui::Begin("Asset Browser", &showAssetBrowser_);
-    ImGui::TextUnformatted("Asset Browser");
-    ImGui::Separator();
-    ImGui::TextDisabled("No assets available");
-    ImGui::End();
+    const auto& activeProject = projectManager_.ActiveProject();
+
+    if (activeProject)
+    {
+        static_cast<void>(assetBrowser_.SetAssetsRoot(
+            activeProject->RootPath() / "Assets"));
+    }
+    else
+    {
+        assetBrowser_.ClearAssetsRoot();
+    }
+
+    assetBrowser_.Draw(&showAssetBrowser_);
 }
 
 void EditorWorkspace::DrawConsolePanel()

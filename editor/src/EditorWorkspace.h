@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AssetBrowser/AssetBrowser.h"
 #include "EditorExitRequest.h"
 
 #include <array>
@@ -70,6 +71,7 @@ private:
 
     Project::ProjectManager& projectManager_;
     WindowTitleCallback windowTitleCallback_;
+    AssetBrowser assetBrowser_;
     std::vector<std::string> consoleMessages_;
     EditorExitRequest exitRequest_{};
 

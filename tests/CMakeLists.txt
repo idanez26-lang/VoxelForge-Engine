@@ -55,6 +55,21 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorAssetBrowserTests
+    Editor/AssetBrowserTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorAssetBrowserTests
+    PRIVATE
+        VoxelForgeEditorAssetBrowser
+)
+vf_configure_test(VoxelForgeEditorAssetBrowserTests)
+add_test(
+    NAME VoxelForge.Editor.AssetBrowser
+    COMMAND $<TARGET_FILE:VoxelForgeEditorAssetBrowserTests>
+)
+
+add_executable(
     VoxelForgeProjectManagerTests
     Project/ProjectManagerTests.cpp
 )
@@ -74,6 +89,7 @@ set_tests_properties(
     VoxelForge.Core.Layers
     VoxelForge.Editor.ExitRequest
     VoxelForge.Editor.WindowTitle
+    VoxelForge.Editor.AssetBrowser
     VoxelForge.Project.Manager
     PROPERTIES TIMEOUT 10
 )
