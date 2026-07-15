@@ -1,7 +1,10 @@
 #pragma once
 
 #include "AssetBrowser/AssetBrowser.h"
+#include "EditorCamera.h"
 #include "EditorExitRequest.h"
+#include "ViewportRenderer.h"
+#include "VoxelViewportState.h"
 
 #include <array>
 #include <filesystem>
@@ -28,9 +31,14 @@ public:
     EditorWorkspace(
         Project::ProjectManager& projectManager,
         WindowTitleCallback windowTitleCallback);
+    ~EditorWorkspace();
 
     void Draw();
     [[nodiscard]] bool ConsumeExitRequest() noexcept;
+    [[nodiscard]] bool OpenVoxInViewport(
+        const std::filesystem::path& filePath);
+    [[nodiscard]] bool HasRenderedVoxelViewport() const noexcept;
+    [[nodiscard]] bool HasVoxelViewportRenderError() const noexcept;
 
 private:
     void DrawMainMenuBar();
@@ -65,6 +73,7 @@ private:
     void SaveProject();
     void CloseProject();
     void UpdateWindowTitle();
+    void ClearVoxelViewport() noexcept;
 
     void AddConsoleMessage(std::string message);
     [[nodiscard]] std::string GetBackendDisplayName() const;
@@ -72,6 +81,9 @@ private:
     Project::ProjectManager& projectManager_;
     WindowTitleCallback windowTitleCallback_;
     AssetBrowser assetBrowser_;
+    EditorCamera viewportCamera_;
+    ViewportRenderer viewportRenderer_;
+    VoxelViewportState viewportState_;
     std::vector<std::string> consoleMessages_;
     EditorExitRequest exitRequest_{};
 
@@ -93,6 +105,8 @@ private:
     bool showNewProjectPopup_ = false;
     bool showOpenProjectPopup_ = false;
     bool resetLayoutRequested_ = false;
+    bool voxelViewportRendered_ = false;
+    bool voxelViewportRenderFailed_ = false;
 };
 
 } // namespace VoxelForge::Editor

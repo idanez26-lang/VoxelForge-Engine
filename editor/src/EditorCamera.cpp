@@ -8,7 +8,29 @@
 namespace VoxelForge::Editor
 {
 
-void EditorCamera::Update(const float deltaTime, const bool viewportHovered)
+namespace
+{
+using Matrix = std::array<float, 16>;
+
+Matrix Multiply(const Matrix& left, const Matrix& right) noexcept
+{
+    Matrix result{};
+    for (int column = 0; column < 4; ++column)
+    {
+        for (int row = 0; row < 4; ++row)
+        {
+            for (int index = 0; index < 4; ++index)
+            {
+                result[column * 4 + row] +=
+                    left[index * 4 + row] * right[column * 4 + index];
+            }
+        }
+    }
+    return result;
+}
+}
+
+void EditorCamera::Update(const bool viewportHovered)
 {
     if (!viewportHovered)
     {
@@ -16,72 +38,48 @@ void EditorCamera::Update(const float deltaTime, const bool viewportHovered)
     }
 
     ImGuiIO& io = ImGui::GetIO();
-
     if (ImGui::IsMouseDown(ImGuiMouseButton_Right))
     {
-        yawDegrees_ += io.MouseDelta.x * lookSensitivity_;
-        pitchDegrees_ -= io.MouseDelta.y * lookSensitivity_;
+        yawDegrees_ += io.MouseDelta.x * orbitSensitivity_;
+        pitchDegrees_ -= io.MouseDelta.y * orbitSensitivity_;
         pitchDegrees_ = std::clamp(pitchDegrees_, -89.0F, 89.0F);
-
-        const Vec3 forward = GetForward();
-        const Vec3 right = GetRight();
-        const Vec3 up{0.0F, 1.0F, 0.0F};
-
-        float speed = movementSpeed_;
-        if (ImGui::IsKeyDown(ImGuiKey_LeftShift))
-        {
-            speed *= 2.5F;
-        }
-
-        const float distance = speed * deltaTime;
-
-        if (ImGui::IsKeyDown(ImGuiKey_W))
-        {
-            position_ = position_ + (forward * distance);
-        }
-
-        if (ImGui::IsKeyDown(ImGuiKey_S))
-        {
-            position_ = position_ - (forward * distance);
-        }
-
-        if (ImGui::IsKeyDown(ImGuiKey_D))
-        {
-            position_ = position_ + (right * distance);
-        }
-
-        if (ImGui::IsKeyDown(ImGuiKey_A))
-        {
-            position_ = position_ - (right * distance);
-        }
-
-        if (ImGui::IsKeyDown(ImGuiKey_E))
-        {
-            position_ = position_ + (up * distance);
-        }
-
-        if (ImGui::IsKeyDown(ImGuiKey_Q))
-        {
-            position_ = position_ - (up * distance);
-        }
     }
 
     if (io.MouseWheel != 0.0F)
     {
-        position_ = position_ + (GetForward() * io.MouseWheel);
+        const float factor = std::pow(0.85F, io.MouseWheel);
+        distance_ = std::clamp(distance_ * factor, 0.1F, 10000.0F);
     }
 }
 
-const Vec3& EditorCamera::GetPosition() const noexcept
+void EditorCamera::Frame(
+    const float width,
+    const float height,
+    const float depth) noexcept
 {
-    return position_;
+    target_ = {};
+    const float radius = std::max(
+        0.5F * std::sqrt(
+            width * width + height * height + depth * depth),
+        0.5F);
+    const float halfFov = DegreesToRadians(fieldOfViewDegrees_) * 0.5F;
+    distance_ = std::max(1.0F, (radius / std::tan(halfFov)) * 1.40F);
+}
+
+void EditorCamera::SetAspectRatio(const float aspectRatio) noexcept
+{
+    aspectRatio_ = std::max(aspectRatio, 0.01F);
+}
+
+Vec3 EditorCamera::GetPosition() const noexcept
+{
+    return target_ - (GetForward() * distance_);
 }
 
 Vec3 EditorCamera::GetForward() const noexcept
 {
     const float yaw = DegreesToRadians(yawDegrees_);
     const float pitch = DegreesToRadians(pitchDegrees_);
-
     return Normalize({
         std::cos(pitch) * std::cos(yaw),
         std::sin(pitch),
@@ -98,9 +96,56 @@ Vec3 EditorCamera::GetUp() const noexcept
     return Normalize(Cross(GetRight(), GetForward()));
 }
 
+const Vec3& EditorCamera::GetTarget() const noexcept
+{
+    return target_;
+}
+
+float EditorCamera::GetDistance() const noexcept
+{
+    return distance_;
+}
+
 float EditorCamera::GetFieldOfViewDegrees() const noexcept
 {
     return fieldOfViewDegrees_;
+}
+
+std::array<float, 16> EditorCamera::GetViewProjection() const noexcept
+{
+    const Vec3 eye = GetPosition();
+    const Vec3 right = GetRight();
+    const Vec3 up = GetUp();
+    const Vec3 forward = GetForward();
+
+    const Matrix view{
+        right.X, up.X, forward.X, 0.0F,
+        right.Y, up.Y, forward.Y, 0.0F,
+        right.Z, up.Z, forward.Z, 0.0F,
+        -Dot(right, eye), -Dot(up, eye), -Dot(forward, eye), 1.0F};
+
+    constexpr float nearPlane = 0.05F;
+    const float farPlane = std::max(10000.0F, distance_ * 2.0F);
+    const float yScale =
+        1.0F / std::tan(DegreesToRadians(fieldOfViewDegrees_) * 0.5F);
+    const float xScale = yScale / aspectRatio_;
+    const float depthScale = farPlane / (farPlane - nearPlane);
+    const Matrix projection{
+        xScale, 0.0F, 0.0F, 0.0F,
+        0.0F, yScale, 0.0F, 0.0F,
+        0.0F, 0.0F, depthScale, 1.0F,
+        0.0F, 0.0F, -nearPlane * depthScale, 0.0F};
+
+    const Matrix columnMajor = Multiply(projection, view);
+    Matrix rowMajor{};
+    for (int row = 0; row < 4; ++row)
+    {
+        for (int column = 0; column < 4; ++column)
+        {
+            rowMajor[row * 4 + column] = columnMajor[column * 4 + row];
+        }
+    }
+    return rowMajor;
 }
 
 } // namespace VoxelForge::Editor

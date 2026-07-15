@@ -720,6 +720,11 @@ void AssetBrowser::DrawEntryContextMenu(
     {
         ImGui::Separator();
 
+        if (ImGui::MenuItem("Open in Viewport") && openVoxCallback_)
+        {
+            openVoxCallback_(entry.AbsolutePath());
+        }
+
         if (ImGui::MenuItem("Inspect VOX"))
         {
             InspectVox(entry);
@@ -727,6 +732,11 @@ void AssetBrowser::DrawEntryContextMenu(
     }
 
     ImGui::EndPopup();
+}
+
+void AssetBrowser::SetOpenVoxCallback(OpenVoxCallback callback)
+{
+    openVoxCallback_ = std::move(callback);
 }
 
 void AssetBrowser::DrawSelection() const

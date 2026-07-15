@@ -73,6 +73,26 @@ add_executable(
     VoxelForgeProjectManagerTests
     Project/ProjectManagerTests.cpp
 )
+
+add_executable(
+    VoxelForgeEditorVoxelViewportTests
+    Editor/VoxelViewportTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/VoxelViewportState.cpp
+)
+target_include_directories(
+    VoxelForgeEditorVoxelViewportTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelViewportTests
+    PRIVATE VoxelForgeMesh VoxelForgeImGui
+)
+vf_configure_test(VoxelForgeEditorVoxelViewportTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelViewport
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelViewportTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -135,6 +155,7 @@ set_tests_properties(
     VoxelForge.Editor.ExitRequest
     VoxelForge.Editor.WindowTitle
     VoxelForge.Editor.AssetBrowser
+    VoxelForge.Editor.VoxelViewport
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Voxel.Core
@@ -147,8 +168,13 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.Smoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelViewportSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --viewport-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
+        VoxelForge.Editor.VoxelViewportSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

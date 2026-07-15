@@ -19,6 +19,7 @@ class AssetBrowser final
 {
 public:
     using MessageCallback = std::function<void(std::string)>;
+    using OpenVoxCallback = std::function<void(std::filesystem::path)>;
 
     [[nodiscard]] bool SetAssetsRoot(
         const std::filesystem::path& assetsRoot);
@@ -42,6 +43,7 @@ public:
     void SetSearchText(std::string_view searchText) noexcept;
     [[nodiscard]] std::vector<const AssetEntry*> VisibleEntries() const;
     void SetMessageCallback(MessageCallback callback);
+    void SetOpenVoxCallback(OpenVoxCallback callback);
 
 private:
     struct PendingEntryOperation final
@@ -105,6 +107,7 @@ private:
     AssetDirectory directory_;
     AssetBrowserViewModel viewModel_;
     MessageCallback messageCallback_;
+    OpenVoxCallback openVoxCallback_;
     std::optional<std::filesystem::path> selectedRelativePath_;
     std::optional<std::filesystem::path> newFolderAssetsRoot_;
     std::optional<PendingEntryOperation> pendingRename_;

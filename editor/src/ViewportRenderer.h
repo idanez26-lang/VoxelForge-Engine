@@ -1,12 +1,17 @@
 #pragma once
 
 #include "EditorCamera.h"
-#include "EditorMath.h"
 
-#include <array>
+#include "VoxelForge/Mesh/MeshData.h"
+#include "VoxelForge/Voxel/VoxelPalette.h"
 
-struct ImDrawList;
-struct ImVec2;
+#include <cstdint>
+#include <string>
+
+struct SDL_GPUBuffer;
+struct SDL_GPUDevice;
+struct SDL_GPUGraphicsPipeline;
+struct SDL_GPUTexture;
 
 namespace VoxelForge::Editor
 {
@@ -14,39 +19,37 @@ namespace VoxelForge::Editor
 class ViewportRenderer final
 {
 public:
-    void Draw(
-        ImDrawList& drawList,
-        const ImVec2& origin,
-        const ImVec2& size,
-        const EditorCamera& camera,
-        const Vec3& cubePosition) const;
+    ~ViewportRenderer();
+
+    [[nodiscard]] bool Upload(
+        const Mesh::MeshData& mesh,
+        const Voxel::VoxelPalette& palette);
+    void ClearModel() noexcept;
+    [[nodiscard]] bool Render(
+        std::uint32_t width,
+        std::uint32_t height,
+        const EditorCamera& camera);
+    void Shutdown() noexcept;
+
+    [[nodiscard]] SDL_GPUTexture* Texture() const noexcept;
+    [[nodiscard]] const std::string& LastError() const noexcept;
 
 private:
-    [[nodiscard]] bool Project(
-        const Vec3& worldPosition,
-        const ImVec2& origin,
-        const ImVec2& size,
-        const EditorCamera& camera,
-        Vec2& screenPosition) const;
+    [[nodiscard]] bool EnsurePipeline();
+    [[nodiscard]] bool EnsureTargets(std::uint32_t width, std::uint32_t height);
+    void ReleaseTargets() noexcept;
+    void SetError(std::string message);
 
-    void DrawGrid(
-        ImDrawList& drawList,
-        const ImVec2& origin,
-        const ImVec2& size,
-        const EditorCamera& camera) const;
-
-    void DrawCube(
-        ImDrawList& drawList,
-        const ImVec2& origin,
-        const ImVec2& size,
-        const EditorCamera& camera,
-        const Vec3& cubePosition) const;
-
-    void DrawAxes(
-        ImDrawList& drawList,
-        const ImVec2& origin,
-        const ImVec2& size,
-        const EditorCamera& camera) const;
+    SDL_GPUDevice* device_ = nullptr;
+    SDL_GPUGraphicsPipeline* pipeline_ = nullptr;
+    SDL_GPUBuffer* vertexBuffer_ = nullptr;
+    SDL_GPUBuffer* indexBuffer_ = nullptr;
+    SDL_GPUTexture* colorTarget_ = nullptr;
+    SDL_GPUTexture* depthTarget_ = nullptr;
+    std::uint32_t width_ = 0;
+    std::uint32_t height_ = 0;
+    std::uint32_t indexCount_ = 0;
+    std::string lastError_;
 };
 
 } // namespace VoxelForge::Editor

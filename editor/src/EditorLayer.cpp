@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <stdexcept>
 #include <utility>
 
 namespace VoxelForge::Editor
@@ -18,11 +19,15 @@ EditorLayer::EditorLayer(
     Project::ProjectManager& projectManager,
     WindowTitleCallback windowTitleCallback,
     ApplicationCloseCallback applicationCloseCallback,
-    const std::size_t smokeTestFrameLimit)
+    const std::size_t smokeTestFrameLimit,
+    std::filesystem::path startupVoxPath,
+    const bool requireVoxelViewportRender)
     : Layer("VoxelForge Editor Layer"),
       workspace_(projectManager, std::move(windowTitleCallback)),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
-      smokeTestFrameLimit_(smokeTestFrameLimit)
+      smokeTestFrameLimit_(smokeTestFrameLimit),
+      startupVoxPath_(std::move(startupVoxPath)),
+      requireVoxelViewportRender_(requireVoxelViewportRender)
 {
 }
 
@@ -41,9 +46,6 @@ void EditorLayer::OnDetach()
 
 void EditorLayer::OnUpdate()
 {
-    const ImGuiIO& io = ImGui::GetIO();
-    deltaTime_ = std::clamp(io.DeltaTime, 0.0001F, 0.1F);
-    editorCamera_.Update(deltaTime_, viewportHovered_);
 }
 
 void EditorLayer::CreateDefaultScene()
@@ -70,6 +72,14 @@ void EditorLayer::CreateDefaultScene()
 
 void EditorLayer::OnImGuiRender()
 {
+    if (!startupVoxPath_.empty())
+    {
+        if (!workspace_.OpenVoxInViewport(startupVoxPath_))
+        {
+            throw std::runtime_error("Viewport startup model failed to load.");
+        }
+        startupVoxPath_.clear();
+    }
     workspace_.Draw();
 
     ++renderedFrameCount_;
@@ -77,6 +87,13 @@ void EditorLayer::OnImGuiRender()
     const bool smokeTestComplete =
         smokeTestFrameLimit_ > 0 &&
         renderedFrameCount_ >= smokeTestFrameLimit_;
+
+    if (requireVoxelViewportRender_ &&
+        (workspace_.HasVoxelViewportRenderError() ||
+         (smokeTestComplete && !workspace_.HasRenderedVoxelViewport())))
+    {
+        throw std::runtime_error("Viewport smoke test did not render a GPU frame.");
+    }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)
     {
@@ -311,61 +328,7 @@ void EditorLayer::DrawViewportPanel()
         ImGuiWindowFlags_NoScrollbar |
             ImGuiWindowFlags_NoScrollWithMouse);
 
-    viewportHovered_ = ImGui::IsWindowHovered(
-        ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-
-    const ImVec2 viewportOrigin = ImGui::GetCursorScreenPos();
-    ImVec2 viewportSize = ImGui::GetContentRegionAvail();
-
-    viewportSize.x = viewportSize.x < 1.0F ? 1.0F : viewportSize.x;
-    viewportSize.y = viewportSize.y < 1.0F ? 1.0F : viewportSize.y;
-
-    Vec3 cubePosition{0.0F, 1.0F, 0.0F};
-
-    if (scene_ != nullptr)
-    {
-        for (const auto& entity : scene_->GetEntities())
-        {
-            if (entity->GetMetadata().Category == "Voxel")
-            {
-                const auto& position = entity->GetTransform().Position;
-                cubePosition = {position[0], position[1] + 1.0F, position[2]};
-                break;
-            }
-        }
-    }
-
-    viewportRenderer_.Draw(
-        *ImGui::GetWindowDrawList(),
-        viewportOrigin,
-        viewportSize,
-        editorCamera_,
-        cubePosition);
-
-    ImGui::InvisibleButton(
-        "##ViewportInteraction",
-        viewportSize,
-        ImGuiButtonFlags_MouseButtonLeft |
-            ImGuiButtonFlags_MouseButtonRight);
-
-    ImGui::SetCursorScreenPos(
-        ImVec2(viewportOrigin.x + 10.0F, viewportOrigin.y + 10.0F));
-
-    ImGui::BeginGroup();
-
-    ImGui::TextUnformatted("Viewport 3D Prototype");
-    ImGui::TextDisabled("Clic droit + souris : regarder");
-    ImGui::TextDisabled("WASD : bouger | Q/E : descendre/monter");
-    ImGui::TextDisabled("Shift : acceleration | Molette : zoom");
-
-    const Vec3& cameraPosition = editorCamera_.GetPosition();
-    ImGui::Text(
-        "Camera %.1f / %.1f / %.1f",
-        cameraPosition.X,
-        cameraPosition.Y,
-        cameraPosition.Z);
-
-    ImGui::EndGroup();
+    ImGui::TextDisabled("The active viewport is hosted by the Scene panel.");
 
     ImGui::End();
 }

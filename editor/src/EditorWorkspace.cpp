@@ -4,6 +4,9 @@
 #include "VoxelForge/Project/Project.h"
 #include "VoxelForge/Project/ProjectManager.h"
 #include "VoxelForge/Renderer/Renderer.h"
+#include "VoxelForge/Asset/Vox/VoxImporter.h"
+#include "VoxelForge/Mesh/VoxelMeshBuilder.h"
+#include "VoxelForge/Voxel/VoxModelConverter.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -74,6 +77,16 @@ EditorWorkspace::EditorWorkspace(
         {
             AddConsoleMessage(std::move(message));
         });
+    assetBrowser_.SetOpenVoxCallback(
+        [this](std::filesystem::path filePath)
+        {
+            static_cast<void>(OpenVoxInViewport(filePath));
+        });
+}
+
+EditorWorkspace::~EditorWorkspace()
+{
+    viewportRenderer_.Shutdown();
 }
 
 void EditorWorkspace::Draw()
@@ -406,7 +419,11 @@ void EditorWorkspace::DrawExplorerPanel()
 
 void EditorWorkspace::DrawScenePanel()
 {
-    ImGui::Begin("Scene", &showScene_);
+    if (!ImGui::Begin("Scene", &showScene_))
+    {
+        ImGui::End();
+        return;
+    }
 
     if (!projectManager_.HasActiveProject())
     {
@@ -415,9 +432,60 @@ void EditorWorkspace::DrawScenePanel()
         return;
     }
 
-    ImGui::TextUnformatted("Scene");
-    ImGui::Separator();
-    ImGui::TextDisabled("3D viewport will appear here");
+    if (!viewportState_.HasModel())
+    {
+        ImGui::TextUnformatted("No voxel model loaded.");
+        ImGui::TextDisabled(
+            "Right-click a .vox asset and choose Open in Viewport.");
+        ImGui::End();
+        return;
+    }
+
+    const VoxelViewportStatistics& statistics = viewportState_.Statistics();
+    ImGui::TextUnformatted(viewportState_.Name().c_str());
+    ImGui::SameLine();
+    if (ImGui::Button("Frame Model"))
+    {
+        viewportCamera_.Frame(
+            static_cast<float>(statistics.Width),
+            static_cast<float>(statistics.Height),
+            static_cast<float>(statistics.Depth));
+    }
+    ImGui::TextDisabled(
+        "%u x %u x %u | %zu voxels | %zu vertices | %zu triangles",
+        statistics.Width, statistics.Height, statistics.Depth,
+        statistics.OccupiedVoxelCount, statistics.VertexCount,
+        statistics.TriangleCount);
+    ImGui::TextDisabled("Right mouse: orbit | Mouse wheel: zoom");
+
+    ImVec2 available = ImGui::GetContentRegionAvail();
+    available.x = std::max(available.x, 1.0F);
+    available.y = std::max(available.y, 1.0F);
+    const bool hovered = ImGui::IsWindowHovered(
+        ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    viewportCamera_.Update(hovered);
+    viewportCamera_.SetAspectRatio(available.x / available.y);
+    const auto width = static_cast<std::uint32_t>(available.x);
+    const auto height = static_cast<std::uint32_t>(available.y);
+    if (viewportRenderer_.Render(width, height, viewportCamera_))
+    {
+        voxelViewportRendered_ = true;
+        const ImVec2 imageOrigin = ImGui::GetCursorScreenPos();
+        ImGui::Image(
+            reinterpret_cast<ImTextureID>(viewportRenderer_.Texture()),
+            available,
+            ImVec2(0.0F, 0.0F),
+            ImVec2(1.0F, 1.0F));
+        ImGui::GetWindowDrawList()->AddRect(
+            imageOrigin,
+            ImVec2(imageOrigin.x + available.x, imageOrigin.y + available.y),
+            IM_COL32(55, 64, 78, 255));
+    }
+    else if (!viewportRenderer_.LastError().empty())
+    {
+        voxelViewportRenderFailed_ = true;
+        DrawErrorMessage(viewportRenderer_.LastError());
+    }
     ImGui::End();
 }
 
@@ -861,6 +929,7 @@ void EditorWorkspace::CreateProject()
         return;
     }
 
+    ClearVoxelViewport();
     AddConsoleMessage("Project created: " + project->Name());
     projectDialogError_.clear();
     welcomeError_.clear();
@@ -895,6 +964,7 @@ bool EditorWorkspace::OpenProject(
     projectDialogError_.clear();
     welcomeError_.clear();
     failedRecentProjectPath_.reset();
+    ClearVoxelViewport();
     AddConsoleMessage("Project opened: " + project->Name());
     UpdateWindowTitle();
     return true;
@@ -947,11 +1017,90 @@ void EditorWorkspace::CloseProject()
     }
 
     const std::string projectName = activeProject->Name();
+    ClearVoxelViewport();
     projectManager_.CloseProject();
     AddConsoleMessage("Project closed: " + projectName);
     welcomeError_.clear();
     failedRecentProjectPath_.reset();
     UpdateWindowTitle();
+}
+
+bool EditorWorkspace::OpenVoxInViewport(
+    const std::filesystem::path& filePath)
+{
+    Asset::Vox::VoxImporter importer;
+    const auto imported = importer.Inspect(filePath);
+    if (!imported.Result.Succeeded || !imported.Asset)
+    {
+        AddConsoleMessage("VOX viewport import failed: " + imported.Result.Message);
+        return false;
+    }
+
+    auto converted = Voxel::VoxModelConverter::Convert(
+        *imported.Asset, filePath.stem().string());
+    if (!converted.Succeeded || !converted.Model)
+    {
+        AddConsoleMessage("VOX viewport conversion failed: " + converted.Message);
+        return false;
+    }
+
+    const Voxel::VoxelGrid* grid = converted.Model->GetGrid(0U);
+    if (grid == nullptr)
+    {
+        AddConsoleMessage("VOX viewport load failed: no grid is available.");
+        return false;
+    }
+    Mesh::MeshBuildResult built = Mesh::VoxelMeshBuilder::Build(*grid);
+    if (!built.Succeeded || !built.Mesh)
+    {
+        AddConsoleMessage("VOX viewport mesh failed: " + built.Message);
+        return false;
+    }
+    if (!viewportRenderer_.Upload(*built.Mesh, converted.Model->Palette()))
+    {
+        const std::string error = viewportRenderer_.LastError();
+        ClearVoxelViewport();
+        AddConsoleMessage("VOX viewport GPU upload failed: " + error);
+        return false;
+    }
+    if (!viewportState_.Replace(
+            filePath.filename().string(), *converted.Model, *built.Mesh))
+    {
+        viewportRenderer_.ClearModel();
+        AddConsoleMessage("VOX viewport load failed: the first grid is empty.");
+        return false;
+    }
+    voxelViewportRendered_ = false;
+    voxelViewportRenderFailed_ = false;
+    const VoxelViewportStatistics& statistics = viewportState_.Statistics();
+    viewportCamera_.Frame(
+        static_cast<float>(statistics.Width),
+        static_cast<float>(statistics.Height),
+        static_cast<float>(statistics.Depth));
+    AddConsoleMessage("Opened in viewport: " + filePath.filename().string());
+    if (converted.Model->GridCount() > 1U)
+    {
+        AddConsoleMessage("Viewport v1 displays only the first VOX grid.");
+    }
+    return true;
+}
+
+bool EditorWorkspace::HasRenderedVoxelViewport() const noexcept
+{
+    return voxelViewportRendered_;
+}
+
+bool EditorWorkspace::HasVoxelViewportRenderError() const noexcept
+{
+    return voxelViewportRenderFailed_;
+}
+
+void EditorWorkspace::ClearVoxelViewport() noexcept
+{
+    viewportRenderer_.ClearModel();
+    viewportState_.Clear();
+    voxelViewportRendered_ = false;
+    voxelViewportRenderFailed_ = false;
 }
 
 void EditorWorkspace::UpdateWindowTitle()

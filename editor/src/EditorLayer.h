@@ -1,13 +1,12 @@
 #pragma once
 
-#include "EditorCamera.h"
 #include "EditorWorkspace.h"
-#include "ViewportRenderer.h"
 #include "VoxelForge/Core/Layer/Layer.h"
 #include "VoxelForge/Scene/Scene.h"
 
 #include <cstddef>
 #include <functional>
+#include <filesystem>
 #include <memory>
 
 struct ImGuiViewport;
@@ -31,7 +30,9 @@ public:
         Project::ProjectManager& projectManager,
         WindowTitleCallback windowTitleCallback,
         ApplicationCloseCallback applicationCloseCallback,
-        std::size_t smokeTestFrameLimit = 0);
+        std::size_t smokeTestFrameLimit = 0,
+        std::filesystem::path startupVoxPath = {},
+        bool requireVoxelViewportRender = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -57,13 +58,13 @@ private:
     std::unique_ptr<Scene::Scene> scene_;
     Scene::Entity* selectedEntity_ = nullptr;
 
-    EditorCamera editorCamera_{};
-    ViewportRenderer viewportRenderer_{};
     EditorWorkspace workspace_;
     ApplicationCloseCallback applicationCloseCallback_;
 
     std::size_t smokeTestFrameLimit_ = 0;
     std::size_t renderedFrameCount_ = 0;
+    std::filesystem::path startupVoxPath_;
+    bool requireVoxelViewportRender_ = false;
     bool applicationCloseRequested_ = false;
 
     float deltaTime_ = 1.0F / 60.0F;
