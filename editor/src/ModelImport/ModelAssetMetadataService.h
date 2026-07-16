@@ -1,8 +1,11 @@
 #pragma once
 
+#include "VoxelForge/Asset/Vox/VoxModelAnalyzer.h"
+
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -21,6 +24,7 @@ struct ModelAssetMetadata final
     std::uint32_t ImporterVersion = 1U;
     std::uintmax_t FileSize = 0U;
     std::int64_t SourceModifiedTime = 0;
+    std::optional<Asset::Vox::VoxModelAnalysis> Analysis;
 };
 
 enum class MetadataEnsureStatus
@@ -54,7 +58,29 @@ struct MetadataRebuildReport final
     std::size_t Repaired = 0U;
     std::size_t Ignored = 0U;
     std::size_t Errors = 0U;
+    std::size_t AnalysesCreated = 0U;
+    std::size_t AnalysesUpdated = 0U;
+    std::size_t AnalysesUnchanged = 0U;
     std::vector<std::string> ErrorMessages;
+};
+
+enum class MetadataAnalysisStatus
+{
+    Created,
+    Updated,
+    Unchanged,
+    Failed
+};
+
+struct MetadataAnalysisResult final
+{
+    MetadataAnalysisStatus Status = MetadataAnalysisStatus::Failed;
+    MetadataEnsureStatus MetadataStatus = MetadataEnsureStatus::Failed;
+    ModelAssetMetadata Metadata;
+    Asset::Vox::VoxModelAnalysis Analysis;
+    std::string Message;
+
+    [[nodiscard]] bool Succeeded() const noexcept;
 };
 
 class ModelAssetMetadataService final
@@ -85,6 +111,16 @@ public:
         std::string& errorMessage) const;
     [[nodiscard]] MetadataOperationResult EnsureMetadata(
         const std::filesystem::path& modelPath);
+    [[nodiscard]] Asset::Vox::VoxModelAnalysis Analyze(
+        const std::filesystem::path& modelPath) const;
+    [[nodiscard]] MetadataAnalysisResult AnalyzeAndUpdateMetadata(
+        const std::filesystem::path& modelPath,
+        bool forceReanalysis = false);
+    [[nodiscard]] std::optional<Asset::Vox::VoxModelAnalysis>
+        ReadCachedAnalysis(const std::filesystem::path& modelPath) const;
+    [[nodiscard]] bool NeedsReanalysis(
+        const std::filesystem::path& modelPath,
+        const ModelAssetMetadata& metadata) const;
     [[nodiscard]] MetadataRebuildReport RebuildMetadata();
 
     [[nodiscard]] std::filesystem::path MetadataPathFor(

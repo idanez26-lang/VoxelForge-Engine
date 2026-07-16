@@ -5,6 +5,7 @@ target_sources(
     PRIVATE
         src/Vox/VoxFormat.cpp
         src/Vox/VoxImporter.cpp
+        src/Vox/VoxModelAnalyzer.cpp
 )
 
 target_include_directories(

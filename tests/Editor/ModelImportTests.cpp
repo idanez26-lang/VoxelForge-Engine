@@ -48,7 +48,29 @@ bool WriteFile(const std::filesystem::path& path, const std::string& content)
 {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    output << content;
+    if (path.extension() == ".vox")
+    {
+        const auto writeU32 = [&output](const std::uint32_t value)
+        {
+            for (unsigned int shift = 0U; shift < 32U; shift += 8U)
+                output.put(static_cast<char>(value >> shift));
+        };
+        const std::uint32_t junkSize = static_cast<std::uint32_t>(content.size());
+        const std::uint32_t childrenSize =
+            12U + junkSize + 24U + 20U;
+        output.write("VOX ", 4); writeU32(150U);
+        output.write("MAIN", 4); writeU32(0U); writeU32(childrenSize);
+        output.write("JUNK", 4); writeU32(junkSize); writeU32(0U);
+        output.write(content.data(), static_cast<std::streamsize>(content.size()));
+        output.write("SIZE", 4); writeU32(12U); writeU32(0U);
+        writeU32(2U); writeU32(2U); writeU32(2U);
+        output.write("XYZI", 4); writeU32(8U); writeU32(0U);
+        writeU32(1U); output.put(0); output.put(0); output.put(0); output.put(1);
+    }
+    else
+    {
+        output << content;
+    }
     return static_cast<bool>(output);
 }
 
@@ -76,13 +98,14 @@ int main()
 
     const auto castle = sources / "castle.vox";
     if (!WriteFile(castle, "castle-v1")) return 1;
+    const std::string castleV1 = ReadFile(castle);
     const ModelImportResult simple = service.ImportModel(castle);
     const auto importedCastle = project / "Assets" / "Models" / "castle.vox";
     if (!Check(simple.Succeeded() &&
             simple.Status == ModelImportStatus::Imported &&
             simple.DestinationPath == importedCastle &&
             std::filesystem::is_regular_file(importedCastle) &&
-            ReadFile(importedCastle) == "castle-v1" && refreshCount == 1U,
+            ReadFile(importedCastle) == castleV1 && refreshCount == 1U,
             "Simple import, Models creation, or refresh failed.")) return 1;
 
     const auto tree = sources / "tree.vox";
@@ -99,9 +122,10 @@ int main()
             "Multiple import or single batch refresh failed.")) return 1;
 
     WriteFile(castle, "castle-v2");
+    const std::string castleV2 = ReadFile(castle);
     const ModelImportResult collision = service.ImportModel(castle);
     if (!Check(collision.Status == ModelImportStatus::Collision &&
-            ReadFile(importedCastle) == "castle-v1" && refreshCount == 2U,
+            ReadFile(importedCastle) == castleV1 && refreshCount == 2U,
             "Collision prompt state changed the destination.")) return 1;
 
     const ModelImportResult renamed = service.ImportModel(
@@ -117,7 +141,7 @@ int main()
     const ModelImportResult replaced = service.ImportModel(
         castle, ModelImportCollisionAction::Replace);
     if (!Check(replaced.Status == ModelImportStatus::Replaced &&
-            ReadFile(importedCastle) == "castle-v2" &&
+            ReadFile(importedCastle) == castleV2 &&
             refreshCount == refreshBeforeReplace + 1U,
             "Replace did not overwrite and refresh.")) return 1;
 
@@ -129,7 +153,7 @@ int main()
         castle, ModelImportCollisionAction::Cancel);
     if (!Check(skipped.Status == ModelImportStatus::Skipped &&
             cancelled.Status == ModelImportStatus::Cancelled &&
-            ReadFile(importedCastle) == "castle-v2" &&
+            ReadFile(importedCastle) == castleV2 &&
             refreshCount == refreshBeforeIgnore,
             "Skip or cancel modified assets.")) return 1;
 

@@ -5,6 +5,7 @@
 #include <charconv>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <random>
 #include <sstream>
 #include <system_error>
@@ -88,7 +89,65 @@ bool MetadataEquals(
         left.Importer == right.Importer &&
         left.ImporterVersion == right.ImporterVersion &&
         left.FileSize == right.FileSize &&
-        left.SourceModifiedTime == right.SourceModifiedTime;
+        left.SourceModifiedTime == right.SourceModifiedTime &&
+        left.Analysis == right.Analysis;
+}
+
+std::string SerializeSubModels(
+    const std::vector<Asset::Vox::VoxSubModelAnalysis>& models)
+{
+    std::ostringstream output;
+    for (std::size_t index = 0U; index < models.size(); ++index)
+    {
+        if (index > 0U) output << ';';
+        const auto& model = models[index];
+        output << model.SizeX << ',' << model.SizeY << ',' << model.SizeZ
+               << ',' << model.VoxelCount;
+    }
+    return output.str();
+}
+
+bool ParseSubModels(
+    const std::string& text,
+    std::vector<Asset::Vox::VoxSubModelAnalysis>& models)
+{
+    models.clear();
+    if (text.empty()) return true;
+    std::size_t start = 0U;
+    while (start <= text.size())
+    {
+        const std::size_t end = text.find(';', start);
+        const std::string_view item(text.data() + start,
+            (end == std::string::npos ? text.size() : end) - start);
+        std::array<std::uint64_t, 4U> fields{};
+        std::size_t fieldStart = 0U;
+        for (std::size_t field = 0U; field < fields.size(); ++field)
+        {
+            const std::size_t fieldEnd = item.find(',', fieldStart);
+            const std::size_t actualEnd = fieldEnd == std::string_view::npos
+                ? item.size() : fieldEnd;
+            const std::string_view value = item.substr(
+                fieldStart, actualEnd - fieldStart);
+            const auto parsed = std::from_chars(
+                value.data(), value.data() + value.size(), fields[field]);
+            if (value.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != value.data() + value.size() ||
+                (field < 3U && fields[field] >
+                    std::numeric_limits<std::uint32_t>::max()))
+                return false;
+            if (field < 3U && fieldEnd == std::string_view::npos) return false;
+            if (field == 3U && fieldEnd != std::string_view::npos) return false;
+            fieldStart = actualEnd + 1U;
+        }
+        models.push_back({
+            static_cast<std::uint32_t>(fields[0]),
+            static_cast<std::uint32_t>(fields[1]),
+            static_cast<std::uint32_t>(fields[2]),
+            fields[3]});
+        if (end == std::string::npos) break;
+        start = end + 1U;
+    }
+    return true;
 }
 
 std::string DefaultAssetId()
@@ -107,6 +166,11 @@ std::string DefaultAssetId()
 bool MetadataOperationResult::Succeeded() const noexcept
 {
     return Status != MetadataEnsureStatus::Failed;
+}
+
+bool MetadataAnalysisResult::Succeeded() const noexcept
+{
+    return Status != MetadataAnalysisStatus::Failed;
 }
 
 ModelAssetMetadataService::ModelAssetMetadataService(
@@ -210,6 +274,56 @@ MetadataReadResult ModelAssetMetadataService::ReadMetadata(
     result.SourceFile = values["source_file"];
     result.SourceExtension = values["source_extension"];
     result.Importer = values["importer"];
+    if (values.contains("analysis_status"))
+    {
+        static constexpr std::array<const char*, 10U> AnalysisFields{
+            "vox_format_version", "model_count", "size_x", "size_y",
+            "size_z", "voxel_count", "used_palette_colors",
+            "has_custom_palette", "analysis_error", "submodels"};
+        for (const char* field : AnalysisFields)
+            if (!values.contains(field))
+                return {false, {},
+                    std::string("Missing cached analysis field: ") + field};
+        Asset::Vox::VoxModelAnalysis analysis;
+        analysis.Valid = values["analysis_status"] == "valid";
+        if (!analysis.Valid && values["analysis_status"] != "error")
+            return {false, {}, "Invalid analysis status."};
+        std::uint32_t customPalette = 0U;
+        if (!ParseInteger(values["vox_format_version"], analysis.FormatVersion) ||
+            !ParseInteger(values["model_count"], analysis.ModelCount) ||
+            !ParseInteger(values["size_x"], analysis.SizeX) ||
+            !ParseInteger(values["size_y"], analysis.SizeY) ||
+            !ParseInteger(values["size_z"], analysis.SizeZ) ||
+            !ParseInteger(values["voxel_count"], analysis.VoxelCount) ||
+            !ParseInteger(values["used_palette_colors"],
+                analysis.UsedPaletteColorCount) ||
+            !ParseInteger(values["has_custom_palette"], customPalette) ||
+            customPalette > 1U ||
+            !ParseSubModels(values["submodels"], analysis.Models))
+            return {false, {}, "Invalid cached analysis field."};
+        analysis.HasCustomPalette = customPalette == 1U;
+        analysis.FileSize = static_cast<std::uint64_t>(result.FileSize);
+        analysis.Error = values["analysis_error"];
+        if (analysis.Valid)
+        {
+            std::uint64_t totalVoxels = 0U;
+            for (const auto& model : analysis.Models)
+            {
+                if (model.VoxelCount >
+                    std::numeric_limits<std::uint64_t>::max() - totalVoxels)
+                    return {false, {}, "Incoherent cached VOX analysis."};
+                totalVoxels += model.VoxelCount;
+            }
+            if (analysis.FormatVersion == 0U || analysis.ModelCount == 0U ||
+                analysis.SizeX == 0U || analysis.SizeY == 0U ||
+                analysis.SizeZ == 0U ||
+                analysis.Models.size() != analysis.ModelCount ||
+                totalVoxels != analysis.VoxelCount ||
+                analysis.UsedPaletteColorCount > 255U)
+                return {false, {}, "Incoherent cached VOX analysis."};
+        }
+        result.Analysis = std::move(analysis);
+    }
     return {true, std::move(result), {}};
 }
 
@@ -266,6 +380,25 @@ bool ModelAssetMetadataService::WriteMetadata(
                << "importer_version=" << metadata.ImporterVersion << '\n'
                << "file_size=" << metadata.FileSize << '\n'
                << "source_modified_time=" << metadata.SourceModifiedTime << '\n';
+        if (metadata.Analysis)
+        {
+            const auto& analysis = *metadata.Analysis;
+            output << "vox_format_version=" << analysis.FormatVersion << '\n'
+                   << "model_count=" << analysis.ModelCount << '\n'
+                   << "size_x=" << analysis.SizeX << '\n'
+                   << "size_y=" << analysis.SizeY << '\n'
+                   << "size_z=" << analysis.SizeZ << '\n'
+                   << "voxel_count=" << analysis.VoxelCount << '\n'
+                   << "used_palette_colors="
+                   << analysis.UsedPaletteColorCount << '\n'
+                   << "has_custom_palette="
+                   << (analysis.HasCustomPalette ? 1 : 0) << '\n'
+                   << "analysis_status="
+                   << (analysis.Valid ? "valid" : "error") << '\n'
+                   << "analysis_error=" << EscapeValue(analysis.Error) << '\n'
+                   << "submodels="
+                   << EscapeValue(SerializeSubModels(analysis.Models)) << '\n';
+        }
         if (!output) { errorMessage = "Unable to write metadata temporary file."; }
     }
     if (errorMessage.empty() && beforeInstall_ && !beforeInstall_())
@@ -352,6 +485,9 @@ MetadataOperationResult ModelAssetMetadataService::EnsureMetadata(
     if (!error.empty()) return {MetadataEnsureStatus::Failed, {}, std::move(error)};
     if (existing.Succeeded)
     {
+        if (existing.Metadata.FileSize == expected.FileSize &&
+            existing.Metadata.SourceModifiedTime == expected.SourceModifiedTime)
+            expected.Analysis = existing.Metadata.Analysis;
         std::string validationError;
         if (ValidateMetadata(existing.Metadata, resolved, validationError) &&
             MetadataEquals(existing.Metadata, expected))
@@ -362,6 +498,84 @@ MetadataOperationResult ModelAssetMetadataService::EnsureMetadata(
     return {metadataExisted ? MetadataEnsureStatus::Repaired :
         MetadataEnsureStatus::Created, expected,
         metadataExisted ? "Metadata repaired." : "Metadata created."};
+}
+
+Asset::Vox::VoxModelAnalysis ModelAssetMetadataService::Analyze(
+    const std::filesystem::path& modelPath) const
+{
+    std::filesystem::path resolved;
+    std::string error;
+    if (!ResolveModelPath(modelPath, resolved, error))
+    {
+        Asset::Vox::VoxModelAnalysis result;
+        result.Error = std::move(error);
+        return result;
+    }
+    return Asset::Vox::VoxModelAnalyzer{}.Analyze(resolved);
+}
+
+MetadataAnalysisResult ModelAssetMetadataService::AnalyzeAndUpdateMetadata(
+    const std::filesystem::path& modelPath,
+    const bool forceReanalysis)
+{
+    const MetadataReadResult previous = ReadMetadata(MetadataPathFor(modelPath));
+    const bool previouslyHadAnalysis =
+        previous.Succeeded && previous.Metadata.Analysis.has_value();
+    const MetadataOperationResult ensured = EnsureMetadata(modelPath);
+    if (!ensured.Succeeded())
+        return {MetadataAnalysisStatus::Failed, ensured.Status, {}, {},
+            ensured.Message};
+    ModelAssetMetadata metadata = ensured.Metadata;
+    const bool cacheAvailable = metadata.Analysis.has_value();
+    if (!forceReanalysis && cacheAvailable &&
+        !NeedsReanalysis(modelPath, metadata))
+    {
+        if (!metadata.Analysis->Valid)
+            return {MetadataAnalysisStatus::Failed, ensured.Status, metadata,
+                *metadata.Analysis, metadata.Analysis->Error};
+        return {MetadataAnalysisStatus::Unchanged, ensured.Status, metadata,
+            *metadata.Analysis, "Cached VOX analysis is current."};
+    }
+
+    Asset::Vox::VoxModelAnalysis analysis = Analyze(modelPath);
+    metadata.Analysis = analysis;
+    std::string error;
+    if (!WriteMetadata(modelPath, metadata, error))
+        return {MetadataAnalysisStatus::Failed, ensured.Status, {},
+            std::move(analysis), std::move(error)};
+    if (!analysis.Valid)
+        return {MetadataAnalysisStatus::Failed, ensured.Status, metadata,
+            analysis, analysis.Error};
+    return {previouslyHadAnalysis ? MetadataAnalysisStatus::Updated
+                                 : MetadataAnalysisStatus::Created,
+        ensured.Status, metadata, analysis,
+        previouslyHadAnalysis ? "VOX analysis updated."
+                              : "VOX analysis created."};
+}
+
+std::optional<Asset::Vox::VoxModelAnalysis>
+ModelAssetMetadataService::ReadCachedAnalysis(
+    const std::filesystem::path& modelPath) const
+{
+    const MetadataReadResult read = ReadMetadata(MetadataPathFor(modelPath));
+    return read.Succeeded ? read.Metadata.Analysis : std::nullopt;
+}
+
+bool ModelAssetMetadataService::NeedsReanalysis(
+    const std::filesystem::path& modelPath,
+    const ModelAssetMetadata& metadata) const
+{
+    if (!metadata.Analysis) return true;
+    std::string error;
+    std::filesystem::path resolved;
+    if (!ResolveModelPath(modelPath, resolved, error)) return true;
+    std::error_code filesystemError;
+    const auto size = std::filesystem::file_size(resolved, filesystemError);
+    if (filesystemError || size != metadata.FileSize) return true;
+    const auto modified = std::filesystem::last_write_time(
+        resolved, filesystemError);
+    return filesystemError || static_cast<std::int64_t>(
+        modified.time_since_epoch().count()) != metadata.SourceModifiedTime;
 }
 
 MetadataRebuildReport ModelAssetMetadataService::RebuildMetadata()
@@ -378,13 +592,24 @@ MetadataRebuildReport ModelAssetMetadataService::RebuildMetadata()
         if (std::filesystem::is_symlink(status) || !entry.is_regular_file(error) ||
             LowerAscii(entry.path().extension().string()) != ".vox")
         { ++report.Ignored; error.clear(); continue; }
-        const MetadataOperationResult result = EnsureMetadata(entry.path());
-        switch (result.Status)
+        const MetadataAnalysisResult result =
+            AnalyzeAndUpdateMetadata(entry.path());
+        switch (result.MetadataStatus)
         {
         case MetadataEnsureStatus::Created: ++report.Created; break;
         case MetadataEnsureStatus::Unchanged: ++report.Unchanged; break;
         case MetadataEnsureStatus::Repaired: ++report.Repaired; break;
-        case MetadataEnsureStatus::Failed: ++report.Errors; report.ErrorMessages.push_back(result.Message); break;
+        case MetadataEnsureStatus::Failed: break;
+        }
+        switch (result.Status)
+        {
+        case MetadataAnalysisStatus::Created: ++report.AnalysesCreated; break;
+        case MetadataAnalysisStatus::Updated: ++report.AnalysesUpdated; break;
+        case MetadataAnalysisStatus::Unchanged: ++report.AnalysesUnchanged; break;
+        case MetadataAnalysisStatus::Failed:
+            ++report.Errors;
+            report.ErrorMessages.push_back(result.Message);
+            break;
         }
     }
     return report;

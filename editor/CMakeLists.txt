@@ -8,6 +8,7 @@ target_include_directories(
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_compile_features(VoxelForgeEditorAssetMetadata PUBLIC cxx_std_20)
+target_link_libraries(VoxelForgeEditorAssetMetadata PUBLIC VoxelForgeAsset)
 if(MSVC)
     target_compile_options(VoxelForgeEditorAssetMetadata PRIVATE /W4 /permissive-)
 else()
@@ -52,6 +53,29 @@ else()
             -Wextra
             -Wpedantic
     )
+endif()
+
+add_library(VoxelForgeEditorAssetInspector STATIC)
+target_sources(
+    VoxelForgeEditorAssetInspector
+    PRIVATE src/AssetInspector/AssetInspectorViewModel.cpp
+)
+target_include_directories(
+    VoxelForgeEditorAssetInspector
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorAssetInspector
+    PUBLIC
+        VoxelForgeEditorAssetBrowser
+        VoxelForgeEditorAssetMetadata
+)
+target_compile_features(VoxelForgeEditorAssetInspector PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorAssetInspector PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorAssetInspector PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 add_library(VoxelForgeEditorVoxelSelection STATIC)
@@ -228,6 +252,7 @@ target_link_libraries(
     VoxelForgeEditor
     PRIVATE
         VoxelForgeEditorAssetBrowser
+        VoxelForgeEditorAssetInspector
         VoxelForgeEditorCommands
         VoxelForgeEditorModelImport
         VoxelForgeEditorQualityOfLife

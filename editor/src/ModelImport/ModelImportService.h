@@ -79,6 +79,9 @@ public:
     [[nodiscard]] MetadataRebuildReport RebuildMetadata();
     [[nodiscard]] MetadataReadResult ReadMetadataForModel(
         const std::filesystem::path& modelPath) const;
+    [[nodiscard]] MetadataAnalysisResult AnalyzeModel(
+        const std::filesystem::path& modelPath,
+        bool forceReanalysis = false);
 
     [[nodiscard]] const std::filesystem::path& ProjectRoot() const noexcept;
     [[nodiscard]] std::filesystem::path ModelsDirectory() const;

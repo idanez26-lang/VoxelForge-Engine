@@ -367,6 +367,20 @@ AssetBrowser::SelectedRelativePath() const noexcept
     return selectedRelativePath_;
 }
 
+std::optional<AssetEntry> AssetBrowser::SelectedEntry() const
+{
+    if (!selectedRelativePath_) return std::nullopt;
+    const auto& entries = directory_.Entries();
+    const auto found = std::find_if(
+        entries.begin(), entries.end(), [this](const AssetEntry& entry)
+        {
+            return entry.RelativePath() == *selectedRelativePath_;
+        });
+    return found == entries.end()
+        ? std::nullopt
+        : std::optional<AssetEntry>(*found);
+}
+
 AssetBrowserViewSettings& AssetBrowser::ViewSettings() noexcept
 {
     return viewModel_.Settings();

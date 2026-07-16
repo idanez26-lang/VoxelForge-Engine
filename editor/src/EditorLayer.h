@@ -42,6 +42,7 @@ public:
         bool voxelSaveSmokeTest = false,
         bool addVoxelSmokeTest = false,
         bool modelImportSmokeTest = false,
+        bool modelImportVisualTest = false,
         bool qualityOfLifeSmokeTest = false,
         std::filesystem::path qualityOfLifeParent = {});
 
@@ -86,6 +87,7 @@ private:
     bool voxelSaveSmokeTest_ = false;
     bool addVoxelSmokeTest_ = false;
     bool modelImportSmokeTest_ = false;
+    bool modelImportVisualTest_ = false;
     bool qualityOfLifeSmokeTest_ = false;
     std::filesystem::path qualityOfLifeParent_;
     bool voxelSelectionRayHit_ = false;

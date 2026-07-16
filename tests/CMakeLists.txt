@@ -100,6 +100,20 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorAssetInspectorTests
+    Editor/AssetInspectorTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorAssetInspectorTests
+    PRIVATE VoxelForgeEditorAssetInspector
+)
+vf_configure_test(VoxelForgeEditorAssetInspectorTests)
+add_test(
+    NAME VoxelForge.Editor.AssetInspector
+    COMMAND $<TARGET_FILE:VoxelForgeEditorAssetInspectorTests>
+)
+
+add_executable(
     VoxelForgeProjectManagerTests
     Project/ProjectManagerTests.cpp
 )
@@ -247,6 +261,20 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeAssetVoxModelAnalyzerTests
+    Asset/VoxModelAnalyzerTests.cpp
+)
+target_link_libraries(
+    VoxelForgeAssetVoxModelAnalyzerTests
+    PRIVATE VoxelForgeAsset
+)
+vf_configure_test(VoxelForgeAssetVoxModelAnalyzerTests)
+add_test(
+    NAME VoxelForge.Asset.VoxModelAnalyzer
+    COMMAND $<TARGET_FILE:VoxelForgeAssetVoxModelAnalyzerTests>
+)
+
+add_executable(
     VoxelForgeVoxelCoreTests
     Voxel/VoxelCoreTests.cpp
 )
@@ -299,6 +327,7 @@ set_tests_properties(
     VoxelForge.Editor.AssetBrowser
     VoxelForge.Editor.ModelImport
     VoxelForge.Editor.AssetMetadata
+    VoxelForge.Editor.AssetInspector
     VoxelForge.Editor.VoxelViewport
     VoxelForge.Editor.VoxelSelection
     VoxelForge.Editor.CommandHistory
@@ -309,6 +338,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelSave
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
+    VoxelForge.Asset.VoxModelAnalyzer
     VoxelForge.Voxel.Core
     VoxelForge.Voxel.Serializer
     VoxelForge.Mesh.VoxelMeshBuilder

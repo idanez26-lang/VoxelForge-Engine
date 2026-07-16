@@ -41,7 +41,43 @@ bool Check(const bool condition, const std::string& message)
     return condition;
 }
 
-bool WriteFile(const fs::path& path, const std::string& contents)
+bool WriteFile(
+    const fs::path& path,
+    const std::string& contents,
+    const std::uint32_t sizeX = 2U,
+    const std::uint32_t sizeY = 2U,
+    const std::uint32_t sizeZ = 2U)
+{
+    fs::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (path.extension() == ".vox")
+    {
+        const auto writeU32 = [&output](const std::uint32_t value)
+        {
+            for (unsigned int shift = 0U; shift < 32U; shift += 8U)
+                output.put(static_cast<char>(value >> shift));
+        };
+        const std::uint32_t junkSize =
+            static_cast<std::uint32_t>(contents.size());
+        const std::uint32_t childrenSize = 12U + junkSize + 24U + 20U;
+        output.write("VOX ", 4); writeU32(150U);
+        output.write("MAIN", 4); writeU32(0U); writeU32(childrenSize);
+        output.write("JUNK", 4); writeU32(junkSize); writeU32(0U);
+        output.write(contents.data(),
+            static_cast<std::streamsize>(contents.size()));
+        output.write("SIZE", 4); writeU32(12U); writeU32(0U);
+        writeU32(sizeX); writeU32(sizeY); writeU32(sizeZ);
+        output.write("XYZI", 4); writeU32(8U); writeU32(0U);
+        writeU32(1U); output.put(0); output.put(0); output.put(0); output.put(1);
+    }
+    else
+    {
+        output << contents;
+    }
+    return static_cast<bool>(output);
+}
+
+bool WriteRawFile(const fs::path& path, const std::string& contents)
 {
     fs::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -105,14 +141,55 @@ int main()
             treeCreated.Metadata.AssetId != created.Metadata.AssetId,
             "Two assets received the same id.")) return 1;
 
+    const std::string treeId = treeCreated.Metadata.AssetId;
+    const MetadataAnalysisResult treeAnalysis =
+        service.AnalyzeAndUpdateMetadata(tree);
+    const MetadataAnalysisResult treeCached =
+        service.AnalyzeAndUpdateMetadata(tree);
+    const auto cachedTree = service.ReadCachedAnalysis(tree);
+    if (!Check(treeAnalysis.Status == MetadataAnalysisStatus::Created &&
+            treeCached.Status == MetadataAnalysisStatus::Unchanged &&
+            cachedTree && cachedTree->Valid && cachedTree->SizeX == 2U &&
+            service.ReadMetadata(service.MetadataPathFor(tree))
+                    .Metadata.AssetId == treeId,
+            "Analysis cache creation, reuse, or asset id preservation failed."))
+        return 1;
+
+    const MetadataReadResult treeBeforeTimeChange =
+        service.ReadMetadata(service.MetadataPathFor(tree));
+    std::error_code timeError;
+    fs::last_write_time(tree,
+        fs::last_write_time(tree, timeError) + std::chrono::seconds(2),
+        timeError);
+    if (!Check(!timeError && service.NeedsReanalysis(
+            tree, treeBeforeTimeChange.Metadata) &&
+            service.AnalyzeAndUpdateMetadata(tree).Status ==
+                MetadataAnalysisStatus::Updated,
+            "Modification-time invalidation failed.")) return 1;
+
+    const MetadataReadResult treeBeforeSizeChange =
+        service.ReadMetadata(service.MetadataPathFor(tree));
+    WriteFile(tree, "tree-content-expanded", 3U, 4U, 5U);
+    const MetadataAnalysisResult sizeUpdated =
+        service.AnalyzeAndUpdateMetadata(tree);
+    if (!Check(service.NeedsReanalysis(tree, treeBeforeSizeChange.Metadata) &&
+            sizeUpdated.Status == MetadataAnalysisStatus::Updated &&
+            sizeUpdated.Analysis.SizeX == 3U &&
+            sizeUpdated.Analysis.SizeY == 4U &&
+            sizeUpdated.Analysis.SizeZ == 5U,
+            "File-size invalidation or updated dimensions failed.")) return 1;
+
     const fs::path unusual = models / "odd%=name.vox";
     WriteFile(unusual, "odd");
     const MetadataOperationResult unusualCreated = service.CreateMetadata(unusual);
+    const MetadataAnalysisResult unusualMigrated =
+        service.AnalyzeAndUpdateMetadata(unusual);
     const MetadataReadResult unusualRead = service.ReadMetadata(
         service.MetadataPathFor(unusual));
-    if (!Check(unusualCreated.Succeeded() && unusualRead.Succeeded &&
+    if (!Check(unusualCreated.Succeeded() && unusualMigrated.Succeeded() &&
+            unusualRead.Succeeded &&
             unusualRead.Metadata.SourceFile == "odd%=name.vox",
-            "Metadata escaping did not preserve a valid Windows filename.")) return 1;
+            "Metadata v1 migration or escaping failed.")) return 1;
 
     fs::remove(castleMetadata);
     const MetadataOperationResult recreated = service.EnsureMetadata(castle);
@@ -247,11 +324,14 @@ int main()
             oneMetadata.Succeeded && refreshCount == 1U,
             "Import metadata, multiple import, or single refresh failed.")) return 1;
     const std::string originalId = oneMetadata.Metadata.AssetId;
-    WriteFile(sources / "one.vox", "one replaced");
+    WriteFile(sources / "one.vox", "one replaced", 5U, 6U, 7U);
     if (!Check(importer.ImportModel(
             sources / "one.vox", ModelImportCollisionAction::Replace).Succeeded() &&
-            importer.ReadMetadataForModel(importedOne).Metadata.AssetId == originalId,
-            "Replace did not preserve the asset id.")) return 1;
+            importer.ReadMetadataForModel(importedOne).Metadata.AssetId == originalId &&
+            importer.ReadMetadataForModel(importedOne).Metadata.Analysis &&
+            importer.ReadMetadataForModel(importedOne)
+                .Metadata.Analysis->SizeX == 5U,
+            "Replace did not preserve the id and update dimensions.")) return 1;
     fs::remove(importer.ModelsDirectory() / "one.vox.vfmeta");
     if (!Check(importer.ImportModel(
             sources / "one.vox", ModelImportCollisionAction::Replace).Succeeded() &&
@@ -285,6 +365,36 @@ int main()
     static_cast<void>(importer.RebuildMetadata());
     if (!Check(refreshCount == beforeRebuildRefresh + 1U,
             "Metadata rebuild did not refresh exactly once.")) return 1;
+
+    const fs::path invalidSource = sources / "invalid.vox";
+    WriteRawFile(invalidSource, "not a vox file");
+    const std::string modelBeforeInvalidReplace = ReadFile(importedOne);
+    const MetadataReadResult metadataBeforeInvalidReplace =
+        importer.ReadMetadataForModel(importedOne);
+    const ModelImportResult invalidNew = importer.ImportModel(invalidSource);
+    WriteRawFile(sources / "one.vox", "invalid replacement");
+    const ModelImportResult invalidReplacement = importer.ImportModel(
+        sources / "one.vox", ModelImportCollisionAction::Replace);
+    if (!Check(!invalidNew.Succeeded() &&
+            !fs::exists(importer.ModelsDirectory() / "invalid.vox") &&
+            !invalidReplacement.Succeeded() &&
+            ReadFile(importedOne) == modelBeforeInvalidReplace &&
+            importer.ReadMetadataForModel(importedOne).Metadata.AssetId ==
+                metadataBeforeInvalidReplace.Metadata.AssetId,
+            "Invalid import refusal or replacement rollback failed.")) return 1;
+
+    const fs::path batchValid = sources / "batch-valid.vox";
+    const fs::path batchInvalid = sources / "batch-invalid.vox";
+    WriteFile(batchValid, "batch-valid");
+    WriteRawFile(batchInvalid, "invalid batch member");
+    const std::size_t refreshBeforePartialBatch = refreshCount;
+    const auto partialBatch = importer.ImportModels({batchValid, batchInvalid});
+    if (!Check(partialBatch.size() == 2U && partialBatch[0].Succeeded() &&
+            !partialBatch[1].Succeeded() &&
+            fs::exists(importer.ModelsDirectory() / "batch-valid.vox") &&
+            !fs::exists(importer.ModelsDirectory() / "batch-invalid.vox") &&
+            refreshCount == refreshBeforePartialBatch + 1U,
+            "Per-file partial batch strategy or refresh count failed.")) return 1;
 
     const fs::path rollbackProject = temporary.Path() / "RollbackProject";
     fs::create_directories(rollbackProject / "Assets");

@@ -31,18 +31,19 @@ EditorLayer::EditorLayer(
     const bool voxelSaveSmokeTest,
     const bool addVoxelSmokeTest,
     const bool modelImportSmokeTest,
+    const bool modelImportVisualTest,
     const bool qualityOfLifeSmokeTest,
     std::filesystem::path qualityOfLifeParent)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
           std::move(windowTitleCallback),
-          qualityOfLifeSmokeTest || modelImportSmokeTest
+          qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
               : ProjectDialogPreferences::DefaultStorageFilePath(),
-          qualityOfLifeSmokeTest || modelImportSmokeTest),
+          qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -56,6 +57,7 @@ EditorLayer::EditorLayer(
       voxelSaveSmokeTest_(voxelSaveSmokeTest),
       addVoxelSmokeTest_(addVoxelSmokeTest),
       modelImportSmokeTest_(modelImportSmokeTest),
+      modelImportVisualTest_(modelImportVisualTest),
       qualityOfLifeSmokeTest_(qualityOfLifeSmokeTest),
       qualityOfLifeParent_(std::move(qualityOfLifeParent))
 {
@@ -102,7 +104,8 @@ void EditorLayer::CreateDefaultScene()
 
 void EditorLayer::OnImGuiRender()
 {
-    if (!startupVoxPath_.empty() && !modelImportSmokeTest_)
+    if (!startupVoxPath_.empty() && !modelImportSmokeTest_ &&
+        !modelImportVisualTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -142,7 +145,8 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(
             workspace_.RunAddVoxelSmokeStep(renderedFrameCount_));
     }
-    if (modelImportSmokeTest_)
+    if (modelImportSmokeTest_ ||
+        (modelImportVisualTest_ && renderedFrameCount_ <= 1U))
     {
         static_cast<void>(workspace_.RunModelImportSmokeStep(
             renderedFrameCount_, startupVoxPath_));

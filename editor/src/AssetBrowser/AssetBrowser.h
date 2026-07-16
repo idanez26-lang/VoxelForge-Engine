@@ -41,6 +41,7 @@ public:
     [[nodiscard]] const AssetDirectory& Directory() const noexcept;
     [[nodiscard]] const std::optional<std::filesystem::path>&
         SelectedRelativePath() const noexcept;
+    [[nodiscard]] std::optional<AssetEntry> SelectedEntry() const;
     [[nodiscard]] AssetBrowserViewSettings& ViewSettings() noexcept;
     [[nodiscard]] const AssetBrowserViewSettings& ViewSettings() const noexcept;
     void SetSearchText(std::string_view searchText) noexcept;

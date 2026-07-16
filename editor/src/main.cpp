@@ -278,8 +278,8 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.PaintVoxelVisualTest,
                 commandLine.VoxelSaveSmokeTest,
                 commandLine.AddVoxelSmokeTest,
-                commandLine.ModelImportSmokeTest ||
-                    commandLine.ModelImportVisualTest,
+                commandLine.ModelImportSmokeTest,
+                commandLine.ModelImportVisualTest,
                 commandLine.QualityOfLifeSmokeTest,
                 commandLine.QualityOfLifeSmokeTest
                     ? viewportFixture.Parent() : std::filesystem::path{});

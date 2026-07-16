@@ -393,6 +393,9 @@ void EditorWorkspace::DrawMainMenuBar()
                 std::to_string(report.Unchanged) + " unchanged, " +
                 std::to_string(report.Repaired) + " repaired, " +
                 std::to_string(report.Ignored) + " ignored, " +
+                std::to_string(report.AnalysesCreated) + " analyzed, " +
+                std::to_string(report.AnalysesUpdated) + " updated, " +
+                std::to_string(report.AnalysesUnchanged) + " cached, " +
                 std::to_string(report.Errors) + " errors.");
             for (const std::string& error : report.ErrorMessages)
                 AddConsoleMessage("Model metadata error: " + error);
@@ -1022,9 +1025,73 @@ void EditorWorkspace::DrawInspectorPanel()
     ImGui::TextUnformatted("Inspector");
     ImGui::Separator();
 
+    static_cast<void>(
+        assetInspector_.UpdateSelection(assetBrowser_.SelectedEntry()));
+    const AssetInspectorState& assetState = assetInspector_.State();
+    if (assetState.Kind != AssetInspectorKind::None)
+    {
+        ImGui::TextUnformatted(assetState.Name.c_str());
+        ImGui::TextDisabled("%s", assetState.TypeLabel.c_str());
+        ImGui::Separator();
+        if (assetState.Kind == AssetInspectorKind::Folder ||
+            assetState.Kind == AssetInspectorKind::OtherFile)
+        {
+            ImGui::Text("Name: %s", assetState.Name.c_str());
+            ImGui::TextWrapped("Relative Path: %s",
+                assetState.RelativePath.generic_string().c_str());
+            ImGui::End();
+            return;
+        }
+
+        if (!assetState.AnalysisError.empty())
+        {
+            ImGui::TextUnformatted("Analysis Error");
+            DrawErrorMessage(assetState.AnalysisError);
+        }
+        else
+        {
+            ImGui::TextUnformatted("Model");
+            ImGui::Text("Dimensions: %s", assetState.Dimensions.c_str());
+            ImGui::Text("Voxel Count: %s", assetState.VoxelCount.c_str());
+            ImGui::Text("Model Count: %s", assetState.ModelCount.c_str());
+            ImGui::Text("Palette Colors: %s", assetState.PaletteColors.c_str());
+            ImGui::Text("Custom Palette: %s", assetState.CustomPalette.c_str());
+            ImGui::Text("VOX Version: %s", assetState.VoxVersion.c_str());
+        }
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Asset");
+        ImGui::TextWrapped("Asset ID: %s", assetState.AssetId.c_str());
+        ImGui::Text("Importer: %s", assetState.Importer.c_str());
+        ImGui::Text("Importer Version: %s",
+            assetState.ImporterVersion.c_str());
+        ImGui::TextWrapped("Relative Path: %s",
+            assetState.RelativePath.generic_string().c_str());
+        ImGui::Text("File Size: %s", assetState.FileSize.c_str());
+        ImGui::Text("Last Modified: %s", assetState.LastModified.c_str());
+        ImGui::Spacing();
+        if (ImGui::Button("Open in Viewport") && assetInspector_.Selection())
+            static_cast<void>(OpenVoxInViewport(
+                assetInspector_.Selection()->AbsolutePath()));
+        ImGui::SameLine();
+        if (ImGui::Button("Reveal in Asset Browser") &&
+            assetInspector_.Selection())
+            static_cast<void>(assetBrowser_.RevealEntry(
+                assetInspector_.Selection()->RelativePath()));
+        if (ImGui::Button("Reanalyze"))
+        {
+            const bool succeeded = assetInspector_.Reanalyze();
+            AddConsoleMessage(succeeded
+                ? "VOX analysis updated: " + assetState.Name
+                : "VOX analysis failed: " +
+                    assetInspector_.State().AnalysisError);
+        }
+        ImGui::End();
+        return;
+    }
+
     if (!activeVoxelModel_)
     {
-        ImGui::TextDisabled("No voxel model loaded.");
+        ImGui::TextDisabled("No asset selected.");
         ImGui::End();
         return;
     }
@@ -1947,6 +2014,7 @@ void EditorWorkspace::SynchronizeProjectAssets()
     {
         modelImportService_.ClearProjectRoot();
         assetBrowser_.ClearAssetsRoot();
+        assetInspector_.ClearProject();
         return;
     }
 
@@ -1959,6 +2027,8 @@ void EditorWorkspace::SynchronizeProjectAssets()
     {
         AddConsoleMessage("Asset Browser refresh failed.");
     }
+    if (!assetInspector_.SetAssetsRoot(project->RootPath() / "Assets"))
+        AddConsoleMessage("Asset Inspector setup failed.");
 }
 
 void EditorWorkspace::BeginModelImport(
@@ -2593,6 +2663,7 @@ bool EditorWorkspace::RunModelImportSmokeStep(
 {
     if (frame == 0U)
     {
+        resetLayoutRequested_ = true;
         const std::size_t refreshBaseline = assetBrowser_.RefreshCount();
         const ModelImportResult result =
             modelImportService_.ImportModel(sourcePath);
@@ -2627,6 +2698,15 @@ bool EditorWorkspace::RunModelImportSmokeStep(
                     {
                         return entry && entry->Extension() == ".vfmeta";
                     });
+            static_cast<void>(assetInspector_.UpdateSelection(
+                assetBrowser_.SelectedEntry()));
+            const AssetInspectorState& inspector = assetInspector_.State();
+            modelImportSmokeInspected_ =
+                inspector.Kind == AssetInspectorKind::VoxModel &&
+                inspector.Analysis && inspector.Analysis->Valid &&
+                !inspector.Dimensions.empty() &&
+                !inspector.VoxelCount.empty() &&
+                inspector.AssetId == modelImportSmokeAssetId_;
         }
     }
     else if (frame == 1U)
@@ -2652,6 +2732,11 @@ bool EditorWorkspace::RunModelImportSmokeStep(
                 metadata.Metadata.SourceFile == "renamed-model.vox" &&
                 std::filesystem::is_regular_file(
                     modelImportSmokeDestination_.string() + ".vfmeta");
+            static_cast<void>(assetInspector_.UpdateSelection(
+                assetBrowser_.SelectedEntry()));
+            modelImportSmokeReanalyzed_ = assetInspector_.Reanalyze() &&
+                assetInspector_.State().Name == "renamed-model.vox" &&
+                assetInspector_.State().AssetId == modelImportSmokeAssetId_;
         }
     }
     else if (frame == 3U)
@@ -2661,6 +2746,10 @@ bool EditorWorkspace::RunModelImportSmokeStep(
             !std::filesystem::exists(modelImportSmokeDestination_) &&
             !std::filesystem::exists(
                 modelImportSmokeDestination_.string() + ".vfmeta");
+        static_cast<void>(assetInspector_.UpdateSelection(
+            assetBrowser_.SelectedEntry()));
+        modelImportSmokeInspectorCleared_ =
+            assetInspector_.State().Kind == AssetInspectorKind::None;
         modelImportSmokeClean_ = true;
         std::error_code error;
         for (const auto& entry : std::filesystem::directory_iterator(
@@ -2679,6 +2768,8 @@ bool EditorWorkspace::RunModelImportSmokeStep(
 bool EditorWorkspace::ModelImportSmokePassed() const noexcept
 {
     return modelImportSmokeImported_ && modelImportSmokeMetadata_ &&
+        modelImportSmokeInspected_ && modelImportSmokeReanalyzed_ &&
+        modelImportSmokeInspectorCleared_ &&
         modelImportSmokeRefreshed_ && modelImportSmokeOpened_ &&
         modelImportSmokeRenamed_ && modelImportSmokeDeleted_ &&
         modelImportSmokeClean_ && HasRenderedVoxelViewport() &&

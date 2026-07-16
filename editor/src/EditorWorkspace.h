@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetBrowser/AssetBrowser.h"
+#include "AssetInspector/AssetInspectorViewModel.h"
 #include "Commands/CommandHistory.h"
 #include "Commands/Voxel/AddVoxelCommand.h"
 #include "Commands/Voxel/AddVoxelTarget.h"
@@ -157,6 +158,7 @@ private:
     Project::ProjectManager& projectManager_;
     WindowTitleCallback windowTitleCallback_;
     AssetBrowser assetBrowser_;
+    AssetInspectorViewModel assetInspector_;
     ModelImportService modelImportService_;
     EditorCamera viewportCamera_;
     ViewportRenderer viewportRenderer_;
@@ -260,11 +262,14 @@ private:
     bool addVoxelSmokeReloaded_ = false;
     bool modelImportSmokeImported_ = false;
     bool modelImportSmokeMetadata_ = false;
+    bool modelImportSmokeInspected_ = false;
     bool modelImportSmokeRefreshed_ = false;
     bool modelImportSmokeOpened_ = false;
     bool modelImportSmokeRenamed_ = false;
     bool modelImportSmokeDeleted_ = false;
     bool modelImportSmokeClean_ = false;
+    bool modelImportSmokeReanalyzed_ = false;
+    bool modelImportSmokeInspectorCleared_ = false;
     std::size_t modelImportSmokeRenderBaseline_ = 0U;
     std::filesystem::path modelImportSmokeDestination_;
     std::string modelImportSmokeAssetId_;

@@ -93,6 +93,14 @@ MetadataReadResult ModelImportService::ReadMetadataForModel(
     return metadataService_.ReadMetadata(metadataService_.MetadataPathFor(modelPath));
 }
 
+MetadataAnalysisResult ModelImportService::AnalyzeModel(
+    const std::filesystem::path& modelPath,
+    const bool forceReanalysis)
+{
+    return metadataService_.AnalyzeAndUpdateMetadata(
+        modelPath, forceReanalysis);
+}
+
 void ModelImportService::SetRefreshCallback(RefreshCallback callback)
 {
     refreshCallback_ = std::move(callback);
@@ -198,6 +206,13 @@ ModelImportResult ModelImportService::ImportModelImpl(
         return Fail(ModelImportStatus::Failed, sourcePath, {},
             "Import source does not exist or is not accessible.");
     }
+    const Asset::Vox::VoxModelAnalysis sourceAnalysis =
+        Asset::Vox::VoxModelAnalyzer{}.Analyze(absoluteSource);
+    if (!sourceAnalysis.Valid)
+    {
+        return Fail(ModelImportStatus::Failed, absoluteSource, {},
+            "Invalid VOX import refused: " + sourceAnalysis.Error);
+    }
 
     const std::filesystem::path modelsDirectory = ModelsDirectory();
     std::filesystem::create_directories(modelsDirectory, error);
@@ -260,8 +275,13 @@ ModelImportResult ModelImportService::ImportModelImpl(
         destination.string() + ".import.tmp";
     const std::filesystem::path importBackup =
         destination.string() + ".import.bak";
+    const std::filesystem::path metadataPath =
+        metadataService_.MetadataPathFor(destination);
+    const std::filesystem::path metadataImportBackup =
+        metadataPath.string() + ".import.bak";
     if (std::filesystem::exists(importTemporary, error) || error ||
-        std::filesystem::exists(importBackup, error) || error)
+        std::filesystem::exists(importBackup, error) || error ||
+        std::filesystem::exists(metadataImportBackup, error) || error)
     {
         return Fail(ModelImportStatus::Failed, absoluteSource, destination,
             "An import temporary or backup file already exists.");
@@ -280,11 +300,29 @@ ModelImportResult ModelImportService::ImportModelImpl(
     const bool replacing = successStatus == ModelImportStatus::Replaced;
     if (replacing)
     {
+        const bool hasMetadata = std::filesystem::exists(metadataPath, error);
+        if (error)
+        {
+            std::filesystem::remove(importTemporary, error);
+            return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+                "Unable to inspect existing model metadata.");
+        }
+        if (hasMetadata && !std::filesystem::copy_file(
+                metadataPath, metadataImportBackup,
+                std::filesystem::copy_options::none, error))
+        {
+            std::error_code cleanup;
+            std::filesystem::remove(importTemporary, cleanup);
+            return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+                "Unable to back up existing model metadata: " +
+                    error.message());
+        }
         std::filesystem::rename(destination, importBackup, error);
         if (error)
         {
             std::error_code cleanup;
             std::filesystem::remove(importTemporary, cleanup);
+            std::filesystem::remove(metadataImportBackup, cleanup);
             return Fail(ModelImportStatus::Failed, absoluteSource, destination,
                 "Unable to back up the existing model: " + error.message());
         }
@@ -295,22 +333,31 @@ ModelImportResult ModelImportService::ImportModelImpl(
     {
         std::error_code cleanup;
         std::filesystem::remove(importTemporary, cleanup);
-        if (replacing) std::filesystem::rename(importBackup, destination, cleanup);
+        if (replacing)
+        {
+            std::filesystem::rename(importBackup, destination, cleanup);
+            std::filesystem::remove(metadataImportBackup, cleanup);
+        }
         return Fail(ModelImportStatus::Failed, absoluteSource, destination,
             "Unable to install the imported model: " + error.message());
     }
 
-    const MetadataOperationResult metadata =
-        metadataService_.EnsureMetadata(destination);
+    const MetadataAnalysisResult metadata =
+        metadataService_.AnalyzeAndUpdateMetadata(destination);
     if (!metadata.Succeeded())
     {
         std::error_code cleanup;
         std::filesystem::remove(destination, cleanup);
-        if (replacing) std::filesystem::rename(importBackup, destination, cleanup);
-        else std::filesystem::remove(
-            metadataService_.MetadataPathFor(destination), cleanup);
+        std::filesystem::remove(metadataPath, cleanup);
+        if (replacing)
+        {
+            std::filesystem::rename(importBackup, destination, cleanup);
+            if (std::filesystem::exists(metadataImportBackup, cleanup))
+                std::filesystem::rename(
+                    metadataImportBackup, metadataPath, cleanup);
+        }
         return Fail(ModelImportStatus::Failed, absoluteSource, destination,
-            "Unable to create model metadata: " + metadata.Message);
+            "Unable to analyze imported model: " + metadata.Message);
     }
     if (replacing)
     {
@@ -318,6 +365,10 @@ ModelImportResult ModelImportService::ImportModelImpl(
         if (error)
             return Fail(ModelImportStatus::Failed, absoluteSource, destination,
                 "Import succeeded, but model backup cleanup failed.");
+        std::filesystem::remove(metadataImportBackup, error);
+        if (error)
+            return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+                "Import succeeded, but metadata backup cleanup failed.");
     }
 
     RecordRecentImport(destination);
