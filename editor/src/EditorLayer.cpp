@@ -28,6 +28,7 @@ EditorLayer::EditorLayer(
     const bool eraseVoxelVisualTest,
     const bool paintVoxelSmokeTest,
     const bool paintVoxelVisualTest,
+    const bool voxelSaveSmokeTest,
     const bool qualityOfLifeSmokeTest,
     std::filesystem::path qualityOfLifeParent)
     : Layer("VoxelForge Editor Layer"),
@@ -48,6 +49,7 @@ EditorLayer::EditorLayer(
       eraseVoxelVisualTest_(eraseVoxelVisualTest),
       paintVoxelSmokeTest_(paintVoxelSmokeTest),
       paintVoxelVisualTest_(paintVoxelVisualTest),
+      voxelSaveSmokeTest_(voxelSaveSmokeTest),
       qualityOfLifeSmokeTest_(qualityOfLifeSmokeTest),
       qualityOfLifeParent_(std::move(qualityOfLifeParent))
 {
@@ -124,6 +126,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(
             workspace_.RunPaintVoxelSmokeStep(renderedFrameCount_));
     }
+    if (voxelSaveSmokeTest_)
+    {
+        static_cast<void>(
+            workspace_.RunVoxelSaveSmokeStep(renderedFrameCount_));
+    }
     if (qualityOfLifeSmokeTest_)
     {
         static_cast<void>(workspace_.RunQualityOfLifeSmokeStep(
@@ -162,6 +169,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Paint voxel smoke test did not execute, undo, redo, and render.");
+    }
+    if (voxelSaveSmokeTest_ && smokeTestComplete &&
+        !workspace_.VoxelSaveSmokePassed())
+    {
+        throw std::runtime_error(
+            "Voxel save smoke test did not save, reload, and render edits.");
     }
     if (qualityOfLifeSmokeTest_ && smokeTestComplete &&
         !workspace_.QualityOfLifeSmokePassed())

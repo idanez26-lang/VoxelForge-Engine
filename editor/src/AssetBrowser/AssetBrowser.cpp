@@ -112,11 +112,11 @@ std::string DisplayedFileSize(const AssetEntry& entry)
     return std::to_string(*entry.FileSize()) + " B";
 }
 
-bool IsVoxFile(const AssetEntry& entry)
+std::string LowercaseExtension(const AssetEntry& entry)
 {
     if (!entry.IsFile())
     {
-        return false;
+        return {};
     }
 
     std::string extension = entry.Extension();
@@ -130,7 +130,18 @@ bool IsVoxFile(const AssetEntry& entry)
                 ? static_cast<char>(character + ('a' - 'A'))
                 : static_cast<char>(character);
         });
-    return extension == ".vox";
+    return extension;
+}
+
+bool IsViewportVoxelFile(const AssetEntry& entry)
+{
+    const std::string extension = LowercaseExtension(entry);
+    return extension == ".vox" || extension == ".vfvoxel";
+}
+
+bool IsVoxFile(const AssetEntry& entry)
+{
+    return LowercaseExtension(entry) == ".vox";
 }
 }
 
@@ -716,7 +727,7 @@ void AssetBrowser::DrawEntryContextMenu(
         RequestDelete(entry);
     }
 
-    if (IsVoxFile(entry))
+    if (IsViewportVoxelFile(entry))
     {
         ImGui::Separator();
 
@@ -725,7 +736,7 @@ void AssetBrowser::DrawEntryContextMenu(
             openVoxCallback_(entry.AbsolutePath());
         }
 
-        if (ImGui::MenuItem("Inspect VOX"))
+        if (IsVoxFile(entry) && ImGui::MenuItem("Inspect VOX"))
         {
             InspectVox(entry);
         }

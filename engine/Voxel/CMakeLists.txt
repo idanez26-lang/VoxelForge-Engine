@@ -5,6 +5,7 @@ target_sources(
     PRIVATE
         src/VoxelGrid.cpp
         src/VoxelModel.cpp
+        src/VoxelModelSerializer.cpp
         src/VoxelPalette.cpp
 )
 

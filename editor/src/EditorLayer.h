@@ -39,6 +39,7 @@ public:
         bool eraseVoxelVisualTest = false,
         bool paintVoxelSmokeTest = false,
         bool paintVoxelVisualTest = false,
+        bool voxelSaveSmokeTest = false,
         bool qualityOfLifeSmokeTest = false,
         std::filesystem::path qualityOfLifeParent = {});
 
@@ -80,6 +81,7 @@ private:
     bool eraseVoxelVisualTest_ = false;
     bool paintVoxelSmokeTest_ = false;
     bool paintVoxelVisualTest_ = false;
+    bool voxelSaveSmokeTest_ = false;
     bool qualityOfLifeSmokeTest_ = false;
     std::filesystem::path qualityOfLifeParent_;
     bool voxelSelectionRayHit_ = false;

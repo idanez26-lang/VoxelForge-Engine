@@ -160,6 +160,23 @@ add_test(
     NAME VoxelForge.Editor.QualityOfLife
     COMMAND $<TARGET_FILE:VoxelForgeEditorQualityOfLifeTests>
 )
+add_executable(
+    VoxelForgeEditorVoxelSaveTests
+    Editor/VoxelSaveTests.cpp
+)
+target_include_directories(
+    VoxelForgeEditorVoxelSaveTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelSaveTests
+    PRIVATE VoxelForgeVoxel
+)
+vf_configure_test(VoxelForgeEditorVoxelSaveTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelSave
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelSaveTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -202,6 +219,21 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeVoxelSerializerTests
+    Voxel/VoxelModelSerializerTests.cpp
+)
+target_link_libraries(
+    VoxelForgeVoxelSerializerTests
+    PRIVATE
+        VoxelForgeVoxel
+)
+vf_configure_test(VoxelForgeVoxelSerializerTests)
+add_test(
+    NAME VoxelForge.Voxel.Serializer
+    COMMAND $<TARGET_FILE:VoxelForgeVoxelSerializerTests>
+)
+
+add_executable(
     VoxelForgeMeshBuilderTests
     Mesh/VoxelMeshBuilderTests.cpp
 )
@@ -228,9 +260,11 @@ set_tests_properties(
     VoxelForge.Editor.EraseVoxel
     VoxelForge.Editor.PaintVoxel
     VoxelForge.Editor.QualityOfLife
+    VoxelForge.Editor.VoxelSave
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Voxel.Core
+    VoxelForge.Voxel.Serializer
     VoxelForge.Mesh.VoxelMeshBuilder
     PROPERTIES TIMEOUT 10
 )
@@ -260,6 +294,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.QualityOfLifeSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --quality-of-life-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelSaveSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-save-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -267,6 +305,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.EraseVoxelSmoke
         VoxelForge.Editor.PaintVoxelSmoke
         VoxelForge.Editor.QualityOfLifeSmoke
+        VoxelForge.Editor.VoxelSaveSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

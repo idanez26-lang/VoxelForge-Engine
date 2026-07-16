@@ -257,7 +257,8 @@ AssetDisplayCategory ClassifyAssetEntry(const AssetEntry& entry)
 
     const std::string extension = FoldAscii(entry.Extension());
 
-    if (extension == ".vox" || extension == ".qb")
+    if (extension == ".vox" || extension == ".vfvoxel" ||
+        extension == ".qb")
     {
         return AssetDisplayCategory::Voxel;
     }
@@ -295,6 +296,11 @@ std::string_view AssetEntryMarker(const AssetEntry& entry)
     if (extension == ".vox")
     {
         return "[VOX]";
+    }
+
+    if (extension == ".vfvoxel")
+    {
+        return "[VFVOX]";
     }
 
     if (extension == ".obj")

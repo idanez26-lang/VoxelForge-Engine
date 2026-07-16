@@ -651,6 +651,7 @@ int TestViewSearchFiltersAndMarkers()
     const std::vector<AssetEntry> entries = {
         MakeViewEntry("Props", AssetEntryType::Directory),
         MakeViewEntry("castle.vox", AssetEntryType::File, 10U),
+        MakeViewEntry("castle.vfvoxel", AssetEntryType::File, 15U),
         MakeViewEntry("model.qb", AssetEntryType::File, 20U),
         MakeViewEntry("mesh.obj", AssetEntryType::File, 30U),
         MakeViewEntry("preview.PNG", AssetEntryType::File, 40U),
@@ -662,7 +663,7 @@ int TestViewSearchFiltersAndMarkers()
     viewModel.SetSearchText("CAST");
 
     if (ViewNames(viewModel.VisibleEntries(entries)) !=
-        std::vector<std::string>{"castle.vox"})
+        std::vector<std::string>{"castle.vfvoxel", "castle.vox"})
     {
         return 38;
     }
@@ -679,7 +680,8 @@ int TestViewSearchFiltersAndMarkers()
         std::pair{AssetBrowserFilter::Folders,
                   std::vector<std::string>{"Props"}},
         std::pair{AssetBrowserFilter::Voxel,
-                  std::vector<std::string>{"castle.vox", "model.qb"}},
+                  std::vector<std::string>{
+                      "castle.vfvoxel", "castle.vox", "model.qb"}},
         std::pair{AssetBrowserFilter::Models,
                   std::vector<std::string>{"mesh.obj"}},
         std::pair{AssetBrowserFilter::Images,
@@ -711,6 +713,7 @@ int TestViewSearchFiltersAndMarkers()
     const std::array expectedMarkers = {
         std::string_view{"[DIR]"},
         std::string_view{"[VOX]"},
+        std::string_view{"[VFVOX]"},
         std::string_view{"[QB]"},
         std::string_view{"[OBJ]"},
         std::string_view{"[IMG]"},

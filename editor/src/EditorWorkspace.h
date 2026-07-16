@@ -13,6 +13,7 @@
 #include "Project/QualityOfLifeLogic.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
+#include "VoxelSave/VoxelSaveState.h"
 #include "VoxelSelection/VoxelSelectionState.h"
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
@@ -63,6 +64,8 @@ public:
     [[nodiscard]] bool EraseVoxelSmokePassed() const noexcept;
     [[nodiscard]] bool RunPaintVoxelSmokeStep(std::size_t frame);
     [[nodiscard]] bool PaintVoxelSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelSaveSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelSaveSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -114,6 +117,7 @@ private:
     void RemoveRecentProject(
         const std::filesystem::path& projectFilePath);
     void SaveProject();
+    [[nodiscard]] bool SaveVoxelModel();
     void CloseProject();
     [[nodiscard]] bool OpenVoxInViewportNow(
         const std::filesystem::path& filePath);
@@ -140,6 +144,7 @@ private:
     ViewportRenderer viewportRenderer_;
     VoxelViewportState viewportState_;
     std::optional<Voxel::VoxelModel> activeVoxelModel_;
+    VoxelSaveState voxelSaveState_;
     VoxelSelectionState voxelSelection_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
@@ -180,7 +185,6 @@ private:
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
     bool voxelSelectionClickCandidate_ = false;
-    bool voxelModelModified_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;
@@ -204,6 +208,17 @@ private:
     std::uint32_t paintSmokeZ_ = 0U;
     std::uint8_t paintSmokeInitialColor_ = 0U;
     std::uint8_t paintSmokeNewColor_ = 0U;
+    std::filesystem::path voxelSaveSmokePath_;
+    std::size_t voxelSaveSmokeInitialVoxelCount_ = 0U;
+    std::size_t voxelSaveSmokeRenderBaseline_ = 0U;
+    std::uint32_t voxelSaveSmokeX_ = 0U;
+    std::uint32_t voxelSaveSmokeY_ = 0U;
+    std::uint32_t voxelSaveSmokeZ_ = 0U;
+    std::uint8_t voxelSaveSmokeColor_ = 0U;
+    bool voxelSaveSmokePaintedAndSaved_ = false;
+    bool voxelSaveSmokePaintReloaded_ = false;
+    bool voxelSaveSmokeErasedAndSaved_ = false;
+    bool voxelSaveSmokeEraseReloaded_ = false;
 };
 
 } // namespace VoxelForge::Editor
