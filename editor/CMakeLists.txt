@@ -107,6 +107,28 @@ else()
         VoxelForgeEditorVoxelSelection PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorVoxelDocument STATIC)
+target_sources(
+    VoxelForgeEditorVoxelDocument
+    PRIVATE src/VoxelDocument/VoxelDocumentSession.cpp
+)
+target_include_directories(
+    VoxelForgeEditorVoxelDocument
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelDocument
+    PUBLIC VoxelForgeAsset
+)
+target_compile_features(VoxelForgeEditorVoxelDocument PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorVoxelDocument PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorVoxelDocument PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorCommands STATIC)
 target_sources(
     VoxelForgeEditorCommands
@@ -268,6 +290,7 @@ target_link_libraries(
         VoxelForgeEditorModelImport
         VoxelForgeEditorQualityOfLife
         VoxelForgeEditorVoxelSelection
+        VoxelForgeEditorVoxelDocument
         VoxelForgeProject
         VoxelForgeRenderer
         VoxelForgeScene

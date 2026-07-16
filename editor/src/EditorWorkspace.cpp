@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <optional>
 #include <memory>
 #include <string_view>
@@ -99,6 +100,27 @@ bool CopyPathToBuffer(
     buffer.fill('\0');
     std::copy(value.begin(), value.end(), buffer.begin());
     return true;
+}
+
+std::optional<std::uint64_t> HashFileContents(
+    const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return std::nullopt;
+    constexpr std::uint64_t OffsetBasis = 14695981039346656037ULL;
+    constexpr std::uint64_t Prime = 1099511628211ULL;
+    std::uint64_t hash = OffsetBasis;
+    std::array<char, 4096U> buffer{};
+    while (input.read(buffer.data(), static_cast<std::streamsize>(buffer.size())) ||
+           input.gcount() > 0)
+    {
+        for (std::streamsize index = 0; index < input.gcount(); ++index)
+        {
+            hash ^= static_cast<std::uint8_t>(buffer[static_cast<std::size_t>(index)]);
+            hash *= Prime;
+        }
+    }
+    return input.eof() ? std::optional<std::uint64_t>(hash) : std::nullopt;
 }
 }
 
@@ -1149,6 +1171,27 @@ void EditorWorkspace::DrawInspectorPanel()
     ImGui::TextUnformatted("Inspector");
     ImGui::Separator();
 
+    if (const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument())
+    {
+        ImGui::TextUnformatted("Active Voxel Document");
+        if (const auto dimensions = document->GetDimensions())
+        {
+            ImGui::Text(
+                "Dimensions: %u x %u x %u",
+                dimensions->X,
+                dimensions->Y,
+                dimensions->Z);
+        }
+        ImGui::Text("Voxel Count: %llu",
+            static_cast<unsigned long long>(document->GetVoxelCount()));
+        ImGui::Text("Sub-models: %zu", document->GetModelCount());
+        ImGui::Text("Dirty: %s", document->IsDirty() ? "Yes" : "No");
+        ImGui::Text("Revision: %llu",
+            static_cast<unsigned long long>(document->GetRevision()));
+        ImGui::Separator();
+    }
+
     static_cast<void>(
         assetInspector_.UpdateSelection(assetBrowser_.SelectedEntry()));
     const AssetInspectorState& assetState = assetInspector_.State();
@@ -1996,6 +2039,7 @@ void EditorWorkspace::CreateProjectNow()
 
     if (!project)
     {
+        voxelDocumentSession_.ClearProject();
         projectDialogError_ = projectManager_.LastError();
         AddConsoleMessage(
             "Project creation failed: " + projectDialogError_);
@@ -2255,6 +2299,8 @@ void EditorWorkspace::SynchronizeProjectAssets()
     }
     if (!assetInspector_.SetAssetsRoot(project->RootPath() / "Assets"))
         AddConsoleMessage("Asset Inspector setup failed.");
+    if (!voxelDocumentSession_.SetProjectRoot(project->RootPath()))
+        AddConsoleMessage("Voxel document session setup failed.");
 }
 
 void EditorWorkspace::BeginModelImport(
@@ -2414,6 +2460,7 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     const std::filesystem::path& filePath)
 {
     std::optional<Voxel::VoxelModel> model;
+    std::optional<Asset::Vox::VoxModel> inspectedVoxModel;
     const std::string extension = LowercaseExtension(filePath);
     if (extension == ".vfvoxel")
     {
@@ -2437,8 +2484,9 @@ bool EditorWorkspace::OpenVoxInViewportNow(
                 "VOX viewport import failed: " + imported.Result.Message);
             return false;
         }
+        inspectedVoxModel = std::move(*imported.Asset);
         auto converted = Voxel::VoxModelConverter::Convert(
-            *imported.Asset, filePath.stem().string());
+            *inspectedVoxModel, filePath.stem().string());
         if (!converted.Succeeded || !converted.Model)
         {
             AddConsoleMessage(
@@ -2485,6 +2533,23 @@ bool EditorWorkspace::OpenVoxInViewportNow(
         AddConsoleMessage(
             "Voxel viewport load failed: no first grid is available.");
         return false;
+    }
+    if (inspectedVoxModel)
+    {
+        const VoxelDocumentSessionResult opened =
+            voxelDocumentSession_.OpenInspected(
+                filePath, *inspectedVoxModel);
+        if (!opened.Succeeded())
+        {
+            ClearVoxelViewport();
+            AddConsoleMessage(
+                "Voxel document load failed: " + opened.Message);
+            return false;
+        }
+    }
+    else
+    {
+        voxelDocumentSession_.Close();
     }
     voxelModelCenter_ = modelCenter;
     voxelSaveState_.OnModelLoaded(filePath);
@@ -3267,6 +3332,89 @@ bool EditorWorkspace::DragDropImportSmokePassed() const noexcept
         dragDropSmokeRefreshControlled_ && dragDropSmokeClean_;
 }
 
+bool EditorWorkspace::RunVoxelDocumentSmokeStep(
+    const std::size_t frame,
+    const std::filesystem::path& sourcePath)
+{
+    using Asset::Voxel::VoxelDocument;
+    using Asset::Voxel::VoxelPosition;
+
+    if (frame == 0U)
+    {
+        std::error_code error;
+        voxelDocumentSmokeSourceSize_ =
+            std::filesystem::file_size(sourcePath, error);
+        if (error) return false;
+        voxelDocumentSmokeSourceTime_ =
+            std::filesystem::last_write_time(sourcePath, error);
+        if (error) return false;
+        const auto hash = HashFileContents(sourcePath);
+        if (!hash) return false;
+        voxelDocumentSmokeSourceHash_ = *hash;
+        const VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        voxelDocumentSmokeInitialState_ = document != nullptr &&
+            document->SourcePath() ==
+                std::filesystem::weakly_canonical(sourcePath, error) &&
+            !error && document->GetModelCount() == 1U &&
+            document->GetVoxelCount() == 7U &&
+            document->HasVoxel({1, 1, 1}) && !document->IsDirty() &&
+            document->GetRevision() == 0U;
+    }
+    else if (frame == 1U)
+    {
+        VoxelDocument* document = voxelDocumentSession_.ActiveDocument();
+        if (document == nullptr) return false;
+        const VoxelPosition editPosition{0, 0, 0};
+        const auto added = document->SetVoxel(editPosition, 8U);
+        const auto replaced = document->ReplaceVoxelColor(editPosition, 9U);
+        const auto removed = document->RemoveVoxel(editPosition);
+        voxelDocumentSmokeEdited_ = added.Changed && replaced.Changed &&
+            removed.Changed && document->GetVoxelCount() == 7U &&
+            !document->HasVoxel(editPosition) && document->IsDirty() &&
+            document->GetRevision() == 3U;
+    }
+    else if (frame == 2U)
+    {
+        VoxelDocument* document = voxelDocumentSession_.ActiveDocument();
+        if (document == nullptr) return false;
+        const std::uint64_t revision = document->GetRevision();
+        document->MarkSaved();
+        voxelDocumentSmokeSaved_ = !document->IsDirty() &&
+            document->GetRevision() == revision && revision == 3U;
+    }
+    else if (frame == 3U)
+    {
+        voxelDocumentSession_.Close();
+        voxelDocumentSmokeClosed_ =
+            !voxelDocumentSession_.HasActiveDocument() &&
+            voxelDocumentSession_.ActiveDocument() == nullptr;
+    }
+    else if (frame == 4U)
+    {
+        std::error_code error;
+        const std::uintmax_t size =
+            std::filesystem::file_size(sourcePath, error);
+        if (error) return false;
+        const auto modified =
+            std::filesystem::last_write_time(sourcePath, error);
+        const auto hash = HashFileContents(sourcePath);
+        voxelDocumentSmokeSourcePreserved_ = !error &&
+            size == voxelDocumentSmokeSourceSize_ &&
+            modified == voxelDocumentSmokeSourceTime_ && hash &&
+            *hash == voxelDocumentSmokeSourceHash_;
+    }
+    return VoxelDocumentSmokePassed();
+}
+
+bool EditorWorkspace::VoxelDocumentSmokePassed() const noexcept
+{
+    return voxelDocumentSmokeInitialState_ && voxelDocumentSmokeEdited_ &&
+        voxelDocumentSmokeSaved_ && voxelDocumentSmokeClosed_ &&
+        voxelDocumentSmokeSourcePreserved_ &&
+        !voxelDocumentSession_.HasActiveDocument();
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -3519,6 +3667,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();
+    voxelDocumentSession_.Close();
     activeVoxelModel_.reset();
     static_cast<void>(voxelSelection_.Clear());
     voxelModelCenter_ = {};

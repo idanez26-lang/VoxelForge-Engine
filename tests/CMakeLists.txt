@@ -287,6 +287,20 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeAssetVoxelDocumentTests
+    Asset/VoxelDocumentTests.cpp
+)
+target_link_libraries(
+    VoxelForgeAssetVoxelDocumentTests
+    PRIVATE VoxelForgeEditorVoxelDocument
+)
+vf_configure_test(VoxelForgeAssetVoxelDocumentTests)
+add_test(
+    NAME VoxelForge.Asset.VoxelDocument
+    COMMAND $<TARGET_FILE:VoxelForgeAssetVoxelDocumentTests>
+)
+
+add_executable(
     VoxelForgeVoxelCoreTests
     Voxel/VoxelCoreTests.cpp
 )
@@ -353,6 +367,7 @@ set_tests_properties(
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Asset.VoxModelAnalyzer
+    VoxelForge.Asset.VoxelDocument
     VoxelForge.Voxel.Core
     VoxelForge.Voxel.Serializer
     VoxelForge.Mesh.VoxelMeshBuilder
@@ -400,6 +415,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.DragDropImportSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --drag-drop-import-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelDocumentSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-document-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -411,6 +430,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.AddVoxelSmoke
         VoxelForge.Editor.ModelImportSmoke
         VoxelForge.Editor.DragDropImportSmoke
+        VoxelForge.Editor.VoxelDocumentSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

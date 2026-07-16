@@ -47,7 +47,8 @@ public:
         bool qualityOfLifeSmokeTest = false,
         std::filesystem::path qualityOfLifeParent = {},
         bool dragDropImportSmokeTest = false,
-        std::vector<std::filesystem::path> dragDropSmokePaths = {});
+        std::vector<std::filesystem::path> dragDropSmokePaths = {},
+        bool voxelDocumentSmokeTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -96,6 +97,8 @@ private:
     std::filesystem::path qualityOfLifeParent_;
     bool dragDropImportSmokeTest_ = false;
     std::vector<std::filesystem::path> dragDropSmokePaths_;
+    bool voxelDocumentSmokeTest_ = false;
+    std::filesystem::path voxelDocumentSmokeSourcePath_;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

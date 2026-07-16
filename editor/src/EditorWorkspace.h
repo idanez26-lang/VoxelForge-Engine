@@ -20,6 +20,7 @@
 #include "VoxelViewportState.h"
 #include "VoxelSave/VoxelSaveState.h"
 #include "VoxelSelection/VoxelSelectionState.h"
+#include "VoxelDocument/VoxelDocumentSession.h"
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
@@ -89,6 +90,10 @@ public:
         std::size_t frame,
         const std::vector<std::filesystem::path>& sourcePaths);
     [[nodiscard]] bool DragDropImportSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelDocumentSmokeStep(
+        std::size_t frame,
+        const std::filesystem::path& sourcePath);
+    [[nodiscard]] bool VoxelDocumentSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -181,6 +186,7 @@ private:
     EditorCamera viewportCamera_;
     ViewportRenderer viewportRenderer_;
     VoxelViewportState viewportState_;
+    VoxelDocumentSession voxelDocumentSession_;
     std::optional<Voxel::VoxelModel> activeVoxelModel_;
     VoxelSaveState voxelSaveState_;
     VoxelSelectionState voxelSelection_;
@@ -315,6 +321,14 @@ private:
     bool dragDropSmokeCollisionRenamed_ = false;
     bool dragDropSmokeRefreshControlled_ = false;
     bool dragDropSmokeClean_ = false;
+    std::uintmax_t voxelDocumentSmokeSourceSize_ = 0U;
+    std::uint64_t voxelDocumentSmokeSourceHash_ = 0U;
+    std::filesystem::file_time_type voxelDocumentSmokeSourceTime_{};
+    bool voxelDocumentSmokeInitialState_ = false;
+    bool voxelDocumentSmokeEdited_ = false;
+    bool voxelDocumentSmokeSaved_ = false;
+    bool voxelDocumentSmokeClosed_ = false;
+    bool voxelDocumentSmokeSourcePreserved_ = false;
 };
 
 } // namespace VoxelForge::Editor

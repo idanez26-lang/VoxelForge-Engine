@@ -6,6 +6,8 @@ target_sources(
         src/Vox/VoxFormat.cpp
         src/Vox/VoxImporter.cpp
         src/Vox/VoxModelAnalyzer.cpp
+        src/Voxel/VoxelDocument.cpp
+        src/Voxel/VoxDocumentLoader.cpp
 )
 
 target_include_directories(

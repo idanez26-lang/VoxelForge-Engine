@@ -37,19 +37,20 @@ EditorLayer::EditorLayer(
     const bool qualityOfLifeSmokeTest,
     std::filesystem::path qualityOfLifeParent,
     const bool dragDropImportSmokeTest,
-    std::vector<std::filesystem::path> dragDropSmokePaths)
+    std::vector<std::filesystem::path> dragDropSmokePaths,
+    const bool voxelDocumentSmokeTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
           std::move(windowTitleCallback),
           qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest ||
-              dragDropImportSmokeTest
+              dragDropImportSmokeTest || voxelDocumentSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
               : ProjectDialogPreferences::DefaultStorageFilePath(),
           qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest ||
-              dragDropImportSmokeTest),
+              dragDropImportSmokeTest || voxelDocumentSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -67,8 +68,11 @@ EditorLayer::EditorLayer(
       qualityOfLifeSmokeTest_(qualityOfLifeSmokeTest),
       qualityOfLifeParent_(std::move(qualityOfLifeParent)),
       dragDropImportSmokeTest_(dragDropImportSmokeTest),
-      dragDropSmokePaths_(std::move(dragDropSmokePaths))
+      dragDropSmokePaths_(std::move(dragDropSmokePaths)),
+      voxelDocumentSmokeTest_(voxelDocumentSmokeTest)
 {
+    if (voxelDocumentSmokeTest_)
+        voxelDocumentSmokeSourcePath_ = startupVoxPath_;
 }
 
 void EditorLayer::OnAttach()
@@ -198,6 +202,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunDragDropImportSmokeStep(
             renderedFrameCount_, dragDropSmokePaths_));
     }
+    if (voxelDocumentSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunVoxelDocumentSmokeStep(
+            renderedFrameCount_, voxelDocumentSmokeSourcePath_));
+    }
     workspace_.Draw();
 
     ++renderedFrameCount_;
@@ -261,6 +270,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Drag-drop import smoke test did not complete its controlled flow.");
+    }
+    if (voxelDocumentSmokeTest_ && smokeTestComplete &&
+        !workspace_.VoxelDocumentSmokePassed())
+    {
+        throw std::runtime_error(
+            "Voxel document smoke test did not complete its controlled flow.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)
