@@ -1,5 +1,6 @@
 #include "VoxelForge/Mesh/VoxelMeshBuilder.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -7,6 +8,7 @@
 #include <new>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace VoxelForge::Mesh
 {
@@ -236,6 +238,159 @@ MeshBuildResult VoxelMeshBuilder::Build(const Voxel::VoxelGrid& grid)
         true,
         MeshBuildError::None,
         "Voxel mesh generation succeeded.",
+        std::move(mesh)};
+}
+
+MeshBuildResult VoxelMeshBuilder::Build(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::size_t modelIndex)
+{
+    if (document.GetModelCount() == 0U && modelIndex == 0U)
+    {
+        return {
+            true,
+            MeshBuildError::None,
+            "Empty voxel document mesh generation succeeded.",
+            MeshData{}};
+    }
+
+    const Asset::Voxel::VoxelSubModel* model = document.GetModel(modelIndex);
+    if (model == nullptr)
+    {
+        return Failure(
+            MeshBuildError::InvalidSource,
+            "Voxel document sub-model index is invalid.");
+    }
+
+    struct DocumentVoxel final
+    {
+        Asset::Voxel::VoxelPosition Position;
+        Asset::Voxel::Voxel Value;
+    };
+    std::vector<DocumentVoxel> voxels;
+    try
+    {
+        voxels.reserve(model->VoxelCount());
+        model->ForEachVoxel(
+            [&voxels](
+                const Asset::Voxel::VoxelPosition& position,
+                const Asset::Voxel::Voxel& voxel)
+            {
+                voxels.push_back({position, voxel});
+            });
+        std::sort(
+            voxels.begin(), voxels.end(),
+            [](const DocumentVoxel& left, const DocumentVoxel& right)
+            {
+                if (left.Position.Z != right.Position.Z)
+                    return left.Position.Z < right.Position.Z;
+                if (left.Position.Y != right.Position.Y)
+                    return left.Position.Y < right.Position.Y;
+                return left.Position.X < right.Position.X;
+            });
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Failure(
+            MeshBuildError::AllocationFailure,
+            "Unable to allocate the voxel document traversal buffer.");
+    }
+    catch (const std::length_error&)
+    {
+        return Failure(
+            MeshBuildError::AllocationFailure,
+            "Voxel document traversal exceeds container limits.");
+    }
+
+    const auto faceVisible = [model](
+        const Asset::Voxel::VoxelPosition& position,
+        const FaceDefinition& face)
+    {
+        return !model->HasVoxel({
+            position.X + face.DeltaX,
+            position.Y + face.DeltaY,
+            position.Z + face.DeltaZ});
+    };
+
+    std::size_t faceCount = 0U;
+    for (const DocumentVoxel& voxel : voxels)
+    {
+        for (const FaceDefinition& face : Faces)
+        {
+            if (faceVisible(voxel.Position, face) &&
+                ++faceCount > MaximumFaceCount)
+            {
+                return Failure(
+                    MeshBuildError::TooLarge,
+                    "Visible voxel document mesh exceeds the v1 face limit.");
+            }
+        }
+    }
+
+    constexpr std::size_t maximumIndex =
+        std::numeric_limits<std::uint32_t>::max();
+    if (faceCount > maximumIndex / 4U || faceCount > maximumIndex / 6U ||
+        faceCount * 4U > MaximumVertexCount ||
+        faceCount * 6U > MaximumIndexCount)
+    {
+        return Failure(
+            MeshBuildError::TooLarge,
+            "Voxel document mesh exceeds the v1 CPU allocation limit.");
+    }
+
+    MeshData mesh;
+    try
+    {
+        mesh.vertices_.reserve(faceCount * 4U);
+        mesh.indices_.reserve(faceCount * 6U);
+        for (const DocumentVoxel& voxel : voxels)
+        {
+            for (const FaceDefinition& face : Faces)
+            {
+                if (!faceVisible(voxel.Position, face)) continue;
+                const std::uint32_t firstVertex =
+                    static_cast<std::uint32_t>(mesh.vertices_.size());
+                for (const std::array<float, 3>& corner : face.Corners)
+                {
+                    MeshVertex vertex;
+                    vertex.Position = {
+                        static_cast<float>(voxel.Position.X) + corner[0],
+                        static_cast<float>(voxel.Position.Y) + corner[1],
+                        static_cast<float>(voxel.Position.Z) + corner[2]};
+                    vertex.Normal = face.Normal;
+                    vertex.ColorIndex = voxel.Value.PaletteIndex;
+                    mesh.vertices_.push_back(vertex);
+                }
+                constexpr std::array<std::uint32_t, 6> localIndices = {
+                    0U, 1U, 2U, 0U, 2U, 3U};
+                for (const std::uint32_t localIndex : localIndices)
+                    mesh.indices_.push_back(firstVertex + localIndex);
+            }
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Failure(
+            MeshBuildError::AllocationFailure,
+            "Unable to allocate CPU memory for the voxel document mesh.");
+    }
+    catch (const std::length_error&)
+    {
+        return Failure(
+            MeshBuildError::AllocationFailure,
+            "Voxel document mesh allocation exceeds container limits.");
+    }
+
+    if (mesh.FaceCount() != faceCount)
+    {
+        return Failure(
+            MeshBuildError::InconsistentResult,
+            "Voxel document mesh generation produced inconsistent buffers.");
+    }
+    return {
+        true,
+        MeshBuildError::None,
+        "Voxel document mesh generation succeeded.",
         std::move(mesh)};
 }
 

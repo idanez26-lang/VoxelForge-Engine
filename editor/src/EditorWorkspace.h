@@ -24,6 +24,7 @@
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
+#include "VoxelForge/Mesh/VoxelDocumentMeshCache.h"
 
 #include <array>
 #include <cstdint>
@@ -94,6 +95,10 @@ public:
         std::size_t frame,
         const std::filesystem::path& sourcePath);
     [[nodiscard]] bool VoxelDocumentSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelRenderSyncSmokeStep(
+        std::size_t frame,
+        const std::filesystem::path& sourcePath);
+    [[nodiscard]] bool VoxelRenderSyncSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -165,12 +170,15 @@ private:
     void ClearVoxelViewport() noexcept;
     void FrameVoxelViewport() noexcept;
     void UpdateVoxelHighlights() noexcept;
+    [[nodiscard]] bool SynchronizeVoxelDocumentRendering();
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
     [[nodiscard]] bool AddAdjacentVoxel();
 
     [[nodiscard]] std::uint64_t VoxelModelGeneration() const noexcept override;
     [[nodiscard]] Voxel::VoxelModel* ActiveVoxelModel() noexcept override;
+    [[nodiscard]] Asset::Voxel::VoxelDocument*
+        ActiveVoxelDocument() noexcept override;
     [[nodiscard]] CommandResult RebuildActiveVoxelMesh() override;
     void CompleteVoxelEdit() noexcept override;
 
@@ -187,6 +195,7 @@ private:
     ViewportRenderer viewportRenderer_;
     VoxelViewportState viewportState_;
     VoxelDocumentSession voxelDocumentSession_;
+    Mesh::VoxelDocumentMeshCache voxelDocumentMeshCache_;
     std::optional<Voxel::VoxelModel> activeVoxelModel_;
     VoxelSaveState voxelSaveState_;
     VoxelSelectionState voxelSelection_;
@@ -329,6 +338,22 @@ private:
     bool voxelDocumentSmokeSaved_ = false;
     bool voxelDocumentSmokeClosed_ = false;
     bool voxelDocumentSmokeSourcePreserved_ = false;
+    std::uintmax_t voxelRenderSyncSmokeSourceSize_ = 0U;
+    std::uint64_t voxelRenderSyncSmokeSourceHash_ = 0U;
+    std::filesystem::file_time_type voxelRenderSyncSmokeSourceTime_{};
+    std::size_t voxelRenderSyncInitialBuildCount_ = 0U;
+    std::size_t voxelRenderSyncInitialUploadCount_ = 0U;
+    std::size_t voxelRenderSyncStableBuildCount_ = 0U;
+    bool voxelRenderSyncInitialBuilt_ = false;
+    bool voxelRenderSyncSetRebuilt_ = false;
+    bool voxelRenderSyncRemoveRebuilt_ = false;
+    bool voxelRenderSyncUnchangedSkipped_ = false;
+    bool voxelRenderSyncClosed_ = false;
+    bool voxelRenderSyncSourcePreserved_ = false;
+    std::optional<std::uint64_t> uploadedDocumentIdentity_;
+    std::optional<std::uint64_t> uploadedDocumentRevision_;
+    std::optional<std::uint64_t> failedDocumentIdentity_;
+    std::optional<std::uint64_t> failedDocumentRevision_;
 };
 
 } // namespace VoxelForge::Editor

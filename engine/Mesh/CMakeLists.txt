@@ -3,6 +3,7 @@ add_library(VoxelForgeMesh STATIC)
 target_sources(
     VoxelForgeMesh
     PRIVATE
+        src/VoxelDocumentMeshCache.cpp
         src/VoxelMeshBuilder.cpp
 )
 
@@ -16,6 +17,7 @@ target_link_libraries(
     VoxelForgeMesh
     PUBLIC
         VoxelForgeVoxel
+        VoxelForgeAsset
 )
 
 target_compile_features(VoxelForgeMesh PUBLIC cxx_std_20)

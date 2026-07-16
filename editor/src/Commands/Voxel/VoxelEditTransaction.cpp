@@ -2,8 +2,11 @@
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
+#include "VoxelForge/Asset/Voxel/VoxelDocument.h"
 
+#include <cstdint>
 #include <exception>
+#include <optional>
 #include <string>
 
 namespace VoxelForge::Editor
@@ -66,8 +69,44 @@ CommandResult ApplyVoxelEdit(
         return CommandResult::Failure("Voxel coordinates are outside the active grid.");
     if (*current != expected)
         return CommandResult::Failure("The active voxel no longer matches command history.");
+
+    Asset::Voxel::VoxelDocument* document = session.ActiveVoxelDocument();
+    const Asset::Voxel::VoxelPosition documentPosition{
+        static_cast<std::int32_t>(x),
+        static_cast<std::int32_t>(y),
+        static_cast<std::int32_t>(z)};
+    const auto applyDocumentVoxel = [document, &documentPosition](
+        const Voxel::Voxel value)
+    {
+        return value.IsOccupied()
+            ? document->SetVoxel(documentPosition, value.ColorIndex)
+            : document->RemoveVoxel(documentPosition);
+    };
+    bool documentChanged = false;
+    if (document != nullptr)
+    {
+        const std::optional<Asset::Voxel::Voxel> documentVoxel =
+            document->GetVoxel(documentPosition);
+        const bool documentMatches = expected.IsOccupied()
+            ? documentVoxel &&
+                documentVoxel->PaletteIndex == expected.ColorIndex
+            : !documentVoxel;
+        if (!documentMatches)
+            return CommandResult::Failure(
+                "VoxelDocument and the editable compatibility grid diverged.");
+        const Asset::Voxel::VoxelDocumentOperationResult changed =
+            applyDocumentVoxel(replacement);
+        if (!changed.Succeeded)
+            return CommandResult::Failure(
+                "VoxelDocument edit failed: " + changed.Message);
+        documentChanged = changed.Changed;
+    }
     if (!grid->Set(x, y, z, replacement))
+    {
+        if (documentChanged)
+            static_cast<void>(applyDocumentVoxel(expected));
         return CommandResult::Failure("Unable to update the active voxel grid.");
+    }
 
     CommandResult rebuilt;
     try
@@ -77,6 +116,8 @@ CommandResult ApplyVoxelEdit(
     catch (const std::exception& exception)
     {
         const bool rolledBack = grid->Set(x, y, z, expected);
+        if (documentChanged)
+            static_cast<void>(applyDocumentVoxel(expected));
         return CommandResult::Failure(
             std::string("Voxel mesh rebuild threw an exception: ") +
             exception.what() +
@@ -85,6 +126,8 @@ CommandResult ApplyVoxelEdit(
     catch (...)
     {
         const bool rolledBack = grid->Set(x, y, z, expected);
+        if (documentChanged)
+            static_cast<void>(applyDocumentVoxel(expected));
         return CommandResult::Failure(
             std::string("Voxel mesh rebuild threw an unknown exception.") +
             (rolledBack ? "" : " CPU rollback also failed."));
@@ -92,6 +135,8 @@ CommandResult ApplyVoxelEdit(
     if (!rebuilt)
     {
         const bool rolledBack = grid->Set(x, y, z, expected);
+        if (documentChanged)
+            static_cast<void>(applyDocumentVoxel(expected));
         return CommandResult::Failure(
             rebuilt.Message + (rolledBack ? "" : " CPU rollback also failed."));
     }

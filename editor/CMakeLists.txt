@@ -145,7 +145,9 @@ target_include_directories(
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_compile_features(VoxelForgeEditorCommands PUBLIC cxx_std_20)
-target_link_libraries(VoxelForgeEditorCommands PUBLIC VoxelForgeVoxel)
+target_link_libraries(
+    VoxelForgeEditorCommands
+    PUBLIC VoxelForgeVoxel VoxelForgeAsset)
 if(MSVC)
     target_compile_options(VoxelForgeEditorCommands PRIVATE /W4 /permissive-)
 else()

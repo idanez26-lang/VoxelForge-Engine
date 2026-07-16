@@ -345,6 +345,20 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeMeshBuilderTests>
 )
 
+add_executable(
+    VoxelForgeMeshDocumentSyncTests
+    Mesh/VoxelDocumentMeshSyncTests.cpp
+)
+target_link_libraries(
+    VoxelForgeMeshDocumentSyncTests
+    PRIVATE VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeMeshDocumentSyncTests)
+add_test(
+    NAME VoxelForge.Mesh.VoxelDocumentSync
+    COMMAND $<TARGET_FILE:VoxelForgeMeshDocumentSyncTests>
+)
+
 set_tests_properties(
     VoxelForge.Core.Events
     VoxelForge.Core.Layers
@@ -371,6 +385,7 @@ set_tests_properties(
     VoxelForge.Voxel.Core
     VoxelForge.Voxel.Serializer
     VoxelForge.Mesh.VoxelMeshBuilder
+    VoxelForge.Mesh.VoxelDocumentSync
     PROPERTIES TIMEOUT 10
 )
 
@@ -419,6 +434,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelDocumentSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-document-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelRenderSyncSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-render-sync-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -431,6 +450,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.ModelImportSmoke
         VoxelForge.Editor.DragDropImportSmoke
         VoxelForge.Editor.VoxelDocumentSmoke
+        VoxelForge.Editor.VoxelRenderSyncSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

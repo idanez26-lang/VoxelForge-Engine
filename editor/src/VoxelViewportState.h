@@ -2,6 +2,7 @@
 
 #include "VoxelForge/Mesh/MeshData.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
+#include "VoxelForge/Asset/Voxel/VoxelDocument.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +42,15 @@ public:
     [[nodiscard]] bool UpdateStatistics(
         const Voxel::VoxelModel& model,
         const Mesh::MeshData& mesh) noexcept;
+    [[nodiscard]] bool ReplaceDocument(
+        std::string name,
+        const Asset::Voxel::VoxelDocument& document,
+        const Mesh::MeshData& mesh,
+        std::size_t modelIndex = 0U);
+    [[nodiscard]] bool UpdateDocumentStatistics(
+        const Asset::Voxel::VoxelDocument& document,
+        const Mesh::MeshData& mesh,
+        std::size_t modelIndex = 0U) noexcept;
     void Clear() noexcept;
 
     [[nodiscard]] bool HasModel() const noexcept;

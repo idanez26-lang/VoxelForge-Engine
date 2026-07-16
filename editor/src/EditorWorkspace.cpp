@@ -102,6 +102,34 @@ bool CopyPathToBuffer(
     return true;
 }
 
+Voxel::VoxelPalette BuildDocumentRenderPalette(
+    const Asset::Voxel::VoxelDocument& document)
+{
+    Voxel::VoxelPalette palette;
+    const auto& source = document.GetPalette();
+    for (std::size_t index = 0U; index < source.size(); ++index)
+    {
+        static_cast<void>(palette.Set(index, {
+            source[index].Red,
+            source[index].Green,
+            source[index].Blue,
+            source[index].Alpha}));
+    }
+    return palette;
+}
+
+Vec3 CalculateVoxelDocumentCenter(
+    const Asset::Voxel::VoxelDocument& document)
+{
+    const auto dimensions = document.GetDimensions();
+    return dimensions
+        ? Vec3{
+            static_cast<float>(dimensions->X) * 0.5F,
+            static_cast<float>(dimensions->Y) * 0.5F,
+            static_cast<float>(dimensions->Z) * 0.5F}
+        : Vec3{};
+}
+
 std::optional<std::uint64_t> HashFileContents(
     const std::filesystem::path& path)
 {
@@ -218,6 +246,8 @@ void EditorWorkspace::CompleteFileDrop(const float x, const float y)
 void EditorWorkspace::Draw()
 {
     ConsumeFileDialogResult();
+    if (!SynchronizeVoxelDocumentRendering())
+        voxelViewportRenderFailed_ = true;
     HandleCommandShortcuts();
     DrawMainMenuBar();
 
@@ -2508,17 +2538,57 @@ bool EditorWorkspace::OpenVoxInViewportNow(
         AddConsoleMessage("Voxel viewport load failed: no grid is available.");
         return false;
     }
-    Mesh::MeshBuildResult built = Mesh::VoxelMeshBuilder::Build(*grid);
-    if (!built.Succeeded || !built.Mesh)
+
+    std::optional<Mesh::MeshData> legacyMesh;
+    const Mesh::MeshData* renderMesh = nullptr;
+    Voxel::VoxelPalette renderPalette;
+    Vec3 modelCenter{};
+    if (inspectedVoxModel)
     {
-        AddConsoleMessage("Voxel viewport mesh failed: " + built.Message);
-        return false;
+        const VoxelDocumentSessionResult opened =
+            voxelDocumentSession_.OpenInspected(filePath, *inspectedVoxModel);
+        if (!opened.Succeeded())
+        {
+            AddConsoleMessage("Voxel document load failed: " + opened.Message);
+            return false;
+        }
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        const auto synchronized = voxelDocumentMeshCache_.Synchronize(
+            *document, voxelDocumentSession_.Generation());
+        if (!synchronized.Succeeded || voxelDocumentMeshCache_.Mesh() == nullptr)
+        {
+            ClearVoxelViewport();
+            AddConsoleMessage(
+                "Voxel document mesh failed: " + synchronized.Message);
+            return false;
+        }
+        renderMesh = voxelDocumentMeshCache_.Mesh();
+        renderPalette = BuildDocumentRenderPalette(*document);
+        modelCenter = CalculateVoxelDocumentCenter(*document);
     }
-    const Vec3 modelCenter = CalculateVoxelGridCenter(*grid);
-    if (!viewportRenderer_.Upload(
-            *built.Mesh, model->Palette(), modelCenter))
+    else
+    {
+        voxelDocumentSession_.Close();
+        voxelDocumentMeshCache_.Clear();
+        uploadedDocumentIdentity_.reset();
+        uploadedDocumentRevision_.reset();
+        Mesh::MeshBuildResult built = Mesh::VoxelMeshBuilder::Build(*grid);
+        if (!built.Succeeded || !built.Mesh)
+        {
+            AddConsoleMessage("Voxel viewport mesh failed: " + built.Message);
+            return false;
+        }
+        legacyMesh = std::move(*built.Mesh);
+        renderMesh = &*legacyMesh;
+        renderPalette = model->Palette();
+        modelCenter = CalculateVoxelGridCenter(*grid);
+    }
+
+    if (!viewportRenderer_.Upload(*renderMesh, renderPalette, modelCenter))
     {
         const std::string error = viewportRenderer_.LastError();
+        ClearVoxelViewport();
         AddConsoleMessage("Voxel viewport GPU upload failed: " + error);
         return false;
     }
@@ -2526,30 +2596,24 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     activeVoxelModel_ = std::move(*model);
     paintPaletteSelection_.OnModelLoaded();
     ++voxelModelGeneration_;
-    if (!viewportState_.Replace(
-            filePath.filename().string(), *activeVoxelModel_, *built.Mesh))
+    const Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const bool stateReplaced = document
+        ? viewportState_.ReplaceDocument(
+            filePath.filename().string(), *document, *renderMesh)
+        : viewportState_.Replace(
+            filePath.filename().string(), *activeVoxelModel_, *renderMesh);
+    if (!stateReplaced)
     {
         ClearVoxelViewport();
         AddConsoleMessage(
             "Voxel viewport load failed: no first grid is available.");
         return false;
     }
-    if (inspectedVoxModel)
+    if (document)
     {
-        const VoxelDocumentSessionResult opened =
-            voxelDocumentSession_.OpenInspected(
-                filePath, *inspectedVoxModel);
-        if (!opened.Succeeded())
-        {
-            ClearVoxelViewport();
-            AddConsoleMessage(
-                "Voxel document load failed: " + opened.Message);
-            return false;
-        }
-    }
-    else
-    {
-        voxelDocumentSession_.Close();
+        uploadedDocumentIdentity_ = voxelDocumentSession_.Generation();
+        uploadedDocumentRevision_ = document->GetRevision();
     }
     voxelModelCenter_ = modelCenter;
     voxelSaveState_.OnModelLoaded(filePath);
@@ -3415,6 +3479,104 @@ bool EditorWorkspace::VoxelDocumentSmokePassed() const noexcept
         !voxelDocumentSession_.HasActiveDocument();
 }
 
+bool EditorWorkspace::RunVoxelRenderSyncSmokeStep(
+    const std::size_t frame,
+    const std::filesystem::path& sourcePath)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        if (document == nullptr) return false;
+        std::error_code error;
+        voxelRenderSyncSmokeSourceSize_ =
+            std::filesystem::file_size(sourcePath, error);
+        if (error) return false;
+        voxelRenderSyncSmokeSourceTime_ =
+            std::filesystem::last_write_time(sourcePath, error);
+        const auto hash = HashFileContents(sourcePath);
+        if (error || !hash) return false;
+        voxelRenderSyncSmokeSourceHash_ = *hash;
+        voxelRenderSyncInitialBuildCount_ =
+            voxelDocumentMeshCache_.BuildCount();
+        voxelRenderSyncInitialUploadCount_ =
+            viewportRenderer_.ModelUploadCount();
+        voxelRenderSyncInitialBuilt_ =
+            voxelDocumentMeshCache_.HasMesh() &&
+            viewportRenderer_.HasModelMesh() &&
+            voxelDocumentMeshCache_.DocumentRevision() == 0U &&
+            uploadedDocumentRevision_ == 0U &&
+            viewportState_.Statistics().TriangleCount == 60U;
+    }
+    else if (frame == 1U)
+    {
+        if (document == nullptr) return false;
+        voxelRenderSyncSetRebuilt_ =
+            document->SetVoxel({0, 0, 0}, 8U).Changed;
+    }
+    else if (frame == 2U)
+    {
+        if (document == nullptr) return false;
+        voxelRenderSyncSetRebuilt_ = voxelRenderSyncSetRebuilt_ &&
+            document->GetRevision() == 1U &&
+            voxelDocumentMeshCache_.BuildCount() ==
+                voxelRenderSyncInitialBuildCount_ + 1U &&
+            viewportRenderer_.ModelUploadCount() ==
+                voxelRenderSyncInitialUploadCount_ + 1U &&
+            uploadedDocumentRevision_ == 1U;
+        voxelRenderSyncRemoveRebuilt_ =
+            document->RemoveVoxel({0, 0, 0}).Changed;
+    }
+    else if (frame == 3U)
+    {
+        if (document == nullptr) return false;
+        voxelRenderSyncRemoveRebuilt_ = voxelRenderSyncRemoveRebuilt_ &&
+            document->GetRevision() == 2U &&
+            document->GetVoxelCount() == 7U &&
+            voxelDocumentMeshCache_.BuildCount() ==
+                voxelRenderSyncInitialBuildCount_ + 2U &&
+            viewportRenderer_.ModelUploadCount() ==
+                voxelRenderSyncInitialUploadCount_ + 2U &&
+            uploadedDocumentRevision_ == 2U;
+        voxelRenderSyncStableBuildCount_ =
+            voxelDocumentMeshCache_.BuildCount();
+    }
+    else if (frame == 5U)
+    {
+        voxelRenderSyncUnchangedSkipped_ =
+            voxelDocumentMeshCache_.BuildCount() ==
+                voxelRenderSyncStableBuildCount_ &&
+            viewportRenderer_.ModelUploadCount() ==
+                voxelRenderSyncInitialUploadCount_ + 2U;
+    }
+    else if (frame == 6U)
+    {
+        std::error_code error;
+        const auto hash = HashFileContents(sourcePath);
+        voxelRenderSyncSourcePreserved_ = hash &&
+            *hash == voxelRenderSyncSmokeSourceHash_ &&
+            std::filesystem::file_size(sourcePath, error) ==
+                voxelRenderSyncSmokeSourceSize_ && !error &&
+            std::filesystem::last_write_time(sourcePath, error) ==
+                voxelRenderSyncSmokeSourceTime_ && !error;
+        ClearVoxelViewport();
+        voxelRenderSyncClosed_ =
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportState_.HasModel();
+    }
+    return VoxelRenderSyncSmokePassed();
+}
+
+bool EditorWorkspace::VoxelRenderSyncSmokePassed() const noexcept
+{
+    return voxelRenderSyncInitialBuilt_ && voxelRenderSyncSetRebuilt_ &&
+        voxelRenderSyncRemoveRebuilt_ &&
+        voxelRenderSyncUnchangedSkipped_ && voxelRenderSyncClosed_ &&
+        voxelRenderSyncSourcePreserved_;
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -3595,8 +3757,99 @@ Voxel::VoxelModel* EditorWorkspace::ActiveVoxelModel() noexcept
     return activeVoxelModel_ ? &*activeVoxelModel_ : nullptr;
 }
 
+Asset::Voxel::VoxelDocument*
+EditorWorkspace::ActiveVoxelDocument() noexcept
+{
+    return voxelDocumentSession_.ActiveDocument();
+}
+
+bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document == nullptr)
+    {
+        if (voxelDocumentMeshCache_.HasMesh()) ClearVoxelViewport();
+        return true;
+    }
+
+    const std::uint64_t identity = voxelDocumentSession_.Generation();
+    const std::uint64_t revision = document->GetRevision();
+    const Mesh::VoxelDocumentMeshSyncResult synchronized =
+        voxelDocumentMeshCache_.Synchronize(*document, identity);
+    if (!synchronized.Succeeded || voxelDocumentMeshCache_.Mesh() == nullptr)
+    {
+        if (failedDocumentIdentity_ != identity ||
+            failedDocumentRevision_ != revision)
+        {
+            AddConsoleMessage(
+                "Voxel render synchronization failed: " +
+                synchronized.Message);
+            failedDocumentIdentity_ = identity;
+            failedDocumentRevision_ = revision;
+        }
+        return false;
+    }
+    if (!synchronized.Rebuilt() &&
+        uploadedDocumentIdentity_ == identity &&
+        uploadedDocumentRevision_ == revision)
+    {
+        return true;
+    }
+
+    const Vec3 modelCenter = CalculateVoxelDocumentCenter(*document);
+    const Voxel::VoxelPalette palette = BuildDocumentRenderPalette(*document);
+    const Mesh::MeshData& mesh = *voxelDocumentMeshCache_.Mesh();
+    if (!viewportRenderer_.Upload(mesh, palette, modelCenter))
+    {
+        if (failedDocumentIdentity_ != identity ||
+            failedDocumentRevision_ != revision)
+        {
+            AddConsoleMessage(
+                "Voxel render GPU synchronization failed: " +
+                viewportRenderer_.LastError());
+            failedDocumentIdentity_ = identity;
+            failedDocumentRevision_ = revision;
+        }
+        return false;
+    }
+    if (viewportState_.HasModel())
+    {
+        if (!viewportState_.UpdateDocumentStatistics(*document, mesh))
+            return false;
+    }
+    else if (!viewportState_.ReplaceDocument(
+                 document->SourcePath().filename().string(),
+                 *document,
+                 mesh))
+    {
+        return false;
+    }
+
+    voxelModelCenter_ = modelCenter;
+    const VoxelViewportStatistics& statistics = viewportState_.Statistics();
+    viewportRenderer_.ConfigureGuides(
+        static_cast<float>(statistics.Width),
+        static_cast<float>(statistics.Height),
+        static_cast<float>(statistics.Depth));
+    uploadedDocumentIdentity_ = identity;
+    uploadedDocumentRevision_ = revision;
+    failedDocumentIdentity_.reset();
+    failedDocumentRevision_.reset();
+    voxelViewportRendered_ = false;
+    voxelViewportRenderFailed_ = false;
+    return true;
+}
+
 CommandResult EditorWorkspace::RebuildActiveVoxelMesh()
 {
+    if (voxelDocumentSession_.HasActiveDocument())
+    {
+        return SynchronizeVoxelDocumentRendering()
+            ? CommandResult::Success()
+            : CommandResult::Failure(
+                "VoxelDocument render synchronization failed.");
+    }
     if (!activeVoxelModel_)
         return CommandResult::Failure("No active voxel model is available.");
     Voxel::VoxelGrid* grid = activeVoxelModel_->GetGrid(0U);
@@ -3668,6 +3921,11 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();
     voxelDocumentSession_.Close();
+    voxelDocumentMeshCache_.Clear();
+    uploadedDocumentIdentity_.reset();
+    uploadedDocumentRevision_.reset();
+    failedDocumentIdentity_.reset();
+    failedDocumentRevision_.reset();
     activeVoxelModel_.reset();
     static_cast<void>(voxelSelection_.Clear());
     voxelModelCenter_ = {};

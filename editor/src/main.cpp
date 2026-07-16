@@ -33,6 +33,7 @@ constexpr std::size_t AddVoxelSmokeTestFrameCount = 40;
 constexpr std::size_t ModelImportSmokeTestFrameCount = 30;
 constexpr std::size_t DragDropImportSmokeTestFrameCount = 20;
 constexpr std::size_t VoxelDocumentSmokeTestFrameCount = 20;
+constexpr std::size_t VoxelRenderSyncSmokeTestFrameCount = 20;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -52,6 +53,7 @@ struct CommandLine final
     bool ModelImportVisualTest = false;
     bool DragDropImportSmokeTest = false;
     bool VoxelDocumentSmokeTest = false;
+    bool VoxelRenderSyncSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -88,6 +90,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--drag-drop-import-smoke-test";
         result.VoxelDocumentSmokeTest |=
             argument == "--voxel-document-smoke-test";
+        result.VoxelRenderSyncSmokeTest |=
+            argument == "--voxel-render-sync-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -288,6 +292,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.ModelImportVisualTest ||
             commandLine.DragDropImportSmokeTest ||
             commandLine.VoxelDocumentSmokeTest ||
+            commandLine.VoxelRenderSyncSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
@@ -345,6 +350,8 @@ int main(const int argumentCount, char* arguments[])
                     ? DragDropImportSmokeTestFrameCount
                     : commandLine.VoxelDocumentSmokeTest
                     ? VoxelDocumentSmokeTestFrameCount
+                    : commandLine.VoxelRenderSyncSmokeTest
+                    ? VoxelRenderSyncSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -363,7 +370,8 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.ModelImportSmokeTest ||
                     commandLine.ModelImportVisualTest ||
                     commandLine.DragDropImportSmokeTest ||
-                    commandLine.VoxelDocumentSmokeTest,
+                    commandLine.VoxelDocumentSmokeTest ||
+                    commandLine.VoxelRenderSyncSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -381,7 +389,8 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.DragDropImportSmokeTest
                     ? viewportFixture.DragDropPaths()
                     : std::vector<std::filesystem::path>{},
-                commandLine.VoxelDocumentSmokeTest);
+                commandLine.VoxelDocumentSmokeTest,
+                commandLine.VoxelRenderSyncSmokeTest);
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(

@@ -240,6 +240,7 @@ bool ViewportRenderer::Upload(
     if (mesh.Empty())
     {
         ClearModel();
+        ++modelUploadCount_;
         lastError_.clear();
         return true;
     }
@@ -282,6 +283,7 @@ bool ViewportRenderer::Upload(
         return false;
     }
     indexCount_ = static_cast<std::uint32_t>(mesh.IndexCount());
+    ++modelUploadCount_;
     lastError_.clear();
     return true;
 }
@@ -779,6 +781,17 @@ std::size_t ViewportRenderer::HighlightRenderCount() const noexcept
 std::size_t ViewportRenderer::ModelRenderCount() const noexcept
 {
     return modelRenderCount_;
+}
+
+std::size_t ViewportRenderer::ModelUploadCount() const noexcept
+{
+    return modelUploadCount_;
+}
+
+bool ViewportRenderer::HasModelMesh() const noexcept
+{
+    return vertexBuffer_ != nullptr && indexBuffer_ != nullptr &&
+        indexCount_ > 0U;
 }
 
 void ViewportRenderer::SetError(std::string message)

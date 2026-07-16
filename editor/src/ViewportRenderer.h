@@ -51,6 +51,8 @@ public:
     [[nodiscard]] std::size_t HighlightUploadCount() const noexcept;
     [[nodiscard]] std::size_t HighlightRenderCount() const noexcept;
     [[nodiscard]] std::size_t ModelRenderCount() const noexcept;
+    [[nodiscard]] std::size_t ModelUploadCount() const noexcept;
+    [[nodiscard]] bool HasModelMesh() const noexcept;
 
 private:
     [[nodiscard]] bool EnsurePipeline();
@@ -98,6 +100,7 @@ private:
     std::size_t highlightUploadCount_ = 0U;
     std::size_t highlightRenderCount_ = 0U;
     std::size_t modelRenderCount_ = 0U;
+    std::size_t modelUploadCount_ = 0U;
     std::string lastError_;
 };
 

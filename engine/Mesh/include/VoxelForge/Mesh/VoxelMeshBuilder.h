@@ -3,6 +3,7 @@
 #include "MeshData.h"
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
+#include "VoxelForge/Asset/Voxel/VoxelDocument.h"
 
 #include <cstddef>
 #include <optional>
@@ -14,6 +15,7 @@ namespace VoxelForge::Mesh
 enum class MeshBuildError
 {
     None,
+    InvalidSource,
     TooLarge,
     AllocationFailure,
     InconsistentResult
@@ -36,6 +38,9 @@ public:
 
     [[nodiscard]] static MeshBuildResult Build(
         const Voxel::VoxelGrid& grid);
+    [[nodiscard]] static MeshBuildResult Build(
+        const Asset::Voxel::VoxelDocument& document,
+        std::size_t modelIndex = 0U);
 };
 
 } // namespace VoxelForge::Mesh

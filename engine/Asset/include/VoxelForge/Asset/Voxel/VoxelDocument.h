@@ -6,9 +6,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace VoxelForge::Asset::Voxel
@@ -99,6 +101,13 @@ public:
     [[nodiscard]] bool HasVoxel(const VoxelPosition& position) const noexcept;
     [[nodiscard]] std::optional<Voxel> GetVoxel(
         const VoxelPosition& position) const noexcept;
+
+    template<typename Visitor>
+    void ForEachVoxel(Visitor&& visitor) const
+    {
+        for (const auto& [position, voxel] : voxels_)
+            std::invoke(visitor, position, voxel);
+    }
 
 private:
     friend class VoxelDocument;
