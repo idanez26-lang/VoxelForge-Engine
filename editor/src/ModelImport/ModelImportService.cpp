@@ -37,7 +37,17 @@ bool ModelImportResult::ChangedAssets() const noexcept
 ModelImportService::ModelImportService(
     ModelAssetMetadataService::AssetIdGenerator assetIdGenerator,
     ModelAssetMetadataService::BeforeInstallCallback beforeInstall)
-    : metadataService_(std::move(assetIdGenerator), std::move(beforeInstall))
+    : ModelImportService(
+          std::move(assetIdGenerator), std::move(beforeInstall), {})
+{
+}
+
+ModelImportService::ModelImportService(
+    ModelAssetMetadataService::AssetIdGenerator assetIdGenerator,
+    ModelAssetMetadataService::BeforeInstallCallback beforeInstall,
+    std::shared_ptr<IVoxThumbnailRenderer> thumbnailRenderer)
+    : metadataService_(std::move(assetIdGenerator), std::move(beforeInstall)),
+      thumbnailService_(std::move(thumbnailRenderer))
 {
 }
 
@@ -67,6 +77,12 @@ bool ModelImportService::SetProjectRoot(
         lastError_ = "Unable to configure Assets/Models metadata.";
         return false;
     }
+    if (!thumbnailService_.SetProjectRoot(absoluteRoot))
+    {
+        metadataService_.ClearModelsDirectory();
+        lastError_ = thumbnailService_.LastError();
+        return false;
+    }
     projectRoot_ = absoluteRoot;
     recentImports_.clear();
     return true;
@@ -78,11 +94,19 @@ void ModelImportService::ClearProjectRoot() noexcept
     recentImports_.clear();
     lastError_.clear();
     metadataService_.ClearModelsDirectory();
+    thumbnailService_.ClearProject();
 }
 
 MetadataRebuildReport ModelImportService::RebuildMetadata()
 {
     MetadataRebuildReport report = metadataService_.RebuildMetadata();
+    NotifyRefresh();
+    return report;
+}
+
+ThumbnailRebuildReport ModelImportService::RebuildThumbnails()
+{
+    ThumbnailRebuildReport report = thumbnailService_.Rebuild();
     NotifyRefresh();
     return report;
 }
@@ -359,6 +383,8 @@ ModelImportResult ModelImportService::ImportModelImpl(
         return Fail(ModelImportStatus::Failed, absoluteSource, destination,
             "Unable to analyze imported model: " + metadata.Message);
     }
+    const ThumbnailGenerationResult thumbnail =
+        thumbnailService_.Generate(destination, true);
     if (replacing)
     {
         std::filesystem::remove(importBackup, error);
@@ -384,7 +410,9 @@ ModelImportResult ModelImportService::ImportModelImpl(
             ? "Model imported with a new name."
             : successStatus == ModelImportStatus::Replaced
             ? "Existing model replaced."
-            : "Model imported."};
+            : "Model imported.",
+        thumbnail.Status,
+        thumbnail.Message};
 }
 
 std::filesystem::path ModelImportService::NextAvailablePath(

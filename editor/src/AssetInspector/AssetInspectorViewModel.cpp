@@ -29,7 +29,8 @@ bool AssetInspectorViewModel::SetAssetsRoot(
     const auto absolute =
         std::filesystem::absolute(assetsRoot, error).lexically_normal();
     if (error || !std::filesystem::is_directory(absolute, error) || error ||
-        !metadataService_.SetModelsDirectory(absolute / "Models"))
+        !metadataService_.SetModelsDirectory(absolute / "Models") ||
+        !thumbnailService_.SetProjectRoot(absolute.parent_path()))
         return false;
     if (assetsRoot_ != absolute)
     {
@@ -46,6 +47,7 @@ void AssetInspectorViewModel::ClearProject() noexcept
     selectedEntry_.reset();
     state_ = {};
     metadataService_.ClearModelsDirectory();
+    thumbnailService_.ClearProject();
 }
 
 bool AssetInspectorViewModel::UpdateSelection(
@@ -67,6 +69,16 @@ bool AssetInspectorViewModel::Reanalyze()
         return false;
     BuildState(true);
     return state_.Analysis.has_value() && state_.Analysis->Valid;
+}
+
+bool AssetInspectorViewModel::RegenerateThumbnail()
+{
+    if (!selectedEntry_ || state_.Kind != AssetInspectorKind::VoxModel)
+        return false;
+    const ThumbnailGenerationResult generated = thumbnailService_.Generate(
+        selectedEntry_->AbsolutePath(), true);
+    BuildState(false);
+    return generated.Succeeded();
 }
 
 const AssetInspectorState& AssetInspectorViewModel::State() const noexcept
@@ -172,6 +184,19 @@ void AssetInspectorViewModel::BuildState(const bool forceReanalysis)
         state_.ImporterVersion =
             std::to_string(metadata.Metadata.ImporterVersion);
     }
+    const ThumbnailPresentation thumbnail =
+        thumbnailService_.Describe(entry.AbsolutePath());
+    state_.ThumbnailStatus = ThumbnailStatusName(thumbnail.Status);
+    state_.ThumbnailResolution = thumbnail.Width > 0U && thumbnail.Height > 0U
+        ? std::to_string(thumbnail.Width) + " x " +
+            std::to_string(thumbnail.Height)
+        : "Unavailable";
+    state_.ThumbnailGeneratorVersion = thumbnail.GeneratorVersion > 0U
+        ? std::to_string(thumbnail.GeneratorVersion) : "Unavailable";
+    state_.ThumbnailFile = thumbnail.CachedFile;
+    state_.ThumbnailError = thumbnail.Error;
+    state_.CanRevealThumbnail = thumbnail.IsReady() &&
+        std::filesystem::is_regular_file(thumbnail.CachedFile);
     state_.Analysis = analyzed.Metadata.Analysis
         ? analyzed.Metadata.Analysis
         : metadata.Succeeded ? metadata.Metadata.Analysis : std::nullopt;

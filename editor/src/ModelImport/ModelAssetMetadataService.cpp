@@ -90,7 +90,7 @@ bool MetadataEquals(
         left.ImporterVersion == right.ImporterVersion &&
         left.FileSize == right.FileSize &&
         left.SourceModifiedTime == right.SourceModifiedTime &&
-        left.Analysis == right.Analysis;
+        left.Analysis == right.Analysis && left.Thumbnail == right.Thumbnail;
 }
 
 std::string SerializeSubModels(
@@ -324,6 +324,48 @@ MetadataReadResult ModelAssetMetadataService::ReadMetadata(
         }
         result.Analysis = std::move(analysis);
     }
+    if (values.contains("thumbnail_status"))
+    {
+        static constexpr std::array<const char*, 13U> ThumbnailFields{
+            "thumbnail_file", "thumbnail_source_size",
+            "thumbnail_source_modified_time", "thumbnail_generator_version",
+            "thumbnail_width", "thumbnail_height",
+            "thumbnail_analysis_model_count", "thumbnail_analysis_size_x",
+            "thumbnail_analysis_size_y", "thumbnail_analysis_size_z",
+            "thumbnail_analysis_voxel_count", "thumbnail_error",
+            "thumbnail_status"};
+        for (const char* field : ThumbnailFields)
+            if (!values.contains(field))
+                return {false, {},
+                    std::string("Missing cached thumbnail field: ") + field};
+        ThumbnailMetadata thumbnail;
+        thumbnail.Status = ParseThumbnailStatus(values["thumbnail_status"]);
+        if (std::string(ThumbnailStatusName(thumbnail.Status)) !=
+            values["thumbnail_status"])
+            return {false, {}, "Invalid thumbnail status."};
+        thumbnail.File = values["thumbnail_file"];
+        thumbnail.Error = values["thumbnail_error"];
+        if (!ParseInteger(values["thumbnail_source_size"],
+                thumbnail.SourceSize) ||
+            !ParseInteger(values["thumbnail_source_modified_time"],
+                thumbnail.SourceModifiedTime) ||
+            !ParseInteger(values["thumbnail_generator_version"],
+                thumbnail.GeneratorVersion) ||
+            !ParseInteger(values["thumbnail_width"], thumbnail.Width) ||
+            !ParseInteger(values["thumbnail_height"], thumbnail.Height) ||
+            !ParseInteger(values["thumbnail_analysis_model_count"],
+                thumbnail.AnalysisModelCount) ||
+            !ParseInteger(values["thumbnail_analysis_size_x"],
+                thumbnail.AnalysisSizeX) ||
+            !ParseInteger(values["thumbnail_analysis_size_y"],
+                thumbnail.AnalysisSizeY) ||
+            !ParseInteger(values["thumbnail_analysis_size_z"],
+                thumbnail.AnalysisSizeZ) ||
+            !ParseInteger(values["thumbnail_analysis_voxel_count"],
+                thumbnail.AnalysisVoxelCount))
+            return {false, {}, "Invalid cached thumbnail field."};
+        result.Thumbnail = std::move(thumbnail);
+    }
     return {true, std::move(result), {}};
 }
 
@@ -399,6 +441,32 @@ bool ModelAssetMetadataService::WriteMetadata(
                    << "submodels="
                    << EscapeValue(SerializeSubModels(analysis.Models)) << '\n';
         }
+        if (metadata.Thumbnail)
+        {
+            const ThumbnailMetadata& thumbnail = *metadata.Thumbnail;
+            output << "thumbnail_status="
+                   << ThumbnailStatusName(thumbnail.Status) << '\n'
+                   << "thumbnail_file=" << EscapeValue(thumbnail.File) << '\n'
+                   << "thumbnail_source_size=" << thumbnail.SourceSize << '\n'
+                   << "thumbnail_source_modified_time="
+                   << thumbnail.SourceModifiedTime << '\n'
+                   << "thumbnail_generator_version="
+                   << thumbnail.GeneratorVersion << '\n'
+                   << "thumbnail_width=" << thumbnail.Width << '\n'
+                   << "thumbnail_height=" << thumbnail.Height << '\n'
+                   << "thumbnail_analysis_model_count="
+                   << thumbnail.AnalysisModelCount << '\n'
+                   << "thumbnail_analysis_size_x="
+                   << thumbnail.AnalysisSizeX << '\n'
+                   << "thumbnail_analysis_size_y="
+                   << thumbnail.AnalysisSizeY << '\n'
+                   << "thumbnail_analysis_size_z="
+                   << thumbnail.AnalysisSizeZ << '\n'
+                   << "thumbnail_analysis_voxel_count="
+                   << thumbnail.AnalysisVoxelCount << '\n'
+                   << "thumbnail_error="
+                   << EscapeValue(thumbnail.Error) << '\n';
+        }
         if (!output) { errorMessage = "Unable to write metadata temporary file."; }
     }
     if (errorMessage.empty() && beforeInstall_ && !beforeInstall_())
@@ -447,6 +515,12 @@ bool ModelAssetMetadataService::ValidateMetadata(
         metadata.Importer != "vox" ||
         metadata.ImporterVersion != CurrentImporterVersion)
         errorMessage = "Metadata does not describe this VOX model.";
+    else if (metadata.Thumbnail &&
+        (metadata.Thumbnail->File !=
+            metadata.AssetId + VoxThumbnailExtension ||
+         metadata.Thumbnail->Width > 4096U ||
+         metadata.Thumbnail->Height > 4096U))
+        errorMessage = "Thumbnail metadata is invalid.";
     else
     {
         std::error_code error;
@@ -487,7 +561,10 @@ MetadataOperationResult ModelAssetMetadataService::EnsureMetadata(
     {
         if (existing.Metadata.FileSize == expected.FileSize &&
             existing.Metadata.SourceModifiedTime == expected.SourceModifiedTime)
+        {
             expected.Analysis = existing.Metadata.Analysis;
+            expected.Thumbnail = existing.Metadata.Thumbnail;
+        }
         std::string validationError;
         if (ValidateMetadata(existing.Metadata, resolved, validationError) &&
             MetadataEquals(existing.Metadata, expected))

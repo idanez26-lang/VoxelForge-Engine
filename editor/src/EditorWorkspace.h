@@ -74,7 +74,8 @@ public:
     [[nodiscard]] bool AddVoxelSmokePassed() const noexcept;
     [[nodiscard]] bool RunModelImportSmokeStep(
         std::size_t frame,
-        const std::filesystem::path& sourcePath);
+        const std::filesystem::path& sourcePath,
+        bool importVisualSet = false);
     [[nodiscard]] bool ModelImportSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
@@ -90,6 +91,7 @@ private:
     void RedoCommand();
     void DrawDockSpace(ImGuiID dockspaceId);
     void BuildDefaultLayout(ImGuiID dockspaceId);
+    void BuildThumbnailVisualLayout(ImGuiID dockspaceId);
 
     void DrawExplorerPanel();
     void DrawScenePanel();
@@ -212,6 +214,8 @@ private:
     bool showOpenImportedModelPopup_ = false;
     bool showDirtyConfirmationPopup_ = false;
     bool resetLayoutRequested_ = false;
+    bool thumbnailVisualLayoutRequested_ = false;
+    bool thumbnailVisualMode_ = false;
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
     bool voxelSelectionClickCandidate_ = false;
@@ -270,8 +274,14 @@ private:
     bool modelImportSmokeClean_ = false;
     bool modelImportSmokeReanalyzed_ = false;
     bool modelImportSmokeInspectorCleared_ = false;
+    bool modelImportSmokeThumbnailGenerated_ = false;
+    bool modelImportSmokeThumbnailLoaded_ = false;
+    bool modelImportSmokeThumbnailPreserved_ = false;
+    bool modelImportSmokeThumbnailRegenerated_ = false;
+    bool modelImportSmokeThumbnailRemoved_ = false;
     std::size_t modelImportSmokeRenderBaseline_ = 0U;
     std::filesystem::path modelImportSmokeDestination_;
+    std::filesystem::path modelImportSmokeThumbnailPath_;
     std::string modelImportSmokeAssetId_;
 };
 

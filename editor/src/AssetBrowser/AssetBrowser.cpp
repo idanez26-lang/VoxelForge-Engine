@@ -165,14 +165,26 @@ bool AssetBrowser::SetAssetsRoot(
         SetError(rootError);
         return false;
     }
+    if (!thumbnailService_.SetProjectRoot(
+            directory_.AssetsRoot().parent_path()))
+    {
+        const std::string thumbnailError = thumbnailService_.LastError();
+        directory_.Clear();
+        SetError(thumbnailError);
+        return false;
+    }
 
     error_.clear();
     statusMessage_.clear();
+    RefreshThumbnailPresentations();
     return true;
 }
 
 void AssetBrowser::ClearAssetsRoot() noexcept
 {
+    thumbnailTextureCache_.Clear();
+    thumbnailService_.ClearProject();
+    thumbnails_.clear();
     directory_.Clear();
     selectedRelativePath_.reset();
     voxInspectionReport_.reset();
@@ -233,6 +245,8 @@ bool AssetBrowser::Refresh()
 
     error_.clear();
     statusMessage_ = "Assets refreshed.";
+    thumbnailTextureCache_.Clear();
+    RefreshThumbnailPresentations();
     return true;
 }
 
@@ -280,6 +294,7 @@ bool AssetBrowser::RevealEntry(
         SetError(directory_.LastError());
         return false;
     }
+    RefreshThumbnailPresentations();
     return SelectEntry(normalized);
 }
 
@@ -309,6 +324,7 @@ AssetOperationResult AssetBrowser::RenameSelectedEntry(
 
     selectedRelativePath_ = result.ResultingRelativePath;
     SynchronizeSelection();
+    RefreshThumbnailPresentations();
     SetStatus(result.Message);
     return result;
 }
@@ -352,6 +368,8 @@ AssetOperationResult AssetBrowser::DeleteSelectedEntry()
     }
 
     selectedRelativePath_.reset();
+    thumbnailTextureCache_.Clear();
+    RefreshThumbnailPresentations();
     SetStatus(result.Message);
     return result;
 }
@@ -415,6 +433,7 @@ void AssetBrowser::DrawToolbar()
         if (directory_.GoToAssetsRoot())
         {
             selectedRelativePath_.reset();
+            RefreshThumbnailPresentations();
             error_.clear();
         }
         else
@@ -431,6 +450,7 @@ void AssetBrowser::DrawToolbar()
         if (directory_.Back())
         {
             selectedRelativePath_.reset();
+            RefreshThumbnailPresentations();
             error_.clear();
         }
         else
@@ -608,6 +628,7 @@ void AssetBrowser::DrawEntries()
     if (directory_.EnterDirectory(*directoryToEnter))
     {
         selectedRelativePath_.reset();
+        RefreshThumbnailPresentations();
         error_.clear();
     }
     else
@@ -625,9 +646,7 @@ void AssetBrowser::DrawGrid(
     const float cellWidth = std::max(
         settings.GridCellSize,
         ImGui::GetFontSize() * 7.0F);
-    const float cellHeight = std::max(
-        ImGui::GetFontSize() * 4.0F,
-        cellWidth * 0.62F);
+    const float thumbnailSize = std::max(48.0F, cellWidth - 8.0F);
     const float availableWidth = std::max(1.0F, ImGui::GetContentRegionAvail().x);
     const int columnCount = std::max(
         1,
@@ -649,16 +668,40 @@ void AssetBrowser::DrawGrid(
         ImGui::PushID(identifier.c_str());
         const bool selected = selectedRelativePath_ &&
             *selectedRelativePath_ == entry->RelativePath();
-        const std::string label = std::string(AssetEntryMarker(*entry)) +
-            "\n" + entry->Name();
-
-        if (ImGui::Selectable(
-                label.c_str(),
-                selected,
-                ImGuiSelectableFlags_AllowDoubleClick,
-                ImVec2(cellWidth, cellHeight)))
+        const ThumbnailPresentation* thumbnail = ThumbnailFor(*entry);
+        SDL_GPUTexture* texture = thumbnail && thumbnail->IsReady()
+            ? thumbnailTextureCache_.Get(thumbnail->CachedFile) : nullptr;
+        bool activated = false;
+        if (texture != nullptr)
         {
-            selectedRelativePath_ = entry->RelativePath();
+            activated = ImGui::ImageButton(
+                "##AssetThumbnail",
+                reinterpret_cast<ImTextureID>(texture),
+                ImVec2(thumbnailSize, thumbnailSize));
+        }
+        else
+        {
+            const char* placeholder = entry->IsDirectory() ? "Folder" :
+                thumbnail && thumbnail->Status == ThumbnailStatus::Failed
+                    ? "Thumbnail failed" :
+                thumbnail && thumbnail->Status == ThumbnailStatus::Generating
+                    ? "Generating..." :
+                thumbnail && thumbnail->Status == ThumbnailStatus::Outdated
+                    ? "Outdated" : "No thumbnail";
+            if (thumbnail && thumbnail->Status == ThumbnailStatus::Failed)
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                    ImVec4(0.40F, 0.12F, 0.12F, 1.0F));
+            activated = ImGui::Button(
+                placeholder, ImVec2(thumbnailSize, thumbnailSize));
+            if (thumbnail && thumbnail->Status == ThumbnailStatus::Failed)
+                ImGui::PopStyleColor();
+        }
+        if (activated) selectedRelativePath_ = entry->RelativePath();
+        if (selected)
+        {
+            ImGui::GetWindowDrawList()->AddRect(
+                ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+                IM_COL32(255, 190, 55, 255), 2.0F, 0, 2.0F);
         }
 
         if (entry->IsDirectory() && ImGui::IsItemHovered() &&
@@ -668,6 +711,8 @@ void AssetBrowser::DrawGrid(
         }
 
         DrawEntryContextMenu(*entry, directoryToEnter);
+        ImGui::TextWrapped("%s", entry->Name().c_str());
+        ImGui::Dummy(ImVec2(cellWidth, ImGui::GetTextLineHeight() * 0.35F));
         ImGui::PopID();
     }
 
@@ -701,7 +746,14 @@ void AssetBrowser::DrawList(
         const std::string identifier = entry->RelativePath().generic_string();
         ImGui::PushID(identifier.c_str());
         ImGui::TableSetColumnIndex(0);
-        ImGui::TextUnformatted(AssetEntryMarker(*entry).data());
+        const ThumbnailPresentation* thumbnail = ThumbnailFor(*entry);
+        SDL_GPUTexture* texture = thumbnail && thumbnail->IsReady()
+            ? thumbnailTextureCache_.Get(thumbnail->CachedFile) : nullptr;
+        if (texture != nullptr)
+            ImGui::Image(reinterpret_cast<ImTextureID>(texture),
+                ImVec2(22.0F, 22.0F));
+        else
+            ImGui::TextUnformatted(AssetEntryMarker(*entry).data());
         ImGui::TableSetColumnIndex(1);
         const bool selected = selectedRelativePath_ &&
             *selectedRelativePath_ == entry->RelativePath();
@@ -781,6 +833,12 @@ void AssetBrowser::DrawEntryContextMenu(
 void AssetBrowser::SetOpenVoxCallback(OpenVoxCallback callback)
 {
     openVoxCallback_ = std::move(callback);
+}
+
+void AssetBrowser::InvalidateThumbnails()
+{
+    thumbnailTextureCache_.Clear();
+    RefreshThumbnailPresentations();
 }
 
 void AssetBrowser::DrawSelection() const
@@ -1288,6 +1346,26 @@ void AssetBrowser::SynchronizeSelection()
     {
         selectedRelativePath_.reset();
     }
+}
+
+void AssetBrowser::RefreshThumbnailPresentations()
+{
+    thumbnails_.clear();
+    for (const AssetEntry& entry : directory_.Entries())
+    {
+        if (!entry.IsFile() || LowercaseExtension(entry) != ".vox") continue;
+        thumbnails_.emplace(
+            entry.RelativePath().generic_string(),
+            thumbnailService_.Describe(entry.AbsolutePath()));
+    }
+}
+
+const ThumbnailPresentation* AssetBrowser::ThumbnailFor(
+    const AssetEntry& entry) const
+{
+    const auto thumbnail = thumbnails_.find(
+        entry.RelativePath().generic_string());
+    return thumbnail == thumbnails_.end() ? nullptr : &thumbnail->second;
 }
 
 void AssetBrowser::SetError(std::string error)

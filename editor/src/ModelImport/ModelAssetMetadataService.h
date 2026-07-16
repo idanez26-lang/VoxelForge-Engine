@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VoxelForge/Asset/Vox/VoxModelAnalyzer.h"
+#include "Thumbnail/ThumbnailMetadata.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -25,6 +26,7 @@ struct ModelAssetMetadata final
     std::uintmax_t FileSize = 0U;
     std::int64_t SourceModifiedTime = 0;
     std::optional<Asset::Vox::VoxModelAnalysis> Analysis;
+    std::optional<ThumbnailMetadata> Thumbnail;
 };
 
 enum class MetadataEnsureStatus

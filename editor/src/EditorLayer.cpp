@@ -145,11 +145,10 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(
             workspace_.RunAddVoxelSmokeStep(renderedFrameCount_));
     }
-    if (modelImportSmokeTest_ ||
-        (modelImportVisualTest_ && renderedFrameCount_ <= 1U))
+    if (modelImportSmokeTest_ || modelImportVisualTest_)
     {
         static_cast<void>(workspace_.RunModelImportSmokeStep(
-            renderedFrameCount_, startupVoxPath_));
+            renderedFrameCount_, startupVoxPath_, modelImportVisualTest_));
     }
     if (qualityOfLifeSmokeTest_)
     {

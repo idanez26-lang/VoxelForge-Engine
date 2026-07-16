@@ -167,6 +167,41 @@ public:
         return static_cast<bool>(output);
     }
 
+    bool CreateThumbnailVisualSources()
+    {
+        const auto writeModel = [](const std::filesystem::path& path,
+            const std::uint32_t sizeX, const std::uint32_t sizeY,
+            const std::uint32_t sizeZ, const std::uint8_t color)
+        {
+            std::vector<std::uint8_t> size;
+            AppendU32(size, sizeX); AppendU32(size, sizeY); AppendU32(size, sizeZ);
+            std::vector<std::uint8_t> xyzi;
+            AppendU32(xyzi, 4U);
+            const std::array<std::array<std::uint8_t, 4>, 4> voxels{{
+                {{0U, 0U, 0U, color}},
+                {{static_cast<std::uint8_t>(sizeX - 1U), 0U, 0U,
+                    static_cast<std::uint8_t>(color + 1U)}},
+                {{0U, static_cast<std::uint8_t>(sizeY - 1U), 0U,
+                    static_cast<std::uint8_t>(color + 2U)}},
+                {{0U, 0U, static_cast<std::uint8_t>(sizeZ - 1U),
+                    static_cast<std::uint8_t>(color + 3U)}}}};
+            for (const auto& voxel : voxels)
+                xyzi.insert(xyzi.end(), voxel.begin(), voxel.end());
+            std::vector<std::uint8_t> children;
+            AppendChunk(children, {'S', 'I', 'Z', 'E'}, size);
+            AppendChunk(children, {'X', 'Y', 'Z', 'I'}, xyzi);
+            std::vector<std::uint8_t> bytes{'V', 'O', 'X', ' '};
+            AppendU32(bytes, 150U);
+            AppendChunk(bytes, {'M', 'A', 'I', 'N'}, {}, children);
+            std::ofstream output(path, std::ios::binary | std::ios::trunc);
+            output.write(reinterpret_cast<const char*>(bytes.data()),
+                static_cast<std::streamsize>(bytes.size()));
+            return static_cast<bool>(output);
+        };
+        return writeModel(parent_ / "tower.vox", 2U, 8U, 3U, 20U) &&
+            writeModel(parent_ / "bridge.vox", 9U, 2U, 3U, 40U);
+    }
+
     ~ViewportTestFixture()
     {
         std::error_code ignored;
@@ -230,6 +265,12 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.ModelImportVisualTest))
         {
             std::cerr << "[FATAL] Unable to create viewport test fixture.\n";
+            return 1;
+        }
+        if (commandLine.ModelImportVisualTest &&
+            !viewportFixture.CreateThumbnailVisualSources())
+        {
+            std::cerr << "[FATAL] Unable to create thumbnail visual fixtures.\n";
             return 1;
         }
 

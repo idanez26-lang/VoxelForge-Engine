@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+int RunVoxThumbnailTests();
+
 namespace
 {
 using namespace VoxelForge::Editor;
@@ -99,8 +101,11 @@ AssetEntry Entry(const fs::path& absolute, const fs::path& assets)
 }
 }
 
-int main()
+int main(const int argumentCount, char* arguments[])
 {
+    if (argumentCount == 2 &&
+        std::string(arguments[1]) == "--thumbnail-only")
+        return RunVoxThumbnailTests();
     try
     {
         TemporaryDirectory temporary;
@@ -187,7 +192,7 @@ int main()
         Require(inspector.SetAssetsRoot(secondAssets) &&
             inspector.State().Kind == AssetInspectorKind::None,
             "Project change retained previous state.");
-        return 0;
+        return RunVoxThumbnailTests();
     }
     catch (const std::exception& exception)
     {

@@ -1,10 +1,12 @@
 #pragma once
 
 #include "ModelAssetMetadataService.h"
+#include "Thumbnail/VoxThumbnailService.h"
 
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -47,6 +49,9 @@ struct ModelImportResult final
     std::filesystem::path SourcePath;
     std::filesystem::path DestinationPath;
     std::string Message;
+    ThumbnailGenerationStatus ThumbnailStatus =
+        ThumbnailGenerationStatus::Failed;
+    std::string ThumbnailMessage;
 
     [[nodiscard]] bool Succeeded() const noexcept;
     [[nodiscard]] bool ChangedAssets() const noexcept;
@@ -62,6 +67,10 @@ public:
     explicit ModelImportService(
         ModelAssetMetadataService::AssetIdGenerator assetIdGenerator = {},
         ModelAssetMetadataService::BeforeInstallCallback beforeInstall = {});
+    ModelImportService(
+        ModelAssetMetadataService::AssetIdGenerator assetIdGenerator,
+        ModelAssetMetadataService::BeforeInstallCallback beforeInstall,
+        std::shared_ptr<IVoxThumbnailRenderer> thumbnailRenderer);
 
     [[nodiscard]] bool SetProjectRoot(
         const std::filesystem::path& projectRoot);
@@ -77,6 +86,7 @@ public:
         ModelImportCollisionAction collisionAction =
             ModelImportCollisionAction::Ask);
     [[nodiscard]] MetadataRebuildReport RebuildMetadata();
+    [[nodiscard]] ThumbnailRebuildReport RebuildThumbnails();
     [[nodiscard]] MetadataReadResult ReadMetadataForModel(
         const std::filesystem::path& modelPath) const;
     [[nodiscard]] MetadataAnalysisResult AnalyzeModel(
@@ -113,6 +123,7 @@ private:
     RefreshCallback refreshCallback_;
     std::string lastError_;
     ModelAssetMetadataService metadataService_;
+    VoxThumbnailService thumbnailService_;
 };
 
 } // namespace VoxelForge::Editor

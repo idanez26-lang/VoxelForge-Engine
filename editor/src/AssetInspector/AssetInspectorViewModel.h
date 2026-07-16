@@ -2,6 +2,7 @@
 
 #include "AssetBrowser/AssetEntry.h"
 #include "ModelImport/ModelAssetMetadataService.h"
+#include "Thumbnail/VoxThumbnailService.h"
 
 #include <filesystem>
 #include <optional>
@@ -36,6 +37,12 @@ struct AssetInspectorState final
     std::string FileSize;
     std::string LastModified;
     std::string AnalysisError;
+    std::string ThumbnailStatus;
+    std::string ThumbnailResolution;
+    std::string ThumbnailGeneratorVersion;
+    std::filesystem::path ThumbnailFile;
+    std::string ThumbnailError;
+    bool CanRevealThumbnail = false;
     std::optional<Asset::Vox::VoxModelAnalysis> Analysis;
 };
 
@@ -48,6 +55,7 @@ public:
     [[nodiscard]] bool UpdateSelection(
         const std::optional<AssetEntry>& selectedEntry);
     [[nodiscard]] bool Reanalyze();
+    [[nodiscard]] bool RegenerateThumbnail();
 
     [[nodiscard]] const AssetInspectorState& State() const noexcept;
     [[nodiscard]] const std::optional<AssetEntry>& Selection() const noexcept;
@@ -66,6 +74,7 @@ private:
     std::optional<AssetEntry> selectedEntry_;
     AssetInspectorState state_;
     ModelAssetMetadataService metadataService_;
+    VoxThumbnailService thumbnailService_;
 };
 
 } // namespace VoxelForge::Editor

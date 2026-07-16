@@ -1,6 +1,7 @@
 #include "AssetDirectory.h"
 
 #include "ModelImport/ModelAssetMetadataService.h"
+#include "Thumbnail/VoxThumbnailService.h"
 
 #include <algorithm>
 #include <array>
@@ -804,6 +805,7 @@ AssetOperationResult AssetDirectory::DeleteEntry(
         freshEntry.OperationPath.parent_path() == assetsRoot_ / "Models";
     std::filesystem::path metadataPath;
     std::filesystem::path metadataTemporary;
+    std::string thumbnailAssetId;
     bool hasMetadata = false;
     if (isManagedVox)
     {
@@ -819,6 +821,10 @@ AssetOperationResult AssetDirectory::DeleteEntry(
                 !std::filesystem::is_regular_file(metadataStatus) ||
                 std::filesystem::exists(metadataTemporary, error) || error)
                 return OperationFailure("Model metadata cannot be deleted safely.", true);
+            const MetadataReadResult metadata =
+                metadataService.ReadMetadata(metadataPath);
+            if (metadata.Succeeded)
+                thumbnailAssetId = metadata.Metadata.AssetId;
             std::filesystem::rename(metadataPath, metadataTemporary, error);
             if (error)
                 return OperationFailure("Unable to prepare model metadata deletion.", true);
@@ -868,6 +874,17 @@ AssetOperationResult AssetDirectory::DeleteEntry(
                     error.message(), true);
     }
 
+    std::string thumbnailCleanupError;
+    if (!thumbnailAssetId.empty())
+    {
+        VoxThumbnailService thumbnailService;
+        if (!thumbnailService.SetProjectRoot(assetsRoot_.parent_path()))
+            thumbnailCleanupError = thumbnailService.LastError();
+        else
+            static_cast<void>(thumbnailService.RemoveByAssetId(
+                thumbnailAssetId, thumbnailCleanupError));
+    }
+
     const bool refreshed = Refresh();
     std::string message = "Deleted " +
         std::string(freshEntry.IsDirectory ? "folder " : "file ") +
@@ -877,6 +894,8 @@ AssetOperationResult AssetDirectory::DeleteEntry(
     {
         message += " Refresh failed: " + lastError_;
     }
+    if (!thumbnailCleanupError.empty())
+        message += " Thumbnail cleanup warning: " + thumbnailCleanupError;
 
     return {true, std::move(message), std::nullopt};
 }

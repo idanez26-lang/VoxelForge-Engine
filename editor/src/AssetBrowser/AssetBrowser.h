@@ -2,6 +2,8 @@
 
 #include "AssetDirectory.h"
 #include "AssetBrowserViewModel.h"
+#include "Thumbnail/ThumbnailTextureCache.h"
+#include "Thumbnail/VoxThumbnailService.h"
 
 #include <array>
 #include <cstdint>
@@ -10,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace VoxelForge::Editor
@@ -48,6 +51,7 @@ public:
     [[nodiscard]] std::vector<const AssetEntry*> VisibleEntries() const;
     void SetMessageCallback(MessageCallback callback);
     void SetOpenVoxCallback(OpenVoxCallback callback);
+    void InvalidateThumbnails();
 
 private:
     struct PendingEntryOperation final
@@ -105,11 +109,17 @@ private:
     [[nodiscard]] bool IsPendingOperationCurrent(
         const PendingEntryOperation& operation) const;
     void SynchronizeSelection();
+    void RefreshThumbnailPresentations();
+    [[nodiscard]] const ThumbnailPresentation* ThumbnailFor(
+        const AssetEntry& entry) const;
     void SetError(std::string error);
     void SetStatus(std::string message);
 
     AssetDirectory directory_;
     AssetBrowserViewModel viewModel_;
+    VoxThumbnailService thumbnailService_;
+    ThumbnailTextureCache thumbnailTextureCache_;
+    std::unordered_map<std::string, ThumbnailPresentation> thumbnails_;
     MessageCallback messageCallback_;
     OpenVoxCallback openVoxCallback_;
     std::optional<std::filesystem::path> selectedRelativePath_;

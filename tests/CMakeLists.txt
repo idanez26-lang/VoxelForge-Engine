@@ -102,15 +102,22 @@ add_test(
 add_executable(
     VoxelForgeEditorAssetInspectorTests
     Editor/AssetInspectorTests.cpp
+    Editor/VoxThumbnailTests.cpp
 )
 target_link_libraries(
     VoxelForgeEditorAssetInspectorTests
-    PRIVATE VoxelForgeEditorAssetInspector
+    PRIVATE
+        VoxelForgeEditorAssetInspector
+        VoxelForgeEditorModelImport
 )
 vf_configure_test(VoxelForgeEditorAssetInspectorTests)
 add_test(
     NAME VoxelForge.Editor.AssetInspector
     COMMAND $<TARGET_FILE:VoxelForgeEditorAssetInspectorTests>
+)
+add_test(
+    NAME VoxelForge.Editor.VoxThumbnail
+    COMMAND $<TARGET_FILE:VoxelForgeEditorAssetInspectorTests> --thumbnail-only
 )
 
 add_executable(
@@ -328,6 +335,7 @@ set_tests_properties(
     VoxelForge.Editor.ModelImport
     VoxelForge.Editor.AssetMetadata
     VoxelForge.Editor.AssetInspector
+    VoxelForge.Editor.VoxThumbnail
     VoxelForge.Editor.VoxelViewport
     VoxelForge.Editor.VoxelSelection
     VoxelForge.Editor.CommandHistory

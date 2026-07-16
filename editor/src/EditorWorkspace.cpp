@@ -160,14 +160,34 @@ void EditorWorkspace::Draw()
 
     if (layoutMissing || resetLayoutRequested_)
     {
-        BuildDefaultLayout(dockspaceId);
+        if (thumbnailVisualLayoutRequested_)
+            BuildThumbnailVisualLayout(dockspaceId);
+        else
+            BuildDefaultLayout(dockspaceId);
         resetLayoutRequested_ = false;
+        thumbnailVisualLayoutRequested_ = false;
     }
 
     if (showExplorer_) DrawExplorerPanel();
     if (showScene_) DrawScenePanel();
-    if (showInspector_) DrawInspectorPanel();
-    if (showAssetBrowser_) DrawAssetBrowserPanel();
+    if (showInspector_ && !thumbnailVisualMode_) DrawInspectorPanel();
+    if (showAssetBrowser_)
+    {
+        if (thumbnailVisualMode_)
+        {
+            ImGui::SetNextWindowDockID(0U, ImGuiCond_Always);
+            ImGui::SetNextWindowPos(ImVec2(8.0F, 72.0F), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(390.0F, 330.0F), ImGuiCond_Always);
+        }
+        DrawAssetBrowserPanel();
+    }
+    if (showInspector_ && thumbnailVisualMode_)
+    {
+        ImGui::SetNextWindowDockID(0U, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(400.0F, 72.0F), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(325.0F, 330.0F), ImGuiCond_Always);
+        DrawInspectorPanel();
+    }
     if (showConsole_) DrawConsolePanel();
     if (showProfiler_) DrawProfilerPanel();
 
@@ -399,6 +419,21 @@ void EditorWorkspace::DrawMainMenuBar()
                 std::to_string(report.Errors) + " errors.");
             for (const std::string& error : report.ErrorMessages)
                 AddConsoleMessage("Model metadata error: " + error);
+        }
+        if (ImGui::MenuItem(
+                "Rebuild VOX Thumbnails", nullptr, false, hasActiveProject))
+        {
+            const ThumbnailRebuildReport report =
+                modelImportService_.RebuildThumbnails();
+            AddConsoleMessage(
+                "[Assets] Thumbnail rebuild completed: " +
+                std::to_string(report.Generated) + " generated, " +
+                std::to_string(report.Unchanged) + " unchanged, " +
+                std::to_string(report.Failed) + " failed, " +
+                std::to_string(report.Skipped) + " skipped, " +
+                std::to_string(report.RemovedOrphans) + " orphans removed.");
+            for (const std::string& error : report.Errors)
+                AddConsoleMessage("Thumbnail rebuild error: " + error);
         }
         ImGui::EndMenu();
     }
@@ -640,6 +675,34 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     showInspector_ = true;
     showAssetBrowser_ = true;
     showConsole_ = true;
+}
+
+void EditorWorkspace::BuildThumbnailVisualLayout(const ImGuiID dockspaceId)
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 workspaceSize(
+        viewport->WorkSize.x,
+        std::max(1.0F, viewport->WorkSize.y - StatusBarHeight));
+    ImGui::DockBuilderRemoveNode(dockspaceId);
+    const ImGuiDockNodeFlags flags =
+        static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) |
+        ImGuiDockNodeFlags_PassthruCentralNode;
+    ImGui::DockBuilderAddNode(dockspaceId, flags);
+    ImGui::DockBuilderSetNodeSize(dockspaceId, workspaceSize);
+    ImGuiID visibleId = dockspaceId;
+    static_cast<void>(ImGui::DockBuilderSplitNode(
+        visibleId, ImGuiDir_Right, 0.43F, nullptr, &visibleId));
+    ImGuiID browserId = visibleId;
+    const ImGuiID inspectorId = ImGui::DockBuilderSplitNode(
+        browserId, ImGuiDir_Right, 0.36F, nullptr, &browserId);
+    ImGui::DockBuilderDockWindow("Asset Browser", browserId);
+    ImGui::DockBuilderDockWindow("Inspector", inspectorId);
+    ImGui::DockBuilderFinish(dockspaceId);
+    showExplorer_ = false;
+    showScene_ = false;
+    showInspector_ = true;
+    showAssetBrowser_ = true;
+    showConsole_ = false;
 }
 
 void EditorWorkspace::DrawExplorerPanel()
@@ -1022,6 +1085,8 @@ void EditorWorkspace::DrawWelcomeScreen()
 void EditorWorkspace::DrawInspectorPanel()
 {
     ImGui::Begin("Inspector", &showInspector_);
+    if (thumbnailVisualMode_)
+        ImGui::SetScrollY(180.0F);
     ImGui::TextUnformatted("Inspector");
     ImGui::Separator();
 
@@ -1069,6 +1134,38 @@ void EditorWorkspace::DrawInspectorPanel()
         ImGui::Text("File Size: %s", assetState.FileSize.c_str());
         ImGui::Text("Last Modified: %s", assetState.LastModified.c_str());
         ImGui::Spacing();
+        ImGui::TextUnformatted("Thumbnail");
+        ImGui::Text("Status: %s", assetState.ThumbnailStatus.c_str());
+        ImGui::Text("Resolution: %s",
+            assetState.ThumbnailResolution.c_str());
+        ImGui::Text("Generator Version: %s",
+            assetState.ThumbnailGeneratorVersion.c_str());
+        ImGui::TextWrapped("Cached File: %s",
+            assetState.ThumbnailFile.empty() ? "Unavailable" :
+                assetState.ThumbnailFile.generic_string().c_str());
+        if (!assetState.ThumbnailError.empty())
+            DrawErrorMessage(assetState.ThumbnailError);
+        if (ImGui::Button("Regenerate Thumbnail"))
+        {
+            const std::string assetName = assetState.Name;
+            const bool succeeded = assetInspector_.RegenerateThumbnail();
+            assetBrowser_.InvalidateThumbnails();
+            AddConsoleMessage(succeeded
+                ? "Thumbnail regenerated: " + assetName
+                : "Thumbnail regeneration failed: " + assetName);
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!assetState.CanRevealThumbnail);
+        if (ImGui::Button("Reveal Cached File"))
+        {
+            std::string revealError;
+            if (!projectFolderOpener_->Open(
+                    assetState.ThumbnailFile.parent_path(), revealError))
+                AddConsoleMessage(
+                    "Reveal thumbnail failed: " + revealError);
+        }
+        ImGui::EndDisabled();
+        ImGui::Spacing();
         if (ImGui::Button("Open in Viewport") && assetInspector_.Selection())
             static_cast<void>(OpenVoxInViewport(
                 assetInspector_.Selection()->AbsolutePath()));
@@ -1084,6 +1181,7 @@ void EditorWorkspace::DrawInspectorPanel()
                 ? "VOX analysis updated: " + assetState.Name
                 : "VOX analysis failed: " +
                     assetInspector_.State().AnalysisError);
+            assetBrowser_.InvalidateThumbnails();
         }
         ImGui::End();
         return;
@@ -2121,6 +2219,10 @@ void EditorWorkspace::LogModelImport(const ModelImportResult& result)
     AddConsoleMessage(result.SourcePath.filename().string());
     AddConsoleMessage("-> " + relative.generic_string());
     AddConsoleMessage("Done");
+    AddConsoleMessage(result.ThumbnailStatus ==
+            ThumbnailGenerationStatus::Generated
+        ? "Thumbnail generated."
+        : "Thumbnail warning: " + result.ThumbnailMessage);
 }
 
 bool EditorWorkspace::OpenVoxInViewport(
@@ -2659,27 +2761,73 @@ bool EditorWorkspace::AddVoxelSmokePassed() const noexcept
 
 bool EditorWorkspace::RunModelImportSmokeStep(
     const std::size_t frame,
-    const std::filesystem::path& sourcePath)
+    const std::filesystem::path& sourcePath,
+    const bool importVisualSet)
 {
     if (frame == 0U)
     {
         resetLayoutRequested_ = true;
+        thumbnailVisualLayoutRequested_ = importVisualSet;
+        thumbnailVisualMode_ = importVisualSet;
         const std::size_t refreshBaseline = assetBrowser_.RefreshCount();
-        const ModelImportResult result =
-            modelImportService_.ImportModel(sourcePath);
+        std::vector<std::filesystem::path> sources{sourcePath};
+        if (importVisualSet)
+        {
+            std::error_code sourceError;
+            for (const auto& entry : std::filesystem::directory_iterator(
+                     sourcePath.parent_path(), sourceError))
+            {
+                if (entry.is_regular_file(sourceError) && !sourceError &&
+                    entry.path() != sourcePath &&
+                    entry.path().extension() == ".vox")
+                    sources.push_back(entry.path());
+                sourceError.clear();
+            }
+            std::sort(sources.begin(), sources.end());
+        }
+        const std::vector<ModelImportResult> results =
+            modelImportService_.ImportModels(sources);
+        const ModelImportResult& result = results.front();
         modelImportSmokeDestination_ = result.DestinationPath;
         modelImportSmokeImported_ = result.Succeeded() &&
             result.DestinationPath.parent_path() ==
                 modelImportService_.ModelsDirectory() &&
             std::filesystem::is_regular_file(result.DestinationPath) &&
-            modelImportService_.RecentImports().size() == 1U;
+            (importVisualSet
+                ? results.size() >= 3U && std::all_of(
+                    results.begin(), results.end(),
+                    [](const ModelImportResult& item)
+                    {
+                        return item.Succeeded();
+                    })
+                : modelImportService_.RecentImports().size() == 1U);
         const MetadataReadResult metadata =
             modelImportService_.ReadMetadataForModel(result.DestinationPath);
         modelImportSmokeMetadata_ = metadata.Succeeded &&
             std::filesystem::is_regular_file(
                 result.DestinationPath.string() + ".vfmeta");
         if (metadata.Succeeded)
+        {
             modelImportSmokeAssetId_ = metadata.Metadata.AssetId;
+            if (metadata.Metadata.Thumbnail)
+            {
+                modelImportSmokeThumbnailPath_ =
+                    modelImportService_.ProjectRoot() / "Cache" /
+                    "Thumbnails" / metadata.Metadata.Thumbnail->File;
+                ThumbnailImage thumbnail;
+                std::string thumbnailError;
+                modelImportSmokeThumbnailGenerated_ =
+                    metadata.Metadata.Thumbnail->Status ==
+                        ThumbnailStatus::Valid &&
+                    std::filesystem::is_regular_file(
+                        modelImportSmokeThumbnailPath_);
+                modelImportSmokeThumbnailLoaded_ =
+                    ReadThumbnailImage(modelImportSmokeThumbnailPath_,
+                        thumbnail, thumbnailError) &&
+                    thumbnail.Width == VoxThumbnailWidth &&
+                    thumbnail.Height == VoxThumbnailHeight;
+            }
+        }
         modelImportSmokeRefreshed_ =
             assetBrowser_.RefreshCount() > refreshBaseline;
         if (modelImportSmokeImported_)
@@ -2707,6 +2855,9 @@ bool EditorWorkspace::RunModelImportSmokeStep(
                 !inspector.Dimensions.empty() &&
                 !inspector.VoxelCount.empty() &&
                 inspector.AssetId == modelImportSmokeAssetId_;
+            modelImportSmokeInspected_ = modelImportSmokeInspected_ &&
+                inspector.ThumbnailStatus == "valid" &&
+                inspector.CanRevealThumbnail;
         }
     }
     else if (frame == 1U)
@@ -2715,7 +2866,7 @@ bool EditorWorkspace::RunModelImportSmokeStep(
             OpenVoxInViewportNow(modelImportSmokeDestination_);
         modelImportSmokeRenderBaseline_ = viewportRenderer_.ModelRenderCount();
     }
-    else if (frame == 2U)
+    else if (!importVisualSet && frame == 2U)
     {
         const AssetOperationResult renamed =
             assetBrowser_.RenameSelectedEntry("renamed-model.vox");
@@ -2732,20 +2883,32 @@ bool EditorWorkspace::RunModelImportSmokeStep(
                 metadata.Metadata.SourceFile == "renamed-model.vox" &&
                 std::filesystem::is_regular_file(
                     modelImportSmokeDestination_.string() + ".vfmeta");
+            modelImportSmokeThumbnailPreserved_ = metadata.Succeeded &&
+                metadata.Metadata.Thumbnail &&
+                metadata.Metadata.Thumbnail->File ==
+                    modelImportSmokeThumbnailPath_.filename().string() &&
+                std::filesystem::is_regular_file(
+                    modelImportSmokeThumbnailPath_);
             static_cast<void>(assetInspector_.UpdateSelection(
                 assetBrowser_.SelectedEntry()));
             modelImportSmokeReanalyzed_ = assetInspector_.Reanalyze() &&
                 assetInspector_.State().Name == "renamed-model.vox" &&
                 assetInspector_.State().AssetId == modelImportSmokeAssetId_;
+            modelImportSmokeThumbnailRegenerated_ =
+                assetInspector_.RegenerateThumbnail() &&
+                std::filesystem::is_regular_file(
+                    modelImportSmokeThumbnailPath_);
         }
     }
-    else if (frame == 3U)
+    else if (!importVisualSet && frame == 3U)
     {
         const AssetOperationResult deleted = assetBrowser_.DeleteSelectedEntry();
         modelImportSmokeDeleted_ = deleted.Succeeded &&
             !std::filesystem::exists(modelImportSmokeDestination_) &&
             !std::filesystem::exists(
                 modelImportSmokeDestination_.string() + ".vfmeta");
+        modelImportSmokeThumbnailRemoved_ =
+            !std::filesystem::exists(modelImportSmokeThumbnailPath_);
         static_cast<void>(assetInspector_.UpdateSelection(
             assetBrowser_.SelectedEntry()));
         modelImportSmokeInspectorCleared_ =
@@ -2760,7 +2923,34 @@ bool EditorWorkspace::RunModelImportSmokeStep(
                 modelImportSmokeClean_ = false;
         }
         modelImportSmokeClean_ = modelImportSmokeClean_ && !error;
+        const std::filesystem::path thumbnailDirectory =
+            modelImportService_.ProjectRoot() / "Cache" / "Thumbnails";
+        for (const auto& entry : std::filesystem::directory_iterator(
+                 thumbnailDirectory, error))
+        {
+            const std::string name = entry.path().filename().string();
+            if (name.ends_with(".tmp") || name.ends_with(".bak") ||
+                VoxThumbnailService::IsRecognizedCacheFile(entry.path()))
+                modelImportSmokeClean_ = false;
+        }
+        modelImportSmokeClean_ = modelImportSmokeClean_ && !error;
         resetLayoutRequested_ = true;
+    }
+    else if (importVisualSet && frame == 30U)
+    {
+        VoxThumbnailService thumbnailService;
+        std::string thumbnailError;
+        if (thumbnailService.SetProjectRoot(modelImportService_.ProjectRoot()))
+            static_cast<void>(thumbnailService.RemoveByAssetId(
+                modelImportSmokeAssetId_, thumbnailError));
+        assetBrowser_.InvalidateThumbnails();
+        static_cast<void>(assetInspector_.UpdateSelection(
+            assetBrowser_.SelectedEntry()));
+    }
+    else if (importVisualSet && frame == 90U)
+    {
+        static_cast<void>(assetInspector_.RegenerateThumbnail());
+        assetBrowser_.InvalidateThumbnails();
     }
     return ModelImportSmokePassed();
 }
@@ -2770,6 +2960,11 @@ bool EditorWorkspace::ModelImportSmokePassed() const noexcept
     return modelImportSmokeImported_ && modelImportSmokeMetadata_ &&
         modelImportSmokeInspected_ && modelImportSmokeReanalyzed_ &&
         modelImportSmokeInspectorCleared_ &&
+        modelImportSmokeThumbnailGenerated_ &&
+        modelImportSmokeThumbnailLoaded_ &&
+        modelImportSmokeThumbnailPreserved_ &&
+        modelImportSmokeThumbnailRegenerated_ &&
+        modelImportSmokeThumbnailRemoved_ &&
         modelImportSmokeRefreshed_ && modelImportSmokeOpened_ &&
         modelImportSmokeRenamed_ && modelImportSmokeDeleted_ &&
         modelImportSmokeClean_ && HasRenderedVoxelViewport() &&
