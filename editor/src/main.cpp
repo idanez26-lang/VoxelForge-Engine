@@ -36,6 +36,7 @@ constexpr std::size_t VoxelDocumentSmokeTestFrameCount = 20;
 constexpr std::size_t VoxelRenderSyncSmokeTestFrameCount = 20;
 constexpr std::size_t VoxelRayPickingSmokeTestFrameCount = 12;
 constexpr std::size_t VoxelPencilSmokeTestFrameCount = 12;
+constexpr std::size_t VoxelEraserSmokeTestFrameCount = 12;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -58,6 +59,7 @@ struct CommandLine final
     bool VoxelRenderSyncSmokeTest = false;
     bool VoxelRayPickingSmokeTest = false;
     bool VoxelPencilSmokeTest = false;
+    bool VoxelEraserSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -100,6 +102,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--voxel-ray-picking-smoke-test";
         result.VoxelPencilSmokeTest |=
             argument == "--voxel-pencil-smoke-test";
+        result.VoxelEraserSmokeTest |=
+            argument == "--voxel-eraser-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -303,6 +307,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelRenderSyncSmokeTest ||
             commandLine.VoxelRayPickingSmokeTest ||
             commandLine.VoxelPencilSmokeTest ||
+            commandLine.VoxelEraserSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
@@ -316,7 +321,8 @@ int main(const int argumentCount, char* arguments[])
         if (viewportTest && !viewportFixture.Create(
                 projectManager,
                 commandLine.AddVoxelSmokeTest ||
-                    commandLine.VoxelPencilSmokeTest,
+                    commandLine.VoxelPencilSmokeTest ||
+                    commandLine.VoxelEraserSmokeTest,
                 commandLine.ModelImportSmokeTest ||
                     commandLine.ModelImportVisualTest ||
                     commandLine.DragDropImportSmokeTest))
@@ -367,6 +373,8 @@ int main(const int argumentCount, char* arguments[])
                     ? VoxelRayPickingSmokeTestFrameCount
                     : commandLine.VoxelPencilSmokeTest
                     ? VoxelPencilSmokeTestFrameCount
+                    : commandLine.VoxelEraserSmokeTest
+                    ? VoxelEraserSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -388,7 +396,8 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.VoxelDocumentSmokeTest ||
                     commandLine.VoxelRenderSyncSmokeTest ||
                     commandLine.VoxelRayPickingSmokeTest ||
-                    commandLine.VoxelPencilSmokeTest,
+                    commandLine.VoxelPencilSmokeTest ||
+                    commandLine.VoxelEraserSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -409,7 +418,8 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.VoxelDocumentSmokeTest,
                 commandLine.VoxelRenderSyncSmokeTest,
                 commandLine.VoxelRayPickingSmokeTest,
-                commandLine.VoxelPencilSmokeTest);
+                commandLine.VoxelPencilSmokeTest,
+                commandLine.VoxelEraserSmokeTest);
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(

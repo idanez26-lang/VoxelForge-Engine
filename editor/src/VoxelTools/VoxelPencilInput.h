@@ -14,7 +14,7 @@ enum class VoxelCameraInteraction
     Zoom
 };
 
-struct VoxelPencilInputFrame final
+struct VoxelToolInputFrame final
 {
     bool LeftButtonDown = false;
     bool ToolActive = false;
@@ -30,17 +30,17 @@ struct VoxelPencilInputFrame final
     std::uint64_t DocumentGeneration = 0U;
 };
 
-enum class VoxelPencilInputDecision
+enum class VoxelToolInputDecision
 {
     None,
     Apply
 };
 
-class VoxelPencilInputController final
+class VoxelToolInputController final
 {
 public:
-    [[nodiscard]] VoxelPencilInputDecision Update(
-        const VoxelPencilInputFrame& frame) noexcept;
+    [[nodiscard]] VoxelToolInputDecision Update(
+        const VoxelToolInputFrame& frame) noexcept;
     void Reset() noexcept;
 
     [[nodiscard]] bool WaitingForRelease() const noexcept;
@@ -51,5 +51,11 @@ private:
     bool cameraRearmRequired_ = false;
     std::optional<std::uint64_t> pressedDocumentGeneration_;
 };
+
+// Compatibility aliases keep the v1 Pencil API stable while the same input
+// gate is shared by every single-click voxel tool.
+using VoxelPencilInputFrame = VoxelToolInputFrame;
+using VoxelPencilInputDecision = VoxelToolInputDecision;
+using VoxelPencilInputController = VoxelToolInputController;
 
 } // namespace VoxelForge::Editor

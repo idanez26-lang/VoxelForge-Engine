@@ -50,6 +50,7 @@ struct VoxelRaycastHit final
     Vec3 LocalPosition{};
     Vec3 WorldPosition{};
     Vec3 Normal{};
+    std::uint64_t DocumentRevision = 0U;
 
     [[nodiscard]] bool operator==(const VoxelRaycastHit&) const noexcept = default;
 };

@@ -249,6 +249,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelPencilTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelEraserTests
+    Editor/VoxelEraserTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelEraserTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorVoxelEraserTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelEraser
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelEraserTests>
+)
+add_executable(
     VoxelForgeEditorQualityOfLifeTests
     Editor/QualityOfLifeTests.cpp
 )
@@ -410,6 +423,7 @@ set_tests_properties(
     VoxelForge.Editor.PaintVoxel
     VoxelForge.Editor.AddVoxel
     VoxelForge.Editor.VoxelPencil
+    VoxelForge.Editor.VoxelEraser
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
     VoxelForge.Project.Manager
@@ -480,6 +494,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelPencilSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-pencil-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelEraserSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-eraser-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -495,6 +513,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelRenderSyncSmoke
         VoxelForge.Editor.VoxelRayPickingSmoke
         VoxelForge.Editor.VoxelPencilSmoke
+        VoxelForge.Editor.VoxelEraserSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

@@ -21,6 +21,7 @@
 #include "VoxelSave/VoxelSaveState.h"
 #include "VoxelSelection/VoxelSelectionState.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
+#include "VoxelTools/VoxelEraserTool.h"
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
 #include "VoxelTools/VoxelPencilTool.h"
@@ -111,6 +112,10 @@ public:
         std::size_t frame,
         const std::filesystem::path& sourcePath);
     [[nodiscard]] bool VoxelPencilSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelEraserSmokeStep(
+        std::size_t frame,
+        const std::filesystem::path& sourcePath);
+    [[nodiscard]] bool VoxelEraserSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -187,6 +192,7 @@ private:
     [[nodiscard]] bool PaintSelectedVoxel();
     [[nodiscard]] bool AddAdjacentVoxel();
     [[nodiscard]] bool ApplyVoxelPencil();
+    [[nodiscard]] bool ApplyVoxelEraser();
 
     [[nodiscard]] std::uint64_t VoxelModelGeneration() const noexcept override;
     [[nodiscard]] Voxel::VoxelModel* ActiveVoxelModel() noexcept override;
@@ -213,10 +219,11 @@ private:
     VoxelSaveState voxelSaveState_;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
-    VoxelPencilInputController voxelPencilInput_;
-    VoxelPencilInputController voxelPencilSmokeInput_;
+    VoxelToolInputController voxelToolInput_;
+    VoxelToolInputController voxelToolSmokeInput_;
     VoxelPlacementPreview voxelPlacementPreview_;
     std::optional<VoxelToolResult> lastVoxelToolResult_;
+    std::optional<VoxelEraserResult> lastVoxelEraserResult_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -276,7 +283,7 @@ private:
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
     bool voxelSelectionClickCandidate_ = false;
-    bool voxelPencilEditInProgress_ = false;
+    bool voxelEditInProgress_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;
@@ -399,6 +406,25 @@ private:
     bool voxelPencilSmokeRendered_ = false;
     bool voxelPencilSmokeClosed_ = false;
     bool voxelPencilSmokeSourcePreserved_ = false;
+    std::uintmax_t voxelEraserSmokeSourceSize_ = 0U;
+    std::uint64_t voxelEraserSmokeSourceHash_ = 0U;
+    std::filesystem::file_time_type voxelEraserSmokeSourceTime_{};
+    std::uint64_t voxelEraserSmokeInitialRevision_ = 0U;
+    std::uint64_t voxelEraserSmokeInitialVoxelCount_ = 0U;
+    std::size_t voxelEraserSmokeInitialBuildCount_ = 0U;
+    std::size_t voxelEraserSmokeInitialUploadCount_ = 0U;
+    std::size_t voxelEraserSmokeHighlightUploadBaseline_ = 0U;
+    std::size_t voxelEraserSmokeRenderBaseline_ = 0U;
+    Asset::Voxel::VoxelPosition voxelEraserSmokeAddedTarget_{};
+    std::uint8_t voxelEraserSmokeRemovedPaletteIndex_ = 0U;
+    bool voxelEraserSmokePencilAdded_ = false;
+    bool voxelEraserSmokePreviewValid_ = false;
+    bool voxelEraserSmokeRemoved_ = false;
+    bool voxelEraserSmokeHeldWithoutRepeat_ = false;
+    bool voxelEraserSmokeRendered_ = false;
+    bool voxelEraserSmokeLastRemoved_ = false;
+    bool voxelEraserSmokeClosed_ = false;
+    bool voxelEraserSmokeSourcePreserved_ = false;
     std::optional<std::uint64_t> uploadedDocumentIdentity_;
     std::optional<std::uint64_t> uploadedDocumentRevision_;
     std::optional<std::uint64_t> failedDocumentIdentity_;

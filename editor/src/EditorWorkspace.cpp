@@ -903,24 +903,32 @@ void EditorWorkspace::DrawScenePanel()
     }
     DrawTooltip("Choose the viewport background");
 
-    const bool pencilActive = voxelToolState_.IsPencilActive();
-    if (pencilActive)
+    const auto drawToolButton = [this](
+        const char* inactiveLabel,
+        const char* activeLabel,
+        const char* tooltip,
+        const ActiveVoxelTool tool,
+        const ImVec4 activeColor)
     {
-        ImGui::PushStyleColor(
-            ImGuiCol_Button, ImVec4(0.20F, 0.48F, 0.28F, 1.0F));
-    }
-    if (ImGui::Button(pencilActive ? "Pencil [Active]" : "Pencil"))
-    {
-        voxelToolState_.SetActiveTool(
-            pencilActive ? ActiveVoxelTool::None : ActiveVoxelTool::Pencil);
-        voxelPencilInput_.Reset();
+        const bool active = voxelToolState_.ActiveTool() == tool;
+        if (active) ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+        const bool clicked = ImGui::Button(active ? activeLabel : inactiveLabel);
+        if (active) ImGui::PopStyleColor();
+        DrawTooltip(tooltip);
+        if (!clicked) return;
+        voxelToolState_.SetActiveTool(active ? ActiveVoxelTool::None : tool);
+        voxelToolInput_.Reset();
         UpdateVoxelHighlights();
-    }
-    if (pencilActive) ImGui::PopStyleColor();
-    DrawTooltip("Activate the Pencil tool (P)");
+    };
+    drawToolButton(
+        "Pencil", "Pencil [Active]", "Activate the Pencil tool (P)",
+        ActiveVoxelTool::Pencil, ImVec4(0.20F, 0.48F, 0.28F, 1.0F));
+    ImGui::SameLine();
+    drawToolButton(
+        "Eraser", "Eraser [Active]", "Activate the Eraser tool (E)",
+        ActiveVoxelTool::Eraser, ImVec4(0.58F, 0.20F, 0.08F, 1.0F));
 
     bool eraseRequested = false;
-    bool paintRequested = false;
     bool addRequested = false;
     const AddVoxelTarget addTarget = FindAddVoxelTarget(
         viewportGrid, voxelSelection_.Selected());
@@ -1084,10 +1092,10 @@ void EditorWorkspace::DrawScenePanel()
             dropState != DragDropImportState::Idle &&
             dropState != DragDropImportState::Completed &&
             dropState != DragDropImportState::Cancelled;
-        const VoxelPencilInputDecision pencilDecision =
-            voxelPencilInput_.Update({
+        const VoxelToolInputDecision toolDecision =
+            voxelToolInput_.Update({
                 ImGui::IsMouseDown(ImGuiMouseButton_Left),
-                voxelToolState_.IsPencilActive(),
+                voxelToolState_.IsEditingToolActive(),
                 document != nullptr,
                 imageHovered,
                 sceneFocused,
@@ -1095,12 +1103,17 @@ void EditorWorkspace::DrawScenePanel()
                 incompatiblePopupOpen,
                 dragDropActive,
                 cameraInteraction,
-                voxelPencilEditInProgress_,
+                voxelEditInProgress_,
                 voxelDocumentSession_.Generation()});
-        if (pencilDecision == VoxelPencilInputDecision::Apply)
-            static_cast<void>(ApplyVoxelPencil());
+        if (toolDecision == VoxelToolInputDecision::Apply)
+        {
+            if (voxelToolState_.IsPencilActive())
+                static_cast<void>(ApplyVoxelPencil());
+            else if (voxelToolState_.IsEraserActive())
+                static_cast<void>(ApplyVoxelEraser());
+        }
 
-        if (!voxelToolState_.IsPencilActive() && selectionInputAvailable &&
+        if (!voxelToolState_.IsEditingToolActive() && selectionInputAvailable &&
             ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             voxelSelectionClickCandidate_ = !cameraControl &&
                 !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
@@ -1126,13 +1139,15 @@ void EditorWorkspace::DrawScenePanel()
             viewportCamera_.Reset();
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
             eraseRequested = true;
-        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_P, false))
+        const ActiveVoxelTool shortcutTool = ResolveVoxelToolShortcut(
+            voxelToolState_.ActiveTool(),
+            ImGui::IsKeyPressed(ImGuiKey_P, false),
+            ImGui::IsKeyPressed(ImGuiKey_E, false),
+            shortcutsEnabled);
+        if (shortcutTool != voxelToolState_.ActiveTool())
         {
-            voxelToolState_.SetActiveTool(
-                voxelToolState_.IsPencilActive()
-                    ? ActiveVoxelTool::None
-                    : ActiveVoxelTool::Pencil);
-            voxelPencilInput_.Reset();
+            voxelToolState_.SetActiveTool(shortcutTool);
+            voxelToolInput_.Reset();
             UpdateVoxelHighlights();
         }
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_A, false))
@@ -1150,7 +1165,6 @@ void EditorWorkspace::DrawScenePanel()
         DrawErrorMessage(viewportRenderer_.LastError());
     }
     if (eraseRequested) static_cast<void>(EraseSelectedVoxel());
-    if (paintRequested) static_cast<void>(PaintSelectedVoxel());
     if (addRequested) static_cast<void>(AddAdjacentVoxel());
     DrawFileDropOverlay(viewportDropRect_, DragDropImportTarget::Viewport);
     ImGui::End();
@@ -1305,11 +1319,30 @@ void EditorWorkspace::DrawInspectorPanel()
             static_cast<unsigned long long>(document->GetRevision()));
         ImGui::Text("Active Tool: %s",
             ActiveVoxelToolName(voxelToolState_.ActiveTool()));
-        ImGui::Text("Palette Index: %zu",
-            voxelToolState_.ActivePaletteIndex());
-        ImGui::Text("Placement: %s",
+        if (voxelToolState_.IsPencilActive())
+            ImGui::Text("Palette Index: %zu",
+                voxelToolState_.ActivePaletteIndex());
+        ImGui::Text("Placement State: %s",
             VoxelPlacementPreviewStatusName(voxelPlacementPreview_.Status));
-        if (lastVoxelToolResult_)
+        if (voxelPlacementPreview_.Position)
+        {
+            ImGui::Text("Target Position: %d, %d, %d",
+                voxelPlacementPreview_.Position->X,
+                voxelPlacementPreview_.Position->Y,
+                voxelPlacementPreview_.Position->Z);
+        }
+        if (voxelToolState_.IsEraserActive() && lastVoxelEraserResult_)
+        {
+            ImGui::Text("Last Operation: %s",
+                VoxelEraserResultCodeName(lastVoxelEraserResult_->Code));
+            ImGui::Text("Last Position: %d, %d, %d",
+                lastVoxelEraserResult_->Position.X,
+                lastVoxelEraserResult_->Position.Y,
+                lastVoxelEraserResult_->Position.Z);
+            ImGui::Text("Removed Palette Index: %u",
+                lastVoxelEraserResult_->RemovedPaletteIndex);
+        }
+        else if (lastVoxelToolResult_)
         {
             ImGui::Text("Last Operation: %s",
                 VoxelToolResultCodeName(lastVoxelToolResult_->Code));
@@ -1534,8 +1567,6 @@ void EditorWorkspace::DrawInspectorPanel()
         wouldChange
             ? "Paint the selected voxel with the active color"
             : "Select an occupied voxel and choose a different color.");
-    ImGui::SameLine();
-    ImGui::TextDisabled("P");
     ImGui::End();
 }
 
@@ -3818,7 +3849,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
             false,
             false,
             VoxelCameraInteraction::None,
-            voxelPencilEditInProgress_,
+            voxelEditInProgress_,
             voxelDocumentSession_.Generation()};
     };
 
@@ -3864,7 +3895,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
             voxelPlacementPreview_.Position == hit->AdjacentPosition &&
             GetBackendDisplayName() == "Direct3D 12" &&
             viewportRenderer_.HasModelMesh();
-        voxelPencilSmokeInput_.Reset();
+        voxelToolSmokeInput_.Reset();
     }
     else if (frame == 1U)
     {
@@ -3876,7 +3907,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
         UpdateVoxelHighlights();
-        const bool firstClick = voxelPencilSmokeInput_.Update(
+        const bool firstClick = voxelToolSmokeInput_.Update(
             inputFrame(true)) == VoxelPencilInputDecision::Apply;
         const bool applied = firstClick && ApplyVoxelPencil();
         const auto voxel = document->GetVoxel(voxelPencilSmokeTarget_);
@@ -3907,7 +3938,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
         const std::uint64_t count = document->GetVoxelCount();
         const std::size_t builds = voxelDocumentMeshCache_.BuildCount();
         const std::size_t uploads = viewportRenderer_.ModelUploadCount();
-        const bool repeated = voxelPencilSmokeInput_.Update(
+        const bool repeated = voxelToolSmokeInput_.Update(
             inputFrame(true)) == VoxelPencilInputDecision::Apply;
         voxelPencilSmokeHeldWithoutRepeat_ = !repeated &&
             document->GetRevision() == revision &&
@@ -3921,7 +3952,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
     }
     else if (frame == 3U)
     {
-        static_cast<void>(voxelPencilSmokeInput_.Update(inputFrame(false)));
+        static_cast<void>(voxelToolSmokeInput_.Update(inputFrame(false)));
     }
     else if (frame == 4U)
     {
@@ -3939,7 +3970,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
         const std::uint64_t count = document->GetVoxelCount();
         const std::size_t builds = voxelDocumentMeshCache_.BuildCount();
         const std::size_t uploads = viewportRenderer_.ModelUploadCount();
-        const bool click = voxelPencilSmokeInput_.Update(
+        const bool click = voxelToolSmokeInput_.Update(
             inputFrame(true)) == VoxelPencilInputDecision::Apply;
         const bool applied = click && ApplyVoxelPencil();
         voxelPencilSmokeOutOfBoundsRefused_ = !applied &&
@@ -3970,8 +4001,8 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
             !viewportRenderer_.HasModelMesh() &&
             !viewportRenderer_.HasHighlightMesh() &&
             !viewportState_.HasModel() &&
-            !voxelPencilInput_.WaitingForRelease() &&
-            !voxelPencilSmokeInput_.WaitingForRelease();
+            !voxelToolInput_.WaitingForRelease() &&
+            !voxelToolSmokeInput_.WaitingForRelease();
     }
     return VoxelPencilSmokePassed();
 }
@@ -3982,6 +4013,211 @@ bool EditorWorkspace::VoxelPencilSmokePassed() const noexcept
         voxelPencilSmokeHeldWithoutRepeat_ &&
         voxelPencilSmokeOutOfBoundsRefused_ && voxelPencilSmokeRendered_ &&
         voxelPencilSmokeClosed_ && voxelPencilSmokeSourcePreserved_;
+}
+
+bool EditorWorkspace::RunVoxelEraserSmokeStep(
+    const std::size_t frame,
+    const std::filesystem::path& sourcePath)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    const auto inputFrame = [this, document](const bool leftDown)
+    {
+        return VoxelToolInputFrame{
+            leftDown,
+            voxelToolState_.IsEditingToolActive(),
+            document != nullptr,
+            true,
+            true,
+            false,
+            false,
+            false,
+            VoxelCameraInteraction::None,
+            voxelEditInProgress_,
+            voxelDocumentSession_.Generation()};
+    };
+
+    if (frame == 0U)
+    {
+        if (document == nullptr || grid == nullptr ||
+            document->GetVoxelCount() != 1U) return false;
+        std::error_code error;
+        voxelEraserSmokeSourceSize_ =
+            std::filesystem::file_size(sourcePath, error);
+        if (error) return false;
+        voxelEraserSmokeSourceTime_ =
+            std::filesystem::last_write_time(sourcePath, error);
+        const auto hash = HashFileContents(sourcePath);
+        if (error || !hash) return false;
+        voxelEraserSmokeSourceHash_ = *hash;
+        voxelEraserSmokeInitialRevision_ = document->GetRevision();
+        voxelEraserSmokeInitialVoxelCount_ = document->GetVoxelCount();
+        voxelEraserSmokeInitialBuildCount_ =
+            voxelDocumentMeshCache_.BuildCount();
+        voxelEraserSmokeInitialUploadCount_ =
+            viewportRenderer_.ModelUploadCount();
+        voxelEraserSmokeHighlightUploadBaseline_ =
+            viewportRenderer_.HighlightUploadCount();
+        voxelEraserSmokeRenderBaseline_ =
+            viewportRenderer_.ModelRenderCount();
+
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        const auto hit = RaycastVoxelDocument(
+            *document,
+            {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit || hit->AdjacentPosition !=
+                Asset::Voxel::VoxelPosition{0, 1, 1}) return false;
+        voxelEraserSmokeAddedTarget_ = hit->AdjacentPosition;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        UpdateVoxelHighlights();
+        const bool added = ApplyVoxelPencil();
+        voxelEraserSmokePencilAdded_ = added &&
+            document->HasVoxel(voxelEraserSmokeAddedTarget_) &&
+            document->GetRevision() == voxelEraserSmokeInitialRevision_ + 1U &&
+            document->GetVoxelCount() == voxelEraserSmokeInitialVoxelCount_ + 1U &&
+            voxelDocumentMeshCache_.BuildCount() ==
+                voxelEraserSmokeInitialBuildCount_ + 1U &&
+            viewportRenderer_.ModelUploadCount() ==
+                voxelEraserSmokeInitialUploadCount_ + 1U;
+    }
+    else if (frame == 1U)
+    {
+        if (document == nullptr || !voxelEraserSmokePencilAdded_) return false;
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Eraser);
+        const auto hit = RaycastVoxelDocument(
+            *document,
+            {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit || hit->Coordinates != VoxelCoordinates{0U, 1U, 1U})
+            return false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        UpdateVoxelHighlights();
+        voxelEraserSmokePreviewValid_ =
+            voxelPlacementPreview_.IsValid() &&
+            voxelPlacementPreview_.Tool == VoxelPreviewTool::Eraser &&
+            voxelPlacementPreview_.Position == voxelEraserSmokeAddedTarget_ &&
+            GetBackendDisplayName() == "Direct3D 12" &&
+            viewportRenderer_.HasModelMesh();
+        voxelToolSmokeInput_.Reset();
+    }
+    else if (frame == 2U)
+    {
+        if (document == nullptr || grid == nullptr) return false;
+        const auto hit = RaycastVoxelDocument(
+            *document,
+            {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit) return false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        UpdateVoxelHighlights();
+        const bool firstClick = voxelToolSmokeInput_.Update(
+            inputFrame(true)) == VoxelToolInputDecision::Apply;
+        const bool removed = firstClick && ApplyVoxelEraser();
+        const Voxel::Voxel* compatible = grid->Get(
+            static_cast<std::uint32_t>(voxelEraserSmokeAddedTarget_.X),
+            static_cast<std::uint32_t>(voxelEraserSmokeAddedTarget_.Y),
+            static_cast<std::uint32_t>(voxelEraserSmokeAddedTarget_.Z));
+        voxelEraserSmokeRemovedPaletteIndex_ = lastVoxelEraserResult_
+            ? lastVoxelEraserResult_->RemovedPaletteIndex : 0U;
+        voxelEraserSmokeRemoved_ = removed &&
+            !document->HasVoxel(voxelEraserSmokeAddedTarget_) &&
+            compatible && !compatible->IsOccupied() && document->IsDirty() &&
+            voxelEraserSmokeRemovedPaletteIndex_ == 1U &&
+            document->GetRevision() == voxelEraserSmokeInitialRevision_ + 2U &&
+            document->GetVoxelCount() == voxelEraserSmokeInitialVoxelCount_ &&
+            voxelDocumentMeshCache_.BuildCount() ==
+                voxelEraserSmokeInitialBuildCount_ + 2U &&
+            viewportRenderer_.ModelUploadCount() ==
+                voxelEraserSmokeInitialUploadCount_ + 2U &&
+            viewportRenderer_.HasModelMesh() && lastVoxelEraserResult_ &&
+            lastVoxelEraserResult_->Code == VoxelEraserResultCode::Applied;
+        voxelEraserSmokeRendered_ =
+            viewportRenderer_.ModelRenderCount() >
+                voxelEraserSmokeRenderBaseline_ &&
+            viewportRenderer_.HighlightUploadCount() >
+                voxelEraserSmokeHighlightUploadBaseline_ &&
+            viewportRenderer_.HighlightRenderCount() > 0U;
+    }
+    else if (frame == 3U)
+    {
+        if (document == nullptr) return false;
+        const std::uint64_t revision = document->GetRevision();
+        const std::uint64_t count = document->GetVoxelCount();
+        const std::size_t builds = voxelDocumentMeshCache_.BuildCount();
+        const std::size_t uploads = viewportRenderer_.ModelUploadCount();
+        const bool repeated = voxelToolSmokeInput_.Update(
+            inputFrame(true)) == VoxelToolInputDecision::Apply;
+        voxelEraserSmokeHeldWithoutRepeat_ = !repeated &&
+            document->GetRevision() == revision &&
+            document->GetVoxelCount() == count &&
+            voxelDocumentMeshCache_.BuildCount() == builds &&
+            viewportRenderer_.ModelUploadCount() == uploads;
+    }
+    else if (frame == 4U)
+    {
+        static_cast<void>(voxelToolSmokeInput_.Update(inputFrame(false)));
+    }
+    else if (frame == 5U)
+    {
+        if (document == nullptr || document->GetVoxelCount() != 1U)
+            return false;
+        const auto hit = RaycastVoxelDocument(
+            *document,
+            {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit || hit->Coordinates != VoxelCoordinates{1U, 1U, 1U})
+            return false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        UpdateVoxelHighlights();
+        const bool click = voxelToolSmokeInput_.Update(
+            inputFrame(true)) == VoxelToolInputDecision::Apply;
+        const bool removed = click && ApplyVoxelEraser();
+        const auto bounds = document->GetBounds();
+        const Mesh::MeshData* mesh = voxelDocumentMeshCache_.Mesh();
+        voxelEraserSmokeLastRemoved_ = removed &&
+            document->GetVoxelCount() == 0U && bounds && !bounds->HasValue &&
+            document->GetRevision() == voxelEraserSmokeInitialRevision_ + 3U &&
+            voxelDocumentMeshCache_.BuildCount() ==
+                voxelEraserSmokeInitialBuildCount_ + 3U &&
+            viewportRenderer_.ModelUploadCount() ==
+                voxelEraserSmokeInitialUploadCount_ + 3U &&
+            mesh != nullptr && mesh->Empty() &&
+            !viewportRenderer_.HasModelMesh();
+    }
+    else if (frame == 6U)
+    {
+        if (document == nullptr) return false;
+        std::error_code error;
+        const auto hash = HashFileContents(sourcePath);
+        voxelEraserSmokeSourcePreserved_ = hash &&
+            *hash == voxelEraserSmokeSourceHash_ &&
+            std::filesystem::file_size(sourcePath, error) ==
+                voxelEraserSmokeSourceSize_ && !error &&
+            std::filesystem::last_write_time(sourcePath, error) ==
+                voxelEraserSmokeSourceTime_ && !error;
+        ClearVoxelViewport();
+        voxelEraserSmokeClosed_ =
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() &&
+            !voxelToolInput_.WaitingForRelease() &&
+            !voxelToolSmokeInput_.WaitingForRelease();
+    }
+    return VoxelEraserSmokePassed();
+}
+
+bool EditorWorkspace::VoxelEraserSmokePassed() const noexcept
+{
+    return voxelEraserSmokePencilAdded_ && voxelEraserSmokePreviewValid_ &&
+        voxelEraserSmokeRemoved_ && voxelEraserSmokeHeldWithoutRepeat_ &&
+        voxelEraserSmokeRendered_ && voxelEraserSmokeLastRemoved_ &&
+        voxelEraserSmokeClosed_ && voxelEraserSmokeSourcePreserved_;
 }
 
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
@@ -4156,8 +4392,8 @@ bool EditorWorkspace::AddAdjacentVoxel()
 
 bool EditorWorkspace::ApplyVoxelPencil()
 {
-    if (voxelPencilEditInProgress_) return false;
-    voxelPencilEditInProgress_ = true;
+    if (voxelEditInProgress_) return false;
+    voxelEditInProgress_ = true;
     VoxelToolResult result;
     try
     {
@@ -4179,7 +4415,7 @@ bool EditorWorkspace::ApplyVoxelPencil()
         result.Code = VoxelToolResultCode::Failed;
         result.Error = "Unknown Pencil failure.";
     }
-    voxelPencilEditInProgress_ = false;
+    voxelEditInProgress_ = false;
     lastVoxelToolResult_ = result;
 
     if (result.Code == VoxelToolResultCode::Applied)
@@ -4197,6 +4433,53 @@ bool EditorWorkspace::ApplyVoxelPencil()
     {
         AddConsoleMessage(
             "[Edit] Failed to add voxel at (" +
+            std::to_string(result.Position.X) + ", " +
+            std::to_string(result.Position.Y) + ", " +
+            std::to_string(result.Position.Z) + "): " + result.Error);
+    }
+    return false;
+}
+
+bool EditorWorkspace::ApplyVoxelEraser()
+{
+    if (voxelEditInProgress_) return false;
+    voxelEditInProgress_ = true;
+    VoxelEraserResult result;
+    try
+    {
+        result = VoxelEraserTool::Apply({
+            static_cast<VoxelEditSession*>(this),
+            voxelDocumentSession_.ActiveDocument(),
+            0U,
+            voxelSelection_.Hovered(),
+            !voxelToolState_.IsEraserActive()});
+    }
+    catch (const std::exception& exception)
+    {
+        result.Code = VoxelEraserResultCode::Failed;
+        result.Error = exception.what();
+    }
+    catch (...)
+    {
+        result.Code = VoxelEraserResultCode::Failed;
+        result.Error = "Unknown Eraser failure.";
+    }
+    voxelEditInProgress_ = false;
+    lastVoxelEraserResult_ = result;
+
+    if (result.Code == VoxelEraserResultCode::Applied)
+    {
+        AddConsoleMessage(
+            "[Edit] Removed voxel at (" +
+            std::to_string(result.Position.X) + ", " +
+            std::to_string(result.Position.Y) + ", " +
+            std::to_string(result.Position.Z) + ").");
+        return true;
+    }
+    if (result.Code == VoxelEraserResultCode::Failed)
+    {
+        AddConsoleMessage(
+            "[Edit] Failed to remove voxel at (" +
             std::to_string(result.Position.X) + ", " +
             std::to_string(result.Position.Y) + ", " +
             std::to_string(result.Position.Z) + "): " + result.Error);
@@ -4378,8 +4661,11 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         return hit ? std::optional<VoxelCoordinates>(hit->Coordinates)
                    : std::nullopt;
     };
+    std::optional<VoxelCoordinates> hoveredCoordinates =
+        coordinates(voxelSelection_.Hovered());
     std::optional<Asset::Voxel::VoxelPosition> placementPosition;
-    bool placementValid = false;
+    VoxelPlacementPreviewStyle placementStyle =
+        VoxelPlacementPreviewStyle::PencilInvalid;
     if (voxelToolState_.IsPencilActive())
     {
         voxelPlacementPreview_ = EvaluateVoxelPencilPreview(
@@ -4387,8 +4673,29 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             0U,
             voxelSelection_.Hovered(),
             true);
-        placementPosition = voxelPlacementPreview_.Position;
-        placementValid = voxelPlacementPreview_.IsValid();
+        placementPosition = voxelPlacementPreview_.IsVisible()
+            ? voxelPlacementPreview_.Position : std::nullopt;
+        placementStyle = voxelPlacementPreview_.IsValid()
+            ? VoxelPlacementPreviewStyle::PencilValid
+            : VoxelPlacementPreviewStyle::PencilInvalid;
+    }
+    else if (voxelToolState_.IsEraserActive())
+    {
+        const VoxelPickingInteractionState interaction =
+            voxelSelection_.InteractionState();
+        const bool blocked =
+            interaction == VoxelPickingInteractionState::CameraInteraction ||
+            interaction == VoxelPickingInteractionState::Blocked;
+        voxelPlacementPreview_ = EvaluateVoxelEraserPreview(
+            voxelDocumentSession_.ActiveDocument(),
+            0U,
+            voxelSelection_.Hovered(),
+            true,
+            blocked);
+        placementPosition = voxelPlacementPreview_.IsVisible()
+            ? voxelPlacementPreview_.Position : std::nullopt;
+        placementStyle = VoxelPlacementPreviewStyle::Eraser;
+        if (placementPosition) hoveredCoordinates.reset();
     }
     else
     {
@@ -4403,14 +4710,14 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 static_cast<std::int32_t>(addTarget.Coordinates->X),
                 static_cast<std::int32_t>(addTarget.Coordinates->Y),
                 static_cast<std::int32_t>(addTarget.Coordinates->Z)};
-            placementValid = true;
+            placementStyle = VoxelPlacementPreviewStyle::PencilValid;
         }
     }
     viewportRenderer_.ConfigureHighlights(
-        coordinates(voxelSelection_.Hovered()),
+        hoveredCoordinates,
         coordinates(voxelSelection_.Selected()),
         placementPosition,
-        placementValid,
+        placementStyle,
         voxelModelCenter_);
 }
 
@@ -4430,11 +4737,12 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     activeVoxelModel_.reset();
     static_cast<void>(voxelSelection_.Clear());
     voxelToolState_.Reset();
-    voxelPencilInput_.Reset();
-    voxelPencilSmokeInput_.Reset();
+    voxelToolInput_.Reset();
+    voxelToolSmokeInput_.Reset();
     voxelPlacementPreview_ = {};
     lastVoxelToolResult_.reset();
-    voxelPencilEditInProgress_ = false;
+    lastVoxelEraserResult_.reset();
+    voxelEditInProgress_ = false;
     voxelModelCenter_ = {};
     voxelViewportRendered_ = false;
     voxelViewportRenderFailed_ = false;

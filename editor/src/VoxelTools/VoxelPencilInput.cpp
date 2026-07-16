@@ -3,8 +3,8 @@
 namespace VoxelForge::Editor
 {
 
-VoxelPencilInputDecision VoxelPencilInputController::Update(
-    const VoxelPencilInputFrame& frame) noexcept
+VoxelToolInputDecision VoxelToolInputController::Update(
+    const VoxelToolInputFrame& frame) noexcept
 {
     const bool cameraInteracting =
         frame.CameraInteraction != VoxelCameraInteraction::None;
@@ -16,7 +16,7 @@ VoxelPencilInputDecision VoxelPencilInputController::Update(
         leftButtonWasDown_ = false;
         pressedDocumentGeneration_.reset();
         if (!cameraInteracting) cameraRearmRequired_ = false;
-        return VoxelPencilInputDecision::None;
+        return VoxelToolInputDecision::None;
     }
 
     leftButtonWasDown_ = true;
@@ -28,7 +28,7 @@ VoxelPencilInputDecision VoxelPencilInputController::Update(
         {
             pressedDocumentGeneration_.reset();
         }
-        return VoxelPencilInputDecision::None;
+        return VoxelToolInputDecision::None;
     }
 
     pressedDocumentGeneration_ = frame.HasDocument
@@ -40,23 +40,23 @@ VoxelPencilInputDecision VoxelPencilInputController::Update(
         !frame.DragDropActive && !cameraInteracting &&
         !cameraRearmRequired_ && !frame.EditInProgress;
     return allowed
-        ? VoxelPencilInputDecision::Apply
-        : VoxelPencilInputDecision::None;
+        ? VoxelToolInputDecision::Apply
+        : VoxelToolInputDecision::None;
 }
 
-void VoxelPencilInputController::Reset() noexcept
+void VoxelToolInputController::Reset() noexcept
 {
     leftButtonWasDown_ = false;
     cameraRearmRequired_ = false;
     pressedDocumentGeneration_.reset();
 }
 
-bool VoxelPencilInputController::WaitingForRelease() const noexcept
+bool VoxelToolInputController::WaitingForRelease() const noexcept
 {
     return leftButtonWasDown_;
 }
 
-bool VoxelPencilInputController::CameraRearmRequired() const noexcept
+bool VoxelToolInputController::CameraRearmRequired() const noexcept
 {
     return cameraRearmRequired_;
 }

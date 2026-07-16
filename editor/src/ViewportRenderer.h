@@ -22,6 +22,13 @@ struct SDL_GPUTexture;
 namespace VoxelForge::Editor
 {
 
+enum class VoxelPlacementPreviewStyle
+{
+    PencilValid,
+    PencilInvalid,
+    Eraser
+};
+
 class ViewportRenderer final
 {
 public:
@@ -36,7 +43,7 @@ public:
         std::optional<VoxelCoordinates> hovered,
         std::optional<VoxelCoordinates> selected,
         std::optional<Asset::Voxel::VoxelPosition> placementPreview,
-        bool placementPreviewValid,
+        VoxelPlacementPreviewStyle placementPreviewStyle,
         Vec3 modelCenter) noexcept;
     void ClearModel() noexcept;
     [[nodiscard]] bool Render(
@@ -99,7 +106,8 @@ private:
     std::optional<VoxelCoordinates> hoveredHighlight_;
     std::optional<VoxelCoordinates> selectedHighlight_;
     std::optional<Asset::Voxel::VoxelPosition> placementPreviewHighlight_;
-    bool placementPreviewValid_ = false;
+    VoxelPlacementPreviewStyle placementPreviewStyle_ =
+        VoxelPlacementPreviewStyle::PencilInvalid;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;
     std::size_t highlightRenderCount_ = 0U;

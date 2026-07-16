@@ -9,7 +9,8 @@ namespace VoxelForge::Editor
 enum class ActiveVoxelTool : std::uint8_t
 {
     None,
-    Pencil
+    Pencil,
+    Eraser
 };
 
 [[nodiscard]] const char* ActiveVoxelToolName(
@@ -27,10 +28,18 @@ public:
     [[nodiscard]] ActiveVoxelTool ActiveTool() const noexcept;
     [[nodiscard]] std::size_t ActivePaletteIndex() const noexcept;
     [[nodiscard]] bool IsPencilActive() const noexcept;
+    [[nodiscard]] bool IsEraserActive() const noexcept;
+    [[nodiscard]] bool IsEditingToolActive() const noexcept;
 
 private:
     ActiveVoxelTool activeTool_ = ActiveVoxelTool::Pencil;
     std::size_t activePaletteIndex_ = DefaultPaletteIndex;
 };
+
+[[nodiscard]] ActiveVoxelTool ResolveVoxelToolShortcut(
+    ActiveVoxelTool current,
+    bool pencilPressed,
+    bool eraserPressed,
+    bool inputAllowed) noexcept;
 
 } // namespace VoxelForge::Editor

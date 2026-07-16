@@ -127,6 +127,8 @@ constexpr std::array<float, 4> ValidPlacementPreviewColor{
     0.18F, 1.0F, 0.32F, 1.0F};
 constexpr std::array<float, 4> InvalidPlacementPreviewColor{
     1.0F, 0.15F, 0.12F, 1.0F};
+constexpr std::array<float, 4> EraserPlacementPreviewColor{
+    1.0F, 0.24F, 0.05F, 1.0F};
 
 std::vector<unsigned char> ReadBinary(const char* path)
 {
@@ -418,13 +420,13 @@ void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelCoordinates> hovered,
     std::optional<VoxelCoordinates> selected,
     std::optional<Asset::Voxel::VoxelPosition> placementPreview,
-    const bool placementPreviewValid,
+    const VoxelPlacementPreviewStyle placementPreviewStyle,
     const Vec3 modelCenter) noexcept
 {
     if (hovered == selected) hovered.reset();
     if (hoveredHighlight_ == hovered && selectedHighlight_ == selected &&
         placementPreviewHighlight_ == placementPreview &&
-        placementPreviewValid_ == placementPreviewValid &&
+        placementPreviewStyle_ == placementPreviewStyle &&
         modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
         modelCenter_.Z == modelCenter.Z)
     {
@@ -433,7 +435,7 @@ void ViewportRenderer::ConfigureHighlights(
     hoveredHighlight_ = hovered;
     selectedHighlight_ = selected;
     placementPreviewHighlight_ = placementPreview;
-    placementPreviewValid_ = placementPreviewValid;
+    placementPreviewStyle_ = placementPreviewStyle;
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
         selectedHighlight_.has_value() || placementPreviewHighlight_.has_value();
@@ -450,8 +452,11 @@ bool ViewportRenderer::EnsureHighlights()
     if (placementPreviewHighlight_)
         AppendVoxelOutline(
             vertices, indices, *placementPreviewHighlight_, modelCenter_,
-            placementPreviewValid_
+            placementPreviewStyle_ == VoxelPlacementPreviewStyle::PencilValid
                 ? ValidPlacementPreviewColor
+                : placementPreviewStyle_ ==
+                    VoxelPlacementPreviewStyle::Eraser
+                ? EraserPlacementPreviewColor
                 : InvalidPlacementPreviewColor);
     if (hoveredHighlight_)
         AppendVoxelOutline(vertices, indices,
@@ -719,7 +724,8 @@ void ViewportRenderer::ClearModel() noexcept
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
     ConfigureHighlights(
-        std::nullopt, std::nullopt, std::nullopt, false, {});
+        std::nullopt, std::nullopt, std::nullopt,
+        VoxelPlacementPreviewStyle::PencilInvalid, {});
 }
 
 void ViewportRenderer::ReleaseHighlights() noexcept

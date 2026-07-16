@@ -358,7 +358,8 @@ std::optional<VoxelRaycastHit> RaycastVoxelDocument(
         adjacentWithinBounds,
         localPosition,
         worldPosition,
-        worldNormal};
+        worldNormal,
+        document.GetRevision()};
 }
 
 Asset::Voxel::VoxelPosition VoxelHitFaceIntegerNormal(
