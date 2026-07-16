@@ -1,5 +1,7 @@
 #include "AssetDirectory.h"
 
+#include "ModelImport/ModelAssetMetadataService.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -623,6 +625,37 @@ AssetOperationResult AssetDirectory::RenameEntry(
         ? currentPath_.lexically_relative(freshSource.OperationPath)
         : std::filesystem::path{};
 
+    const bool isManagedVox = freshSource.IsRegularFile &&
+        !freshSource.IsSymbolicLink &&
+        FoldCase(freshSource.OperationPath.extension().string()) == ".vox" &&
+        freshSource.OperationPath.parent_path() == assetsRoot_ / "Models";
+    ModelAssetMetadataService metadataService;
+    std::filesystem::path sourceMetadata;
+    std::filesystem::path destinationMetadata;
+    bool hasMetadata = false;
+    if (isManagedVox)
+    {
+        if (!metadataService.SetModelsDirectory(assetsRoot_ / "Models"))
+            return OperationFailure("Unable to configure model metadata.", true);
+        sourceMetadata = metadataService.MetadataPathFor(freshSource.OperationPath);
+        destinationMetadata = metadataService.MetadataPathFor(destination);
+        const auto metadataStatus = std::filesystem::symlink_status(sourceMetadata, error);
+        if (!error && std::filesystem::exists(metadataStatus))
+        {
+            if (std::filesystem::is_symlink(metadataStatus) ||
+                !std::filesystem::is_regular_file(metadataStatus))
+                return OperationFailure("Model metadata is not a safe regular file.", true);
+            hasMetadata = true;
+            if (std::filesystem::exists(destinationMetadata, error) || error)
+                return OperationFailure("Rename destination metadata already exists.", true);
+        }
+        else if (error)
+        {
+            return OperationFailure("Unable to inspect model metadata.", true);
+        }
+    }
+
+    error.clear();
     std::filesystem::rename(
         freshSource.OperationPath,
         destination,
@@ -633,6 +666,37 @@ AssetOperationResult AssetDirectory::RenameEntry(
         return OperationFailure(
             "Unable to rename the asset entry: " + error.message(),
             true);
+    }
+
+    if (isManagedVox)
+    {
+        if (hasMetadata)
+        {
+            std::filesystem::rename(sourceMetadata, destinationMetadata, error);
+            if (error)
+            {
+                std::error_code rollback;
+                std::filesystem::rename(
+                    destination, freshSource.OperationPath, rollback);
+                return OperationFailure(
+                    "Unable to rename model metadata: " + error.message(), true);
+            }
+        }
+        const MetadataOperationResult ensured =
+            metadataService.EnsureMetadata(destination);
+        if (!ensured.Succeeded())
+        {
+            std::error_code rollback;
+            if (hasMetadata)
+                std::filesystem::rename(
+                    destinationMetadata, sourceMetadata, rollback);
+            else
+                std::filesystem::remove(destinationMetadata, rollback);
+            std::filesystem::rename(destination, freshSource.OperationPath, rollback);
+            return OperationFailure(
+                "Unable to update renamed model metadata: " + ensured.Message,
+                true);
+        }
     }
 
     if (currentPathMoves)
@@ -734,12 +798,48 @@ AssetOperationResult AssetDirectory::DeleteEntry(
     }
 
     std::error_code error;
+    const bool isManagedVox = freshEntry.IsRegularFile &&
+        !freshEntry.IsSymbolicLink &&
+        FoldCase(freshEntry.OperationPath.extension().string()) == ".vox" &&
+        freshEntry.OperationPath.parent_path() == assetsRoot_ / "Models";
+    std::filesystem::path metadataPath;
+    std::filesystem::path metadataTemporary;
+    bool hasMetadata = false;
+    if (isManagedVox)
+    {
+        ModelAssetMetadataService metadataService;
+        if (!metadataService.SetModelsDirectory(assetsRoot_ / "Models"))
+            return OperationFailure("Unable to configure model metadata.", true);
+        metadataPath = metadataService.MetadataPathFor(freshEntry.OperationPath);
+        metadataTemporary = metadataPath.string() + ".delete.tmp";
+        const auto metadataStatus = std::filesystem::symlink_status(metadataPath, error);
+        if (!error && std::filesystem::exists(metadataStatus))
+        {
+            if (std::filesystem::is_symlink(metadataStatus) ||
+                !std::filesystem::is_regular_file(metadataStatus) ||
+                std::filesystem::exists(metadataTemporary, error) || error)
+                return OperationFailure("Model metadata cannot be deleted safely.", true);
+            std::filesystem::rename(metadataPath, metadataTemporary, error);
+            if (error)
+                return OperationFailure("Unable to prepare model metadata deletion.", true);
+            hasMetadata = true;
+        }
+        else if (error)
+            return OperationFailure("Unable to inspect model metadata.", true);
+    }
+
+    error.clear();
     const bool removed = std::filesystem::remove(
         freshEntry.OperationPath,
         error);
 
     if (error)
     {
+        if (hasMetadata)
+        {
+            std::error_code rollback;
+            std::filesystem::rename(metadataTemporary, metadataPath, rollback);
+        }
         return OperationFailure(
             "Unable to delete the asset entry: " + error.message(),
             true);
@@ -747,11 +847,25 @@ AssetOperationResult AssetDirectory::DeleteEntry(
 
     if (!removed)
     {
+        if (hasMetadata)
+        {
+            std::error_code rollback;
+            std::filesystem::rename(metadataTemporary, metadataPath, rollback);
+        }
         return OperationFailure(
             freshEntry.IsDirectory
                 ? "Folder is not empty."
                 : "Asset entry no longer exists.",
             true);
+    }
+
+    if (hasMetadata)
+    {
+        std::filesystem::remove(metadataTemporary, error);
+        if (error)
+            return OperationFailure(
+                "Model was deleted, but metadata cleanup failed: " +
+                    error.message(), true);
     }
 
     const bool refreshed = Refresh();

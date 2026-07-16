@@ -259,10 +259,15 @@ private:
     bool addVoxelSmokeRedoneAndSaved_ = false;
     bool addVoxelSmokeReloaded_ = false;
     bool modelImportSmokeImported_ = false;
+    bool modelImportSmokeMetadata_ = false;
     bool modelImportSmokeRefreshed_ = false;
     bool modelImportSmokeOpened_ = false;
+    bool modelImportSmokeRenamed_ = false;
+    bool modelImportSmokeDeleted_ = false;
+    bool modelImportSmokeClean_ = false;
     std::size_t modelImportSmokeRenderBaseline_ = 0U;
     std::filesystem::path modelImportSmokeDestination_;
+    std::string modelImportSmokeAssetId_;
 };
 
 } // namespace VoxelForge::Editor

@@ -231,6 +231,11 @@ std::vector<const AssetEntry*> AssetBrowserViewModel::VisibleEntries(
 
     for (const AssetEntry& entry : entries)
     {
+        if (!entry.IsDirectory() &&
+            FoldAscii(entry.Extension()) == ".vfmeta")
+        {
+            continue;
+        }
         if (MatchesFilter(entry, settings_.Filter) &&
             ContainsAsciiCaseInsensitive(entry.Name(), SearchText()))
         {

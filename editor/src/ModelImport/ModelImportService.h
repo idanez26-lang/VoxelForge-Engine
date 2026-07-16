@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ModelAssetMetadataService.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <functional>
@@ -57,6 +59,10 @@ public:
 
     static constexpr std::size_t MaximumRecentImports = 10U;
 
+    explicit ModelImportService(
+        ModelAssetMetadataService::AssetIdGenerator assetIdGenerator = {},
+        ModelAssetMetadataService::BeforeInstallCallback beforeInstall = {});
+
     [[nodiscard]] bool SetProjectRoot(
         const std::filesystem::path& projectRoot);
     void ClearProjectRoot() noexcept;
@@ -70,6 +76,9 @@ public:
         const std::vector<std::filesystem::path>& sourcePaths,
         ModelImportCollisionAction collisionAction =
             ModelImportCollisionAction::Ask);
+    [[nodiscard]] MetadataRebuildReport RebuildMetadata();
+    [[nodiscard]] MetadataReadResult ReadMetadataForModel(
+        const std::filesystem::path& modelPath) const;
 
     [[nodiscard]] const std::filesystem::path& ProjectRoot() const noexcept;
     [[nodiscard]] std::filesystem::path ModelsDirectory() const;
@@ -100,6 +109,7 @@ private:
     std::vector<std::filesystem::path> recentImports_;
     RefreshCallback refreshCallback_;
     std::string lastError_;
+    ModelAssetMetadataService metadataService_;
 };
 
 } // namespace VoxelForge::Editor

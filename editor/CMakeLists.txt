@@ -1,3 +1,20 @@
+add_library(VoxelForgeEditorAssetMetadata STATIC)
+target_sources(
+    VoxelForgeEditorAssetMetadata
+    PRIVATE src/ModelImport/ModelAssetMetadataService.cpp
+)
+target_include_directories(
+    VoxelForgeEditorAssetMetadata
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_features(VoxelForgeEditorAssetMetadata PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorAssetMetadata PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorAssetMetadata PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorAssetBrowser STATIC)
 target_sources(
     VoxelForgeEditorAssetBrowser
@@ -16,6 +33,7 @@ target_link_libraries(
     VoxelForgeEditorAssetBrowser
     PRIVATE
         VoxelForgeAsset
+        VoxelForgeEditorAssetMetadata
         VoxelForgeImGui
 )
 target_compile_features(VoxelForgeEditorAssetBrowser PUBLIC cxx_std_20)
@@ -108,6 +126,8 @@ target_sources(
     VoxelForgeEditorModelImport
     PRIVATE src/ModelImport/ModelImportService.cpp
 )
+target_link_libraries(
+    VoxelForgeEditorModelImport PUBLIC VoxelForgeEditorAssetMetadata)
 target_include_directories(
     VoxelForgeEditorModelImport
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src

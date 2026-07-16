@@ -34,6 +34,13 @@ bool ModelImportResult::ChangedAssets() const noexcept
     return Succeeded();
 }
 
+ModelImportService::ModelImportService(
+    ModelAssetMetadataService::AssetIdGenerator assetIdGenerator,
+    ModelAssetMetadataService::BeforeInstallCallback beforeInstall)
+    : metadataService_(std::move(assetIdGenerator), std::move(beforeInstall))
+{
+}
+
 bool ModelImportService::SetProjectRoot(
     const std::filesystem::path& projectRoot)
 {
@@ -53,6 +60,13 @@ bool ModelImportService::SetProjectRoot(
         return false;
     }
 
+    const std::filesystem::path modelsDirectory =
+        absoluteRoot / "Assets" / "Models";
+    if (!metadataService_.SetModelsDirectory(modelsDirectory))
+    {
+        lastError_ = "Unable to configure Assets/Models metadata.";
+        return false;
+    }
     projectRoot_ = absoluteRoot;
     recentImports_.clear();
     return true;
@@ -63,6 +77,20 @@ void ModelImportService::ClearProjectRoot() noexcept
     projectRoot_.clear();
     recentImports_.clear();
     lastError_.clear();
+    metadataService_.ClearModelsDirectory();
+}
+
+MetadataRebuildReport ModelImportService::RebuildMetadata()
+{
+    MetadataRebuildReport report = metadataService_.RebuildMetadata();
+    NotifyRefresh();
+    return report;
+}
+
+MetadataReadResult ModelImportService::ReadMetadataForModel(
+    const std::filesystem::path& modelPath) const
+{
+    return metadataService_.ReadMetadata(metadataService_.MetadataPathFor(modelPath));
 }
 
 void ModelImportService::SetRefreshCallback(RefreshCallback callback)
@@ -189,7 +217,6 @@ ModelImportResult ModelImportService::ImportModelImpl(
     }
 
     ModelImportStatus successStatus = ModelImportStatus::Imported;
-    std::filesystem::copy_options options = std::filesystem::copy_options::none;
     if (destinationExists)
     {
         switch (collisionAction)
@@ -199,7 +226,6 @@ ModelImportResult ModelImportService::ImportModelImpl(
                 "The file already exists.");
         case ModelImportCollisionAction::Replace:
             successStatus = ModelImportStatus::Replaced;
-            options = std::filesystem::copy_options::overwrite_existing;
             break;
         case ModelImportCollisionAction::Rename:
             destination = NextAvailablePath(destination);
@@ -213,6 +239,16 @@ ModelImportResult ModelImportService::ImportModelImpl(
                 "Import cancelled.");
         }
     }
+    else
+    {
+        const std::filesystem::path orphanMetadata =
+            metadataService_.MetadataPathFor(destination);
+        if (std::filesystem::exists(orphanMetadata, error) || error)
+        {
+            return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+                "An orphan metadata file already occupies the import destination.");
+        }
+    }
 
     if (absoluteSource == destination)
     {
@@ -220,13 +256,68 @@ ModelImportResult ModelImportService::ImportModelImpl(
             "Source is already in Assets/Models.");
     }
 
+    const std::filesystem::path importTemporary =
+        destination.string() + ".import.tmp";
+    const std::filesystem::path importBackup =
+        destination.string() + ".import.bak";
+    if (std::filesystem::exists(importTemporary, error) || error ||
+        std::filesystem::exists(importBackup, error) || error)
+    {
+        return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+            "An import temporary or backup file already exists.");
+    }
+
     error.clear();
     const bool copied = std::filesystem::copy_file(
-        absoluteSource, destination, options, error);
+        absoluteSource, importTemporary,
+        std::filesystem::copy_options::none, error);
     if (!copied || error)
     {
         return Fail(ModelImportStatus::Failed, absoluteSource, destination,
             "Unable to copy the model: " + error.message());
+    }
+
+    const bool replacing = successStatus == ModelImportStatus::Replaced;
+    if (replacing)
+    {
+        std::filesystem::rename(destination, importBackup, error);
+        if (error)
+        {
+            std::error_code cleanup;
+            std::filesystem::remove(importTemporary, cleanup);
+            return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+                "Unable to back up the existing model: " + error.message());
+        }
+    }
+    error.clear();
+    std::filesystem::rename(importTemporary, destination, error);
+    if (error)
+    {
+        std::error_code cleanup;
+        std::filesystem::remove(importTemporary, cleanup);
+        if (replacing) std::filesystem::rename(importBackup, destination, cleanup);
+        return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+            "Unable to install the imported model: " + error.message());
+    }
+
+    const MetadataOperationResult metadata =
+        metadataService_.EnsureMetadata(destination);
+    if (!metadata.Succeeded())
+    {
+        std::error_code cleanup;
+        std::filesystem::remove(destination, cleanup);
+        if (replacing) std::filesystem::rename(importBackup, destination, cleanup);
+        else std::filesystem::remove(
+            metadataService_.MetadataPathFor(destination), cleanup);
+        return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+            "Unable to create model metadata: " + metadata.Message);
+    }
+    if (replacing)
+    {
+        std::filesystem::remove(importBackup, error);
+        if (error)
+            return Fail(ModelImportStatus::Failed, absoluteSource, destination,
+                "Import succeeded, but model backup cleanup failed.");
     }
 
     RecordRecentImport(destination);
@@ -256,7 +347,9 @@ std::filesystem::path ModelImportService::NextAvailablePath(
     {
         const std::filesystem::path candidate =
             parent / (stem + " (" + std::to_string(index) + ")" + extension);
-        if (!std::filesystem::exists(candidate, error) && !error)
+        if (!std::filesystem::exists(candidate, error) && !error &&
+            !std::filesystem::exists(
+                metadataService_.MetadataPathFor(candidate), error) && !error)
         {
             return candidate;
         }

@@ -84,6 +84,22 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorAssetMetadataTests
+    Editor/AssetMetadataTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorAssetMetadataTests
+    PRIVATE
+        VoxelForgeEditorAssetBrowser
+        VoxelForgeEditorModelImport
+)
+vf_configure_test(VoxelForgeEditorAssetMetadataTests)
+add_test(
+    NAME VoxelForge.Editor.AssetMetadata
+    COMMAND $<TARGET_FILE:VoxelForgeEditorAssetMetadataTests>
+)
+
+add_executable(
     VoxelForgeProjectManagerTests
     Project/ProjectManagerTests.cpp
 )
@@ -282,6 +298,7 @@ set_tests_properties(
     VoxelForge.Editor.WindowTitle
     VoxelForge.Editor.AssetBrowser
     VoxelForge.Editor.ModelImport
+    VoxelForge.Editor.AssetMetadata
     VoxelForge.Editor.VoxelViewport
     VoxelForge.Editor.VoxelSelection
     VoxelForge.Editor.CommandHistory

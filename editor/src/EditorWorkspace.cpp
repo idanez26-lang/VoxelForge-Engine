@@ -379,6 +379,27 @@ void EditorWorkspace::DrawMainMenuBar()
         ImGui::EndMenu();
     }
 
+    if (ImGui::BeginMenu("Assets"))
+    {
+        const bool hasActiveProject = projectManager_.HasActiveProject();
+        if (ImGui::MenuItem(
+                "Rebuild Model Metadata", nullptr, false, hasActiveProject))
+        {
+            const MetadataRebuildReport report =
+                modelImportService_.RebuildMetadata();
+            AddConsoleMessage(
+                "Model metadata rebuild: " +
+                std::to_string(report.Created) + " created, " +
+                std::to_string(report.Unchanged) + " unchanged, " +
+                std::to_string(report.Repaired) + " repaired, " +
+                std::to_string(report.Ignored) + " ignored, " +
+                std::to_string(report.Errors) + " errors.");
+            for (const std::string& error : report.ErrorMessages)
+                AddConsoleMessage("Model metadata error: " + error);
+        }
+        ImGui::EndMenu();
+    }
+
     if (ImGui::BeginMenu("View"))
     {
         ImGui::MenuItem("Explorer", nullptr, &showExplorer_);
@@ -2581,6 +2602,13 @@ bool EditorWorkspace::RunModelImportSmokeStep(
                 modelImportService_.ModelsDirectory() &&
             std::filesystem::is_regular_file(result.DestinationPath) &&
             modelImportService_.RecentImports().size() == 1U;
+        const MetadataReadResult metadata =
+            modelImportService_.ReadMetadataForModel(result.DestinationPath);
+        modelImportSmokeMetadata_ = metadata.Succeeded &&
+            std::filesystem::is_regular_file(
+                result.DestinationPath.string() + ".vfmeta");
+        if (metadata.Succeeded)
+            modelImportSmokeAssetId_ = metadata.Metadata.AssetId;
         modelImportSmokeRefreshed_ =
             assetBrowser_.RefreshCount() > refreshBaseline;
         if (modelImportSmokeImported_)
@@ -2591,6 +2619,14 @@ bool EditorWorkspace::RunModelImportSmokeStep(
             modelImportSmokeRefreshed_ = modelImportSmokeRefreshed_ &&
                 assetBrowser_.RevealEntry(relativeToAssets) &&
                 assetBrowser_.SelectedRelativePath() == relativeToAssets;
+            const auto visibleEntries = assetBrowser_.VisibleEntries();
+            modelImportSmokeMetadata_ = modelImportSmokeMetadata_ &&
+                std::none_of(
+                    visibleEntries.begin(), visibleEntries.end(),
+                    [](const AssetEntry* entry)
+                    {
+                        return entry && entry->Extension() == ".vfmeta";
+                    });
         }
     }
     else if (frame == 1U)
@@ -2601,6 +2637,40 @@ bool EditorWorkspace::RunModelImportSmokeStep(
     }
     else if (frame == 2U)
     {
+        const AssetOperationResult renamed =
+            assetBrowser_.RenameSelectedEntry("renamed-model.vox");
+        if (renamed.Succeeded && renamed.ResultingRelativePath)
+        {
+            modelImportSmokeDestination_ =
+                modelImportService_.ProjectRoot() / "Assets" /
+                *renamed.ResultingRelativePath;
+            const MetadataReadResult metadata =
+                modelImportService_.ReadMetadataForModel(
+                    modelImportSmokeDestination_);
+            modelImportSmokeRenamed_ = metadata.Succeeded &&
+                metadata.Metadata.AssetId == modelImportSmokeAssetId_ &&
+                metadata.Metadata.SourceFile == "renamed-model.vox" &&
+                std::filesystem::is_regular_file(
+                    modelImportSmokeDestination_.string() + ".vfmeta");
+        }
+    }
+    else if (frame == 3U)
+    {
+        const AssetOperationResult deleted = assetBrowser_.DeleteSelectedEntry();
+        modelImportSmokeDeleted_ = deleted.Succeeded &&
+            !std::filesystem::exists(modelImportSmokeDestination_) &&
+            !std::filesystem::exists(
+                modelImportSmokeDestination_.string() + ".vfmeta");
+        modelImportSmokeClean_ = true;
+        std::error_code error;
+        for (const auto& entry : std::filesystem::directory_iterator(
+                 modelImportService_.ModelsDirectory(), error))
+        {
+            const std::string name = entry.path().filename().string();
+            if (name.ends_with(".tmp") || name.ends_with(".bak"))
+                modelImportSmokeClean_ = false;
+        }
+        modelImportSmokeClean_ = modelImportSmokeClean_ && !error;
         resetLayoutRequested_ = true;
     }
     return ModelImportSmokePassed();
@@ -2608,8 +2678,10 @@ bool EditorWorkspace::RunModelImportSmokeStep(
 
 bool EditorWorkspace::ModelImportSmokePassed() const noexcept
 {
-    return modelImportSmokeImported_ && modelImportSmokeRefreshed_ &&
-        modelImportSmokeOpened_ && HasRenderedVoxelViewport() &&
+    return modelImportSmokeImported_ && modelImportSmokeMetadata_ &&
+        modelImportSmokeRefreshed_ && modelImportSmokeOpened_ &&
+        modelImportSmokeRenamed_ && modelImportSmokeDeleted_ &&
+        modelImportSmokeClean_ && HasRenderedVoxelViewport() &&
         viewportRenderer_.ModelRenderCount() > modelImportSmokeRenderBaseline_;
 }
 
