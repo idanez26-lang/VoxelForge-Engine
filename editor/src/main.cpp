@@ -40,6 +40,7 @@ constexpr std::size_t VoxelEraserSmokeTestFrameCount = 12;
 constexpr std::size_t VoxelUndoRedoSmokeTestFrameCount = 16;
 constexpr std::size_t FirstCreationExperienceSmokeTestFrameCount = 10;
 constexpr std::size_t LayoutStabilitySmokeTestFrameCount = 11;
+constexpr std::size_t DoubleClickCameraSmokeTestFrameCount = 11;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -66,6 +67,7 @@ struct CommandLine final
     bool VoxelUndoRedoSmokeTest = false;
     bool FirstCreationExperienceSmokeTest = false;
     bool LayoutStabilitySmokeTest = false;
+    bool DoubleClickCameraSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -116,6 +118,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--first-creation-experience-smoke-test";
         result.LayoutStabilitySmokeTest |=
             argument == "--layout-stability-smoke-test";
+        result.DoubleClickCameraSmokeTest |=
+            argument == "--double-click-camera-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -333,6 +337,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelUndoRedoSmokeTest ||
             commandLine.FirstCreationExperienceSmokeTest ||
             commandLine.LayoutStabilitySmokeTest ||
+            commandLine.DoubleClickCameraSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
@@ -412,6 +417,8 @@ int main(const int argumentCount, char* arguments[])
                     ? FirstCreationExperienceSmokeTestFrameCount
                     : commandLine.LayoutStabilitySmokeTest
                     ? LayoutStabilitySmokeTestFrameCount
+                    : commandLine.DoubleClickCameraSmokeTest
+                    ? DoubleClickCameraSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -437,7 +444,8 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.VoxelEraserSmokeTest ||
                     commandLine.VoxelUndoRedoSmokeTest ||
                     commandLine.FirstCreationExperienceSmokeTest ||
-                    commandLine.LayoutStabilitySmokeTest,
+                    commandLine.LayoutStabilitySmokeTest ||
+                    commandLine.DoubleClickCameraSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -462,7 +470,8 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.VoxelEraserSmokeTest,
                 commandLine.VoxelUndoRedoSmokeTest,
                 commandLine.FirstCreationExperienceSmokeTest,
-                commandLine.LayoutStabilitySmokeTest);
+                commandLine.LayoutStabilitySmokeTest,
+                commandLine.DoubleClickCameraSmokeTest);
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(

@@ -45,7 +45,8 @@ EditorLayer::EditorLayer(
     const bool voxelEraserSmokeTest,
     const bool voxelUndoRedoSmokeTest,
     const bool firstCreationExperienceSmokeTest,
-    const bool layoutStabilitySmokeTest)
+    const bool layoutStabilitySmokeTest,
+    const bool doubleClickCameraSmokeTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
@@ -55,7 +56,7 @@ EditorLayer::EditorLayer(
               voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest ||
               voxelPencilSmokeTest || voxelEraserSmokeTest ||
               voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest ||
-              layoutStabilitySmokeTest
+              layoutStabilitySmokeTest || doubleClickCameraSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -65,7 +66,7 @@ EditorLayer::EditorLayer(
               voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest ||
               voxelPencilSmokeTest || voxelEraserSmokeTest ||
               voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest ||
-              layoutStabilitySmokeTest),
+              layoutStabilitySmokeTest || doubleClickCameraSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -91,7 +92,8 @@ EditorLayer::EditorLayer(
       voxelEraserSmokeTest_(voxelEraserSmokeTest),
       voxelUndoRedoSmokeTest_(voxelUndoRedoSmokeTest),
       firstCreationExperienceSmokeTest_(firstCreationExperienceSmokeTest),
-      layoutStabilitySmokeTest_(layoutStabilitySmokeTest)
+      layoutStabilitySmokeTest_(layoutStabilitySmokeTest),
+      doubleClickCameraSmokeTest_(doubleClickCameraSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -276,6 +278,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunLayoutStabilitySmokeStep(
             renderedFrameCount_));
     }
+    if (doubleClickCameraSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunDoubleClickCameraSmokeStep(
+            renderedFrameCount_));
+    }
 
     ++renderedFrameCount_;
 
@@ -288,7 +295,9 @@ void EditorLayer::OnImGuiRender()
         (firstCreationExperienceSmokeTest_ &&
             workspace_.FirstCreationExperienceSmokePassed()) ||
         (layoutStabilitySmokeTest_ &&
-            workspace_.LayoutStabilitySmokePassed());
+            workspace_.LayoutStabilitySmokePassed()) ||
+        (doubleClickCameraSmokeTest_ &&
+            workspace_.DoubleClickCameraSmokePassed());
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
@@ -393,6 +402,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Viewport and Inspector layout stability smoke test did not complete.");
+    }
+    if (doubleClickCameraSmokeTest_ && smokeTestComplete &&
+        !workspace_.DoubleClickCameraSmokePassed())
+    {
+        throw std::runtime_error(
+            "Double-click camera smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

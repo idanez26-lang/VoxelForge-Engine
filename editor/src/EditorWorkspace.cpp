@@ -1147,7 +1147,7 @@ void EditorWorkspace::DrawScenePanel()
             "Right-click a .vox file and choose Open in Viewport.");
     }
     ImGui::TextDisabled(
-        "Right: orbit | Middle: pan | Wheel: zoom | F/double-click: frame | Home: reset");
+        "Right: orbit | Middle: pan | Wheel: zoom | F: frame | Home: reset");
 
     ImVec2 available = ImGui::GetContentRegionAvail();
     available.x = std::max(available.x, 1.0F);
@@ -1296,9 +1296,19 @@ void EditorWorkspace::DrawScenePanel()
         const bool shortcutsEnabled = sceneActive &&
             !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
             !incompatiblePopupOpen;
-        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_F, false))
+        const std::uint8_t leftClickCount =
+            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
+                ? 2U
+                : ImGui::IsMouseClicked(ImGuiMouseButton_Left) ? 1U : 0U;
+        const ViewportCameraActions cameraActions =
+            ResolveViewportCameraActions({
+                shortcutsEnabled,
+                ImGui::IsKeyPressed(ImGuiKey_F, false),
+                ImGui::IsKeyPressed(ImGuiKey_Home, false),
+                leftClickCount});
+        if (cameraActions.FrameRequested)
             FrameVoxelViewport();
-        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Home, false))
+        if (cameraActions.ResetRequested)
             viewportCamera_.Reset();
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
             eraseRequested = true;
@@ -1318,9 +1328,6 @@ void EditorWorkspace::DrawScenePanel()
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
             voxelSelection_.ClearSelection())
             UpdateVoxelHighlights();
-        if (imageHovered &&
-            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-            FrameVoxelViewport();
     }
     else if (!viewportRenderer_.LastError().empty())
     {
@@ -5256,6 +5263,132 @@ bool EditorWorkspace::LayoutStabilitySmokePassed() const noexcept
         layoutStabilitySmokeUndone_ && layoutStabilitySmokeRedone_ &&
         layoutStabilitySmokeRectanglesStable_ &&
         layoutStabilitySmokeCleaned_;
+}
+
+bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
+{
+    const auto applyActions = [this](const ViewportCameraActions& actions)
+    {
+        if (actions.FrameRequested) FrameVoxelViewport();
+        if (actions.ResetRequested) viewportCamera_.Reset();
+    };
+    const auto verifyDoubleClick = [this, &applyActions]()
+    {
+        const ViewportCameraActions actions =
+            ResolveViewportCameraActions({true, false, false, 2U});
+        applyActions(actions);
+        return !actions.FrameRequested && !actions.ResetRequested &&
+            viewportCamera_.CaptureState() ==
+                doubleClickCameraSmokeReference_;
+    };
+
+    switch (frame)
+    {
+    case 0U:
+        if (!projectManager_.HasActiveProject() ||
+            voxelDocumentSession_.ActiveDocument() == nullptr ||
+            !viewportState_.HasModel())
+        {
+            return false;
+        }
+        FrameVoxelViewport();
+        viewportCamera_.Orbit(23.0F, -11.0F);
+        viewportCamera_.Pan(17.0F, -9.0F, 720.0F);
+        viewportCamera_.Zoom(1.0F);
+        doubleClickCameraSmokeReference_ = viewportCamera_.CaptureState();
+        return true;
+    case 1U:
+        doubleClickCameraSmokeGridStable_ = verifyDoubleClick();
+        return doubleClickCameraSmokeGridStable_;
+    case 2U:
+        doubleClickCameraSmokeVoxelStable_ = verifyDoubleClick();
+        return doubleClickCameraSmokeVoxelStable_;
+    case 3U:
+        doubleClickCameraSmokeEmptyStable_ = verifyDoubleClick();
+        return doubleClickCameraSmokeEmptyStable_;
+    case 4U:
+    {
+        const EditorCameraState before = viewportCamera_.CaptureState();
+        viewportCamera_.Orbit(12.0F, -8.0F);
+        const EditorCameraState after = viewportCamera_.CaptureState();
+        doubleClickCameraSmokeOrbitWorked_ =
+            after.RotationDegrees != before.RotationDegrees &&
+            after.Target == before.Target && after.Distance == before.Distance;
+        return doubleClickCameraSmokeOrbitWorked_;
+    }
+    case 5U:
+    {
+        const EditorCameraState before = viewportCamera_.CaptureState();
+        viewportCamera_.Pan(-14.0F, 7.0F, 720.0F);
+        const EditorCameraState after = viewportCamera_.CaptureState();
+        doubleClickCameraSmokePanWorked_ =
+            after.Target != before.Target &&
+            after.RotationDegrees == before.RotationDegrees &&
+            after.Distance == before.Distance;
+        return doubleClickCameraSmokePanWorked_;
+    }
+    case 6U:
+    {
+        const EditorCameraState before = viewportCamera_.CaptureState();
+        viewportCamera_.Zoom(-1.0F);
+        const EditorCameraState after = viewportCamera_.CaptureState();
+        doubleClickCameraSmokeZoomWorked_ =
+            after.Distance != before.Distance &&
+            after.RotationDegrees == before.RotationDegrees &&
+            after.Target == before.Target;
+        return doubleClickCameraSmokeZoomWorked_;
+    }
+    case 7U:
+    {
+        const ViewportCameraActions actions =
+            ResolveViewportCameraActions({true, true, false, 0U});
+        applyActions(actions);
+        doubleClickCameraSmokeShortcutsWorked_ =
+            actions.FrameRequested && !actions.ResetRequested &&
+            viewportCamera_.GetTarget() == Vec3{};
+        return doubleClickCameraSmokeShortcutsWorked_;
+    }
+    case 8U:
+    {
+        const ViewportCameraActions actions =
+            ResolveViewportCameraActions({true, false, true, 0U});
+        applyActions(actions);
+        EditorCamera defaultCamera;
+        doubleClickCameraSmokeShortcutsWorked_ =
+            doubleClickCameraSmokeShortcutsWorked_ &&
+            !actions.FrameRequested && actions.ResetRequested &&
+            viewportCamera_.CaptureState() == defaultCamera.CaptureState();
+        return doubleClickCameraSmokeShortcutsWorked_;
+    }
+    case 9U:
+        CloseProject();
+        doubleClickCameraSmokeCleaned_ =
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() &&
+            !voxelPlacementPreview_.IsVisible() &&
+            !constructionPlaneTarget_ &&
+            !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo();
+        return doubleClickCameraSmokeCleaned_;
+    default:
+        return DoubleClickCameraSmokePassed();
+    }
+}
+
+bool EditorWorkspace::DoubleClickCameraSmokePassed() const noexcept
+{
+    return doubleClickCameraSmokeGridStable_ &&
+        doubleClickCameraSmokeVoxelStable_ &&
+        doubleClickCameraSmokeEmptyStable_ &&
+        doubleClickCameraSmokeOrbitWorked_ &&
+        doubleClickCameraSmokePanWorked_ &&
+        doubleClickCameraSmokeZoomWorked_ &&
+        doubleClickCameraSmokeShortcutsWorked_ &&
+        doubleClickCameraSmokeCleaned_;
 }
 
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(

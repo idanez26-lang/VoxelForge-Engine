@@ -42,10 +42,7 @@ void EditorCamera::Update(
     ImGuiIO& io = ImGui::GetIO();
     if (ImGui::IsMouseDown(ImGuiMouseButton_Right))
     {
-        yawDegrees_ += io.MouseDelta.x * orbitSensitivity_;
-        pitchDegrees_ -= io.MouseDelta.y * orbitSensitivity_;
-        pitchDegrees_ = std::clamp(pitchDegrees_, -89.0F, 89.0F);
-        view_ = EditorCameraView::Perspective;
+        Orbit(io.MouseDelta.x, io.MouseDelta.y);
     }
 
     if (ImGui::IsMouseDown(ImGuiMouseButton_Middle))
@@ -55,9 +52,18 @@ void EditorCamera::Update(
 
     if (io.MouseWheel != 0.0F)
     {
-        const float factor = std::pow(0.85F, io.MouseWheel);
-        distance_ = std::clamp(distance_ * factor, 0.1F, 10000.0F);
+        Zoom(io.MouseWheel);
     }
+}
+
+void EditorCamera::Orbit(
+    const float horizontalPixels,
+    const float verticalPixels) noexcept
+{
+    yawDegrees_ += horizontalPixels * orbitSensitivity_;
+    pitchDegrees_ -= verticalPixels * orbitSensitivity_;
+    pitchDegrees_ = std::clamp(pitchDegrees_, -89.0F, 89.0F);
+    view_ = EditorCameraView::Perspective;
 }
 
 void EditorCamera::Pan(
@@ -72,6 +78,12 @@ void EditorCamera::Pan(
         safeHeight;
     target_ = target_ - (GetRight() * horizontalPixels * worldUnitsPerPixel);
     target_ = target_ + (GetUp() * verticalPixels * worldUnitsPerPixel);
+}
+
+void EditorCamera::Zoom(const float wheelDelta) noexcept
+{
+    const float factor = std::pow(0.85F, wheelDelta);
+    distance_ = std::clamp(distance_ * factor, 0.1F, 10000.0F);
 }
 
 void EditorCamera::Frame(
@@ -181,6 +193,16 @@ float EditorCamera::GetFieldOfViewDegrees() const noexcept
 EditorCameraView EditorCamera::GetView() const noexcept
 {
     return view_;
+}
+
+EditorCameraState EditorCamera::CaptureState() const noexcept
+{
+    return {
+        GetPosition(),
+        {pitchDegrees_, yawDegrees_, 0.0F},
+        distance_,
+        target_,
+        view_};
 }
 
 VoxelRay EditorCamera::CreateViewportRay(

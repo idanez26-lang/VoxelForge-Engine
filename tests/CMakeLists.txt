@@ -151,6 +151,26 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorDoubleClickCameraTests
+    Editor/DoubleClickCameraTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportInput/ViewportCameraInput.cpp
+)
+target_include_directories(
+    VoxelForgeEditorDoubleClickCameraTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeEditorDoubleClickCameraTests
+    PRIVATE VoxelForgeEditorVoxelSelection VoxelForgeImGui
+)
+vf_configure_test(VoxelForgeEditorDoubleClickCameraTests)
+add_test(
+    NAME VoxelForge.Editor.DoubleClickCamera
+    COMMAND $<TARGET_FILE:VoxelForgeEditorDoubleClickCameraTests>
+)
+
+add_executable(
     VoxelForgeEditorVoxelSelectionTests
     Editor/VoxelSelectionTests.cpp
 )
@@ -485,6 +505,7 @@ set_tests_properties(
     VoxelForge.Editor.AssetInspector
     VoxelForge.Editor.VoxThumbnail
     VoxelForge.Editor.VoxelViewport
+    VoxelForge.Editor.DoubleClickCamera
     VoxelForge.Editor.VoxelSelection
     VoxelForge.Editor.VoxelRayPicking
     VoxelForge.Editor.CommandHistory
@@ -584,6 +605,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.LayoutStabilitySmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --layout-stability-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.DoubleClickCameraSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --double-click-camera-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -603,6 +628,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelUndoRedoSmoke
         VoxelForge.Editor.FirstCreationExperienceSmoke
         VoxelForge.Editor.LayoutStabilitySmoke
+        VoxelForge.Editor.DoubleClickCameraSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

@@ -386,6 +386,7 @@ target_sources(
         src/EditorCamera.cpp
         src/EditorLayer.cpp
         src/EditorWorkspace.cpp
+        src/ViewportInput/ViewportCameraInput.cpp
         src/ViewportRenderer.cpp
         src/VoxelViewportState.cpp
         src/main.cpp

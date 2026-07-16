@@ -17,6 +17,7 @@
 #include "Platform/ProjectFolderOpener.h"
 #include "Project/ProjectDialogPreferences.h"
 #include "Project/QualityOfLifeLogic.h"
+#include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
 #include "VoxelSave/VoxelSaveState.h"
@@ -132,6 +133,8 @@ public:
     [[nodiscard]] bool FirstCreationExperienceSmokePassed() const noexcept;
     [[nodiscard]] bool RunLayoutStabilitySmokeStep(std::size_t frame);
     [[nodiscard]] bool LayoutStabilitySmokePassed() const noexcept;
+    [[nodiscard]] bool RunDoubleClickCameraSmokeStep(std::size_t frame);
+    [[nodiscard]] bool DoubleClickCameraSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -347,6 +350,15 @@ private:
     bool layoutStabilitySmokeRedone_ = false;
     bool layoutStabilitySmokeRectanglesStable_ = false;
     bool layoutStabilitySmokeCleaned_ = false;
+    EditorCameraState doubleClickCameraSmokeReference_{};
+    bool doubleClickCameraSmokeGridStable_ = false;
+    bool doubleClickCameraSmokeVoxelStable_ = false;
+    bool doubleClickCameraSmokeEmptyStable_ = false;
+    bool doubleClickCameraSmokeOrbitWorked_ = false;
+    bool doubleClickCameraSmokePanWorked_ = false;
+    bool doubleClickCameraSmokeZoomWorked_ = false;
+    bool doubleClickCameraSmokeShortcutsWorked_ = false;
+    bool doubleClickCameraSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

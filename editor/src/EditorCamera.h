@@ -23,11 +23,25 @@ enum class EditorCameraView : std::uint8_t
     Bottom
 };
 
+struct EditorCameraState final
+{
+    Vec3 Position{};
+    Vec3 RotationDegrees{};
+    float Distance = 0.0F;
+    Vec3 Target{};
+    EditorCameraView View = EditorCameraView::Perspective;
+
+    [[nodiscard]] bool operator==(
+        const EditorCameraState&) const noexcept = default;
+};
+
 class EditorCamera final
 {
 public:
     void Update(bool viewportHovered, float viewportHeight);
+    void Orbit(float horizontalPixels, float verticalPixels) noexcept;
     void Pan(float horizontalPixels, float verticalPixels, float viewportHeight) noexcept;
+    void Zoom(float wheelDelta) noexcept;
     void Frame(float width, float height, float depth) noexcept;
     void Reset() noexcept;
     void SetView(EditorCameraView view) noexcept;
@@ -41,6 +55,7 @@ public:
     [[nodiscard]] float GetDistance() const noexcept;
     [[nodiscard]] float GetFieldOfViewDegrees() const noexcept;
     [[nodiscard]] EditorCameraView GetView() const noexcept;
+    [[nodiscard]] EditorCameraState CaptureState() const noexcept;
     [[nodiscard]] VoxelRay CreateViewportRay(
         float normalizedX,
         float normalizedY) const noexcept;

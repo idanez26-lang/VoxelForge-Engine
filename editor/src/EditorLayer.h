@@ -55,7 +55,8 @@ public:
         bool voxelEraserSmokeTest = false,
         bool voxelUndoRedoSmokeTest = false,
         bool firstCreationExperienceSmokeTest = false,
-        bool layoutStabilitySmokeTest = false);
+        bool layoutStabilitySmokeTest = false,
+        bool doubleClickCameraSmokeTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -118,6 +119,7 @@ private:
     std::filesystem::path voxelUndoRedoSmokeSourcePath_;
     bool firstCreationExperienceSmokeTest_ = false;
     bool layoutStabilitySmokeTest_ = false;
+    bool doubleClickCameraSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 
