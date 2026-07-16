@@ -34,21 +34,32 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
     const Asset::Voxel::VoxelDocument* document,
     const std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit,
-    const bool pencilActive) noexcept
+    const bool pencilActive,
+    const std::optional<Asset::Voxel::VoxelPosition> directTarget) noexcept
 {
-    if (!pencilActive || document == nullptr || !hit ||
-        hit->Face == VoxelHitFace::None ||
-        hit->SubModelIndex != subModelIndex)
+    if (!pencilActive || document == nullptr)
     {
         return {};
     }
     const auto dimensions = document->GetDimensions(subModelIndex);
     if (!dimensions) return {};
 
-    const Asset::Voxel::VoxelPosition expectedAdjacent =
-        CalculateAdjacent(*hit);
-    if (hit->AdjacentPosition != expectedAdjacent) return {};
-    const Asset::Voxel::VoxelPosition adjacent = hit->AdjacentPosition;
+    Asset::Voxel::VoxelPosition adjacent{};
+    if (directTarget)
+    {
+        if (document->GetVoxelCount() != 0U) return {};
+        adjacent = *directTarget;
+    }
+    else
+    {
+        if (!hit || hit->Face == VoxelHitFace::None ||
+            hit->SubModelIndex != subModelIndex)
+            return {};
+        const Asset::Voxel::VoxelPosition expectedAdjacent =
+            CalculateAdjacent(*hit);
+        if (hit->AdjacentPosition != expectedAdjacent) return {};
+        adjacent = hit->AdjacentPosition;
+    }
     const bool inside = adjacent.X >= 0 && adjacent.Y >= 0 && adjacent.Z >= 0 &&
         static_cast<std::uint32_t>(adjacent.X) < dimensions->X &&
         static_cast<std::uint32_t>(adjacent.Y) < dimensions->Y &&

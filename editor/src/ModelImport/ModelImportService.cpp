@@ -125,6 +125,13 @@ MetadataAnalysisResult ModelImportService::AnalyzeModel(
         modelPath, forceReanalysis);
 }
 
+ThumbnailGenerationResult ModelImportService::GenerateThumbnail(
+    const std::filesystem::path& modelPath,
+    const bool forceRegeneration)
+{
+    return thumbnailService_.Generate(modelPath, forceRegeneration);
+}
+
 void ModelImportService::SetRefreshCallback(RefreshCallback callback)
 {
     refreshCallback_ = std::move(callback);

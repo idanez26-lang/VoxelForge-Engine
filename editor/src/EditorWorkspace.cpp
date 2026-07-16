@@ -215,6 +215,27 @@ EditorWorkspace::EditorWorkspace(
         {
             assetBrowser_.InvalidateThumbnails();
         });
+    voxelModelCreationService_.SetThumbnailCallback(
+        [this](const std::filesystem::path& path)
+        {
+            const ThumbnailGenerationResult result =
+                modelImportService_.GenerateThumbnail(path, true);
+            return VoxelModelCreationStepResult{
+                result.Succeeded(), result.Message};
+        });
+    voxelModelCreationService_.SetAssetBrowserCallback(
+        [this](const std::filesystem::path& path)
+        {
+            if (!assetBrowser_.Refresh()) return false;
+            const auto& project = projectManager_.ActiveProject();
+            return project && assetBrowser_.RevealEntry(
+                path.lexically_relative(project->RootPath() / "Assets"));
+        });
+    voxelModelCreationService_.SetOpenCallback(
+        [this](const std::filesystem::path& path)
+        {
+            return OpenVoxInViewportNow(path);
+        });
     SynchronizeProjectAssets();
     if (!projectDialogPreferences_.Load())
     {
@@ -333,8 +354,10 @@ void EditorWorkspace::Draw()
     DrawStatusBar();
     DrawAboutPopup();
     DrawProjectDialogs();
+    DrawVoxelModelCreationDialogs();
     DrawModelImportDialogs();
     DrawDirtyConfirmationDialog();
+    DrawFirstCreationOverlay();
 }
 
 bool EditorWorkspace::ConsumeExitRequest() noexcept
@@ -370,6 +393,14 @@ void EditorWorkspace::DrawMainMenuBar()
         DrawTooltip("Open a project (Ctrl+O)");
 
         const bool hasActiveProject = projectManager_.HasActiveProject();
+        if (ImGui::MenuItem(
+                "New Voxel Model...", "Ctrl+Shift+N", false,
+                hasActiveProject))
+        {
+            RequestNewVoxelModelDialog();
+        }
+        DrawTooltip("Create an empty voxel model in Assets/Models");
+
         if (ImGui::MenuItem(
                 "Import Model...", "Ctrl+I", false, hasActiveProject))
         {
@@ -683,6 +714,12 @@ void EditorWorkspace::HandleCommandShortcuts()
         RequestImportModelDialog();
     }
     else if (ImGui::Shortcut(
+                 ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N,
+                 shortcutFlags) && context.HasProject)
+    {
+        RequestNewVoxelModelDialog();
+    }
+    else if (ImGui::Shortcut(
                  ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S,
                  shortcutFlags) &&
              CanRunProjectShortcut(ProjectShortcut::SaveAs, context))
@@ -726,7 +763,10 @@ void EditorWorkspace::UndoCommand()
         const VoxelEditHistoryResult result = voxelEditHistory_.Undo(*this);
         voxelEditInProgress_ = false;
         if (result)
+        {
             AddConsoleMessage("[Edit] Undo: " + result.Label);
+            firstCreationExperience_.OnUndo();
+        }
         else if (result.Code != VoxelEditHistoryResultCode::NothingToUndo)
             AddConsoleMessage("[Edit] Undo failed: " + result.Message);
         return;
@@ -747,7 +787,10 @@ void EditorWorkspace::RedoCommand()
         const VoxelEditHistoryResult result = voxelEditHistory_.Redo(*this);
         voxelEditInProgress_ = false;
         if (result)
+        {
             AddConsoleMessage("[Edit] Redo: " + result.Label);
+            firstCreationExperience_.OnRedo();
+        }
         else if (result.Code != VoxelEditHistoryResultCode::NothingToRedo)
             AddConsoleMessage("[Edit] Redo failed: " + result.Message);
         return;
@@ -1150,6 +1193,8 @@ void EditorWorkspace::DrawScenePanel()
             !inputBlocked && !cameraControl;
         const Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
+        const auto previousConstructionTarget = constructionPlaneTarget_;
+        constructionPlaneTarget_.reset();
         std::optional<VoxelRaycastHit> hoveredHit;
         VoxelPickingInteractionState pickingState =
             VoxelPickingInteractionState::Unavailable;
@@ -1175,12 +1220,20 @@ void EditorWorkspace::DrawScenePanel()
                     CenteredVoxelModelTransform(voxelModelCenter_);
                 hoveredHit = RaycastVoxelDocument(
                     *document, *ray.Ray, options);
+                if (!hoveredHit && document->GetVoxelCount() == 0U &&
+                    voxelToolState_.IsPencilActive())
+                {
+                    constructionPlaneTarget_ =
+                        FindVoxelConstructionPlaneTarget(
+                            *document, 0U, *ray.Ray, voxelModelCenter_);
+                }
                 pickingState = hoveredHit
                     ? VoxelPickingInteractionState::Hit
                     : VoxelPickingInteractionState::NoHit;
             }
         }
-        if (voxelSelection_.SetHovered(pickingState, std::move(hoveredHit)))
+        if (voxelSelection_.SetHovered(pickingState, std::move(hoveredHit)) ||
+            previousConstructionTarget != constructionPlaneTarget_)
         {
             UpdateVoxelHighlights();
         }
@@ -2074,9 +2127,133 @@ void EditorWorkspace::DrawDirtyConfirmationDialog()
         dirtyActionConfirmation_.Cancel();
         pendingProjectPath_.clear();
         pendingVoxelPath_.clear();
+        pendingVoxelModelCreation_ = {};
+        pendingVoxelModelCollisionAction_ =
+            VoxelModelCreationCollisionAction::Ask;
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
+}
+
+void EditorWorkspace::DrawVoxelModelCreationDialogs()
+{
+    constexpr const char* CreatePopup = "New Voxel Model";
+    constexpr const char* CollisionPopup = "Voxel Model Already Exists";
+    if (showNewVoxelModelPopup_)
+    {
+        ImGui::OpenPopup(CreatePopup);
+        showNewVoxelModelPopup_ = false;
+    }
+    ImGui::SetNextWindowPos(
+        ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
+        ImVec2(0.5F, 0.5F));
+    if (ImGui::BeginPopupModal(
+            CreatePopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted("Create an empty VOX model.");
+        ImGui::InputText(
+            "Name", newVoxelModelName_.data(), newVoxelModelName_.size());
+        ImGui::InputInt3("Dimensions", newVoxelModelDimensions_.data());
+        ImGui::TextDisabled("Valid range: 1..256. Default: 64 x 64 x 64.");
+        DrawErrorMessage(voxelModelCreationError_);
+        if (ImGui::Button("Create"))
+        {
+            VoxelModelCreationRequest request;
+            request.Name = newVoxelModelName_.data();
+            request.Dimensions = {
+                newVoxelModelDimensions_[0] > 0
+                    ? static_cast<std::uint32_t>(newVoxelModelDimensions_[0]) : 0U,
+                newVoxelModelDimensions_[1] > 0
+                    ? static_cast<std::uint32_t>(newVoxelModelDimensions_[1]) : 0U,
+                newVoxelModelDimensions_[2] > 0
+                    ? static_cast<std::uint32_t>(newVoxelModelDimensions_[2]) : 0U};
+            std::string validation;
+            if (!VoxelModelCreationService::ValidateModelName(
+                    request.Name, validation) ||
+                !VoxelModelCreationService::ValidateDimensions(
+                    request.Dimensions, validation))
+            {
+                voxelModelCreationError_ = std::move(validation);
+            }
+            else
+            {
+                voxelModelCreationError_.clear();
+                RequestCreateVoxelModel(
+                    std::move(request),
+                    VoxelModelCreationCollisionAction::Ask);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+        {
+            voxelModelCreationError_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (showVoxelModelCollisionPopup_)
+    {
+        ImGui::OpenPopup(CollisionPopup);
+        showVoxelModelCollisionPopup_ = false;
+    }
+    ImGui::SetNextWindowPos(
+        ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
+        ImVec2(0.5F, 0.5F));
+    if (ImGui::BeginPopupModal(
+            CollisionPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextWrapped("The model already exists.");
+        if (ImGui::Button("Rename"))
+        {
+            pendingVoxelModelCollisionAction_ =
+                VoxelModelCreationCollisionAction::Rename;
+            CreateVoxelModelNow();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Replace"))
+        {
+            pendingVoxelModelCollisionAction_ =
+                VoxelModelCreationCollisionAction::Replace;
+            CreateVoxelModelNow();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+        {
+            pendingVoxelModelCreation_ = {};
+            pendingVoxelModelCollisionAction_ =
+                VoxelModelCreationCollisionAction::Ask;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorWorkspace::DrawFirstCreationOverlay()
+{
+    if (!firstCreationExperience_.Visible()) return;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5F,
+               viewport->WorkPos.y + 72.0F),
+        ImGuiCond_Always, ImVec2(0.5F, 0.0F));
+    ImGui::SetNextWindowSize(ImVec2(360.0F, 0.0F));
+    ImGui::SetNextWindowBgAlpha(0.94F);
+    constexpr ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings;
+    if (ImGui::Begin("First Creation", nullptr, flags))
+    {
+        ImGui::TextWrapped("%s", firstCreationExperience_.Message());
+        if (firstCreationExperience_.Stage() == FirstCreationStage::Welcome &&
+            ImGui::Button("Compris"))
+            firstCreationExperience_.Acknowledge();
+    }
+    ImGui::End();
 }
 
 void EditorWorkspace::DrawNewProjectDialog()
@@ -2317,6 +2494,39 @@ void EditorWorkspace::RequestImportModelDialog()
         AddConsoleMessage("Model import failed: a file dialog is already open.");
 }
 
+void EditorWorkspace::RequestNewVoxelModelDialog()
+{
+    if (!projectManager_.HasActiveProject())
+    {
+        AddConsoleMessage("Voxel model creation failed: no project is loaded.");
+        return;
+    }
+    newVoxelModelName_.fill('\0');
+    constexpr std::string_view defaultName = "MyModel";
+    std::copy(defaultName.begin(), defaultName.end(),
+        newVoxelModelName_.begin());
+    newVoxelModelDimensions_ = {64, 64, 64};
+    voxelModelCreationError_.clear();
+    showNewVoxelModelPopup_ = true;
+}
+
+void EditorWorkspace::RequestCreateVoxelModel(
+    VoxelModelCreationRequest request,
+    const VoxelModelCreationCollisionAction collisionAction)
+{
+    if (dirtyActionConfirmation_.IsPending()) return;
+    pendingVoxelModelCreation_ = std::move(request);
+    pendingVoxelModelCollisionAction_ = collisionAction;
+    if (!dirtyActionConfirmation_.Request(
+            DestructiveAction::CreateVoxelModel,
+            HasUnsavedVoxelChanges()))
+    {
+        showDirtyConfirmationPopup_ = true;
+        return;
+    }
+    CreateVoxelModelNow();
+}
+
 void EditorWorkspace::CreateProject()
 {
     if (!dirtyActionConfirmation_.Request(
@@ -2431,6 +2641,38 @@ void EditorWorkspace::SaveProject()
         "Project saved: " + projectManager_.ActiveProject()->Name());
 }
 
+void EditorWorkspace::CreateVoxelModelNow()
+{
+    const VoxelModelCreationResult result =
+        voxelModelCreationService_.CreateModel(
+            pendingVoxelModelCreation_, pendingVoxelModelCollisionAction_);
+    if (result.Status == VoxelModelCreationStatus::Collision)
+    {
+        showVoxelModelCollisionPopup_ = true;
+        return;
+    }
+    if (!result.Succeeded())
+    {
+        if (result.Status != VoxelModelCreationStatus::Cancelled)
+        {
+            voxelModelCreationError_ = result.Message;
+            AddConsoleMessage(
+                "Voxel model creation failed: " + result.Message);
+        }
+        return;
+    }
+    AddConsoleMessage(
+        "[Create] Created " + result.ModelPath.filename().string() + ".");
+    if (!result.Warning.empty())
+        AddConsoleMessage("[Create] Warning: " + result.Warning);
+    firstCreationExperience_.Start(
+        projectDialogPreferences_.FirstCreationCompleted());
+    pendingVoxelModelCreation_ = {};
+    pendingVoxelModelCollisionAction_ =
+        VoxelModelCreationCollisionAction::Ask;
+    voxelModelCreationError_.clear();
+}
+
 bool EditorWorkspace::SaveVoxelModel()
 {
     Asset::Voxel::VoxelDocument* document =
@@ -2450,6 +2692,12 @@ bool EditorWorkspace::SaveVoxelModel()
         return false;
     }
     voxelSaveState_.MarkSaved();
+    if (firstCreationExperience_.OnSave() &&
+        !projectDialogPreferences_.SetFirstCreationCompleted(true))
+    {
+        AddConsoleMessage("First creation preference warning: " +
+            projectDialogPreferences_.LastError());
+    }
     AddConsoleMessage("[Save] Saved " +
         result.SavedPath.filename().string() + ".");
     if (result.Warning.empty())
@@ -2538,6 +2786,9 @@ void EditorWorkspace::ExecutePendingDirtyAction(const DestructiveAction action)
     case DestructiveAction::CreateProject:
         CreateProjectNow();
         break;
+    case DestructiveAction::CreateVoxelModel:
+        CreateVoxelModelNow();
+        break;
     case DestructiveAction::ExitApplication:
         exitRequest_.RequestExit();
         break;
@@ -2597,6 +2848,7 @@ void EditorWorkspace::SynchronizeProjectAssets()
             });
         modelImportService_.ClearProjectRoot();
         voxelDocumentSaveService_.ClearProject();
+        voxelModelCreationService_.ClearProject();
         assetBrowser_.ClearAssetsRoot();
         assetInspector_.ClearProject();
         return;
@@ -2617,6 +2869,9 @@ void EditorWorkspace::SynchronizeProjectAssets()
         AddConsoleMessage("Voxel document session setup failed.");
     if (!voxelDocumentSaveService_.SetProjectRoot(project->RootPath()))
         AddConsoleMessage("VOX save service setup failed.");
+    if (!voxelModelCreationService_.SetProjectRoot(project->RootPath()))
+        AddConsoleMessage("Voxel model creation service setup failed: " +
+            voxelModelCreationService_.LastError());
 }
 
 void EditorWorkspace::BeginModelImport(
@@ -4706,6 +4961,129 @@ bool EditorWorkspace::VoxelUndoRedoSmokePassed() const noexcept
         voxelUndoRedoSmokeClosed_ && voxelUndoRedoSmokeSourcePreserved_;
 }
 
+bool EditorWorkspace::RunFirstCreationExperienceSmokeStep(
+    const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        const VoxelModelCreationResult created =
+            voxelModelCreationService_.CreateModel({
+                "Maison", {64U, 64U, 64U}});
+        document = voxelDocumentSession_.ActiveDocument();
+        firstCreationSmokePath_ = created.ModelPath;
+        const std::filesystem::path expectedSelection =
+            std::filesystem::path("Models") / "Maison.vox";
+        firstCreationSmokeCreated_ = created.Succeeded() &&
+            created.ThumbnailGenerated && created.AssetBrowserRefreshed &&
+            created.Opened && document != nullptr &&
+            document->SourcePath() == created.ModelPath &&
+            document->GetDimensions() ==
+                Asset::Voxel::VoxelDimensions{64U, 64U, 64U} &&
+            document->GetVoxelCount() == 0U && !document->IsDirty() &&
+            voxelEditHistory_.IsAtSavedState() &&
+            assetBrowser_.SelectedRelativePath() == expectedSelection &&
+            created.Metadata.Analysis && created.Metadata.Analysis->Valid &&
+            created.Metadata.Analysis->VoxelCount == 0U &&
+            created.Metadata.Thumbnail &&
+            created.Metadata.Thumbnail->Status == ThumbnailStatus::Valid;
+        if (!firstCreationSmokeCreated_) return false;
+        firstCreationExperience_.Start(false);
+        firstCreationExperience_.Acknowledge();
+    }
+    else if (frame == 1U)
+    {
+        if (document == nullptr || !firstCreationSmokeCreated_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        firstCreationSmokeTarget_ = {32, 0, 32};
+        constructionPlaneTarget_ = firstCreationSmokeTarget_;
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        firstCreationSmokePencilled_ = ApplyVoxelPencil() &&
+            document->GetVoxelCount() == 1U &&
+            document->HasVoxel(firstCreationSmokeTarget_) &&
+            document->GetRevision() == revision + 1U && document->IsDirty() &&
+            voxelEditHistory_.CanUndo() &&
+            firstCreationExperience_.Stage() == FirstCreationStage::Undo;
+    }
+    else if (frame == 2U)
+    {
+        if (document == nullptr || !firstCreationSmokePencilled_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        UndoCommand();
+        firstCreationSmokeUndone_ = document->GetVoxelCount() == 0U &&
+            !document->HasVoxel(firstCreationSmokeTarget_) &&
+            document->GetRevision() == revision + 1U && !document->IsDirty() &&
+            voxelEditHistory_.CanRedo() &&
+            firstCreationExperience_.Stage() == FirstCreationStage::Redo;
+    }
+    else if (frame == 3U)
+    {
+        if (document == nullptr || !firstCreationSmokeUndone_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        RedoCommand();
+        firstCreationSmokeRedone_ = document->GetVoxelCount() == 1U &&
+            document->HasVoxel(firstCreationSmokeTarget_) &&
+            document->GetRevision() == revision + 1U && document->IsDirty() &&
+            firstCreationExperience_.Stage() == FirstCreationStage::Save;
+    }
+    else if (frame == 4U)
+    {
+        if (document == nullptr || !firstCreationSmokeRedone_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        firstCreationSmokeSaved_ = SaveVoxelModel() &&
+            !document->IsDirty() && document->GetRevision() == revision &&
+            voxelEditHistory_.CanUndo() &&
+            firstCreationExperience_.Stage() == FirstCreationStage::Completed &&
+            !std::filesystem::exists(
+                firstCreationSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                firstCreationSmokePath_.string() + ".vfsave.bak");
+    }
+    else if (frame == 5U)
+    {
+        if (!firstCreationSmokeSaved_) return false;
+        ClearVoxelViewport();
+        if (!OpenVoxInViewportNow(firstCreationSmokePath_)) return false;
+        document = voxelDocumentSession_.ActiveDocument();
+        firstCreationSmokeReopened_ = document != nullptr &&
+            document->GetVoxelCount() == 1U &&
+            document->HasVoxel(firstCreationSmokeTarget_) &&
+            !document->IsDirty() && voxelEditHistory_.IsAtSavedState();
+    }
+    else if (frame == 6U)
+    {
+        if (!firstCreationSmokeReopened_) return false;
+        CloseProject();
+        firstCreationSmokeCleaned_ =
+            !projectManager_.ActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() && !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                firstCreationSmokePath_.string() + ".vfcreate.tmp") &&
+            !std::filesystem::exists(
+                firstCreationSmokePath_.string() + ".vfcreate.bak") &&
+            !std::filesystem::exists(
+                firstCreationSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                firstCreationSmokePath_.string() + ".vfsave.bak");
+    }
+    return FirstCreationExperienceSmokePassed();
+}
+
+bool EditorWorkspace::FirstCreationExperienceSmokePassed() const noexcept
+{
+    return firstCreationSmokeCreated_ && firstCreationSmokePencilled_ &&
+        firstCreationSmokeUndone_ && firstCreationSmokeRedone_ &&
+        firstCreationSmokeSaved_ && firstCreationSmokeReopened_ &&
+        firstCreationSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -4958,6 +5336,9 @@ bool EditorWorkspace::AddAdjacentVoxel()
 bool EditorWorkspace::ApplyVoxelPencil()
 {
     if (voxelEditInProgress_) return false;
+    const std::uint64_t voxelCountBefore =
+        voxelDocumentSession_.ActiveDocument()
+        ? voxelDocumentSession_.ActiveDocument()->GetVoxelCount() : 0U;
     voxelEditInProgress_ = true;
     VoxelToolResult result;
     try
@@ -4969,7 +5350,8 @@ bool EditorWorkspace::ApplyVoxelPencil()
             voxelSelection_.Hovered(),
             voxelToolState_.ActivePaletteIndex(),
             !voxelToolState_.IsPencilActive(),
-            &voxelEditHistory_});
+            &voxelEditHistory_,
+            constructionPlaneTarget_});
     }
     catch (const std::exception& exception)
     {
@@ -4986,6 +5368,9 @@ bool EditorWorkspace::ApplyVoxelPencil()
 
     if (result.Code == VoxelToolResultCode::Applied)
     {
+        constructionPlaneTarget_.reset();
+        if (voxelCountBefore == 0U)
+            firstCreationExperience_.OnFirstVoxelCreated();
         AddConsoleMessage(
             "[Edit] Added voxel at (" +
             std::to_string(result.Position.X) + ", " +
@@ -5245,7 +5630,10 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             voxelDocumentSession_.ActiveDocument(),
             0U,
             voxelSelection_.Hovered(),
-            true);
+            true,
+            voxelDocumentSession_.ActiveDocument() &&
+                voxelDocumentSession_.ActiveDocument()->GetVoxelCount() == 0U
+                ? constructionPlaneTarget_ : std::nullopt);
         placementPosition = voxelPlacementPreview_.IsVisible()
             ? voxelPlacementPreview_.Position : std::nullopt;
         placementStyle = voxelPlacementPreview_.IsValid()
@@ -5315,6 +5703,8 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     voxelToolInput_.Reset();
     voxelToolSmokeInput_.Reset();
     voxelPlacementPreview_ = {};
+    constructionPlaneTarget_.reset();
+    firstCreationExperience_.Hide();
     lastVoxelToolResult_.reset();
     lastVoxelEraserResult_.reset();
     voxelEditInProgress_ = false;

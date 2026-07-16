@@ -14,9 +14,11 @@ public:
     [[nodiscard]] bool Load();
     [[nodiscard]] bool SetLastCreateParent(std::filesystem::path path);
     [[nodiscard]] bool SetLastOpenDirectory(std::filesystem::path path);
+    [[nodiscard]] bool SetFirstCreationCompleted(bool completed);
 
     [[nodiscard]] const std::filesystem::path& LastCreateParent() const noexcept;
     [[nodiscard]] const std::filesystem::path& LastOpenDirectory() const noexcept;
+    [[nodiscard]] bool FirstCreationCompleted() const noexcept;
     [[nodiscard]] const std::filesystem::path& StorageFilePath() const noexcept;
     [[nodiscard]] const std::string& LastError() const noexcept;
 
@@ -30,6 +32,7 @@ private:
     std::filesystem::path storageFilePath_;
     std::filesystem::path lastCreateParent_;
     std::filesystem::path lastOpenDirectory_;
+    bool firstCreationCompleted_ = false;
     std::string lastError_;
 };
 

@@ -40,7 +40,9 @@ struct VoxelPlacementPreview final
     const Asset::Voxel::VoxelDocument* document,
     std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit,
-    bool pencilActive) noexcept;
+    bool pencilActive,
+    std::optional<Asset::Voxel::VoxelPosition> directTarget =
+        std::nullopt) noexcept;
 
 [[nodiscard]] VoxelPlacementPreview EvaluateVoxelEraserPreview(
     const Asset::Voxel::VoxelDocument* document,

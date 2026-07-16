@@ -41,20 +41,34 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
     const std::uint64_t revision = document.GetRevision();
     if (context.Blocked)
         return Refused(VoxelToolResultCode::Blocked, {}, revision);
-    if (!context.Hit || context.Hit->Face == VoxelHitFace::None)
-        return Refused(VoxelToolResultCode::NoHit, {}, revision);
-    const Asset::Voxel::VoxelPosition expectedAdjacent =
-        CalculateAdjacent(*context.Hit);
-    const Asset::Voxel::VoxelPosition adjacent =
-        context.Hit->AdjacentPosition;
-    if (adjacent != expectedAdjacent)
+    Asset::Voxel::VoxelPosition adjacent{};
+    if (context.DirectTarget)
     {
-        return Refused(
-            VoxelToolResultCode::Failed, adjacent, revision,
-            "Voxel hit adjacency does not match its detected face.");
+        if (document.GetVoxelCount() != 0U)
+        {
+            return Refused(
+                VoxelToolResultCode::Failed, *context.DirectTarget, revision,
+                "A direct Pencil target is valid only for an empty document.");
+        }
+        adjacent = *context.DirectTarget;
+    }
+    else
+    {
+        if (!context.Hit || context.Hit->Face == VoxelHitFace::None)
+            return Refused(VoxelToolResultCode::NoHit, {}, revision);
+        const Asset::Voxel::VoxelPosition expectedAdjacent =
+            CalculateAdjacent(*context.Hit);
+        adjacent = context.Hit->AdjacentPosition;
+        if (adjacent != expectedAdjacent)
+        {
+            return Refused(
+                VoxelToolResultCode::Failed, adjacent, revision,
+                "Voxel hit adjacency does not match its detected face.");
+        }
     }
     if (context.EditSession == nullptr ||
-        context.Hit->SubModelIndex != context.SubModelIndex ||
+        (!context.DirectTarget &&
+         context.Hit->SubModelIndex != context.SubModelIndex) ||
         document.GetModel(context.SubModelIndex) == nullptr)
     {
         return Refused(

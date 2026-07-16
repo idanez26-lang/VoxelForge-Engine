@@ -37,6 +37,7 @@ enum class DestructiveAction
     CloseProject,
     OpenProject,
     CreateProject,
+    CreateVoxelModel,
     ExitApplication,
     ReplaceVoxelModel
 };

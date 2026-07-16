@@ -317,6 +317,22 @@ add_test(
     NAME VoxelForge.Editor.VoxelDocumentSaveService
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelDocumentSaveServiceTests>
 )
+add_executable(
+    VoxelForgeEditorFirstCreationExperienceTests
+    Editor/FirstCreationExperienceTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorFirstCreationExperienceTests
+    PRIVATE
+        VoxelForgeEditorVoxelCreation
+        VoxelForgeEditorVoxelSave
+        VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorFirstCreationExperienceTests)
+add_test(
+    NAME VoxelForge.Editor.FirstCreationExperience
+    COMMAND $<TARGET_FILE:VoxelForgeEditorFirstCreationExperienceTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -468,6 +484,7 @@ set_tests_properties(
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
     VoxelForge.Editor.VoxelDocumentSaveService
+    VoxelForge.Editor.FirstCreationExperience
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Asset.VoxModelAnalyzer
@@ -545,6 +562,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelUndoRedoSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-undo-redo-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.FirstCreationExperienceSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --first-creation-experience-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -562,6 +583,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelPencilSmoke
         VoxelForge.Editor.VoxelEraserSmoke
         VoxelForge.Editor.VoxelUndoRedoSmoke
+        VoxelForge.Editor.FirstCreationExperienceSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

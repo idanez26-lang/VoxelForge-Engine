@@ -20,6 +20,9 @@
 #include "VoxelViewportState.h"
 #include "VoxelSave/VoxelSaveState.h"
 #include "VoxelSave/VoxelDocumentSaveService.h"
+#include "VoxelCreation/FirstCreationExperience.h"
+#include "VoxelCreation/VoxelConstructionPlane.h"
+#include "VoxelCreation/VoxelModelCreationService.h"
 #include "VoxelSelection/VoxelSelectionState.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
@@ -123,6 +126,8 @@ public:
         std::size_t frame,
         const std::filesystem::path& sourcePath);
     [[nodiscard]] bool VoxelUndoRedoSmokePassed() const noexcept;
+    [[nodiscard]] bool RunFirstCreationExperienceSmokeStep(std::size_t frame);
+    [[nodiscard]] bool FirstCreationExperienceSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -155,6 +160,8 @@ private:
     void DrawNewProjectDialog();
     void DrawOpenProjectDialog();
     void DrawModelImportDialogs();
+    void DrawVoxelModelCreationDialogs();
+    void DrawFirstCreationOverlay();
     void DrawDirtyConfirmationDialog();
     void ConsumeFileDialogResult();
     [[nodiscard]] bool DrawPathInput(
@@ -164,6 +171,10 @@ private:
     void RequestNewProjectDialog();
     void RequestOpenProjectDialog();
     void RequestImportModelDialog();
+    void RequestNewVoxelModelDialog();
+    void RequestCreateVoxelModel(
+        VoxelModelCreationRequest request,
+        VoxelModelCreationCollisionAction collisionAction);
     void RequestExit();
     void RequestCloseProject();
     void RequestOpenProject(
@@ -180,6 +191,7 @@ private:
     void RemoveRecentProject(
         const std::filesystem::path& projectFilePath);
     void SaveProject();
+    void CreateVoxelModelNow();
     [[nodiscard]] bool SaveVoxelModel();
     [[nodiscard]] bool HasUnsavedVoxelChanges() const noexcept;
     void CloseProject();
@@ -227,11 +239,14 @@ private:
     std::optional<Voxel::VoxelModel> activeVoxelModel_;
     VoxelSaveState voxelSaveState_;
     VoxelDocumentSaveService voxelDocumentSaveService_;
+    VoxelModelCreationService voxelModelCreationService_;
+    FirstCreationExperience firstCreationExperience_;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
     VoxelToolInputController voxelToolInput_;
     VoxelToolInputController voxelToolSmokeInput_;
     VoxelPlacementPreview voxelPlacementPreview_;
+    std::optional<Asset::Voxel::VoxelPosition> constructionPlaneTarget_;
     VoxelEditHistory voxelEditHistory_;
     VoxelHistoryInputController voxelHistoryInput_;
     std::optional<VoxelToolResult> lastVoxelToolResult_;
@@ -251,11 +266,17 @@ private:
     DirtyActionConfirmation dirtyActionConfirmation_;
     std::filesystem::path pendingProjectPath_;
     std::filesystem::path pendingVoxelPath_;
+    VoxelModelCreationRequest pendingVoxelModelCreation_{};
+    VoxelModelCreationCollisionAction pendingVoxelModelCollisionAction_ =
+        VoxelModelCreationCollisionAction::Ask;
     bool pendingRecentProject_ = false;
 
     std::array<char, 128> newProjectName_{};
     std::array<char, 1024> newProjectParentPath_{};
     std::array<char, 1024> openProjectFilePath_{};
+    std::array<char, 128> newVoxelModelName_{};
+    std::array<int, 3> newVoxelModelDimensions_{64, 64, 64};
+    std::string voxelModelCreationError_;
     std::string projectDialogError_;
     std::string welcomeError_;
     std::optional<std::filesystem::path> failedRecentProjectPath_;
@@ -285,6 +306,8 @@ private:
     bool showAboutPopup_ = false;
     bool showNewProjectPopup_ = false;
     bool showOpenProjectPopup_ = false;
+    bool showNewVoxelModelPopup_ = false;
+    bool showVoxelModelCollisionPopup_ = false;
     bool showImportConfirmationPopup_ = false;
     bool showImportCollisionPopup_ = false;
     bool showOpenImportedModelPopup_ = false;
@@ -296,6 +319,15 @@ private:
     bool voxelViewportRenderFailed_ = false;
     bool voxelSelectionClickCandidate_ = false;
     bool voxelEditInProgress_ = false;
+    std::filesystem::path firstCreationSmokePath_;
+    Asset::Voxel::VoxelPosition firstCreationSmokeTarget_{};
+    bool firstCreationSmokeCreated_ = false;
+    bool firstCreationSmokePencilled_ = false;
+    bool firstCreationSmokeUndone_ = false;
+    bool firstCreationSmokeRedone_ = false;
+    bool firstCreationSmokeSaved_ = false;
+    bool firstCreationSmokeReopened_ = false;
+    bool firstCreationSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

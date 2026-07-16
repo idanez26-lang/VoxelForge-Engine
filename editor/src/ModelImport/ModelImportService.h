@@ -92,6 +92,9 @@ public:
     [[nodiscard]] MetadataAnalysisResult AnalyzeModel(
         const std::filesystem::path& modelPath,
         bool forceReanalysis = false);
+    [[nodiscard]] ThumbnailGenerationResult GenerateThumbnail(
+        const std::filesystem::path& modelPath,
+        bool forceRegeneration = true);
 
     [[nodiscard]] const std::filesystem::path& ProjectRoot() const noexcept;
     [[nodiscard]] std::filesystem::path ModelsDirectory() const;

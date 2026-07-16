@@ -43,7 +43,8 @@ EditorLayer::EditorLayer(
     const bool voxelRayPickingSmokeTest,
     const bool voxelPencilSmokeTest,
     const bool voxelEraserSmokeTest,
-    const bool voxelUndoRedoSmokeTest)
+    const bool voxelUndoRedoSmokeTest,
+    const bool firstCreationExperienceSmokeTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
@@ -52,7 +53,7 @@ EditorLayer::EditorLayer(
               dragDropImportSmokeTest || voxelDocumentSmokeTest ||
               voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest ||
               voxelPencilSmokeTest || voxelEraserSmokeTest ||
-              voxelUndoRedoSmokeTest
+              voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -61,7 +62,7 @@ EditorLayer::EditorLayer(
               dragDropImportSmokeTest || voxelDocumentSmokeTest ||
               voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest ||
               voxelPencilSmokeTest || voxelEraserSmokeTest ||
-              voxelUndoRedoSmokeTest),
+              voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -85,7 +86,8 @@ EditorLayer::EditorLayer(
       voxelRayPickingSmokeTest_(voxelRayPickingSmokeTest),
       voxelPencilSmokeTest_(voxelPencilSmokeTest),
       voxelEraserSmokeTest_(voxelEraserSmokeTest),
-      voxelUndoRedoSmokeTest_(voxelUndoRedoSmokeTest)
+      voxelUndoRedoSmokeTest_(voxelUndoRedoSmokeTest),
+      firstCreationExperienceSmokeTest_(firstCreationExperienceSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -173,7 +175,8 @@ void EditorLayer::CreateDefaultScene()
 void EditorLayer::OnImGuiRender()
 {
     if (!startupVoxPath_.empty() && !modelImportSmokeTest_ &&
-        !modelImportVisualTest_ && !dragDropImportSmokeTest_)
+        !modelImportVisualTest_ && !dragDropImportSmokeTest_ &&
+        !firstCreationExperienceSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -259,6 +262,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunVoxelUndoRedoSmokeStep(
             renderedFrameCount_, voxelUndoRedoSmokeSourcePath_));
     }
+    if (firstCreationExperienceSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunFirstCreationExperienceSmokeStep(
+            renderedFrameCount_));
+    }
 
     ++renderedFrameCount_;
 
@@ -267,7 +275,9 @@ void EditorLayer::OnImGuiRender()
         renderedFrameCount_ >= smokeTestFrameLimit_;
 
     const bool saveSmokeCompletedWithCleanup =
-        voxelSaveSmokeTest_ && workspace_.VoxelSaveSmokePassed();
+        (voxelSaveSmokeTest_ && workspace_.VoxelSaveSmokePassed()) ||
+        (firstCreationExperienceSmokeTest_ &&
+            workspace_.FirstCreationExperienceSmokePassed());
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
@@ -360,6 +370,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Voxel Undo/Redo smoke test did not complete.");
+    }
+    if (firstCreationExperienceSmokeTest_ && smokeTestComplete &&
+        !workspace_.FirstCreationExperienceSmokePassed())
+    {
+        throw std::runtime_error(
+            "First creation experience smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

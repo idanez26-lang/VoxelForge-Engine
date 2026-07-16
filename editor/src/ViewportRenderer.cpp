@@ -523,6 +523,33 @@ bool ViewportRenderer::EnsureGuides()
             {offset - halfWidth, groundY - lineHeight, -gridExtent},
             {offset + halfWidth, groundY, gridExtent}, color);
     }
+    if (guideWidth_ > 0.0F && guideHeight_ > 0.0F && guideDepth_ > 0.0F)
+    {
+        const float minX = -guideWidth_ * 0.5F;
+        const float maxX = guideWidth_ * 0.5F;
+        const float minY = -guideHeight_ * 0.5F;
+        const float maxY = guideHeight_ * 0.5F;
+        const float minZ = -guideDepth_ * 0.5F;
+        const float maxZ = guideDepth_ * 0.5F;
+        const float edge = std::max(0.025F, modelSpan * 0.0025F);
+        constexpr std::array<float, 4> boundsColor{
+            0.30F, 0.62F, 0.92F, 0.72F};
+        for (const float y : {minY, maxY})
+            for (const float z : {minZ, maxZ})
+                AppendBox(vertices, indices,
+                    {minX, y - edge, z - edge},
+                    {maxX, y + edge, z + edge}, boundsColor);
+        for (const float x : {minX, maxX})
+            for (const float z : {minZ, maxZ})
+                AppendBox(vertices, indices,
+                    {x - edge, minY, z - edge},
+                    {x + edge, maxY, z + edge}, boundsColor);
+        for (const float x : {minX, maxX})
+            for (const float y : {minY, maxY})
+                AppendBox(vertices, indices,
+                    {x - edge, y - edge, minZ},
+                    {x + edge, y + edge, maxZ}, boundsColor);
+    }
     gridIndexCount_ = static_cast<std::uint32_t>(indices.size());
 
     const float axisLength = std::max(2.0F, modelSpan * 0.65F);

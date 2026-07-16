@@ -1,8 +1,29 @@
+add_library(VoxelForgeEditorAssetMetadataCore STATIC)
+target_sources(
+    VoxelForgeEditorAssetMetadataCore
+    PRIVATE
+        src/ModelImport/ModelAssetMetadataService.cpp
+)
+target_include_directories(
+    VoxelForgeEditorAssetMetadataCore
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_features(VoxelForgeEditorAssetMetadataCore PUBLIC cxx_std_20)
+target_link_libraries(
+    VoxelForgeEditorAssetMetadataCore
+    PUBLIC VoxelForgeAsset)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorAssetMetadataCore PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorAssetMetadataCore PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorAssetMetadata STATIC)
 target_sources(
     VoxelForgeEditorAssetMetadata
     PRIVATE
-        src/ModelImport/ModelAssetMetadataService.cpp
         src/Thumbnail/ThumbnailImage.cpp
         src/Thumbnail/ThumbnailTextureCache.cpp
         src/Thumbnail/VoxThumbnailRenderer.cpp
@@ -15,7 +36,10 @@ target_include_directories(
 target_compile_features(VoxelForgeEditorAssetMetadata PUBLIC cxx_std_20)
 target_link_libraries(
     VoxelForgeEditorAssetMetadata
-    PUBLIC VoxelForgeAsset VoxelForgeRenderer SDL3::SDL3)
+    PUBLIC
+        VoxelForgeEditorAssetMetadataCore
+        VoxelForgeRenderer
+        SDL3::SDL3)
 if(MSVC)
     target_compile_options(VoxelForgeEditorAssetMetadata PRIVATE /W4 /permissive-)
 else()
@@ -237,6 +261,33 @@ else()
         VoxelForgeEditorVoxelSave PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorVoxelCreation STATIC)
+target_sources(
+    VoxelForgeEditorVoxelCreation
+    PRIVATE
+        src/VoxelCreation/FirstCreationExperience.cpp
+        src/VoxelCreation/VoxelConstructionPlane.cpp
+        src/VoxelCreation/VoxelModelCreationService.cpp
+)
+target_include_directories(
+    VoxelForgeEditorVoxelCreation
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelCreation
+    PUBLIC
+        VoxelForgeAsset
+        VoxelForgeEditorAssetMetadataCore
+        VoxelForgeEditorVoxelSelection
+)
+target_compile_features(VoxelForgeEditorVoxelCreation PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorVoxelCreation PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorVoxelCreation PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(VoxelForgeEditor)
 
 if(WIN32)
@@ -330,6 +381,7 @@ target_link_libraries(
         VoxelForgeEditorQualityOfLife
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorVoxelDocument
+        VoxelForgeEditorVoxelCreation
         VoxelForgeEditorVoxelSave
         VoxelForgeProject
         VoxelForgeRenderer

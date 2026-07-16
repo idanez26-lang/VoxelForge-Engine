@@ -85,7 +85,9 @@ int main()
     if (!Expect(preferences.SetLastCreateParent(createDirectory),
             "The create directory must be saved.") ||
         !Expect(preferences.SetLastOpenDirectory(openDirectory),
-            "The open directory must be saved.")) return 1;
+            "The open directory must be saved.") ||
+        !Expect(preferences.SetFirstCreationCompleted(true),
+            "The first creation completion must be saved.")) return 1;
 
     ProjectDialogPreferences reloaded(preferencesFile);
     if (!Expect(reloaded.Load(), "Saved preferences must load.") ||
@@ -95,6 +97,8 @@ int main()
         !Expect(reloaded.LastOpenDirectory() ==
                 std::filesystem::absolute(openDirectory).lexically_normal(),
             "The open directory must round-trip.") ||
+        !Expect(reloaded.FirstCreationCompleted(),
+            "The first creation completion must round-trip.") ||
         !Expect(reloaded.StorageFilePath().string().starts_with(
                 temporary.Path().string()),
             "Tests must use only the injected temporary profile.")) return 1;

@@ -51,6 +51,7 @@ bool ProjectDialogPreferences::Load()
     lastError_.clear();
     lastCreateParent_.clear();
     lastOpenDirectory_.clear();
+    firstCreationCompleted_ = false;
     if (storageFilePath_.empty()) return true;
 
     std::ifstream input(storageFilePath_);
@@ -68,12 +69,17 @@ bool ProjectDialogPreferences::Load()
     {
         constexpr std::string_view CreateKey = "last_create_parent=";
         constexpr std::string_view OpenKey = "last_open_directory=";
+        constexpr std::string_view FirstCreationKey =
+            "first_creation_completed=";
         if (line.starts_with(CreateKey))
             lastCreateParent_ = ExistingDirectoryOrEmpty(
                 FromUtf8(line.substr(CreateKey.size())));
         else if (line.starts_with(OpenKey))
             lastOpenDirectory_ = ExistingDirectoryOrEmpty(
                 FromUtf8(line.substr(OpenKey.size())));
+        else if (line.starts_with(FirstCreationKey))
+            firstCreationCompleted_ =
+                line.substr(FirstCreationKey.size()) == "1";
     }
     return true;
 }
@@ -90,6 +96,12 @@ bool ProjectDialogPreferences::SetLastOpenDirectory(std::filesystem::path path)
     return Save();
 }
 
+bool ProjectDialogPreferences::SetFirstCreationCompleted(const bool completed)
+{
+    firstCreationCompleted_ = completed;
+    return Save();
+}
+
 const std::filesystem::path& ProjectDialogPreferences::LastCreateParent() const noexcept
 {
     return lastCreateParent_;
@@ -98,6 +110,11 @@ const std::filesystem::path& ProjectDialogPreferences::LastCreateParent() const 
 const std::filesystem::path& ProjectDialogPreferences::LastOpenDirectory() const noexcept
 {
     return lastOpenDirectory_;
+}
+
+bool ProjectDialogPreferences::FirstCreationCompleted() const noexcept
+{
+    return firstCreationCompleted_;
 }
 
 const std::filesystem::path& ProjectDialogPreferences::StorageFilePath() const noexcept
@@ -150,7 +167,9 @@ bool ProjectDialogPreferences::Save()
         return false;
     }
     output << "last_create_parent=" << ToUtf8(lastCreateParent_) << '\n'
-           << "last_open_directory=" << ToUtf8(lastOpenDirectory_) << '\n';
+           << "last_open_directory=" << ToUtf8(lastOpenDirectory_) << '\n'
+           << "first_creation_completed="
+           << (firstCreationCompleted_ ? 1 : 0) << '\n';
     if (!output)
     {
         lastError_ = "Unable to finish writing project dialog preferences.";
