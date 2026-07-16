@@ -1,6 +1,6 @@
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "VoxelCreation/FirstCreationExperience.h"
-#include "VoxelCreation/VoxelConstructionPlane.h"
+#include "VoxelCreation/WorkplaneService.h"
 #include "VoxelCreation/VoxelModelCreationService.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelSave/VoxelDocumentSaveService.h"
@@ -236,20 +236,22 @@ void TestFirstVoxelUndoRedoSaveAndReopen(
     experience.Acknowledge();
 
     const Editor::Vec3 center{32.0F, 32.0F, 32.0F};
-    const auto target = Editor::FindVoxelConstructionPlaneTarget(
+    const auto workplaneHit = Editor::WorkplaneService{}.Intersect(
         document, 0U, {{0.5F, -16.0F, 0.5F}, {0.0F, -1.0F, 0.0F}}, center);
-    Require(target == Asset::Voxel::VoxelPosition{32, 0, 32},
-        "Construction plane did not resolve the expected first voxel.");
+    const auto target = workplaneHit.Position;
+    Require(workplaneHit.IsValid() &&
+        target == Asset::Voxel::VoxelPosition{32, 0, 32},
+        "Workplane did not resolve the expected first voxel.");
     const auto preview = Editor::EvaluateVoxelPencilPreview(
         &document, 0U, std::nullopt, true, target);
     Require(preview.IsValid() && preview.Position == target,
-        "First voxel preview is not valid on the construction plane.");
+        "First voxel preview is not valid on the Workplane.");
     Editor::VoxelPencilContext pencil;
     pencil.EditSession = &session;
     pencil.Document = &document;
     pencil.PaletteIndex = 1U;
     pencil.History = &history;
-    pencil.DirectTarget = target;
+    pencil.WorkplaneTarget = target;
     const auto pencilled = Editor::VoxelPencilTool::Apply(pencil);
     experience.OnFirstVoxelCreated();
     Require(pencilled.Code == Editor::VoxelToolResultCode::Applied &&
@@ -257,14 +259,11 @@ void TestFirstVoxelUndoRedoSaveAndReopen(
         history.CanUndo() &&
         experience.Stage() == Editor::FirstCreationStage::Undo,
         "First Pencil did not create one undoable voxel.");
-    const std::uint64_t revisionBeforeInvalidDirectTarget =
-        document.GetRevision();
-    pencil.DirectTarget = Asset::Voxel::VoxelPosition{33, 0, 32};
-    const auto invalidDirectTarget = Editor::VoxelPencilTool::Apply(pencil);
-    Require(invalidDirectTarget.Code == Editor::VoxelToolResultCode::Failed &&
-        document.GetVoxelCount() == 1U &&
-        document.GetRevision() == revisionBeforeInvalidDirectTarget,
-        "Direct Pencil targets must be restricted to empty documents.");
+    const auto persistentPreview = Editor::EvaluateVoxelPencilPreview(
+        &document, 0U, std::nullopt, true,
+        Asset::Voxel::VoxelPosition{33, 0, 32});
+    Require(persistentPreview.IsValid(),
+        "The Workplane must remain available after the first voxel.");
 
     Require(static_cast<bool>(history.Undo(session)),
         "First voxel Undo failed.");

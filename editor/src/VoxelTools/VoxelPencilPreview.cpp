@@ -35,7 +35,7 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
     const std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit,
     const bool pencilActive,
-    const std::optional<Asset::Voxel::VoxelPosition> directTarget) noexcept
+    const std::optional<Asset::Voxel::VoxelPosition> workplaneTarget) noexcept
 {
     if (!pencilActive || document == nullptr)
     {
@@ -45,10 +45,9 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
     if (!dimensions) return {};
 
     Asset::Voxel::VoxelPosition adjacent{};
-    if (directTarget)
+    if (workplaneTarget)
     {
-        if (document->GetVoxelCount() != 0U) return {};
-        adjacent = *directTarget;
+        adjacent = *workplaneTarget;
     }
     else
     {

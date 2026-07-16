@@ -1199,8 +1199,8 @@ void EditorWorkspace::DrawScenePanel()
             !inputBlocked && !cameraControl;
         const Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
-        const auto previousConstructionTarget = constructionPlaneTarget_;
-        constructionPlaneTarget_.reset();
+        const auto previousWorkplaneHit = workplaneHit_;
+        workplaneHit_.reset();
         std::optional<VoxelRaycastHit> hoveredHit;
         VoxelPickingInteractionState pickingState =
             VoxelPickingInteractionState::Unavailable;
@@ -1226,12 +1226,10 @@ void EditorWorkspace::DrawScenePanel()
                     CenteredVoxelModelTransform(voxelModelCenter_);
                 hoveredHit = RaycastVoxelDocument(
                     *document, *ray.Ray, options);
-                if (!hoveredHit && document->GetVoxelCount() == 0U &&
-                    voxelToolState_.IsPencilActive())
+                if (!hoveredHit && voxelToolState_.IsPencilActive())
                 {
-                    constructionPlaneTarget_ =
-                        FindVoxelConstructionPlaneTarget(
-                            *document, 0U, *ray.Ray, voxelModelCenter_);
+                    workplaneHit_ = workplaneService_.Intersect(
+                        *document, 0U, *ray.Ray, voxelModelCenter_);
                 }
                 pickingState = hoveredHit
                     ? VoxelPickingInteractionState::Hit
@@ -1242,11 +1240,15 @@ void EditorWorkspace::DrawScenePanel()
         {
             pickingState = *layoutStabilitySmokePickingOverride_;
             hoveredHit = layoutStabilitySmokeHitOverride_;
-            constructionPlaneTarget_ =
-                layoutStabilitySmokeConstructionOverride_;
+            workplaneHit_ = layoutStabilitySmokeWorkplaneOverride_
+                ? std::optional<WorkplaneHit>(WorkplaneHit{
+                    WorkplaneHitStatus::Valid,
+                    layoutStabilitySmokeWorkplaneOverride_,
+                    0.0F})
+                : std::nullopt;
         }
         if (voxelSelection_.SetHovered(pickingState, std::move(hoveredHit)) ||
-            previousConstructionTarget != constructionPlaneTarget_)
+            previousWorkplaneHit != workplaneHit_)
         {
             UpdateVoxelHighlights();
         }
@@ -5013,7 +5015,8 @@ bool EditorWorkspace::RunFirstCreationExperienceSmokeStep(
         if (document == nullptr || !firstCreationSmokeCreated_) return false;
         const std::uint64_t revision = document->GetRevision();
         firstCreationSmokeTarget_ = {32, 0, 32};
-        constructionPlaneTarget_ = firstCreationSmokeTarget_;
+        workplaneHit_ = WorkplaneHit{
+            WorkplaneHitStatus::Valid, firstCreationSmokeTarget_, 0.0F};
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
         static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
         firstCreationSmokePencilled_ = ApplyVoxelPencil() &&
@@ -5100,6 +5103,142 @@ bool EditorWorkspace::FirstCreationExperienceSmokePassed() const noexcept
         firstCreationSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunPersistentWorkplaneSmokeStep(
+    const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        const VoxelModelCreationResult created =
+            voxelModelCreationService_.CreateModel({
+                "PersistentWorkplane", {64U, 64U, 64U}});
+        document = voxelDocumentSession_.ActiveDocument();
+        persistentWorkplaneSmokePath_ = created.ModelPath;
+        persistentWorkplaneSmokeFirst_ = {4, 0, 4};
+        persistentWorkplaneSmokeSecond_ = {56, 0, 56};
+        persistentWorkplaneSmokeCreated_ = created.Succeeded() &&
+            created.Opened && document != nullptr &&
+            document->GetVoxelCount() == 0U && !document->IsDirty() &&
+            workplaneService_.Grid(*document) == WorkplaneGrid{
+                {WorkplaneAxis::Y, 0}, 64U, 64U};
+        if (!persistentWorkplaneSmokeCreated_) return false;
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+    }
+    else if (frame == 1U)
+    {
+        if (document == nullptr || !persistentWorkplaneSmokeCreated_)
+            return false;
+        const std::uint64_t revision = document->GetRevision();
+        workplaneHit_ = WorkplaneHit{
+            WorkplaneHitStatus::Valid,
+            persistentWorkplaneSmokeFirst_,
+            1.0F};
+        persistentWorkplaneSmokeFirstAdded_ = ApplyVoxelPencil() &&
+            document->GetVoxelCount() == 1U &&
+            document->HasVoxel(persistentWorkplaneSmokeFirst_) &&
+            document->GetRevision() == revision + 1U &&
+            voxelEditHistory_.UndoCount() == 1U;
+    }
+    else if (frame == 2U)
+    {
+        if (document == nullptr || !persistentWorkplaneSmokeFirstAdded_)
+            return false;
+        const std::uint64_t revision = document->GetRevision();
+        workplaneHit_ = WorkplaneHit{
+            WorkplaneHitStatus::Valid,
+            persistentWorkplaneSmokeSecond_,
+            1.0F};
+        persistentWorkplaneSmokeSecondAdded_ = ApplyVoxelPencil() &&
+            document->GetVoxelCount() == 2U &&
+            document->HasVoxel(persistentWorkplaneSmokeFirst_) &&
+            document->HasVoxel(persistentWorkplaneSmokeSecond_) &&
+            document->GetRevision() == revision + 1U &&
+            voxelEditHistory_.UndoCount() == 2U;
+    }
+    else if (frame == 3U)
+    {
+        if (document == nullptr || !persistentWorkplaneSmokeSecondAdded_)
+            return false;
+        UndoCommand();
+        persistentWorkplaneSmokeUndone_ =
+            document->GetVoxelCount() == 1U &&
+            document->HasVoxel(persistentWorkplaneSmokeFirst_) &&
+            !document->HasVoxel(persistentWorkplaneSmokeSecond_) &&
+            voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 4U)
+    {
+        if (document == nullptr || !persistentWorkplaneSmokeUndone_)
+            return false;
+        RedoCommand();
+        persistentWorkplaneSmokeRedone_ =
+            document->GetVoxelCount() == 2U &&
+            document->HasVoxel(persistentWorkplaneSmokeFirst_) &&
+            document->HasVoxel(persistentWorkplaneSmokeSecond_) &&
+            !voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 5U)
+    {
+        if (document == nullptr || !persistentWorkplaneSmokeRedone_)
+            return false;
+        const std::uint64_t revision = document->GetRevision();
+        persistentWorkplaneSmokeSaved_ = SaveVoxelModel() &&
+            !document->IsDirty() && document->GetRevision() == revision &&
+            !std::filesystem::exists(
+                persistentWorkplaneSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                persistentWorkplaneSmokePath_.string() + ".vfsave.bak");
+    }
+    else if (frame == 6U)
+    {
+        if (!persistentWorkplaneSmokeSaved_) return false;
+        ClearVoxelViewport();
+        if (!OpenVoxInViewportNow(persistentWorkplaneSmokePath_)) return false;
+        document = voxelDocumentSession_.ActiveDocument();
+        persistentWorkplaneSmokeReopened_ = document != nullptr &&
+            document->GetVoxelCount() == 2U &&
+            document->HasVoxel(persistentWorkplaneSmokeFirst_) &&
+            document->HasVoxel(persistentWorkplaneSmokeSecond_) &&
+            !document->IsDirty();
+    }
+    else if (frame == 7U)
+    {
+        if (!persistentWorkplaneSmokeReopened_) return false;
+        CloseProject();
+        persistentWorkplaneSmokeCleaned_ =
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() && !workplaneHit_ &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                persistentWorkplaneSmokePath_.string() + ".vfcreate.tmp") &&
+            !std::filesystem::exists(
+                persistentWorkplaneSmokePath_.string() + ".vfcreate.bak") &&
+            !std::filesystem::exists(
+                persistentWorkplaneSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                persistentWorkplaneSmokePath_.string() + ".vfsave.bak");
+    }
+    return PersistentWorkplaneSmokePassed();
+}
+
+bool EditorWorkspace::PersistentWorkplaneSmokePassed() const noexcept
+{
+    return persistentWorkplaneSmokeCreated_ &&
+        persistentWorkplaneSmokeFirstAdded_ &&
+        persistentWorkplaneSmokeSecondAdded_ &&
+        persistentWorkplaneSmokeUndone_ &&
+        persistentWorkplaneSmokeRedone_ &&
+        persistentWorkplaneSmokeSaved_ &&
+        persistentWorkplaneSmokeReopened_ &&
+        persistentWorkplaneSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
 {
     Asset::Voxel::VoxelDocument* document =
@@ -5126,7 +5265,7 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
     {
         layoutStabilitySmokePickingOverride_ = state;
         layoutStabilitySmokeHitOverride_ = std::move(hit);
-        layoutStabilitySmokeConstructionOverride_ = construction;
+        layoutStabilitySmokeWorkplaneOverride_ = construction;
     };
     const auto hitFor = [this, document](const VoxelHitFace face)
     {
@@ -5247,7 +5386,7 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
             !viewportRenderer_.HasHighlightMesh() &&
             !viewportState_.HasModel() &&
             !voxelPlacementPreview_.IsVisible() &&
-            !constructionPlaneTarget_ && !voxelEditHistory_.CanUndo() &&
+            !workplaneHit_ && !voxelEditHistory_.CanUndo() &&
             !voxelEditHistory_.CanRedo() &&
             !std::filesystem::exists(
                 layoutStabilitySmokePath_.string() + ".vfcreate.tmp") &&
@@ -5370,7 +5509,7 @@ bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
             !viewportRenderer_.HasHighlightMesh() &&
             !viewportState_.HasModel() &&
             !voxelPlacementPreview_.IsVisible() &&
-            !constructionPlaneTarget_ &&
+            !workplaneHit_ &&
             !voxelEditHistory_.CanUndo() &&
             !voxelEditHistory_.CanRedo();
         return doubleClickCameraSmokeCleaned_;
@@ -5658,7 +5797,7 @@ bool EditorWorkspace::ApplyVoxelPencil()
             voxelToolState_.ActivePaletteIndex(),
             !voxelToolState_.IsPencilActive(),
             &voxelEditHistory_,
-            constructionPlaneTarget_});
+            workplaneHit_ ? workplaneHit_->Position : std::nullopt});
     }
     catch (const std::exception& exception)
     {
@@ -5675,7 +5814,7 @@ bool EditorWorkspace::ApplyVoxelPencil()
 
     if (result.Code == VoxelToolResultCode::Applied)
     {
-        constructionPlaneTarget_.reset();
+        workplaneHit_.reset();
         if (voxelCountBefore == 0U)
             firstCreationExperience_.OnFirstVoxelCreated();
         AddConsoleMessage(
@@ -5938,9 +6077,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             0U,
             voxelSelection_.Hovered(),
             true,
-            voxelDocumentSession_.ActiveDocument() &&
-                voxelDocumentSession_.ActiveDocument()->GetVoxelCount() == 0U
-                ? constructionPlaneTarget_ : std::nullopt);
+            workplaneHit_ ? workplaneHit_->Position : std::nullopt);
         placementPosition = voxelPlacementPreview_.IsVisible()
             ? voxelPlacementPreview_.Position : std::nullopt;
         placementStyle = voxelPlacementPreview_.IsValid()
@@ -6010,11 +6147,11 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     voxelToolInput_.Reset();
     voxelToolSmokeInput_.Reset();
     voxelPlacementPreview_ = {};
-    constructionPlaneTarget_.reset();
+    workplaneHit_.reset();
     currentViewportRectangle_ = {};
     layoutStabilitySmokePickingOverride_.reset();
     layoutStabilitySmokeHitOverride_.reset();
-    layoutStabilitySmokeConstructionOverride_.reset();
+    layoutStabilitySmokeWorkplaneOverride_.reset();
     firstCreationExperience_.Hide();
     lastVoxelToolResult_.reset();
     lastVoxelEraserResult_.reset();

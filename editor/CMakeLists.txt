@@ -288,6 +288,7 @@ target_sources(
         src/VoxelCreation/FirstCreationExperience.cpp
         src/VoxelCreation/VoxelConstructionPlane.cpp
         src/VoxelCreation/VoxelModelCreationService.cpp
+        src/VoxelCreation/WorkplaneService.cpp
 )
 target_include_directories(
     VoxelForgeEditorVoxelCreation

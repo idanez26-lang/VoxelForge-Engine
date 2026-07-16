@@ -10,6 +10,7 @@
 namespace VoxelForge::Editor
 {
 
+// Legacy compatibility entry point. New editor code uses WorkplaneService.
 [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
 FindVoxelConstructionPlaneTarget(
     const Asset::Voxel::VoxelDocument& document,

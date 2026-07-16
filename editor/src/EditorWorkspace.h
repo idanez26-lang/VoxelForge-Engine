@@ -23,8 +23,8 @@
 #include "VoxelSave/VoxelSaveState.h"
 #include "VoxelSave/VoxelDocumentSaveService.h"
 #include "VoxelCreation/FirstCreationExperience.h"
-#include "VoxelCreation/VoxelConstructionPlane.h"
 #include "VoxelCreation/VoxelModelCreationService.h"
+#include "VoxelCreation/WorkplaneService.h"
 #include "VoxelSelection/VoxelSelectionState.h"
 #include "VoxelSelection/ViewportRayBuilder.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
@@ -135,6 +135,8 @@ public:
     [[nodiscard]] bool LayoutStabilitySmokePassed() const noexcept;
     [[nodiscard]] bool RunDoubleClickCameraSmokeStep(std::size_t frame);
     [[nodiscard]] bool DoubleClickCameraSmokePassed() const noexcept;
+    [[nodiscard]] bool RunPersistentWorkplaneSmokeStep(std::size_t frame);
+    [[nodiscard]] bool PersistentWorkplaneSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -248,12 +250,13 @@ private:
     VoxelDocumentSaveService voxelDocumentSaveService_;
     VoxelModelCreationService voxelModelCreationService_;
     FirstCreationExperience firstCreationExperience_;
+    WorkplaneService workplaneService_;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
     VoxelToolInputController voxelToolInput_;
     VoxelToolInputController voxelToolSmokeInput_;
     VoxelPlacementPreview voxelPlacementPreview_;
-    std::optional<Asset::Voxel::VoxelPosition> constructionPlaneTarget_;
+    std::optional<WorkplaneHit> workplaneHit_;
     VoxelEditHistory voxelEditHistory_;
     VoxelHistoryInputController voxelHistoryInput_;
     std::optional<VoxelToolResult> lastVoxelToolResult_;
@@ -343,7 +346,7 @@ private:
         layoutStabilitySmokePickingOverride_;
     std::optional<VoxelRaycastHit> layoutStabilitySmokeHitOverride_;
     std::optional<Asset::Voxel::VoxelPosition>
-        layoutStabilitySmokeConstructionOverride_;
+        layoutStabilitySmokeWorkplaneOverride_;
     bool layoutStabilitySmokeCreated_ = false;
     bool layoutStabilitySmokePencilled_ = false;
     bool layoutStabilitySmokeUndone_ = false;
@@ -359,6 +362,17 @@ private:
     bool doubleClickCameraSmokeZoomWorked_ = false;
     bool doubleClickCameraSmokeShortcutsWorked_ = false;
     bool doubleClickCameraSmokeCleaned_ = false;
+    std::filesystem::path persistentWorkplaneSmokePath_;
+    Asset::Voxel::VoxelPosition persistentWorkplaneSmokeFirst_{};
+    Asset::Voxel::VoxelPosition persistentWorkplaneSmokeSecond_{};
+    bool persistentWorkplaneSmokeCreated_ = false;
+    bool persistentWorkplaneSmokeFirstAdded_ = false;
+    bool persistentWorkplaneSmokeSecondAdded_ = false;
+    bool persistentWorkplaneSmokeUndone_ = false;
+    bool persistentWorkplaneSmokeRedone_ = false;
+    bool persistentWorkplaneSmokeSaved_ = false;
+    bool persistentWorkplaneSmokeReopened_ = false;
+    bool persistentWorkplaneSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

@@ -46,7 +46,8 @@ EditorLayer::EditorLayer(
     const bool voxelUndoRedoSmokeTest,
     const bool firstCreationExperienceSmokeTest,
     const bool layoutStabilitySmokeTest,
-    const bool doubleClickCameraSmokeTest)
+    const bool doubleClickCameraSmokeTest,
+    const bool persistentWorkplaneSmokeTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
@@ -56,7 +57,8 @@ EditorLayer::EditorLayer(
               voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest ||
               voxelPencilSmokeTest || voxelEraserSmokeTest ||
               voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest ||
-              layoutStabilitySmokeTest || doubleClickCameraSmokeTest
+              layoutStabilitySmokeTest || doubleClickCameraSmokeTest ||
+              persistentWorkplaneSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -66,7 +68,8 @@ EditorLayer::EditorLayer(
               voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest ||
               voxelPencilSmokeTest || voxelEraserSmokeTest ||
               voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest ||
-              layoutStabilitySmokeTest || doubleClickCameraSmokeTest),
+              layoutStabilitySmokeTest || doubleClickCameraSmokeTest ||
+              persistentWorkplaneSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -93,7 +96,8 @@ EditorLayer::EditorLayer(
       voxelUndoRedoSmokeTest_(voxelUndoRedoSmokeTest),
       firstCreationExperienceSmokeTest_(firstCreationExperienceSmokeTest),
       layoutStabilitySmokeTest_(layoutStabilitySmokeTest),
-      doubleClickCameraSmokeTest_(doubleClickCameraSmokeTest)
+      doubleClickCameraSmokeTest_(doubleClickCameraSmokeTest),
+      persistentWorkplaneSmokeTest_(persistentWorkplaneSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -182,7 +186,8 @@ void EditorLayer::OnImGuiRender()
 {
     if (!startupVoxPath_.empty() && !modelImportSmokeTest_ &&
         !modelImportVisualTest_ && !dragDropImportSmokeTest_ &&
-        !firstCreationExperienceSmokeTest_ && !layoutStabilitySmokeTest_)
+        !firstCreationExperienceSmokeTest_ && !layoutStabilitySmokeTest_ &&
+        !persistentWorkplaneSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -283,6 +288,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunDoubleClickCameraSmokeStep(
             renderedFrameCount_));
     }
+    if (persistentWorkplaneSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunPersistentWorkplaneSmokeStep(
+            renderedFrameCount_));
+    }
 
     ++renderedFrameCount_;
 
@@ -297,7 +307,9 @@ void EditorLayer::OnImGuiRender()
         (layoutStabilitySmokeTest_ &&
             workspace_.LayoutStabilitySmokePassed()) ||
         (doubleClickCameraSmokeTest_ &&
-            workspace_.DoubleClickCameraSmokePassed());
+            workspace_.DoubleClickCameraSmokePassed()) ||
+        (persistentWorkplaneSmokeTest_ &&
+            workspace_.PersistentWorkplaneSmokePassed());
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
@@ -408,6 +420,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Double-click camera smoke test did not complete.");
+    }
+    if (persistentWorkplaneSmokeTest_ && smokeTestComplete &&
+        !workspace_.PersistentWorkplaneSmokePassed())
+    {
+        throw std::runtime_error(
+            "Persistent Workplane smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

@@ -45,7 +45,7 @@ struct VoxelPencilContext final
     std::size_t PaletteIndex = 1U;
     bool Blocked = false;
     VoxelEditHistory* History = nullptr;
-    std::optional<Asset::Voxel::VoxelPosition> DirectTarget;
+    std::optional<Asset::Voxel::VoxelPosition> WorkplaneTarget;
 };
 
 class VoxelPencilTool final

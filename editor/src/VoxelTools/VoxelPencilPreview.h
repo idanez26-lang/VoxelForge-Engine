@@ -41,7 +41,7 @@ struct VoxelPlacementPreview final
     std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit,
     bool pencilActive,
-    std::optional<Asset::Voxel::VoxelPosition> directTarget =
+    std::optional<Asset::Voxel::VoxelPosition> workplaneTarget =
         std::nullopt) noexcept;
 
 [[nodiscard]] VoxelPlacementPreview EvaluateVoxelEraserPreview(

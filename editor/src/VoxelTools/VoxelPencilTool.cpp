@@ -42,15 +42,9 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
     if (context.Blocked)
         return Refused(VoxelToolResultCode::Blocked, {}, revision);
     Asset::Voxel::VoxelPosition adjacent{};
-    if (context.DirectTarget)
+    if (context.WorkplaneTarget)
     {
-        if (document.GetVoxelCount() != 0U)
-        {
-            return Refused(
-                VoxelToolResultCode::Failed, *context.DirectTarget, revision,
-                "A direct Pencil target is valid only for an empty document.");
-        }
-        adjacent = *context.DirectTarget;
+        adjacent = *context.WorkplaneTarget;
     }
     else
     {
@@ -67,7 +61,7 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
         }
     }
     if (context.EditSession == nullptr ||
-        (!context.DirectTarget &&
+        (!context.WorkplaneTarget &&
          context.Hit->SubModelIndex != context.SubModelIndex) ||
         document.GetModel(context.SubModelIndex) == nullptr)
     {
