@@ -39,6 +39,7 @@ constexpr std::size_t VoxelPencilSmokeTestFrameCount = 12;
 constexpr std::size_t VoxelEraserSmokeTestFrameCount = 12;
 constexpr std::size_t VoxelUndoRedoSmokeTestFrameCount = 16;
 constexpr std::size_t FirstCreationExperienceSmokeTestFrameCount = 10;
+constexpr std::size_t LayoutStabilitySmokeTestFrameCount = 11;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -64,6 +65,7 @@ struct CommandLine final
     bool VoxelEraserSmokeTest = false;
     bool VoxelUndoRedoSmokeTest = false;
     bool FirstCreationExperienceSmokeTest = false;
+    bool LayoutStabilitySmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -112,6 +114,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--voxel-undo-redo-smoke-test";
         result.FirstCreationExperienceSmokeTest |=
             argument == "--first-creation-experience-smoke-test";
+        result.LayoutStabilitySmokeTest |=
+            argument == "--layout-stability-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -328,6 +332,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelEraserSmokeTest ||
             commandLine.VoxelUndoRedoSmokeTest ||
             commandLine.FirstCreationExperienceSmokeTest ||
+            commandLine.LayoutStabilitySmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
@@ -339,7 +344,8 @@ int main(const int argumentCount, char* arguments[])
                 ? viewportFixture.RecentProjectsPath()
                 : VoxelForge::Project::RecentProjects::DefaultStorageFilePath());
         const bool fixtureCreated = !viewportTest ||
-            (commandLine.FirstCreationExperienceSmokeTest
+            (commandLine.FirstCreationExperienceSmokeTest ||
+             commandLine.LayoutStabilitySmokeTest
                 ? viewportFixture.CreateEmptyProject(projectManager)
                 : viewportFixture.Create(
                     projectManager,
@@ -404,6 +410,8 @@ int main(const int argumentCount, char* arguments[])
                     ? VoxelUndoRedoSmokeTestFrameCount
                     : commandLine.FirstCreationExperienceSmokeTest
                     ? FirstCreationExperienceSmokeTestFrameCount
+                    : commandLine.LayoutStabilitySmokeTest
+                    ? LayoutStabilitySmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -428,7 +436,8 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.VoxelPencilSmokeTest ||
                     commandLine.VoxelEraserSmokeTest ||
                     commandLine.VoxelUndoRedoSmokeTest ||
-                    commandLine.FirstCreationExperienceSmokeTest,
+                    commandLine.FirstCreationExperienceSmokeTest ||
+                    commandLine.LayoutStabilitySmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -452,7 +461,8 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.VoxelPencilSmokeTest,
                 commandLine.VoxelEraserSmokeTest,
                 commandLine.VoxelUndoRedoSmokeTest,
-                commandLine.FirstCreationExperienceSmokeTest);
+                commandLine.FirstCreationExperienceSmokeTest,
+                commandLine.LayoutStabilitySmokeTest);
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(

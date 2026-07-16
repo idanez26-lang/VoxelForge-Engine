@@ -11,6 +11,7 @@
 #include "EditorCamera.h"
 #include "EditorExitRequest.h"
 #include "DragDropImport/DragDropImportController.h"
+#include "Layout/InspectorLayoutModel.h"
 #include "ModelImport/ModelImportService.h"
 #include "Platform/FileDialogService.h"
 #include "Platform/ProjectFolderOpener.h"
@@ -24,6 +25,7 @@
 #include "VoxelCreation/VoxelConstructionPlane.h"
 #include "VoxelCreation/VoxelModelCreationService.h"
 #include "VoxelSelection/VoxelSelectionState.h"
+#include "VoxelSelection/ViewportRayBuilder.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelHistory/VoxelHistoryInput.h"
@@ -128,6 +130,8 @@ public:
     [[nodiscard]] bool VoxelUndoRedoSmokePassed() const noexcept;
     [[nodiscard]] bool RunFirstCreationExperienceSmokeStep(std::size_t frame);
     [[nodiscard]] bool FirstCreationExperienceSmokePassed() const noexcept;
+    [[nodiscard]] bool RunLayoutStabilitySmokeStep(std::size_t frame);
+    [[nodiscard]] bool LayoutStabilitySmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -294,6 +298,7 @@ private:
         DragDropImportTarget::None;
     DragDropRect assetBrowserDropRect_{};
     DragDropRect viewportDropRect_{};
+    ViewportRectangle currentViewportRectangle_{};
     bool importStartedFromDrop_ = false;
 
     bool showExplorer_ = true;
@@ -328,6 +333,20 @@ private:
     bool firstCreationSmokeSaved_ = false;
     bool firstCreationSmokeReopened_ = false;
     bool firstCreationSmokeCleaned_ = false;
+    std::filesystem::path layoutStabilitySmokePath_;
+    Asset::Voxel::VoxelPosition layoutStabilitySmokeTarget_{};
+    std::vector<ViewportRectangle> layoutStabilitySmokeRectangles_;
+    std::optional<VoxelPickingInteractionState>
+        layoutStabilitySmokePickingOverride_;
+    std::optional<VoxelRaycastHit> layoutStabilitySmokeHitOverride_;
+    std::optional<Asset::Voxel::VoxelPosition>
+        layoutStabilitySmokeConstructionOverride_;
+    bool layoutStabilitySmokeCreated_ = false;
+    bool layoutStabilitySmokePencilled_ = false;
+    bool layoutStabilitySmokeUndone_ = false;
+    bool layoutStabilitySmokeRedone_ = false;
+    bool layoutStabilitySmokeRectanglesStable_ = false;
+    bool layoutStabilitySmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

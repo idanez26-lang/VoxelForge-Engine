@@ -333,6 +333,19 @@ add_test(
     NAME VoxelForge.Editor.FirstCreationExperience
     COMMAND $<TARGET_FILE:VoxelForgeEditorFirstCreationExperienceTests>
 )
+add_executable(
+    VoxelForgeEditorLayoutStabilityTests
+    Editor/LayoutStabilityTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorLayoutStabilityTests
+    PRIVATE VoxelForgeEditorLayout
+)
+vf_configure_test(VoxelForgeEditorLayoutStabilityTests)
+add_test(
+    NAME VoxelForge.Editor.LayoutStability
+    COMMAND $<TARGET_FILE:VoxelForgeEditorLayoutStabilityTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -485,6 +498,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelSave
     VoxelForge.Editor.VoxelDocumentSaveService
     VoxelForge.Editor.FirstCreationExperience
+    VoxelForge.Editor.LayoutStability
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Asset.VoxModelAnalyzer
@@ -566,6 +580,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.FirstCreationExperienceSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --first-creation-experience-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.LayoutStabilitySmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --layout-stability-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -584,6 +602,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelEraserSmoke
         VoxelForge.Editor.VoxelUndoRedoSmoke
         VoxelForge.Editor.FirstCreationExperienceSmoke
+        VoxelForge.Editor.LayoutStabilitySmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

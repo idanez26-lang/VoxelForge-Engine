@@ -214,6 +214,26 @@ else()
         VoxelForgeEditorQualityOfLife PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorLayout STATIC)
+target_sources(
+    VoxelForgeEditorLayout
+    PRIVATE src/Layout/InspectorLayoutModel.cpp
+)
+target_include_directories(
+    VoxelForgeEditorLayout
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorLayout
+    PUBLIC VoxelForgeEditorCommands)
+target_compile_features(VoxelForgeEditorLayout PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorLayout PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorLayout PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorModelImport STATIC)
 target_sources(
     VoxelForgeEditorModelImport
@@ -379,6 +399,7 @@ target_link_libraries(
         VoxelForgeEditorCommands
         VoxelForgeEditorModelImport
         VoxelForgeEditorQualityOfLife
+        VoxelForgeEditorLayout
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorVoxelDocument
         VoxelForgeEditorVoxelCreation

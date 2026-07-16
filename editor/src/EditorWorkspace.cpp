@@ -172,6 +172,43 @@ std::string FormatSaveTime(
     output << std::put_time(&local, "%Y-%m-%d %H:%M:%S");
     return output.str();
 }
+
+void DrawInspectorDiagnostics(const InspectorLayoutModel& model)
+{
+    ImGui::TextUnformatted("Voxel Diagnostics");
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float childHeight = model.StableHeight(
+        ImGui::GetTextLineHeightWithSpacing(), style.WindowPadding.y);
+    constexpr ImGuiWindowFlags childFlags =
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    if (ImGui::BeginChild(
+            "##StableVoxelDiagnostics", ImVec2(0.0F, childHeight),
+            true, childFlags))
+    {
+        constexpr ImGuiTableFlags tableFlags =
+            ImGuiTableFlags_SizingStretchProp |
+            ImGuiTableFlags_NoSavedSettings;
+        if (ImGui::BeginTable("##StableVoxelDiagnosticRows", 2, tableFlags))
+        {
+            ImGui::TableSetupColumn(
+                "Label", ImGuiTableColumnFlags_WidthFixed, 112.0F);
+            ImGui::TableSetupColumn(
+                "Value", ImGuiTableColumnFlags_WidthStretch);
+            for (const InspectorDiagnosticRow& row : model.Rows())
+            {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextDisabled("%s", row.Label.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(row.Value.c_str());
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", row.Value.c_str());
+            }
+            ImGui::EndTable();
+        }
+    }
+    ImGui::EndChild();
+}
 }
 
 EditorWorkspace::EditorWorkspace(
@@ -1040,7 +1077,9 @@ void EditorWorkspace::DrawScenePanel()
     {
         const bool active = voxelToolState_.ActiveTool() == tool;
         if (active) ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
-        const bool clicked = ImGui::Button(active ? activeLabel : inactiveLabel);
+        constexpr ImVec2 buttonSize(104.0F, 0.0F);
+        const bool clicked = ImGui::Button(
+            active ? activeLabel : inactiveLabel, buttonSize);
         if (active) ImGui::PopStyleColor();
         DrawTooltip(tooltip);
         if (!clicked) return;
@@ -1086,11 +1125,6 @@ void EditorWorkspace::DrawScenePanel()
     DrawTooltip("Erase the selected voxel (Delete)");
     ImGui::SameLine();
     ImGui::TextDisabled("Delete");
-    if (voxelSelection_.Selected() && !addTarget)
-    {
-        ImGui::TextDisabled(
-            "%s", AddVoxelTargetStatusMessage(addTarget.Status));
-    }
     if (voxelSaveState_.IsDirty())
     {
         ImGui::SameLine();
@@ -1104,38 +1138,8 @@ void EditorWorkspace::DrawScenePanel()
             statistics.Width, statistics.Height, statistics.Depth,
             statistics.OccupiedVoxelCount, statistics.TriangleCount / 2U,
             statistics.TriangleCount);
-        const auto drawHit = [](const char* label,
-            const std::optional<VoxelRaycastHit>& hit)
-        {
-            if (!hit)
-            {
-                ImGui::TextDisabled("%s: None", label);
-                return;
-            }
-            ImGui::Text("%s: %u, %u, %u", label,
-                hit->Coordinates.X, hit->Coordinates.Y, hit->Coordinates.Z);
-        };
-        drawHit("Hovered", voxelSelection_.Hovered());
-        ImGui::SameLine();
-        drawHit("Selected", voxelSelection_.Selected());
-        const auto& detail = voxelSelection_.Hovered()
-            ? voxelSelection_.Hovered() : voxelSelection_.Selected();
-        if (detail)
-        {
-            ImGui::TextDisabled(
-                "Sub-model: %zu | Face: %s | Distance: %.3f | Color: %u",
-                detail->SubModelIndex, VoxelHitFaceName(detail->Face),
-                detail->Distance, detail->ColorIndex);
-            ImGui::TextDisabled(
-                "Adjacent: %d, %d, %d%s",
-                detail->AdjacentPosition.X,
-                detail->AdjacentPosition.Y,
-                detail->AdjacentPosition.Z,
-                detail->AdjacentWithinBounds ? "" : " (outside bounds)");
-        }
-        ImGui::TextDisabled("Picking: %s",
-            VoxelPickingInteractionStateName(
-                voxelSelection_.InteractionState()));
+        ImGui::TextDisabled(
+            "Voxel hover and tool diagnostics are shown in Inspector.");
     }
     else
     {
@@ -1148,6 +1152,9 @@ void EditorWorkspace::DrawScenePanel()
     ImVec2 available = ImGui::GetContentRegionAvail();
     available.x = std::max(available.x, 1.0F);
     available.y = std::max(available.y, 1.0F);
+    const ImVec2 imageOrigin = ImGui::GetCursorScreenPos();
+    currentViewportRectangle_ = {
+        imageOrigin.x, imageOrigin.y, available.x, available.y};
     viewportCamera_.SetAspectRatio(available.x / available.y);
     const auto width = static_cast<std::uint32_t>(available.x);
     const auto height = static_cast<std::uint32_t>(available.y);
@@ -1158,7 +1165,6 @@ void EditorWorkspace::DrawScenePanel()
             viewportState_.BackgroundColor()))
     {
         voxelViewportRendered_ = true;
-        const ImVec2 imageOrigin = ImGui::GetCursorScreenPos();
         ImGui::Image(
             reinterpret_cast<ImTextureID>(viewportRenderer_.Texture()),
             available,
@@ -1210,7 +1216,7 @@ void EditorWorkspace::DrawScenePanel()
         {
             const ViewportRayBuildResult ray = BuildViewportRay(
                 {io.MousePos.x, io.MousePos.y},
-                {imageOrigin.x, imageOrigin.y, available.x, available.y},
+                currentViewportRectangle_,
                 viewportCamera_.GetViewProjection(),
                 viewportCamera_.GetPosition());
             if (ray.Succeeded())
@@ -1231,6 +1237,13 @@ void EditorWorkspace::DrawScenePanel()
                     ? VoxelPickingInteractionState::Hit
                     : VoxelPickingInteractionState::NoHit;
             }
+        }
+        if (layoutStabilitySmokePickingOverride_)
+        {
+            pickingState = *layoutStabilitySmokePickingOverride_;
+            hoveredHit = layoutStabilitySmokeHitOverride_;
+            constructionPlaneTarget_ =
+                layoutStabilitySmokeConstructionOverride_;
         }
         if (voxelSelection_.SetHovered(pickingState, std::move(hoveredHit)) ||
             previousConstructionTarget != constructionPlaneTarget_)
@@ -1445,12 +1458,20 @@ void EditorWorkspace::DrawInspectorPanel()
 {
     ImGui::Begin("Inspector", &showInspector_);
     if (thumbnailVisualMode_)
-        ImGui::SetScrollY(180.0F);
+    {
+        const InspectorLayoutModel emptyDiagnostics =
+            InspectorLayoutModel::Build({});
+        ImGui::SetScrollY(
+            180.0F + emptyDiagnostics.StableHeight(
+                ImGui::GetTextLineHeightWithSpacing(),
+                ImGui::GetStyle().WindowPadding.y));
+    }
     ImGui::TextUnformatted("Inspector");
     ImGui::Separator();
 
-    if (const Asset::Voxel::VoxelDocument* document =
-            voxelDocumentSession_.ActiveDocument())
+    const Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document != nullptr)
     {
         ImGui::TextUnformatted("Active Voxel Document");
         if (const auto dimensions = document->GetDimensions())
@@ -1493,42 +1514,19 @@ void EditorWorkspace::DrawInspectorPanel()
         ImGui::TextWrapped("Saved Path: %s",
             saveResult.SavedPath.empty() ? "None"
                 : saveResult.SavedPath.string().c_str());
-        ImGui::Text("Active Tool: %s",
-            ActiveVoxelToolName(voxelToolState_.ActiveTool()));
-        if (voxelToolState_.IsPencilActive())
-            ImGui::Text("Palette Index: %zu",
-                voxelToolState_.ActivePaletteIndex());
-        ImGui::Text("Placement State: %s",
-            VoxelPlacementPreviewStatusName(voxelPlacementPreview_.Status));
-        if (voxelPlacementPreview_.Position)
-        {
-            ImGui::Text("Target Position: %d, %d, %d",
-                voxelPlacementPreview_.Position->X,
-                voxelPlacementPreview_.Position->Y,
-                voxelPlacementPreview_.Position->Z);
-        }
-        if (voxelToolState_.IsEraserActive() && lastVoxelEraserResult_)
-        {
-            ImGui::Text("Last Operation: %s",
-                VoxelEraserResultCodeName(lastVoxelEraserResult_->Code));
-            ImGui::Text("Last Position: %d, %d, %d",
-                lastVoxelEraserResult_->Position.X,
-                lastVoxelEraserResult_->Position.Y,
-                lastVoxelEraserResult_->Position.Z);
-            ImGui::Text("Removed Palette Index: %u",
-                lastVoxelEraserResult_->RemovedPaletteIndex);
-        }
-        else if (lastVoxelToolResult_)
-        {
-            ImGui::Text("Last Operation: %s",
-                VoxelToolResultCodeName(lastVoxelToolResult_->Code));
-            ImGui::Text("Last Position: %d, %d, %d",
-                lastVoxelToolResult_->Position.X,
-                lastVoxelToolResult_->Position.Y,
-                lastVoxelToolResult_->Position.Z);
-        }
-        ImGui::Separator();
     }
+    DrawInspectorDiagnostics(InspectorLayoutModel::Build({
+        document != nullptr,
+        document ? document->SourcePath().filename().string() : std::string{},
+        document ? document->GetRevision() : 0U,
+        voxelSelection_.Hovered(),
+        voxelSelection_.InteractionState(),
+        voxelToolState_.ActiveTool(),
+        voxelToolState_.ActivePaletteIndex(),
+        voxelPlacementPreview_,
+        lastVoxelToolResult_,
+        lastVoxelEraserResult_}));
+    ImGui::Separator();
 
     static_cast<void>(
         assetInspector_.UpdateSelection(assetBrowser_.SelectedEntry()));
@@ -2236,15 +2234,26 @@ void EditorWorkspace::DrawFirstCreationOverlay()
 {
     if (!firstCreationExperience_.Visible()) return;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const bool hasViewportRectangle =
+        currentViewportRectangle_.Width > 1.0F &&
+        currentViewportRectangle_.Height > 1.0F;
+    const ImVec2 overlayPosition = hasViewportRectangle
+        ? ImVec2(
+            currentViewportRectangle_.X +
+                currentViewportRectangle_.Width * 0.5F,
+            currentViewportRectangle_.Y + 16.0F)
+        : ImVec2(
+            viewport->WorkPos.x + viewport->WorkSize.x * 0.5F,
+            viewport->WorkPos.y + 72.0F);
     ImGui::SetNextWindowPos(
-        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5F,
-               viewport->WorkPos.y + 72.0F),
+        overlayPosition,
         ImGuiCond_Always, ImVec2(0.5F, 0.0F));
-    ImGui::SetNextWindowSize(ImVec2(360.0F, 0.0F));
+    ImGui::SetNextWindowSize(ImVec2(360.0F, 112.0F), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.94F);
     constexpr ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
         ImGuiWindowFlags_NoSavedSettings;
     if (ImGui::Begin("First Creation", nullptr, flags))
     {
@@ -5084,6 +5093,171 @@ bool EditorWorkspace::FirstCreationExperienceSmokePassed() const noexcept
         firstCreationSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const auto recordRectangle = [this]()
+    {
+        const ViewportRectangle& rectangle = currentViewportRectangle_;
+        if (rectangle.Width <= 1.0F || rectangle.Height <= 1.0F)
+            return false;
+        layoutStabilitySmokeRectangles_.push_back(rectangle);
+        const ViewportRectangle& baseline =
+            layoutStabilitySmokeRectangles_.front();
+        layoutStabilitySmokeRectanglesStable_ =
+            layoutStabilitySmokeRectanglesStable_ &&
+            rectangle.X == baseline.X && rectangle.Y == baseline.Y &&
+            rectangle.Width == baseline.Width &&
+            rectangle.Height == baseline.Height;
+        return layoutStabilitySmokeRectanglesStable_;
+    };
+    const auto setPickingState = [this](
+        const VoxelPickingInteractionState state,
+        std::optional<VoxelRaycastHit> hit = std::nullopt,
+        std::optional<Asset::Voxel::VoxelPosition> construction = std::nullopt)
+    {
+        layoutStabilitySmokePickingOverride_ = state;
+        layoutStabilitySmokeHitOverride_ = std::move(hit);
+        layoutStabilitySmokeConstructionOverride_ = construction;
+    };
+    const auto hitFor = [this, document](const VoxelHitFace face)
+    {
+        VoxelRaycastHit hit;
+        hit.Coordinates = {
+            static_cast<std::uint32_t>(layoutStabilitySmokeTarget_.X),
+            static_cast<std::uint32_t>(layoutStabilitySmokeTarget_.Y),
+            static_cast<std::uint32_t>(layoutStabilitySmokeTarget_.Z)};
+        hit.Face = face;
+        hit.Distance = 8.0F;
+        hit.ColorIndex = 1U;
+        hit.SubModelIndex = 0U;
+        const Asset::Voxel::VoxelPosition normal =
+            VoxelHitFaceIntegerNormal(face);
+        hit.AdjacentPosition = {
+            layoutStabilitySmokeTarget_.X + normal.X,
+            layoutStabilitySmokeTarget_.Y + normal.Y,
+            layoutStabilitySmokeTarget_.Z + normal.Z};
+        hit.AdjacentWithinBounds = true;
+        hit.DocumentRevision = document ? document->GetRevision() : 0U;
+        return hit;
+    };
+
+    if (frame == 0U)
+    {
+        const VoxelModelCreationResult created =
+            voxelModelCreationService_.CreateModel({
+                "LayoutStability", {64U, 64U, 64U}});
+        document = voxelDocumentSession_.ActiveDocument();
+        layoutStabilitySmokePath_ = created.ModelPath;
+        layoutStabilitySmokeTarget_ = {32, 0, 32};
+        layoutStabilitySmokeRectanglesStable_ = true;
+        layoutStabilitySmokeCreated_ = created.Succeeded() &&
+            created.Opened && document != nullptr &&
+            document->GetVoxelCount() == 0U && !document->IsDirty();
+        if (!layoutStabilitySmokeCreated_) return false;
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+        setPickingState(
+            VoxelPickingInteractionState::NoHit, std::nullopt,
+            layoutStabilitySmokeTarget_);
+    }
+    else if (frame == 1U)
+    {
+        if (!layoutStabilitySmokeCreated_ || document == nullptr ||
+            !recordRectangle() ||
+            voxelPlacementPreview_.Status !=
+                VoxelPlacementPreviewStatus::Valid)
+            return false;
+        layoutStabilitySmokePencilled_ = ApplyVoxelPencil() &&
+            document->GetVoxelCount() == 1U &&
+            document->HasVoxel(layoutStabilitySmokeTarget_) &&
+            document->IsDirty() && voxelEditHistory_.CanUndo();
+        setPickingState(
+            VoxelPickingInteractionState::Hit,
+            hitFor(VoxelHitFace::PositiveY));
+    }
+    else if (frame == 2U)
+    {
+        if (!layoutStabilitySmokePencilled_ || !recordRectangle()) return false;
+        setPickingState(
+            VoxelPickingInteractionState::Hit,
+            hitFor(VoxelHitFace::PositiveX));
+    }
+    else if (frame == 3U)
+    {
+        if (!recordRectangle()) return false;
+        setPickingState(VoxelPickingInteractionState::NoHit);
+    }
+    else if (frame == 4U)
+    {
+        if (document == nullptr || !recordRectangle()) return false;
+        UndoCommand();
+        layoutStabilitySmokeUndone_ = document->GetVoxelCount() == 0U &&
+            !document->HasVoxel(layoutStabilitySmokeTarget_) &&
+            voxelEditHistory_.CanRedo();
+        setPickingState(
+            VoxelPickingInteractionState::NoHit, std::nullopt,
+            layoutStabilitySmokeTarget_);
+    }
+    else if (frame == 5U)
+    {
+        if (!layoutStabilitySmokeUndone_ || !recordRectangle()) return false;
+        RedoCommand();
+        layoutStabilitySmokeRedone_ = document != nullptr &&
+            document->GetVoxelCount() == 1U &&
+            document->HasVoxel(layoutStabilitySmokeTarget_);
+        setPickingState(
+            VoxelPickingInteractionState::Hit,
+            hitFor(VoxelHitFace::NegativeZ));
+    }
+    else if (frame == 6U)
+    {
+        if (!layoutStabilitySmokeRedone_ || !recordRectangle()) return false;
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Eraser);
+        setPickingState(
+            VoxelPickingInteractionState::Hit,
+            hitFor(VoxelHitFace::NegativeX));
+    }
+    else if (frame == 7U)
+    {
+        if (!recordRectangle() ||
+            voxelToolState_.ActiveTool() != ActiveVoxelTool::Eraser)
+            return false;
+        setPickingState(VoxelPickingInteractionState::OutsideViewport);
+    }
+    else if (frame == 8U)
+    {
+        if (!recordRectangle()) return false;
+        layoutStabilitySmokeRectanglesStable_ =
+            layoutStabilitySmokeRectanglesStable_ &&
+            layoutStabilitySmokeRectangles_.size() == 8U;
+        CloseProject();
+        layoutStabilitySmokeCleaned_ =
+            !projectManager_.ActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() &&
+            !voxelPlacementPreview_.IsVisible() &&
+            !constructionPlaneTarget_ && !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                layoutStabilitySmokePath_.string() + ".vfcreate.tmp") &&
+            !std::filesystem::exists(
+                layoutStabilitySmokePath_.string() + ".vfcreate.bak");
+    }
+    return LayoutStabilitySmokePassed();
+}
+
+bool EditorWorkspace::LayoutStabilitySmokePassed() const noexcept
+{
+    return layoutStabilitySmokeCreated_ && layoutStabilitySmokePencilled_ &&
+        layoutStabilitySmokeUndone_ && layoutStabilitySmokeRedone_ &&
+        layoutStabilitySmokeRectanglesStable_ &&
+        layoutStabilitySmokeCleaned_;
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -5704,6 +5878,10 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     voxelToolSmokeInput_.Reset();
     voxelPlacementPreview_ = {};
     constructionPlaneTarget_.reset();
+    currentViewportRectangle_ = {};
+    layoutStabilitySmokePickingOverride_.reset();
+    layoutStabilitySmokeHitOverride_.reset();
+    layoutStabilitySmokeConstructionOverride_.reset();
     firstCreationExperience_.Hide();
     lastVoxelToolResult_.reset();
     lastVoxelEraserResult_.reset();
