@@ -50,7 +50,8 @@ public:
         std::vector<std::filesystem::path> dragDropSmokePaths = {},
         bool voxelDocumentSmokeTest = false,
         bool voxelRenderSyncSmokeTest = false,
-        bool voxelRayPickingSmokeTest = false);
+        bool voxelRayPickingSmokeTest = false,
+        bool voxelPencilSmokeTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -105,6 +106,8 @@ private:
     std::filesystem::path voxelRenderSyncSmokeSourcePath_;
     bool voxelRayPickingSmokeTest_ = false;
     std::filesystem::path voxelRayPickingSmokeSourcePath_;
+    bool voxelPencilSmokeTest_ = false;
+    std::filesystem::path voxelPencilSmokeSourcePath_;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

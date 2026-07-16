@@ -903,6 +903,22 @@ void EditorWorkspace::DrawScenePanel()
     }
     DrawTooltip("Choose the viewport background");
 
+    const bool pencilActive = voxelToolState_.IsPencilActive();
+    if (pencilActive)
+    {
+        ImGui::PushStyleColor(
+            ImGuiCol_Button, ImVec4(0.20F, 0.48F, 0.28F, 1.0F));
+    }
+    if (ImGui::Button(pencilActive ? "Pencil [Active]" : "Pencil"))
+    {
+        voxelToolState_.SetActiveTool(
+            pencilActive ? ActiveVoxelTool::None : ActiveVoxelTool::Pencil);
+        voxelPencilInput_.Reset();
+        UpdateVoxelHighlights();
+    }
+    if (pencilActive) ImGui::PopStyleColor();
+    DrawTooltip("Activate the Pencil tool (P)");
+
     bool eraseRequested = false;
     bool paintRequested = false;
     bool addRequested = false;
@@ -1010,9 +1026,16 @@ void EditorWorkspace::DrawScenePanel()
         const ImGuiIO& io = ImGui::GetIO();
         const bool sceneFocused = ImGui::IsWindowFocused(
             ImGuiFocusedFlags_RootAndChildWindows);
+        const VoxelCameraInteraction cameraInteraction =
+            ImGui::IsMouseDown(ImGuiMouseButton_Right)
+                ? VoxelCameraInteraction::Orbit
+                : ImGui::IsMouseDown(ImGuiMouseButton_Middle)
+                ? VoxelCameraInteraction::Pan
+                : (imageHovered && io.MouseWheel != 0.0F)
+                ? VoxelCameraInteraction::Zoom
+                : VoxelCameraInteraction::None;
         const bool cameraControl =
-            ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
-            ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+            cameraInteraction != VoxelCameraInteraction::None;
         const bool incompatiblePopupOpen = ImGui::IsPopupOpen(
             nullptr,
             ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
@@ -1056,7 +1079,28 @@ void EditorWorkspace::DrawScenePanel()
         {
             UpdateVoxelHighlights();
         }
-        if (selectionInputAvailable &&
+        const DragDropImportState dropState = dragDropImport_.State();
+        const bool dragDropActive =
+            dropState != DragDropImportState::Idle &&
+            dropState != DragDropImportState::Completed &&
+            dropState != DragDropImportState::Cancelled;
+        const VoxelPencilInputDecision pencilDecision =
+            voxelPencilInput_.Update({
+                ImGui::IsMouseDown(ImGuiMouseButton_Left),
+                voxelToolState_.IsPencilActive(),
+                document != nullptr,
+                imageHovered,
+                sceneFocused,
+                io.WantCaptureMouse && (!imageHovered || inputBlocked),
+                incompatiblePopupOpen,
+                dragDropActive,
+                cameraInteraction,
+                voxelPencilEditInProgress_,
+                voxelDocumentSession_.Generation()});
+        if (pencilDecision == VoxelPencilInputDecision::Apply)
+            static_cast<void>(ApplyVoxelPencil());
+
+        if (!voxelToolState_.IsPencilActive() && selectionInputAvailable &&
             ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             voxelSelectionClickCandidate_ = !cameraControl &&
                 !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
@@ -1083,7 +1127,14 @@ void EditorWorkspace::DrawScenePanel()
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
             eraseRequested = true;
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_P, false))
-            paintRequested = true;
+        {
+            voxelToolState_.SetActiveTool(
+                voxelToolState_.IsPencilActive()
+                    ? ActiveVoxelTool::None
+                    : ActiveVoxelTool::Pencil);
+            voxelPencilInput_.Reset();
+            UpdateVoxelHighlights();
+        }
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_A, false))
             addRequested = true;
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
@@ -1252,6 +1303,21 @@ void EditorWorkspace::DrawInspectorPanel()
         ImGui::Text("Dirty: %s", document->IsDirty() ? "Yes" : "No");
         ImGui::Text("Revision: %llu",
             static_cast<unsigned long long>(document->GetRevision()));
+        ImGui::Text("Active Tool: %s",
+            ActiveVoxelToolName(voxelToolState_.ActiveTool()));
+        ImGui::Text("Palette Index: %zu",
+            voxelToolState_.ActivePaletteIndex());
+        ImGui::Text("Placement: %s",
+            VoxelPlacementPreviewStatusName(voxelPlacementPreview_.Status));
+        if (lastVoxelToolResult_)
+        {
+            ImGui::Text("Last Operation: %s",
+                VoxelToolResultCodeName(lastVoxelToolResult_->Code));
+            ImGui::Text("Last Position: %d, %d, %d",
+                lastVoxelToolResult_->Position.X,
+                lastVoxelToolResult_->Position.Y,
+                lastVoxelToolResult_->Position.Z);
+        }
         ImGui::Separator();
     }
 
@@ -1466,7 +1532,7 @@ void EditorWorkspace::DrawInspectorPanel()
     ImGui::EndDisabled();
     DrawTooltip(
         wouldChange
-            ? "Paint the selected voxel (P while Scene is active)"
+            ? "Paint the selected voxel with the active color"
             : "Select an occupied voxel and choose a different color.");
     ImGui::SameLine();
     ImGui::TextDisabled("P");
@@ -3732,6 +3798,192 @@ bool EditorWorkspace::VoxelRayPickingSmokePassed() const noexcept
         voxelRayPickingSourcePreserved_;
 }
 
+bool EditorWorkspace::RunVoxelPencilSmokeStep(
+    const std::size_t frame,
+    const std::filesystem::path& sourcePath)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    const auto inputFrame = [this, document](const bool leftDown)
+    {
+        return VoxelPencilInputFrame{
+            leftDown,
+            voxelToolState_.IsPencilActive(),
+            document != nullptr,
+            true,
+            true,
+            false,
+            false,
+            false,
+            VoxelCameraInteraction::None,
+            voxelPencilEditInProgress_,
+            voxelDocumentSession_.Generation()};
+    };
+
+    if (frame == 0U)
+    {
+        if (document == nullptr || grid == nullptr ||
+            document->GetVoxelCount() != 1U) return false;
+        std::error_code error;
+        voxelPencilSmokeSourceSize_ =
+            std::filesystem::file_size(sourcePath, error);
+        if (error) return false;
+        voxelPencilSmokeSourceTime_ =
+            std::filesystem::last_write_time(sourcePath, error);
+        const auto hash = HashFileContents(sourcePath);
+        if (error || !hash) return false;
+        voxelPencilSmokeSourceHash_ = *hash;
+        voxelPencilSmokeInitialRevision_ = document->GetRevision();
+        voxelPencilSmokeInitialVoxelCount_ = document->GetVoxelCount();
+        voxelPencilSmokeInitialBuildCount_ =
+            voxelDocumentMeshCache_.BuildCount();
+        voxelPencilSmokeInitialUploadCount_ =
+            viewportRenderer_.ModelUploadCount();
+        voxelPencilSmokeHighlightUploadBaseline_ =
+            viewportRenderer_.HighlightUploadCount();
+        voxelPencilSmokeRenderBaseline_ =
+            viewportRenderer_.ModelRenderCount();
+
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        VoxelRaycastOptions options;
+        const auto hit = RaycastVoxelDocument(
+            *document,
+            {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}},
+            options);
+        if (!hit || hit->AdjacentPosition !=
+                Asset::Voxel::VoxelPosition{0, 1, 1}) return false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        UpdateVoxelHighlights();
+        voxelPencilSmokeTarget_ = hit->AdjacentPosition;
+        voxelPencilSmokePreviewValid_ =
+            voxelPlacementPreview_.IsValid() &&
+            voxelPlacementPreview_.Position == hit->AdjacentPosition &&
+            GetBackendDisplayName() == "Direct3D 12" &&
+            viewportRenderer_.HasModelMesh();
+        voxelPencilSmokeInput_.Reset();
+    }
+    else if (frame == 1U)
+    {
+        if (document == nullptr || grid == nullptr) return false;
+        const auto hit = RaycastVoxelDocument(
+            *document,
+            {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit) return false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        UpdateVoxelHighlights();
+        const bool firstClick = voxelPencilSmokeInput_.Update(
+            inputFrame(true)) == VoxelPencilInputDecision::Apply;
+        const bool applied = firstClick && ApplyVoxelPencil();
+        const auto voxel = document->GetVoxel(voxelPencilSmokeTarget_);
+        const Voxel::Voxel* compatible = grid->Get(
+            static_cast<std::uint32_t>(voxelPencilSmokeTarget_.X),
+            static_cast<std::uint32_t>(voxelPencilSmokeTarget_.Y),
+            static_cast<std::uint32_t>(voxelPencilSmokeTarget_.Z));
+        voxelPencilSmokeApplied_ = applied && voxel &&
+            voxel->PaletteIndex == 1U && compatible &&
+            compatible->IsOccupied() && compatible->ColorIndex == 1U &&
+            document->IsDirty() &&
+            document->GetRevision() == voxelPencilSmokeInitialRevision_ + 1U &&
+            document->GetVoxelCount() == voxelPencilSmokeInitialVoxelCount_ + 1U &&
+            voxelDocumentMeshCache_.BuildCount() ==
+                voxelPencilSmokeInitialBuildCount_ + 1U &&
+            viewportRenderer_.ModelUploadCount() ==
+                voxelPencilSmokeInitialUploadCount_ + 1U &&
+            viewportRenderer_.HighlightUploadCount() >
+                voxelPencilSmokeHighlightUploadBaseline_ &&
+            viewportRenderer_.HighlightRenderCount() > 0U &&
+            viewportRenderer_.HasModelMesh() && lastVoxelToolResult_ &&
+            lastVoxelToolResult_->Code == VoxelToolResultCode::Applied;
+    }
+    else if (frame == 2U)
+    {
+        if (document == nullptr) return false;
+        const std::uint64_t revision = document->GetRevision();
+        const std::uint64_t count = document->GetVoxelCount();
+        const std::size_t builds = voxelDocumentMeshCache_.BuildCount();
+        const std::size_t uploads = viewportRenderer_.ModelUploadCount();
+        const bool repeated = voxelPencilSmokeInput_.Update(
+            inputFrame(true)) == VoxelPencilInputDecision::Apply;
+        voxelPencilSmokeHeldWithoutRepeat_ = !repeated &&
+            document->GetRevision() == revision &&
+            document->GetVoxelCount() == count &&
+            voxelDocumentMeshCache_.BuildCount() == builds &&
+            viewportRenderer_.ModelUploadCount() == uploads;
+        voxelPencilSmokeRendered_ =
+            viewportRenderer_.ModelRenderCount() >
+                voxelPencilSmokeRenderBaseline_ &&
+            viewportRenderer_.HasModelMesh();
+    }
+    else if (frame == 3U)
+    {
+        static_cast<void>(voxelPencilSmokeInput_.Update(inputFrame(false)));
+    }
+    else if (frame == 4U)
+    {
+        if (document == nullptr) return false;
+        VoxelRaycastHit outside;
+        outside.Coordinates = {0U, 1U, 1U};
+        outside.Face = VoxelHitFace::NegativeX;
+        outside.SubModelIndex = 0U;
+        outside.AdjacentPosition = {-1, 1, 1};
+        outside.AdjacentWithinBounds = false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, outside));
+        UpdateVoxelHighlights();
+        const std::uint64_t revision = document->GetRevision();
+        const std::uint64_t count = document->GetVoxelCount();
+        const std::size_t builds = voxelDocumentMeshCache_.BuildCount();
+        const std::size_t uploads = viewportRenderer_.ModelUploadCount();
+        const bool click = voxelPencilSmokeInput_.Update(
+            inputFrame(true)) == VoxelPencilInputDecision::Apply;
+        const bool applied = click && ApplyVoxelPencil();
+        voxelPencilSmokeOutOfBoundsRefused_ = !applied &&
+            lastVoxelToolResult_ && lastVoxelToolResult_->Code ==
+                VoxelToolResultCode::TargetOutOfBounds &&
+            voxelPlacementPreview_.Status ==
+                VoxelPlacementPreviewStatus::OutOfBounds &&
+            document->GetRevision() == revision &&
+            document->GetVoxelCount() == count &&
+            voxelDocumentMeshCache_.BuildCount() == builds &&
+            viewportRenderer_.ModelUploadCount() == uploads;
+    }
+    else if (frame == 5U)
+    {
+        if (document == nullptr) return false;
+        std::error_code error;
+        const auto hash = HashFileContents(sourcePath);
+        voxelPencilSmokeSourcePreserved_ = hash &&
+            *hash == voxelPencilSmokeSourceHash_ &&
+            std::filesystem::file_size(sourcePath, error) ==
+                voxelPencilSmokeSourceSize_ && !error &&
+            std::filesystem::last_write_time(sourcePath, error) ==
+                voxelPencilSmokeSourceTime_ && !error;
+        ClearVoxelViewport();
+        voxelPencilSmokeClosed_ =
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() &&
+            !voxelPencilInput_.WaitingForRelease() &&
+            !voxelPencilSmokeInput_.WaitingForRelease();
+    }
+    return VoxelPencilSmokePassed();
+}
+
+bool EditorWorkspace::VoxelPencilSmokePassed() const noexcept
+{
+    return voxelPencilSmokePreviewValid_ && voxelPencilSmokeApplied_ &&
+        voxelPencilSmokeHeldWithoutRepeat_ &&
+        voxelPencilSmokeOutOfBoundsRefused_ && voxelPencilSmokeRendered_ &&
+        voxelPencilSmokeClosed_ && voxelPencilSmokeSourcePreserved_;
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -3900,6 +4152,56 @@ bool EditorWorkspace::AddAdjacentVoxel()
         std::to_string(destination.Y) + ", " +
         std::to_string(destination.Z));
     return true;
+}
+
+bool EditorWorkspace::ApplyVoxelPencil()
+{
+    if (voxelPencilEditInProgress_) return false;
+    voxelPencilEditInProgress_ = true;
+    VoxelToolResult result;
+    try
+    {
+        result = VoxelPencilTool::Apply({
+            static_cast<VoxelEditSession*>(this),
+            voxelDocumentSession_.ActiveDocument(),
+            0U,
+            voxelSelection_.Hovered(),
+            voxelToolState_.ActivePaletteIndex(),
+            !voxelToolState_.IsPencilActive()});
+    }
+    catch (const std::exception& exception)
+    {
+        result.Code = VoxelToolResultCode::Failed;
+        result.Error = exception.what();
+    }
+    catch (...)
+    {
+        result.Code = VoxelToolResultCode::Failed;
+        result.Error = "Unknown Pencil failure.";
+    }
+    voxelPencilEditInProgress_ = false;
+    lastVoxelToolResult_ = result;
+
+    if (result.Code == VoxelToolResultCode::Applied)
+    {
+        AddConsoleMessage(
+            "[Edit] Added voxel at (" +
+            std::to_string(result.Position.X) + ", " +
+            std::to_string(result.Position.Y) + ", " +
+            std::to_string(result.Position.Z) +
+            ") using palette index " +
+            std::to_string(voxelToolState_.ActivePaletteIndex()) + ".");
+        return true;
+    }
+    if (result.Code == VoxelToolResultCode::Failed)
+    {
+        AddConsoleMessage(
+            "[Edit] Failed to add voxel at (" +
+            std::to_string(result.Position.X) + ", " +
+            std::to_string(result.Position.Y) + ", " +
+            std::to_string(result.Position.Z) + "): " + result.Error);
+    }
+    return false;
 }
 
 std::uint64_t EditorWorkspace::VoxelModelGeneration() const noexcept
@@ -4076,14 +4378,39 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         return hit ? std::optional<VoxelCoordinates>(hit->Coordinates)
                    : std::nullopt;
     };
-    const Voxel::VoxelGrid* grid = activeVoxelModel_
-        ? activeVoxelModel_->GetGrid(0U) : nullptr;
-    const AddVoxelTarget addTarget =
-        FindAddVoxelTarget(grid, voxelSelection_.Selected());
+    std::optional<Asset::Voxel::VoxelPosition> placementPosition;
+    bool placementValid = false;
+    if (voxelToolState_.IsPencilActive())
+    {
+        voxelPlacementPreview_ = EvaluateVoxelPencilPreview(
+            voxelDocumentSession_.ActiveDocument(),
+            0U,
+            voxelSelection_.Hovered(),
+            true);
+        placementPosition = voxelPlacementPreview_.Position;
+        placementValid = voxelPlacementPreview_.IsValid();
+    }
+    else
+    {
+        voxelPlacementPreview_ = {};
+        const Voxel::VoxelGrid* grid = activeVoxelModel_
+            ? activeVoxelModel_->GetGrid(0U) : nullptr;
+        const AddVoxelTarget addTarget =
+            FindAddVoxelTarget(grid, voxelSelection_.Selected());
+        if (addTarget)
+        {
+            placementPosition = Asset::Voxel::VoxelPosition{
+                static_cast<std::int32_t>(addTarget.Coordinates->X),
+                static_cast<std::int32_t>(addTarget.Coordinates->Y),
+                static_cast<std::int32_t>(addTarget.Coordinates->Z)};
+            placementValid = true;
+        }
+    }
     viewportRenderer_.ConfigureHighlights(
         coordinates(voxelSelection_.Hovered()),
         coordinates(voxelSelection_.Selected()),
-        addTarget ? addTarget.Coordinates : std::nullopt,
+        placementPosition,
+        placementValid,
         voxelModelCenter_);
 }
 
@@ -4102,6 +4429,12 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     failedDocumentRevision_.reset();
     activeVoxelModel_.reset();
     static_cast<void>(voxelSelection_.Clear());
+    voxelToolState_.Reset();
+    voxelPencilInput_.Reset();
+    voxelPencilSmokeInput_.Reset();
+    voxelPlacementPreview_ = {};
+    lastVoxelToolResult_.reset();
+    voxelPencilEditInProgress_ = false;
     voxelModelCenter_ = {};
     voxelViewportRendered_ = false;
     voxelViewportRenderFailed_ = false;

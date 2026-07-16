@@ -24,6 +24,7 @@ namespace VoxelForge::Editor
     std::uint32_t y,
     std::uint32_t z,
     Voxel::Voxel expected,
-    Voxel::Voxel replacement);
+    Voxel::Voxel replacement,
+    std::size_t modelIndex = 0U);
 
 } // namespace VoxelForge::Editor

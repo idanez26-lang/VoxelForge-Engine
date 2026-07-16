@@ -81,7 +81,7 @@ void AppendBox(
 void AppendVoxelOutline(
     std::vector<GPUVertex>& vertices,
     std::vector<std::uint32_t>& indices,
-    const VoxelCoordinates coordinates,
+    const Asset::Voxel::VoxelPosition coordinates,
     const Vec3 center,
     const std::array<float, 4>& color)
 {
@@ -113,6 +113,20 @@ void AppendVoxelOutline(
                 {x - thickness, y - thickness, z0},
                 {x + thickness, y + thickness, z1}, color);
 }
+
+Asset::Voxel::VoxelPosition ToVoxelPosition(
+    const VoxelCoordinates coordinates) noexcept
+{
+    return {
+        static_cast<std::int32_t>(coordinates.X),
+        static_cast<std::int32_t>(coordinates.Y),
+        static_cast<std::int32_t>(coordinates.Z)};
+}
+
+constexpr std::array<float, 4> ValidPlacementPreviewColor{
+    0.18F, 1.0F, 0.32F, 1.0F};
+constexpr std::array<float, 4> InvalidPlacementPreviewColor{
+    1.0F, 0.15F, 0.12F, 1.0F};
 
 std::vector<unsigned char> ReadBinary(const char* path)
 {
@@ -403,12 +417,14 @@ void ViewportRenderer::ConfigureGuides(
 void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelCoordinates> hovered,
     std::optional<VoxelCoordinates> selected,
-    std::optional<VoxelCoordinates> addPreview,
+    std::optional<Asset::Voxel::VoxelPosition> placementPreview,
+    const bool placementPreviewValid,
     const Vec3 modelCenter) noexcept
 {
     if (hovered == selected) hovered.reset();
     if (hoveredHighlight_ == hovered && selectedHighlight_ == selected &&
-        addPreviewHighlight_ == addPreview &&
+        placementPreviewHighlight_ == placementPreview &&
+        placementPreviewValid_ == placementPreviewValid &&
         modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
         modelCenter_.Z == modelCenter.Z)
     {
@@ -416,10 +432,11 @@ void ViewportRenderer::ConfigureHighlights(
     }
     hoveredHighlight_ = hovered;
     selectedHighlight_ = selected;
-    addPreviewHighlight_ = addPreview;
+    placementPreviewHighlight_ = placementPreview;
+    placementPreviewValid_ = placementPreviewValid;
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
-        selectedHighlight_.has_value() || addPreviewHighlight_.has_value();
+        selectedHighlight_.has_value() || placementPreviewHighlight_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
 }
 
@@ -430,15 +447,19 @@ bool ViewportRenderer::EnsureHighlights()
     std::vector<std::uint32_t> indices;
     vertices.reserve(24U * 12U * 3U);
     indices.reserve(36U * 12U * 3U);
-    if (addPreviewHighlight_)
+    if (placementPreviewHighlight_)
         AppendVoxelOutline(
-            vertices, indices, *addPreviewHighlight_, modelCenter_,
-            {0.18F, 1.0F, 0.32F, 1.0F});
+            vertices, indices, *placementPreviewHighlight_, modelCenter_,
+            placementPreviewValid_
+                ? ValidPlacementPreviewColor
+                : InvalidPlacementPreviewColor);
     if (hoveredHighlight_)
-        AppendVoxelOutline(vertices, indices, *hoveredHighlight_, modelCenter_,
+        AppendVoxelOutline(vertices, indices,
+            ToVoxelPosition(*hoveredHighlight_), modelCenter_,
             {1.0F, 0.88F, 0.12F, 1.0F});
     if (selectedHighlight_)
-        AppendVoxelOutline(vertices, indices, *selectedHighlight_, modelCenter_,
+        AppendVoxelOutline(vertices, indices,
+            ToVoxelPosition(*selectedHighlight_), modelCenter_,
             {1.0F, 0.38F, 0.08F, 1.0F});
     if (indices.empty())
     {
@@ -697,7 +718,8 @@ void ViewportRenderer::ClearModel() noexcept
     vertexBuffer_ = nullptr;
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
-    ConfigureHighlights(std::nullopt, std::nullopt, std::nullopt, {});
+    ConfigureHighlights(
+        std::nullopt, std::nullopt, std::nullopt, false, {});
 }
 
 void ViewportRenderer::ReleaseHighlights() noexcept

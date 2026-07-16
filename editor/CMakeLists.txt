@@ -141,6 +141,10 @@ target_sources(
         src/Commands/Voxel/EraseVoxelCommand.cpp
         src/Commands/Voxel/PaintVoxelCommand.cpp
         src/Commands/Voxel/VoxelEditTransaction.cpp
+        src/VoxelTools/VoxelPencilInput.cpp
+        src/VoxelTools/VoxelPencilPreview.cpp
+        src/VoxelTools/VoxelPencilTool.cpp
+        src/VoxelTools/VoxelToolState.cpp
 )
 target_include_directories(
     VoxelForgeEditorCommands
@@ -149,7 +153,10 @@ target_include_directories(
 target_compile_features(VoxelForgeEditorCommands PUBLIC cxx_std_20)
 target_link_libraries(
     VoxelForgeEditorCommands
-    PUBLIC VoxelForgeVoxel VoxelForgeAsset)
+    PUBLIC
+        VoxelForgeVoxel
+        VoxelForgeAsset
+        VoxelForgeEditorVoxelSelection)
 if(MSVC)
     target_compile_options(VoxelForgeEditorCommands PRIVATE /W4 /permissive-)
 else()

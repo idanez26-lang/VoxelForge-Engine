@@ -236,6 +236,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorAddVoxelTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelPencilTests
+    Editor/VoxelPencilTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelPencilTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorVoxelPencilTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelPencil
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelPencilTests>
+)
+add_executable(
     VoxelForgeEditorQualityOfLifeTests
     Editor/QualityOfLifeTests.cpp
 )
@@ -396,6 +409,7 @@ set_tests_properties(
     VoxelForge.Editor.EraseVoxel
     VoxelForge.Editor.PaintVoxel
     VoxelForge.Editor.AddVoxel
+    VoxelForge.Editor.VoxelPencil
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
     VoxelForge.Project.Manager
@@ -462,6 +476,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelRayPickingSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-ray-picking-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelPencilSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-pencil-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -476,6 +494,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelDocumentSmoke
         VoxelForge.Editor.VoxelRenderSyncSmoke
         VoxelForge.Editor.VoxelRayPickingSmoke
+        VoxelForge.Editor.VoxelPencilSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

@@ -4,6 +4,7 @@
 #include "VoxelSelection/VoxelRaycast.h"
 
 #include "VoxelForge/Mesh/MeshData.h"
+#include "VoxelForge/Asset/Voxel/VoxelDocument.h"
 #include "VoxelForge/Voxel/VoxelPalette.h"
 
 #include <cstdint>
@@ -34,7 +35,8 @@ public:
     void ConfigureHighlights(
         std::optional<VoxelCoordinates> hovered,
         std::optional<VoxelCoordinates> selected,
-        std::optional<VoxelCoordinates> addPreview,
+        std::optional<Asset::Voxel::VoxelPosition> placementPreview,
+        bool placementPreviewValid,
         Vec3 modelCenter) noexcept;
     void ClearModel() noexcept;
     [[nodiscard]] bool Render(
@@ -96,7 +98,8 @@ private:
     bool highlightsDirty_ = false;
     std::optional<VoxelCoordinates> hoveredHighlight_;
     std::optional<VoxelCoordinates> selectedHighlight_;
-    std::optional<VoxelCoordinates> addPreviewHighlight_;
+    std::optional<Asset::Voxel::VoxelPosition> placementPreviewHighlight_;
+    bool placementPreviewValid_ = false;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;
     std::size_t highlightRenderCount_ = 0U;
