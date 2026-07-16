@@ -31,6 +31,9 @@ constexpr std::size_t MaximumConsoleMessageCount = 200;
 constexpr const char* WorkspaceDockspaceName = "VoxelForgeStudioDockSpace";
 constexpr const char* AboutPopupName = "About VoxelForge Studio";
 constexpr const char* DirtyConfirmationPopupName = "Unsaved Voxel Model";
+constexpr const char* ImportConfirmationPopupName = "Import Models";
+constexpr const char* ImportCollisionPopupName = "Model Already Exists";
+constexpr const char* OpenImportedModelPopupName = "Open Imported Model";
 
 bool HasProjectExtension(const std::filesystem::path& path)
 {
@@ -125,6 +128,12 @@ EditorWorkspace::EditorWorkspace(
         {
             static_cast<void>(OpenVoxInViewport(filePath));
         });
+    modelImportService_.SetRefreshCallback(
+        [this]()
+        {
+            static_cast<void>(assetBrowser_.Refresh());
+        });
+    SynchronizeProjectAssets();
     if (!projectDialogPreferences_.Load())
     {
         AddConsoleMessage(
@@ -170,6 +179,7 @@ void EditorWorkspace::Draw()
     DrawStatusBar();
     DrawAboutPopup();
     DrawProjectDialogs();
+    DrawModelImportDialogs();
     DrawDirtyConfirmationDialog();
 }
 
@@ -204,6 +214,36 @@ void EditorWorkspace::DrawMainMenuBar()
             RequestOpenProjectDialog();
         }
         DrawTooltip("Open a project (Ctrl+O)");
+
+        const bool hasActiveProject = projectManager_.HasActiveProject();
+        if (ImGui::MenuItem(
+                "Import Model...", "Ctrl+I", false, hasActiveProject))
+        {
+            RequestImportModelDialog();
+        }
+        DrawTooltip("Import one or more .vox models into Assets/Models");
+
+        std::optional<std::filesystem::path> recentImportToOpen;
+        if (ImGui::BeginMenu("Recent Imports"))
+        {
+            const auto& recentImports = modelImportService_.RecentImports();
+            if (recentImports.empty())
+            {
+                ImGui::MenuItem("No recent imports", nullptr, false, false);
+            }
+            for (const std::filesystem::path& path : recentImports)
+            {
+                const std::string label = path.filename().string();
+                ImGui::PushID(path.string().c_str());
+                if (ImGui::MenuItem(label.c_str())) recentImportToOpen = path;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", path.string().c_str());
+                ImGui::PopID();
+            }
+            ImGui::EndMenu();
+        }
+        if (recentImportToOpen)
+            static_cast<void>(OpenVoxInViewport(*recentImportToOpen));
 
         std::optional<std::filesystem::path> recentProjectToOpen;
 
@@ -251,8 +291,6 @@ void EditorWorkspace::DrawMainMenuBar()
         }
 
         ImGui::Separator();
-        const bool hasActiveProject = projectManager_.HasActiveProject();
-
         if (ImGui::MenuItem(
                 "Save Project",
                 nullptr,
@@ -419,6 +457,11 @@ void EditorWorkspace::HandleCommandShortcuts()
         CanRunProjectShortcut(ProjectShortcut::OpenProject, context))
     {
         RequestOpenProjectDialog();
+    }
+    else if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_I, shortcutFlags) &&
+             context.HasProject)
+    {
+        RequestImportModelDialog();
     }
     else if (ImGui::Shortcut(
                  ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S,
@@ -1214,6 +1257,115 @@ void EditorWorkspace::DrawProjectDialogs()
     DrawOpenProjectDialog();
 }
 
+void EditorWorkspace::DrawModelImportDialogs()
+{
+    if (showImportConfirmationPopup_)
+    {
+        ImGui::OpenPopup(ImportConfirmationPopupName);
+        showImportConfirmationPopup_ = false;
+    }
+    if (ImGui::BeginPopupModal(
+            ImportConfirmationPopupName, nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted(selectedImportPaths_.size() == 1U
+            ? "Import this model into Assets/Models?"
+            : "Import these models into Assets/Models?");
+        ImGui::Separator();
+        for (const std::filesystem::path& path : selectedImportPaths_)
+        {
+            ImGui::BulletText("%s", path.filename().string().c_str());
+        }
+        const char* importLabel = selectedImportPaths_.size() == 1U
+            ? "Import" : "Import All";
+        if (ImGui::Button(importLabel))
+        {
+            std::vector<std::filesystem::path> paths =
+                std::move(selectedImportPaths_);
+            ImGui::CloseCurrentPopup();
+            BeginModelImport(std::move(paths));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+        {
+            selectedImportPaths_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (showImportCollisionPopup_)
+    {
+        ImGui::OpenPopup(ImportCollisionPopupName);
+        showImportCollisionPopup_ = false;
+    }
+    if (ImGui::BeginPopupModal(
+            ImportCollisionPopupName, nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted("Le fichier existe déjà.");
+        if (pendingImportCollision_)
+        {
+            ImGui::TextWrapped("%s",
+                pendingImportCollision_->DestinationPath.string().c_str());
+        }
+        if (ImGui::Button("Remplacer"))
+        {
+            ImGui::CloseCurrentPopup();
+            ContinueModelImport(ModelImportCollisionAction::Replace);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Renommer"))
+        {
+            ImGui::CloseCurrentPopup();
+            ContinueModelImport(ModelImportCollisionAction::Rename);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Ignorer"))
+        {
+            ImGui::CloseCurrentPopup();
+            ContinueModelImport(ModelImportCollisionAction::Skip);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Annuler"))
+        {
+            ImGui::CloseCurrentPopup();
+            ContinueModelImport(ModelImportCollisionAction::Cancel);
+        }
+        ImGui::EndPopup();
+    }
+
+    if (showOpenImportedModelPopup_)
+    {
+        ImGui::OpenPopup(OpenImportedModelPopupName);
+        showOpenImportedModelPopup_ = false;
+    }
+    if (ImGui::BeginPopupModal(
+            OpenImportedModelPopupName, nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted("Open in Viewport?");
+        if (importedModelToOpen_)
+            ImGui::TextDisabled("%s",
+                importedModelToOpen_->filename().string().c_str());
+        if (ImGui::Button("Oui"))
+        {
+            const std::filesystem::path path =
+                importedModelToOpen_.value_or(std::filesystem::path{});
+            importedModelToOpen_.reset();
+            ImGui::CloseCurrentPopup();
+            if (!path.empty()) static_cast<void>(OpenVoxInViewport(path));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Non"))
+        {
+            importedModelToOpen_.reset();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
 void EditorWorkspace::ConsumeFileDialogResult()
 {
     const std::optional<FileDialogResult> result =
@@ -1225,6 +1377,16 @@ void EditorWorkspace::ConsumeFileDialogResult()
         projectDialogError_ = result->Error.empty()
             ? "The system file dialog failed." : result->Error;
         AddConsoleMessage("File dialog failed: " + projectDialogError_);
+        return;
+    }
+
+    if (result->Kind == FileDialogKind::ModelFiles)
+    {
+        selectedImportPaths_ = result->Paths;
+        if (selectedImportPaths_.empty() && !result->Path.empty())
+            selectedImportPaths_.push_back(result->Path);
+        if (selectedImportPaths_.empty()) return;
+        showImportConfirmationPopup_ = true;
         return;
     }
 
@@ -1501,6 +1663,18 @@ void EditorWorkspace::RequestOpenProjectDialog()
     showOpenProjectPopup_ = true;
 }
 
+void EditorWorkspace::RequestImportModelDialog()
+{
+    if (!projectManager_.HasActiveProject())
+    {
+        AddConsoleMessage("Model import failed: no project is loaded.");
+        return;
+    }
+    const std::filesystem::path initial = modelImportService_.ModelsDirectory();
+    if (!fileDialogService_->ChooseModelFiles(initial))
+        AddConsoleMessage("Model import failed: a file dialog is already open.");
+}
+
 void EditorWorkspace::CreateProject()
 {
     if (!dirtyActionConfirmation_.Request(
@@ -1529,6 +1703,7 @@ void EditorWorkspace::CreateProjectNow()
     }
 
     ClearVoxelViewport();
+    SynchronizeProjectAssets();
     AddConsoleMessage("Project created: " + project->Name());
     projectDialogError_.clear();
     welcomeError_.clear();
@@ -1566,6 +1741,7 @@ bool EditorWorkspace::OpenProject(
     welcomeError_.clear();
     failedRecentProjectPath_.reset();
     ClearVoxelViewport();
+    SynchronizeProjectAssets();
     if (!projectDialogPreferences_.SetLastOpenDirectory(
             projectFilePath.parent_path()))
         AddConsoleMessage(
@@ -1736,10 +1912,124 @@ void EditorWorkspace::CloseProject()
     const std::string projectName = activeProject->Name();
     ClearVoxelViewport();
     projectManager_.CloseProject();
+    SynchronizeProjectAssets();
     AddConsoleMessage("Project closed: " + projectName);
     welcomeError_.clear();
     failedRecentProjectPath_.reset();
     UpdateWindowTitle();
+}
+
+void EditorWorkspace::SynchronizeProjectAssets()
+{
+    const auto& project = projectManager_.ActiveProject();
+    if (!project)
+    {
+        modelImportService_.ClearProjectRoot();
+        assetBrowser_.ClearAssetsRoot();
+        return;
+    }
+
+    if (!modelImportService_.SetProjectRoot(project->RootPath()))
+    {
+        AddConsoleMessage(
+            "Model import setup failed: " + modelImportService_.LastError());
+    }
+    if (!assetBrowser_.SetAssetsRoot(project->RootPath() / "Assets"))
+    {
+        AddConsoleMessage("Asset Browser refresh failed.");
+    }
+}
+
+void EditorWorkspace::BeginModelImport(
+    std::vector<std::filesystem::path> sourcePaths)
+{
+    pendingImportPaths_ = std::move(sourcePaths);
+    pendingImportIndex_ = 0U;
+    requestedImportCount_ = pendingImportPaths_.size();
+    successfulImportPaths_.clear();
+    pendingImportCollision_.reset();
+    ContinueModelImport(ModelImportCollisionAction::Ask);
+}
+
+void EditorWorkspace::ContinueModelImport(
+    ModelImportCollisionAction collisionAction)
+{
+    while (pendingImportIndex_ < pendingImportPaths_.size())
+    {
+        const std::filesystem::path source =
+            pendingImportPaths_[pendingImportIndex_];
+        const ModelImportResult result =
+            modelImportService_.ImportModel(source, collisionAction);
+        collisionAction = ModelImportCollisionAction::Ask;
+
+        if (result.Status == ModelImportStatus::Collision)
+        {
+            pendingImportCollision_ = result;
+            showImportCollisionPopup_ = true;
+            return;
+        }
+        if (result.Status == ModelImportStatus::Cancelled)
+        {
+            AddConsoleMessage("Model import cancelled.");
+            pendingImportPaths_.clear();
+            pendingImportCollision_.reset();
+            return;
+        }
+
+        if (result.Succeeded())
+        {
+            successfulImportPaths_.push_back(result.DestinationPath);
+            const std::filesystem::path relativeToAssets =
+                result.DestinationPath.lexically_relative(
+                    modelImportService_.ProjectRoot() / "Assets");
+            static_cast<void>(assetBrowser_.RevealEntry(relativeToAssets));
+            LogModelImport(result);
+        }
+        else if (result.Status == ModelImportStatus::Skipped)
+        {
+            AddConsoleMessage(
+                "Import skipped: " + source.filename().string());
+        }
+        else
+        {
+            AddConsoleMessage(
+                "Import failed: " + source.filename().string() +
+                " - " + result.Message);
+        }
+
+        ++pendingImportIndex_;
+        pendingImportCollision_.reset();
+    }
+    FinishModelImport();
+}
+
+void EditorWorkspace::FinishModelImport()
+{
+    if (requestedImportCount_ > 1U)
+    {
+        AddConsoleMessage(
+            std::to_string(successfulImportPaths_.size()) +
+            " models imported.");
+    }
+    else if (requestedImportCount_ == 1U &&
+             successfulImportPaths_.size() == 1U)
+    {
+        importedModelToOpen_ = successfulImportPaths_.front();
+        showOpenImportedModelPopup_ = true;
+    }
+    pendingImportPaths_.clear();
+    pendingImportIndex_ = 0U;
+    requestedImportCount_ = 0U;
+}
+
+void EditorWorkspace::LogModelImport(const ModelImportResult& result)
+{
+    const std::filesystem::path relative = result.DestinationPath
+        .lexically_relative(modelImportService_.ProjectRoot());
+    AddConsoleMessage("Import");
+    AddConsoleMessage(result.SourcePath.filename().string());
+    AddConsoleMessage("-> " + relative.generic_string());
+    AddConsoleMessage("Done");
 }
 
 bool EditorWorkspace::OpenVoxInViewport(
@@ -2274,6 +2564,53 @@ bool EditorWorkspace::AddVoxelSmokePassed() const noexcept
         addVoxelSmokeReloaded_ &&
         viewportRenderer_.ModelRenderCount() >
             addVoxelSmokeReloadRenderBaseline_;
+}
+
+bool EditorWorkspace::RunModelImportSmokeStep(
+    const std::size_t frame,
+    const std::filesystem::path& sourcePath)
+{
+    if (frame == 0U)
+    {
+        const std::size_t refreshBaseline = assetBrowser_.RefreshCount();
+        const ModelImportResult result =
+            modelImportService_.ImportModel(sourcePath);
+        modelImportSmokeDestination_ = result.DestinationPath;
+        modelImportSmokeImported_ = result.Succeeded() &&
+            result.DestinationPath.parent_path() ==
+                modelImportService_.ModelsDirectory() &&
+            std::filesystem::is_regular_file(result.DestinationPath) &&
+            modelImportService_.RecentImports().size() == 1U;
+        modelImportSmokeRefreshed_ =
+            assetBrowser_.RefreshCount() > refreshBaseline;
+        if (modelImportSmokeImported_)
+        {
+            const std::filesystem::path relativeToAssets =
+                result.DestinationPath.lexically_relative(
+                    modelImportService_.ProjectRoot() / "Assets");
+            modelImportSmokeRefreshed_ = modelImportSmokeRefreshed_ &&
+                assetBrowser_.RevealEntry(relativeToAssets) &&
+                assetBrowser_.SelectedRelativePath() == relativeToAssets;
+        }
+    }
+    else if (frame == 1U)
+    {
+        modelImportSmokeOpened_ = modelImportSmokeImported_ &&
+            OpenVoxInViewportNow(modelImportSmokeDestination_);
+        modelImportSmokeRenderBaseline_ = viewportRenderer_.ModelRenderCount();
+    }
+    else if (frame == 2U)
+    {
+        resetLayoutRequested_ = true;
+    }
+    return ModelImportSmokePassed();
+}
+
+bool EditorWorkspace::ModelImportSmokePassed() const noexcept
+{
+    return modelImportSmokeImported_ && modelImportSmokeRefreshed_ &&
+        modelImportSmokeOpened_ && HasRenderedVoxelViewport() &&
+        viewportRenderer_.ModelRenderCount() > modelImportSmokeRenderBaseline_;
 }
 
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(

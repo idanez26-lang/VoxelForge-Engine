@@ -70,6 +70,20 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorModelImportTests
+    Editor/ModelImportTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorModelImportTests
+    PRIVATE VoxelForgeEditorModelImport
+)
+vf_configure_test(VoxelForgeEditorModelImportTests)
+add_test(
+    NAME VoxelForge.Editor.ModelImport
+    COMMAND $<TARGET_FILE:VoxelForgeEditorModelImportTests>
+)
+
+add_executable(
     VoxelForgeProjectManagerTests
     Project/ProjectManagerTests.cpp
 )
@@ -267,6 +281,7 @@ set_tests_properties(
     VoxelForge.Editor.ExitRequest
     VoxelForge.Editor.WindowTitle
     VoxelForge.Editor.AssetBrowser
+    VoxelForge.Editor.ModelImport
     VoxelForge.Editor.VoxelViewport
     VoxelForge.Editor.VoxelSelection
     VoxelForge.Editor.CommandHistory
@@ -316,6 +331,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.AddVoxelSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --add-voxel-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.ModelImportSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --model-import-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -325,6 +344,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.QualityOfLifeSmoke
         VoxelForge.Editor.VoxelSaveSmoke
         VoxelForge.Editor.AddVoxelSmoke
+        VoxelForge.Editor.ModelImportSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

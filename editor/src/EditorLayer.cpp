@@ -30,16 +30,19 @@ EditorLayer::EditorLayer(
     const bool paintVoxelVisualTest,
     const bool voxelSaveSmokeTest,
     const bool addVoxelSmokeTest,
+    const bool modelImportSmokeTest,
     const bool qualityOfLifeSmokeTest,
     std::filesystem::path qualityOfLifeParent)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
           std::move(windowTitleCallback),
-          qualityOfLifeSmokeTest
-              ? qualityOfLifeParent / "preferences.ini"
+          qualityOfLifeSmokeTest || modelImportSmokeTest
+              ? (qualityOfLifeSmokeTest
+                  ? qualityOfLifeParent
+                  : startupVoxPath.parent_path()) / "preferences.ini"
               : ProjectDialogPreferences::DefaultStorageFilePath(),
-          qualityOfLifeSmokeTest),
+          qualityOfLifeSmokeTest || modelImportSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -52,6 +55,7 @@ EditorLayer::EditorLayer(
       paintVoxelVisualTest_(paintVoxelVisualTest),
       voxelSaveSmokeTest_(voxelSaveSmokeTest),
       addVoxelSmokeTest_(addVoxelSmokeTest),
+      modelImportSmokeTest_(modelImportSmokeTest),
       qualityOfLifeSmokeTest_(qualityOfLifeSmokeTest),
       qualityOfLifeParent_(std::move(qualityOfLifeParent))
 {
@@ -98,7 +102,7 @@ void EditorLayer::CreateDefaultScene()
 
 void EditorLayer::OnImGuiRender()
 {
-    if (!startupVoxPath_.empty())
+    if (!startupVoxPath_.empty() && !modelImportSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -137,6 +141,11 @@ void EditorLayer::OnImGuiRender()
     {
         static_cast<void>(
             workspace_.RunAddVoxelSmokeStep(renderedFrameCount_));
+    }
+    if (modelImportSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunModelImportSmokeStep(
+            renderedFrameCount_, startupVoxPath_));
     }
     if (qualityOfLifeSmokeTest_)
     {
@@ -188,6 +197,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Add voxel smoke test did not add, undo, redo, save, reload, and render.");
+    }
+    if (modelImportSmokeTest_ && smokeTestComplete &&
+        !workspace_.ModelImportSmokePassed())
+    {
+        throw std::runtime_error(
+            "Model import smoke test did not copy, refresh, open, and render.");
     }
     if (qualityOfLifeSmokeTest_ && smokeTestComplete &&
         !workspace_.QualityOfLifeSmokePassed())

@@ -221,6 +221,7 @@ void AssetBrowser::Draw(bool* open)
 
 bool AssetBrowser::Refresh()
 {
+    ++refreshCount_;
     const bool refreshed = directory_.Refresh();
     SynchronizeSelection();
 
@@ -233,6 +234,11 @@ bool AssetBrowser::Refresh()
     error_.clear();
     statusMessage_ = "Assets refreshed.";
     return true;
+}
+
+std::size_t AssetBrowser::RefreshCount() const noexcept
+{
+    return refreshCount_;
 }
 
 bool AssetBrowser::SelectEntry(
@@ -255,6 +261,26 @@ bool AssetBrowser::SelectEntry(
 
     selectedRelativePath_ = entry->RelativePath();
     return true;
+}
+
+bool AssetBrowser::RevealEntry(
+    const std::filesystem::path& relativePath)
+{
+    if (!directory_.HasAssetsRoot() || relativePath.empty())
+    {
+        return false;
+    }
+    const std::filesystem::path normalized = relativePath.lexically_normal();
+    const std::filesystem::path parent = normalized.parent_path();
+    const std::filesystem::path directory = parent.empty()
+        ? directory_.AssetsRoot()
+        : directory_.AssetsRoot() / parent;
+    if (!directory_.EnterDirectory(directory))
+    {
+        SetError(directory_.LastError());
+        return false;
+    }
+    return SelectEntry(normalized);
 }
 
 AssetOperationResult AssetBrowser::RenameSelectedEntry(
@@ -400,13 +426,6 @@ void AssetBrowser::DrawToolbar()
     }
 
     ImGui::EndDisabled();
-    ImGui::SameLine();
-
-    if (ImGui::Button("Refresh"))
-    {
-        static_cast<void>(Refresh());
-    }
-
     ImGui::SameLine();
 
     if (ImGui::Button("New Folder"))
@@ -819,11 +838,6 @@ void AssetBrowser::DrawBackgroundContextMenu()
     if (ImGui::MenuItem("New Folder"))
     {
         RequestNewFolder();
-    }
-
-    if (ImGui::MenuItem("Refresh"))
-    {
-        static_cast<void>(Refresh());
     }
 
     ImGui::EndPopup();

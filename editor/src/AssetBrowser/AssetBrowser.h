@@ -28,7 +28,10 @@ public:
     void Draw(bool* open);
 
     [[nodiscard]] bool Refresh();
+    [[nodiscard]] std::size_t RefreshCount() const noexcept;
     [[nodiscard]] bool SelectEntry(
+        const std::filesystem::path& relativePath);
+    [[nodiscard]] bool RevealEntry(
         const std::filesystem::path& relativePath);
     [[nodiscard]] AssetOperationResult RenameSelectedEntry(
         std::string_view newName);
@@ -121,6 +124,7 @@ private:
     bool openRenamePopup_ = false;
     bool openDeletePopup_ = false;
     bool openVoxInspectionPopup_ = false;
+    std::size_t refreshCount_ = 0U;
 };
 
 } // namespace VoxelForge::Editor

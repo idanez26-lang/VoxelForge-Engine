@@ -103,6 +103,24 @@ else()
         VoxelForgeEditorQualityOfLife PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorModelImport STATIC)
+target_sources(
+    VoxelForgeEditorModelImport
+    PRIVATE src/ModelImport/ModelImportService.cpp
+)
+target_include_directories(
+    VoxelForgeEditorModelImport
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_features(VoxelForgeEditorModelImport PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorModelImport PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorModelImport PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(VoxelForgeEditor)
 
 if(WIN32)
@@ -191,6 +209,7 @@ target_link_libraries(
     PRIVATE
         VoxelForgeEditorAssetBrowser
         VoxelForgeEditorCommands
+        VoxelForgeEditorModelImport
         VoxelForgeEditorQualityOfLife
         VoxelForgeEditorVoxelSelection
         VoxelForgeProject

@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace VoxelForge::Editor
 {
@@ -18,7 +19,8 @@ enum class FileDialogStatus
 enum class FileDialogKind
 {
     ProjectParentFolder,
-    ProjectFile
+    ProjectFile,
+    ModelFiles
 };
 
 struct FileDialogResult final
@@ -27,6 +29,7 @@ struct FileDialogResult final
     FileDialogKind Kind = FileDialogKind::ProjectParentFolder;
     std::filesystem::path Path;
     std::string Error;
+    std::vector<std::filesystem::path> Paths;
 };
 
 class FileDialogResultChannel final
@@ -68,6 +71,8 @@ public:
     [[nodiscard]] virtual bool ChooseProjectParentFolder(
         const std::filesystem::path& initialDirectory) = 0;
     [[nodiscard]] virtual bool ChooseProjectFile(
+        const std::filesystem::path& initialDirectory) = 0;
+    [[nodiscard]] virtual bool ChooseModelFiles(
         const std::filesystem::path& initialDirectory) = 0;
     [[nodiscard]] virtual std::optional<FileDialogResult> ConsumeResult() = 0;
     [[nodiscard]] virtual bool IsPending() const noexcept = 0;

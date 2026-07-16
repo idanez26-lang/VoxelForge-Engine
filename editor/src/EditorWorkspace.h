@@ -9,6 +9,7 @@
 #include "Commands/Voxel/PaintVoxelCommand.h"
 #include "EditorCamera.h"
 #include "EditorExitRequest.h"
+#include "ModelImport/ModelImportService.h"
 #include "Platform/FileDialogService.h"
 #include "Platform/ProjectFolderOpener.h"
 #include "Project/ProjectDialogPreferences.h"
@@ -70,6 +71,10 @@ public:
     [[nodiscard]] bool VoxelSaveSmokePassed() const noexcept;
     [[nodiscard]] bool RunAddVoxelSmokeStep(std::size_t frame);
     [[nodiscard]] bool AddVoxelSmokePassed() const noexcept;
+    [[nodiscard]] bool RunModelImportSmokeStep(
+        std::size_t frame,
+        const std::filesystem::path& sourcePath);
+    [[nodiscard]] bool ModelImportSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -97,6 +102,7 @@ private:
     void DrawProjectDialogs();
     void DrawNewProjectDialog();
     void DrawOpenProjectDialog();
+    void DrawModelImportDialogs();
     void DrawDirtyConfirmationDialog();
     void ConsumeFileDialogResult();
     [[nodiscard]] bool DrawPathInput(
@@ -105,6 +111,7 @@ private:
 
     void RequestNewProjectDialog();
     void RequestOpenProjectDialog();
+    void RequestImportModelDialog();
     void RequestExit();
     void RequestCloseProject();
     void RequestOpenProject(
@@ -123,6 +130,11 @@ private:
     void SaveProject();
     [[nodiscard]] bool SaveVoxelModel();
     void CloseProject();
+    void SynchronizeProjectAssets();
+    void BeginModelImport(std::vector<std::filesystem::path> sourcePaths);
+    void ContinueModelImport(ModelImportCollisionAction collisionAction);
+    void FinishModelImport();
+    void LogModelImport(const ModelImportResult& result);
     [[nodiscard]] bool OpenVoxInViewportNow(
         const std::filesystem::path& filePath);
     void OpenProjectFolder();
@@ -145,6 +157,7 @@ private:
     Project::ProjectManager& projectManager_;
     WindowTitleCallback windowTitleCallback_;
     AssetBrowser assetBrowser_;
+    ModelImportService modelImportService_;
     EditorCamera viewportCamera_;
     ViewportRenderer viewportRenderer_;
     VoxelViewportState viewportState_;
@@ -174,6 +187,13 @@ private:
     std::string projectDialogError_;
     std::string welcomeError_;
     std::optional<std::filesystem::path> failedRecentProjectPath_;
+    std::vector<std::filesystem::path> selectedImportPaths_;
+    std::vector<std::filesystem::path> pendingImportPaths_;
+    std::vector<std::filesystem::path> successfulImportPaths_;
+    std::optional<ModelImportResult> pendingImportCollision_;
+    std::optional<std::filesystem::path> importedModelToOpen_;
+    std::size_t pendingImportIndex_ = 0U;
+    std::size_t requestedImportCount_ = 0U;
 
     bool showExplorer_ = true;
     bool showScene_ = true;
@@ -185,6 +205,9 @@ private:
     bool showAboutPopup_ = false;
     bool showNewProjectPopup_ = false;
     bool showOpenProjectPopup_ = false;
+    bool showImportConfirmationPopup_ = false;
+    bool showImportCollisionPopup_ = false;
+    bool showOpenImportedModelPopup_ = false;
     bool showDirtyConfirmationPopup_ = false;
     bool resetLayoutRequested_ = false;
     bool voxelViewportRendered_ = false;
@@ -235,6 +258,11 @@ private:
     bool addVoxelSmokeUndone_ = false;
     bool addVoxelSmokeRedoneAndSaved_ = false;
     bool addVoxelSmokeReloaded_ = false;
+    bool modelImportSmokeImported_ = false;
+    bool modelImportSmokeRefreshed_ = false;
+    bool modelImportSmokeOpened_ = false;
+    std::size_t modelImportSmokeRenderBaseline_ = 0U;
+    std::filesystem::path modelImportSmokeDestination_;
 };
 
 } // namespace VoxelForge::Editor

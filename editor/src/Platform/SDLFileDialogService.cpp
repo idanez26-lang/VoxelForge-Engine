@@ -143,6 +143,10 @@ void SDLCALL OnDialogComplete(
         {
             result.Status = FileDialogStatus::Success;
             result.Path = FromUtf8(fileList[0]);
+            for (std::size_t index = 0U; fileList[index] != nullptr; ++index)
+            {
+                result.Paths.push_back(FromUtf8(fileList[index]));
+            }
         }
 
         static_cast<void>(context->Producer.Publish(std::move(result)));
@@ -157,7 +161,8 @@ void SDLCALL OnDialogComplete(
                 FileDialogStatus::Error,
                 context->Kind,
                 {},
-                "Unable to copy the system file dialog result."}));
+                "Unable to copy the system file dialog result.",
+                {}}));
         }
         catch (...)
         {
@@ -219,6 +224,30 @@ public:
         return true;
     }
 
+    bool ChooseModelFiles(
+        const std::filesystem::path& initialDirectory) override
+    {
+        if (pending_)
+        {
+            return false;
+        }
+        auto context = std::make_unique<DialogContext>(DialogContext{
+            channel_.CreateProducer(), FileDialogKind::ModelFiles,
+            ToUtf8(initialDirectory), {"MagicaVoxel Model", "vox"}});
+        DialogContext* rawContext = context.release();
+        pending_ = true;
+        SDL_ShowOpenFileDialog(
+            OnDialogComplete,
+            rawContext,
+            nullptr,
+            &rawContext->Filter,
+            1,
+            rawContext->InitialDirectory.empty()
+                ? nullptr : rawContext->InitialDirectory.c_str(),
+            true);
+        return true;
+    }
+
     std::optional<FileDialogResult> ConsumeResult() override
     {
         std::optional<FileDialogResult> result = channel_.Consume();
@@ -249,6 +278,10 @@ public:
     bool ChooseProjectFile(const std::filesystem::path&) override
     {
         return Begin(FileDialogKind::ProjectFile);
+    }
+    bool ChooseModelFiles(const std::filesystem::path&) override
+    {
+        return Begin(FileDialogKind::ModelFiles);
     }
     std::optional<FileDialogResult> ConsumeResult() override
     {

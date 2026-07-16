@@ -163,6 +163,22 @@ int main()
             "Consuming a simulated result must release the active request."))
         return 1;
 
+    if (!Expect(simulatedDialog->ChooseModelFiles(temporary.Path()),
+            "A multiple model dialog request must start.") ||
+        !Expect(simulatedDialog->InjectSimulatedResult({
+                FileDialogStatus::Success,
+                FileDialogKind::ModelFiles,
+                temporary.Path() / "castle.vox",
+                {},
+                {temporary.Path() / "castle.vox",
+                 temporary.Path() / "tree.vox"}}),
+            "The model dialog must accept multiple paths.")) return 1;
+    const auto simulatedModels = simulatedDialog->ConsumeResult();
+    if (!Expect(simulatedModels &&
+                simulatedModels->Status == FileDialogStatus::Success &&
+                simulatedModels->Paths.size() == 2U,
+            "Multiple model paths must survive the dialog channel.")) return 1;
+
     ShortcutContext shortcut;
     if (!Expect(CanRunProjectShortcut(ProjectShortcut::NewProject, shortcut),
             "New must be available without a project.") ||

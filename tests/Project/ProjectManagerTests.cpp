@@ -104,6 +104,13 @@ int RunProjectManagerTests(const std::filesystem::path& temporaryRoot)
 
     if (!fs::is_regular_file(expectedProjectFile) ||
         !fs::is_directory(expectedRoot / "Assets") ||
+        !fs::is_directory(expectedRoot / "Assets" / "Models") ||
+        !fs::is_directory(expectedRoot / "Assets" / "Materials") ||
+        !fs::is_directory(expectedRoot / "Assets" / "Textures") ||
+        !fs::is_directory(expectedRoot / "Assets" / "Scenes") ||
+        !fs::is_directory(expectedRoot / "Assets" / "Prefabs") ||
+        !fs::is_directory(expectedRoot / "Assets" / "Imports") ||
+        !fs::is_directory(expectedRoot / "Assets" / "Generated") ||
         !fs::is_directory(expectedRoot / "Scenes") ||
         !fs::is_directory(expectedRoot / "Cache"))
     {

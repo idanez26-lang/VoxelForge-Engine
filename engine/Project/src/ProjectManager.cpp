@@ -4,6 +4,7 @@
 #include "VoxelForge/Project/ProjectSerializer.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <iterator>
 #include <string_view>
@@ -16,6 +17,17 @@ namespace
 {
 
 constexpr std::string_view ProjectExtension = ".vfproject";
+constexpr std::array<std::string_view, 10> ProjectDirectories{
+    "Assets",
+    "Assets/Models",
+    "Assets/Materials",
+    "Assets/Textures",
+    "Assets/Scenes",
+    "Assets/Prefabs",
+    "Assets/Imports",
+    "Assets/Generated",
+    "Scenes",
+    "Cache"};
 
 std::string ToUpper(std::string value)
 {
@@ -109,11 +121,12 @@ void CleanupCreatedScaffold(
     std::error_code ignoredError;
     std::filesystem::remove(projectFilePath, ignoredError);
     ignoredError.clear();
-    std::filesystem::remove(rootPath / "Cache", ignoredError);
-    ignoredError.clear();
-    std::filesystem::remove(rootPath / "Scenes", ignoredError);
-    ignoredError.clear();
-    std::filesystem::remove(rootPath / "Assets", ignoredError);
+    for (auto iterator = ProjectDirectories.rbegin();
+         iterator != ProjectDirectories.rend(); ++iterator)
+    {
+        ignoredError.clear();
+        std::filesystem::remove(rootPath / *iterator, ignoredError);
+    }
 
     if (rootWasCreated)
     {
@@ -126,7 +139,7 @@ bool HasRequiredProjectDirectories(const std::filesystem::path& rootPath)
 {
     std::error_code error;
 
-    for (const std::string_view directory : {"Assets", "Scenes", "Cache"})
+    for (const std::string_view directory : ProjectDirectories)
     {
         if (!std::filesystem::is_directory(rootPath / directory, error) || error)
         {
@@ -299,11 +312,11 @@ std::shared_ptr<Project> ProjectManager::CreateProject(
         rootWasCreated = true;
     }
 
-    for (const std::string_view directory : {"Assets", "Scenes", "Cache"})
+    for (const std::string_view directory : ProjectDirectories)
     {
         filesystemError.clear();
 
-        if (!std::filesystem::create_directory(
+        if (!std::filesystem::create_directories(
                 rootPath / directory,
                 filesystemError) || filesystemError)
         {
