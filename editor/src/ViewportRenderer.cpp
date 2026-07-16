@@ -49,6 +49,11 @@ constexpr std::array<GuideFace, 6> GuideFaces{{
     {{0.0F, 0.0F, 1.0F}, {{{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}}}}
 }};
 
+constexpr float ViewportDepthClearValue = 1.0F;
+constexpr std::int64_t ViewportStencilClearValue = 0;
+static_assert(
+    ViewportDepthClearValue >= 0.0F && ViewportDepthClearValue <= 1.0F);
+
 void AppendBox(
     std::vector<GPUVertex>& vertices,
     std::vector<std::uint32_t>& indices,
@@ -396,10 +401,12 @@ void ViewportRenderer::ConfigureGuides(
 void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelCoordinates> hovered,
     std::optional<VoxelCoordinates> selected,
+    std::optional<VoxelCoordinates> addPreview,
     const Vec3 modelCenter) noexcept
 {
     if (hovered == selected) hovered.reset();
     if (hoveredHighlight_ == hovered && selectedHighlight_ == selected &&
+        addPreviewHighlight_ == addPreview &&
         modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
         modelCenter_.Z == modelCenter.Z)
     {
@@ -407,9 +414,10 @@ void ViewportRenderer::ConfigureHighlights(
     }
     hoveredHighlight_ = hovered;
     selectedHighlight_ = selected;
+    addPreviewHighlight_ = addPreview;
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
-        selectedHighlight_.has_value();
+        selectedHighlight_.has_value() || addPreviewHighlight_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
 }
 
@@ -418,8 +426,12 @@ bool ViewportRenderer::EnsureHighlights()
     if (!highlightsDirty_) return true;
     std::vector<GPUVertex> vertices;
     std::vector<std::uint32_t> indices;
-    vertices.reserve(24U * 12U * 2U);
-    indices.reserve(36U * 12U * 2U);
+    vertices.reserve(24U * 12U * 3U);
+    indices.reserve(36U * 12U * 3U);
+    if (addPreviewHighlight_)
+        AppendVoxelOutline(
+            vertices, indices, *addPreviewHighlight_, modelCenter_,
+            {0.18F, 1.0F, 0.32F, 1.0F});
     if (hoveredHighlight_)
         AppendVoxelOutline(vertices, indices, *hoveredHighlight_, modelCenter_,
             {1.0F, 0.88F, 0.12F, 1.0F});
@@ -527,12 +539,33 @@ bool ViewportRenderer::EnsureTargets(
         SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
         SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
         width, height, 1U, 1U, SDL_GPU_SAMPLECOUNT_1, 0U};
+    const SDL_PropertiesID depthProperties = SDL_CreateProperties();
+    if (depthProperties == 0U ||
+        !SDL_SetFloatProperty(
+            depthProperties,
+            SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_DEPTH_FLOAT,
+            ViewportDepthClearValue) ||
+        !SDL_SetNumberProperty(
+            depthProperties,
+            SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_STENCIL_NUMBER,
+            ViewportStencilClearValue))
+    {
+        if (depthProperties != 0U)
+        {
+            SDL_DestroyProperties(depthProperties);
+        }
+        SetError(
+            std::string("Unable to configure viewport depth target: ") +
+            SDL_GetError());
+        return false;
+    }
     const SDL_GPUTextureCreateInfo depthInfo{
         SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_D16_UNORM,
         SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
-        width, height, 1U, 1U, SDL_GPU_SAMPLECOUNT_1, 0U};
+        width, height, 1U, 1U, SDL_GPU_SAMPLECOUNT_1, depthProperties};
     colorTarget_ = SDL_CreateGPUTexture(device_, &colorInfo);
     depthTarget_ = SDL_CreateGPUTexture(device_, &depthInfo);
+    SDL_DestroyProperties(depthProperties);
     if (colorTarget_ == nullptr || depthTarget_ == nullptr)
     {
         ReleaseTargets();
@@ -578,7 +611,9 @@ bool ViewportRenderer::Render(
     colorInfo.cycle = true;
     SDL_GPUDepthStencilTargetInfo depthInfo{};
     depthInfo.texture = depthTarget_;
-    depthInfo.clear_depth = 1.0F;
+    depthInfo.clear_depth = ViewportDepthClearValue;
+    depthInfo.clear_stencil =
+        static_cast<std::uint8_t>(ViewportStencilClearValue);
     depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;
     depthInfo.store_op = SDL_GPU_STOREOP_DONT_CARE;
     depthInfo.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
@@ -660,7 +695,7 @@ void ViewportRenderer::ClearModel() noexcept
     vertexBuffer_ = nullptr;
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
-    ConfigureHighlights(std::nullopt, std::nullopt, {});
+    ConfigureHighlights(std::nullopt, std::nullopt, std::nullopt, {});
 }
 
 void ViewportRenderer::ReleaseHighlights() noexcept

@@ -148,6 +148,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorPaintVoxelTests>
 )
 add_executable(
+    VoxelForgeEditorAddVoxelTests
+    Editor/AddVoxelTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorAddVoxelTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh VoxelForgeVoxel
+)
+vf_configure_test(VoxelForgeEditorAddVoxelTests)
+add_test(
+    NAME VoxelForge.Editor.AddVoxel
+    COMMAND $<TARGET_FILE:VoxelForgeEditorAddVoxelTests>
+)
+add_executable(
     VoxelForgeEditorQualityOfLifeTests
     Editor/QualityOfLifeTests.cpp
 )
@@ -259,6 +272,7 @@ set_tests_properties(
     VoxelForge.Editor.CommandHistory
     VoxelForge.Editor.EraseVoxel
     VoxelForge.Editor.PaintVoxel
+    VoxelForge.Editor.AddVoxel
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
     VoxelForge.Project.Manager
@@ -298,6 +312,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelSaveSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-save-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.AddVoxelSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --add-voxel-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -306,6 +324,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.PaintVoxelSmoke
         VoxelForge.Editor.QualityOfLifeSmoke
         VoxelForge.Editor.VoxelSaveSmoke
+        VoxelForge.Editor.AddVoxelSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

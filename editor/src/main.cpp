@@ -29,6 +29,7 @@ constexpr std::size_t VoxelSelectionSmokeTestFrameCount = 30;
 constexpr std::size_t EraseVoxelSmokeTestFrameCount = 35;
 constexpr std::size_t PaintVoxelSmokeTestFrameCount = 35;
 constexpr std::size_t VoxelSaveSmokeTestFrameCount = 30;
+constexpr std::size_t AddVoxelSmokeTestFrameCount = 40;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -43,6 +44,7 @@ struct CommandLine final
     bool PaintVoxelSmokeTest = false;
     bool PaintVoxelVisualTest = false;
     bool VoxelSaveSmokeTest = false;
+    bool AddVoxelSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -69,6 +71,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--paint-voxel-visual-test";
         result.VoxelSaveSmokeTest |=
             argument == "--voxel-save-smoke-test";
+        result.AddVoxelSmokeTest |=
+            argument == "--add-voxel-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -113,7 +117,9 @@ public:
         return true;
     }
 
-    bool Create(VoxelForge::Project::ProjectManager& projectManager)
+    bool Create(
+        VoxelForge::Project::ProjectManager& projectManager,
+        const bool singleVoxel)
     {
         const auto project = projectManager.CreateProject("ViewportTest", parent_);
         if (!project)
@@ -125,11 +131,15 @@ public:
         std::vector<std::uint8_t> size;
         AppendU32(size, 3U); AppendU32(size, 3U); AppendU32(size, 3U);
         std::vector<std::uint8_t> xyzi;
-        const std::array<std::array<std::uint8_t, 4>, 7> voxels{{
+        const std::array<std::array<std::uint8_t, 4>, 7> fullVoxels{{
             {{1U, 1U, 1U, 1U}}, {{0U, 1U, 1U, 2U}},
             {{2U, 1U, 1U, 3U}}, {{1U, 0U, 1U, 4U}},
             {{1U, 2U, 1U, 5U}}, {{1U, 1U, 0U, 6U}},
             {{1U, 1U, 2U, 7U}}}};
+        const std::vector<std::array<std::uint8_t, 4>> voxels = singleVoxel
+            ? std::vector<std::array<std::uint8_t, 4>>{{{1U, 1U, 1U, 1U}}}
+            : std::vector<std::array<std::uint8_t, 4>>(
+                fullVoxels.begin(), fullVoxels.end());
         AppendU32(xyzi, static_cast<std::uint32_t>(voxels.size()));
         for (const auto& voxel : voxels)
         {
@@ -190,6 +200,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.PaintVoxelSmokeTest ||
             commandLine.PaintVoxelVisualTest ||
             commandLine.VoxelSaveSmokeTest ||
+            commandLine.AddVoxelSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
@@ -200,7 +211,8 @@ int main(const int argumentCount, char* arguments[])
             viewportTest
                 ? viewportFixture.RecentProjectsPath()
                 : VoxelForge::Project::RecentProjects::DefaultStorageFilePath());
-        if (viewportTest && !viewportFixture.Create(projectManager))
+        if (viewportTest && !viewportFixture.Create(
+                projectManager, commandLine.AddVoxelSmokeTest))
         {
             std::cerr << "[FATAL] Unable to create viewport test fixture.\n";
             return 1;
@@ -222,6 +234,8 @@ int main(const int argumentCount, char* arguments[])
                     ? PaintVoxelSmokeTestFrameCount
                     : commandLine.VoxelSaveSmokeTest
                     ? VoxelSaveSmokeTestFrameCount
+                    : commandLine.AddVoxelSmokeTest
+                    ? AddVoxelSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -235,7 +249,8 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.VoxelSelectionSmokeTest ||
                     commandLine.EraseVoxelSmokeTest ||
                     commandLine.PaintVoxelSmokeTest ||
-                    commandLine.VoxelSaveSmokeTest,
+                    commandLine.VoxelSaveSmokeTest ||
+                    commandLine.AddVoxelSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -243,6 +258,7 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.PaintVoxelSmokeTest,
                 commandLine.PaintVoxelVisualTest,
                 commandLine.VoxelSaveSmokeTest,
+                commandLine.AddVoxelSmokeTest,
                 commandLine.QualityOfLifeSmokeTest,
                 commandLine.QualityOfLifeSmokeTest
                     ? viewportFixture.Parent() : std::filesystem::path{});

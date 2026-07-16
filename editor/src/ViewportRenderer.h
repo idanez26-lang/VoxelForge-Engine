@@ -34,6 +34,7 @@ public:
     void ConfigureHighlights(
         std::optional<VoxelCoordinates> hovered,
         std::optional<VoxelCoordinates> selected,
+        std::optional<VoxelCoordinates> addPreview,
         Vec3 modelCenter) noexcept;
     void ClearModel() noexcept;
     [[nodiscard]] bool Render(
@@ -92,6 +93,7 @@ private:
     bool highlightsDirty_ = false;
     std::optional<VoxelCoordinates> hoveredHighlight_;
     std::optional<VoxelCoordinates> selectedHighlight_;
+    std::optional<VoxelCoordinates> addPreviewHighlight_;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;
     std::size_t highlightRenderCount_ = 0U;

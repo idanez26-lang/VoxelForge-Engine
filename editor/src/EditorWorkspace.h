@@ -2,6 +2,8 @@
 
 #include "AssetBrowser/AssetBrowser.h"
 #include "Commands/CommandHistory.h"
+#include "Commands/Voxel/AddVoxelCommand.h"
+#include "Commands/Voxel/AddVoxelTarget.h"
 #include "Commands/Voxel/EraseVoxelCommand.h"
 #include "Commands/Voxel/PaintPaletteSelection.h"
 #include "Commands/Voxel/PaintVoxelCommand.h"
@@ -66,6 +68,8 @@ public:
     [[nodiscard]] bool PaintVoxelSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelSaveSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelSaveSmokePassed() const noexcept;
+    [[nodiscard]] bool RunAddVoxelSmokeStep(std::size_t frame);
+    [[nodiscard]] bool AddVoxelSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -128,6 +132,7 @@ private:
     void UpdateVoxelHighlights() noexcept;
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
+    [[nodiscard]] bool AddAdjacentVoxel();
 
     [[nodiscard]] std::uint64_t VoxelModelGeneration() const noexcept override;
     [[nodiscard]] Voxel::VoxelModel* ActiveVoxelModel() noexcept override;
@@ -219,6 +224,17 @@ private:
     bool voxelSaveSmokePaintReloaded_ = false;
     bool voxelSaveSmokeErasedAndSaved_ = false;
     bool voxelSaveSmokeEraseReloaded_ = false;
+    std::filesystem::path addVoxelSmokeSavePath_;
+    VoxelCoordinates addVoxelSmokeTarget_{};
+    std::size_t addVoxelSmokePreviewUploadBaseline_ = 0U;
+    std::size_t addVoxelSmokeExecuteRenderBaseline_ = 0U;
+    std::size_t addVoxelSmokeUndoRenderBaseline_ = 0U;
+    std::size_t addVoxelSmokeReloadRenderBaseline_ = 0U;
+    bool addVoxelSmokeSelected_ = false;
+    bool addVoxelSmokeExecuted_ = false;
+    bool addVoxelSmokeUndone_ = false;
+    bool addVoxelSmokeRedoneAndSaved_ = false;
+    bool addVoxelSmokeReloaded_ = false;
 };
 
 } // namespace VoxelForge::Editor

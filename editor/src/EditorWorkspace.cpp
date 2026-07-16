@@ -663,6 +663,15 @@ void EditorWorkspace::DrawScenePanel()
 
     bool eraseRequested = false;
     bool paintRequested = false;
+    bool addRequested = false;
+    const AddVoxelTarget addTarget = FindAddVoxelTarget(
+        viewportGrid, voxelSelection_.Selected());
+    ImGui::BeginDisabled(!addTarget);
+    if (ImGui::Button("Add Adjacent"))
+        addRequested = true;
+    ImGui::EndDisabled();
+    DrawTooltip("Add a voxel next to the selected face (A)");
+    ImGui::SameLine();
     const bool canErase = hasModel && voxelSelection_.Selected().has_value();
     ImGui::BeginDisabled(!canErase);
     if (ImGui::Button("Erase Selected"))
@@ -671,6 +680,11 @@ void EditorWorkspace::DrawScenePanel()
     DrawTooltip("Erase the selected voxel (Delete)");
     ImGui::SameLine();
     ImGui::TextDisabled("Delete");
+    if (voxelSelection_.Selected() && !addTarget)
+    {
+        ImGui::TextDisabled(
+            "%s", AddVoxelTargetStatusMessage(addTarget.Status));
+    }
     if (voxelSaveState_.IsDirty())
     {
         ImGui::SameLine();
@@ -797,6 +811,8 @@ void EditorWorkspace::DrawScenePanel()
             eraseRequested = true;
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_P, false))
             paintRequested = true;
+        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_A, false))
+            addRequested = true;
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
             voxelSelection_.ClearSelection())
             UpdateVoxelHighlights();
@@ -811,6 +827,7 @@ void EditorWorkspace::DrawScenePanel()
     }
     if (eraseRequested) static_cast<void>(EraseSelectedVoxel());
     if (paintRequested) static_cast<void>(PaintSelectedVoxel());
+    if (addRequested) static_cast<void>(AddAdjacentVoxel());
     ImGui::End();
 }
 
@@ -2141,6 +2158,124 @@ bool EditorWorkspace::VoxelSaveSmokePassed() const noexcept
         viewportRenderer_.ModelRenderCount() > voxelSaveSmokeRenderBaseline_;
 }
 
+bool EditorWorkspace::RunAddVoxelSmokeStep(const std::size_t frame)
+{
+    Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    if (grid == nullptr)
+    {
+        return false;
+    }
+
+    if (frame == 0U)
+    {
+        if (grid->OccupiedVoxelCount() != 1U ||
+            viewportState_.Statistics().TriangleCount != 12U)
+        {
+            return false;
+        }
+        const auto hit = RaycastVoxelGrid(
+            *grid, {{-1.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit)
+        {
+            return false;
+        }
+        static_cast<void>(paintPaletteSelection_.SetIndex(255U));
+        addVoxelSmokePreviewUploadBaseline_ =
+            viewportRenderer_.HighlightUploadCount();
+        static_cast<void>(voxelSelection_.SetHovered(hit));
+        static_cast<void>(voxelSelection_.SelectHovered());
+        const AddVoxelTarget target = FindAddVoxelTarget(grid, hit);
+        if (!target)
+        {
+            return false;
+        }
+        addVoxelSmokeTarget_ = *target.Coordinates;
+        UpdateVoxelHighlights();
+        addVoxelSmokeSelected_ = true;
+    }
+    else if (frame == 1U)
+    {
+        addVoxelSmokeExecuteRenderBaseline_ =
+            viewportRenderer_.ModelRenderCount();
+        const bool added = AddAdjacentVoxel();
+        const Voxel::Voxel* voxel = grid->Get(
+            addVoxelSmokeTarget_.X,
+            addVoxelSmokeTarget_.Y,
+            addVoxelSmokeTarget_.Z);
+        addVoxelSmokeExecuted_ = added && voxel != nullptr &&
+            voxel->IsOccupied() && voxel->ColorIndex == 255U &&
+            voxel->Flags == Voxel::Voxel::OccupiedFlag &&
+            grid->OccupiedVoxelCount() == 2U &&
+            viewportState_.Statistics().TriangleCount == 20U &&
+            voxelSaveState_.IsDirty() && !voxelSelection_.Selected() &&
+            viewportRenderer_.HighlightUploadCount() >
+                addVoxelSmokePreviewUploadBaseline_;
+    }
+    else if (frame == 10U)
+    {
+        const bool rendered = viewportRenderer_.ModelRenderCount() >
+            addVoxelSmokeExecuteRenderBaseline_;
+        UndoCommand();
+        addVoxelSmokeUndone_ = rendered &&
+            !grid->Get(
+                addVoxelSmokeTarget_.X,
+                addVoxelSmokeTarget_.Y,
+                addVoxelSmokeTarget_.Z)->IsOccupied() &&
+            grid->OccupiedVoxelCount() == 1U &&
+            viewportState_.Statistics().TriangleCount == 12U;
+        addVoxelSmokeUndoRenderBaseline_ =
+            viewportRenderer_.ModelRenderCount();
+    }
+    else if (frame == 20U)
+    {
+        const bool rendered = viewportRenderer_.ModelRenderCount() >
+            addVoxelSmokeUndoRenderBaseline_;
+        RedoCommand();
+        const Voxel::Voxel* voxel = grid->Get(
+            addVoxelSmokeTarget_.X,
+            addVoxelSmokeTarget_.Y,
+            addVoxelSmokeTarget_.Z);
+        addVoxelSmokeSavePath_ = voxelSaveState_.SavePath();
+        const bool saved = voxel != nullptr && voxel->IsOccupied() &&
+            SaveVoxelModel();
+        addVoxelSmokeRedoneAndSaved_ = rendered && saved &&
+            voxel->ColorIndex == 255U && grid->OccupiedVoxelCount() == 2U &&
+            viewportState_.Statistics().TriangleCount == 20U &&
+            !voxelSaveState_.IsDirty() && commandHistory_.CanUndo();
+    }
+    else if (frame == 25U)
+    {
+        ClearVoxelViewport();
+        if (!OpenVoxInViewportNow(addVoxelSmokeSavePath_))
+        {
+            return false;
+        }
+        grid = activeVoxelModel_->GetGrid(0U);
+        const Voxel::Voxel* voxel = grid ? grid->Get(
+            addVoxelSmokeTarget_.X,
+            addVoxelSmokeTarget_.Y,
+            addVoxelSmokeTarget_.Z) : nullptr;
+        addVoxelSmokeReloaded_ = voxel != nullptr && voxel->IsOccupied() &&
+            voxel->ColorIndex == 255U && grid->OccupiedVoxelCount() == 2U &&
+            viewportState_.Statistics().TriangleCount == 20U &&
+            !voxelSaveState_.IsDirty() && !commandHistory_.CanUndo() &&
+            !commandHistory_.CanRedo();
+        addVoxelSmokeReloadRenderBaseline_ =
+            viewportRenderer_.ModelRenderCount();
+    }
+    return true;
+}
+
+bool EditorWorkspace::AddVoxelSmokePassed() const noexcept
+{
+    return addVoxelSmokeSelected_ && addVoxelSmokeExecuted_ &&
+        addVoxelSmokeUndone_ && addVoxelSmokeRedoneAndSaved_ &&
+        addVoxelSmokeReloaded_ &&
+        viewportRenderer_.ModelRenderCount() >
+            addVoxelSmokeReloadRenderBaseline_;
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -2276,6 +2411,41 @@ bool EditorWorkspace::PaintSelectedVoxel()
     return true;
 }
 
+bool EditorWorkspace::AddAdjacentVoxel()
+{
+    Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    const AddVoxelTarget target =
+        FindAddVoxelTarget(grid, voxelSelection_.Selected());
+    if (!target)
+    {
+        AddConsoleMessage(
+            std::string("Add voxel failed: ") +
+            AddVoxelTargetStatusMessage(target.Status));
+        return false;
+    }
+
+    const VoxelCoordinates destination = *target.Coordinates;
+    CommandResult result = commandHistory_.Execute(
+        std::make_unique<AddVoxelCommand>(
+            static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
+            destination.X, destination.Y, destination.Z,
+            paintPaletteSelection_.Index()));
+    if (!result)
+    {
+        AddConsoleMessage("Add voxel failed: " + result.Message);
+        return false;
+    }
+
+    // The shared edit completion rule clears hover and selection after every
+    // successful Execute/Undo/Redo. This is the safest deterministic v1 rule.
+    AddConsoleMessage(
+        "Added voxel: " + std::to_string(destination.X) + ", " +
+        std::to_string(destination.Y) + ", " +
+        std::to_string(destination.Z));
+    return true;
+}
+
 std::uint64_t EditorWorkspace::VoxelModelGeneration() const noexcept
 {
     return voxelModelGeneration_;
@@ -2340,9 +2510,15 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         return hit ? std::optional<VoxelCoordinates>(hit->Coordinates)
                    : std::nullopt;
     };
+    const Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    const AddVoxelTarget addTarget =
+        FindAddVoxelTarget(grid, voxelSelection_.Selected());
     viewportRenderer_.ConfigureHighlights(
         coordinates(voxelSelection_.Hovered()),
-        coordinates(voxelSelection_.Selected()), voxelModelCenter_);
+        coordinates(voxelSelection_.Selected()),
+        addTarget ? addTarget.Coordinates : std::nullopt,
+        voxelModelCenter_);
 }
 
 void EditorWorkspace::ClearVoxelViewport() noexcept
