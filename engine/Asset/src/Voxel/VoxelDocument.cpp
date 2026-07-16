@@ -321,6 +321,7 @@ VoxelDocumentOperationResult VoxelDocument::SetPaletteColor(
     if (palette_[paletteIndex] == color)
         return Success(false, "Palette color is unchanged.");
     palette_[paletteIndex] = color;
+    hasCustomPalette_ = true;
     RecordChange();
     return Success(true, "Palette color changed.");
 }

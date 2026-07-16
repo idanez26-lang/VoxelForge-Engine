@@ -18,10 +18,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <chrono>
+#include <ctime>
 #include <fstream>
+#include <iomanip>
 #include <optional>
 #include <memory>
 #include <string_view>
+#include <sstream>
 #include <utility>
 
 namespace VoxelForge::Editor
@@ -152,6 +156,22 @@ std::optional<std::uint64_t> HashFileContents(
     }
     return input.eof() ? std::optional<std::uint64_t>(hash) : std::nullopt;
 }
+
+std::string FormatSaveTime(
+    const std::chrono::system_clock::time_point time)
+{
+    if (time == std::chrono::system_clock::time_point{}) return "Never";
+    const std::time_t value = std::chrono::system_clock::to_time_t(time);
+    std::tm local{};
+#if defined(_WIN32)
+    if (localtime_s(&local, &value) != 0) return "Unavailable";
+#else
+    if (localtime_r(&value, &local) == nullptr) return "Unavailable";
+#endif
+    std::ostringstream output;
+    output << std::put_time(&local, "%Y-%m-%d %H:%M:%S");
+    return output.str();
+}
 }
 
 EditorWorkspace::EditorWorkspace(
@@ -184,6 +204,16 @@ EditorWorkspace::EditorWorkspace(
         [this]()
         {
             static_cast<void>(assetBrowser_.Refresh());
+        });
+    voxelDocumentSaveService_.SetRefreshCallback(
+        [this]()
+        {
+            static_cast<void>(assetBrowser_.Refresh());
+        });
+    voxelDocumentSaveService_.SetThumbnailInvalidationCallback(
+        [this]()
+        {
+            assetBrowser_.InvalidateThumbnails();
         });
     SynchronizeProjectAssets();
     if (!projectDialogPreferences_.Load())
@@ -425,17 +455,21 @@ void EditorWorkspace::DrawMainMenuBar()
         }
         DrawTooltip("Save the active project metadata");
 
-        const bool hasActiveVoxelModel = activeVoxelModel_.has_value();
+        const Asset::Voxel::VoxelDocument* activeDocument =
+            voxelDocumentSession_.ActiveDocument();
+        const bool canSaveVoxel = activeDocument != nullptr &&
+            activeDocument->IsDirty() &&
+            !voxelDocumentSaveService_.IsBusy();
         if (ImGui::MenuItem(
-                "Save Voxel Model",
+                "Save",
                 "Ctrl+S",
                 false,
-                hasActiveVoxelModel))
+                canSaveVoxel))
         {
             static_cast<void>(SaveVoxelModel());
         }
         DrawTooltip(
-            "Save the active model as .vfvoxel (Ctrl+S when modified)");
+            "Save the active VOX model");
 
         ImGui::BeginDisabled();
         ImGui::MenuItem("Save Project As...", "Ctrl+Shift+S");
@@ -657,9 +691,13 @@ void EditorWorkspace::HandleCommandShortcuts()
     }
     else if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, shortcutFlags))
     {
-        if (activeVoxelModel_ && voxelSaveState_.IsDirty())
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (document)
         {
-            static_cast<void>(SaveVoxelModel());
+            if (document->IsDirty() &&
+                !voxelDocumentSaveService_.IsBusy())
+                static_cast<void>(SaveVoxelModel());
         }
         else if (CanRunProjectShortcut(ProjectShortcut::SaveProject, context))
         {
@@ -939,6 +977,16 @@ void EditorWorkspace::DrawScenePanel()
             static_cast<ViewportBackground>(selectedBackground));
     }
     DrawTooltip("Choose the viewport background");
+
+    const Asset::Voxel::VoxelDocument* activeDocument =
+        voxelDocumentSession_.ActiveDocument();
+    const bool canSave = activeDocument != nullptr &&
+        activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
+    ImGui::BeginDisabled(!canSave);
+    if (ImGui::Button("Save")) static_cast<void>(SaveVoxelModel());
+    ImGui::EndDisabled();
+    DrawTooltip("Save the active VOX model");
+    ImGui::SameLine();
 
     const auto drawToolButton = [this](
         const char* inactiveLabel,
@@ -1380,6 +1428,18 @@ void EditorWorkspace::DrawInspectorPanel()
             voxelEditHistory_.EstimatedMemory());
         ImGui::Text("Saved State: %s",
             voxelEditHistory_.IsAtSavedState() ? "Current" : "Different");
+        const VoxelDocumentSaveResult& saveResult =
+            voxelDocumentSaveService_.LastResult();
+        ImGui::Text("Save Status: %s",
+            VoxelDocumentSaveStageName(voxelDocumentSaveService_.Stage()));
+        ImGui::Text("Last Save Time: %s",
+            FormatSaveTime(
+                voxelDocumentSaveService_.LastSaveTime()).c_str());
+        ImGui::TextWrapped("Last Save Result: %s",
+            saveResult.Message.empty() ? "None" : saveResult.Message.c_str());
+        ImGui::TextWrapped("Saved Path: %s",
+            saveResult.SavedPath.empty() ? "None"
+                : saveResult.SavedPath.string().c_str());
         ImGui::Text("Active Tool: %s",
             ActiveVoxelToolName(voxelToolState_.ActiveTool()));
         if (voxelToolState_.IsPencilActive())
@@ -1983,10 +2043,26 @@ void EditorWorkspace::DrawDirtyConfirmationDialog()
             ImGuiWindowFlags_AlwaysAutoResize))
         return;
 
-    ImGui::TextWrapped("The active voxel model has unsaved changes.");
-    ImGui::TextUnformatted("Discard changes?");
+    const Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const std::string fileName = document
+        ? document->SourcePath().filename().string() : "active model";
+    ImGui::TextWrapped("Save changes to %s?", fileName.c_str());
     ImGui::Spacing();
-    if (ImGui::Button("Discard"))
+    ImGui::BeginDisabled(voxelDocumentSaveService_.IsBusy());
+    if (ImGui::Button("Save"))
+    {
+        if (SaveVoxelModel())
+        {
+            const auto action =
+                dirtyActionConfirmation_.ContinueAfterSuccessfulSave();
+            ImGui::CloseCurrentPopup();
+            if (action) ExecutePendingDirtyAction(*action);
+        }
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Don't Save"))
     {
         const auto action = dirtyActionConfirmation_.Discard();
         ImGui::CloseCurrentPopup();
@@ -2178,7 +2254,7 @@ void EditorWorkspace::DrawOpenProjectDialog()
 
     if (ImGui::Button("Open"))
     {
-        if (voxelSaveState_.IsDirty())
+        if (HasUnsavedVoxelChanges())
         {
             RequestOpenProject(projectFilePath, false);
             ImGui::CloseCurrentPopup();
@@ -2244,7 +2320,7 @@ void EditorWorkspace::RequestImportModelDialog()
 void EditorWorkspace::CreateProject()
 {
     if (!dirtyActionConfirmation_.Request(
-            DestructiveAction::CreateProject, voxelSaveState_.IsDirty()))
+            DestructiveAction::CreateProject, HasUnsavedVoxelChanges()))
     {
         showDirtyConfirmationPopup_ = true;
         ImGui::CloseCurrentPopup();
@@ -2357,37 +2433,46 @@ void EditorWorkspace::SaveProject()
 
 bool EditorWorkspace::SaveVoxelModel()
 {
-    if (!activeVoxelModel_ || voxelSaveState_.SavePath().empty())
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document == nullptr)
     {
-        AddConsoleMessage("Voxel model save failed: no model is loaded.");
+        AddConsoleMessage("[Save] Failed: no active VOX document.");
         return false;
     }
-
-    const Voxel::VoxelSerializationResult result =
-        Voxel::VoxelModelSerializer::Save(
-            voxelSaveState_.SavePath(), *activeVoxelModel_);
-    if (!result)
+    const VoxelDocumentSaveResult result =
+        voxelDocumentSaveService_.Save(*document, voxelEditHistory_);
+    if (!result.Succeeded())
     {
-        AddConsoleMessage("Voxel model save failed: " + result.Message);
+        AddConsoleMessage("[Save] Failed to save " +
+            document->SourcePath().filename().string() + ": " +
+            result.Message);
         return false;
     }
-
     voxelSaveState_.MarkSaved();
-    if (Asset::Voxel::VoxelDocument* document =
-            voxelDocumentSession_.ActiveDocument())
-    {
-        voxelEditHistory_.MarkSavedState(*document);
-    }
-    static_cast<void>(assetBrowser_.Refresh());
-    AddConsoleMessage(
-        "Voxel model saved: " + voxelSaveState_.SavePath().string());
+    AddConsoleMessage("[Save] Saved " +
+        result.SavedPath.filename().string() + ".");
+    if (result.Warning.empty())
+        AddConsoleMessage("[Save] Updated metadata and thumbnail for " +
+            result.SavedPath.filename().string() + ".");
+    else
+        AddConsoleMessage("[Save] Saved " +
+            result.SavedPath.filename().string() + ", but " +
+            result.Warning);
     return true;
+}
+
+bool EditorWorkspace::HasUnsavedVoxelChanges() const noexcept
+{
+    return voxelDocumentSession_.HasActiveDocument()
+        ? voxelDocumentSession_.IsDirty()
+        : voxelSaveState_.IsDirty();
 }
 
 void EditorWorkspace::RequestExit()
 {
     if (dirtyActionConfirmation_.Request(
-            DestructiveAction::ExitApplication, voxelSaveState_.IsDirty()))
+            DestructiveAction::ExitApplication, HasUnsavedVoxelChanges()))
     {
         exitRequest_.RequestExit();
         return;
@@ -2398,7 +2483,7 @@ void EditorWorkspace::RequestExit()
 void EditorWorkspace::RequestCloseProject()
 {
     if (dirtyActionConfirmation_.Request(
-            DestructiveAction::CloseProject, voxelSaveState_.IsDirty()))
+            DestructiveAction::CloseProject, HasUnsavedVoxelChanges()))
     {
         CloseProject();
         return;
@@ -2414,7 +2499,7 @@ void EditorWorkspace::RequestOpenProject(
     pendingProjectPath_ = std::move(projectFilePath);
     pendingRecentProject_ = recentProject;
     if (dirtyActionConfirmation_.Request(
-            DestructiveAction::OpenProject, voxelSaveState_.IsDirty()))
+            DestructiveAction::OpenProject, HasUnsavedVoxelChanges()))
     {
         static_cast<void>(OpenProject(
             pendingProjectPath_, pendingRecentProject_));
@@ -2429,7 +2514,7 @@ void EditorWorkspace::RequestReplaceVoxelModel(std::filesystem::path filePath)
     if (dirtyActionConfirmation_.IsPending()) return;
     pendingVoxelPath_ = std::move(filePath);
     if (dirtyActionConfirmation_.Request(
-            DestructiveAction::ReplaceVoxelModel, voxelSaveState_.IsDirty()))
+            DestructiveAction::ReplaceVoxelModel, HasUnsavedVoxelChanges()))
     {
         static_cast<void>(OpenVoxInViewportNow(pendingVoxelPath_));
         pendingVoxelPath_.clear();
@@ -2511,6 +2596,7 @@ void EditorWorkspace::SynchronizeProjectAssets()
                 static_cast<void>(assetBrowser_.Refresh());
             });
         modelImportService_.ClearProjectRoot();
+        voxelDocumentSaveService_.ClearProject();
         assetBrowser_.ClearAssetsRoot();
         assetInspector_.ClearProject();
         return;
@@ -2529,6 +2615,8 @@ void EditorWorkspace::SynchronizeProjectAssets()
         AddConsoleMessage("Asset Inspector setup failed.");
     if (!voxelDocumentSession_.SetProjectRoot(project->RootPath()))
         AddConsoleMessage("Voxel document session setup failed.");
+    if (!voxelDocumentSaveService_.SetProjectRoot(project->RootPath()))
+        AddConsoleMessage("VOX save service setup failed.");
 }
 
 void EditorWorkspace::BeginModelImport(
@@ -2676,7 +2764,7 @@ void EditorWorkspace::LogModelImport(const ModelImportResult& result)
 bool EditorWorkspace::OpenVoxInViewport(
     const std::filesystem::path& filePath)
 {
-    if (voxelSaveState_.IsDirty())
+    if (HasUnsavedVoxelChanges())
     {
         RequestReplaceVoxelModel(filePath);
         return true;
@@ -3080,6 +3168,10 @@ bool EditorWorkspace::RunVoxelSaveSmokeStep(const std::size_t frame)
     {
         const bool painted = PaintSelectedVoxel();
         voxelSaveSmokePath_ = voxelSaveState_.SavePath();
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        voxelSaveSmokeRevisionAfterEdit_ = document
+            ? document->GetRevision() : 0U;
         const bool saved = painted && voxelSaveState_.IsDirty() &&
             SaveVoxelModel();
         const Voxel::Voxel* voxel = grid->Get(
@@ -3087,7 +3179,25 @@ bool EditorWorkspace::RunVoxelSaveSmokeStep(const std::size_t frame)
         voxelSaveSmokePaintedAndSaved_ = saved && voxel != nullptr &&
             voxel->ColorIndex == voxelSaveSmokeColor_ &&
             !voxelSaveState_.IsDirty() && voxelEditHistory_.CanUndo() &&
-            std::filesystem::is_regular_file(voxelSaveSmokePath_);
+            std::filesystem::is_regular_file(voxelSaveSmokePath_) &&
+            voxelSaveSmokePath_.extension() == ".vox";
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelSaveSmokeRevisionPreserved_ = document && saved &&
+            document->GetRevision() == voxelSaveSmokeRevisionAfterEdit_;
+        const MetadataReadResult metadata =
+            modelImportService_.ReadMetadataForModel(voxelSaveSmokePath_);
+        voxelSaveSmokeMetadataUpdated_ = metadata.Succeeded &&
+            metadata.Metadata.Analysis && metadata.Metadata.Analysis->Valid &&
+            metadata.Metadata.Analysis->VoxelCount ==
+                voxelSaveSmokeInitialVoxelCount_ &&
+            metadata.Metadata.SourceFile ==
+                voxelSaveSmokePath_.filename().string();
+        voxelSaveSmokeThumbnailUpdated_ = metadata.Succeeded &&
+            metadata.Metadata.Thumbnail &&
+            metadata.Metadata.Thumbnail->Status == ThumbnailStatus::Valid &&
+            std::filesystem::is_regular_file(
+                modelImportService_.ProjectRoot() / "Cache" / "Thumbnails" /
+                metadata.Metadata.Thumbnail->File);
     }
     else if (frame == 5U)
     {
@@ -3101,8 +3211,8 @@ bool EditorWorkspace::RunVoxelSaveSmokeStep(const std::size_t frame)
             voxelSaveSmokeX_, voxelSaveSmokeY_, voxelSaveSmokeZ_) : nullptr;
         voxelSaveSmokePaintReloaded_ = voxel != nullptr &&
             voxel->IsOccupied() && voxel->ColorIndex == voxelSaveSmokeColor_ &&
-            !voxelSaveState_.IsDirty() && !commandHistory_.CanUndo() &&
-            !commandHistory_.CanRedo() && !voxelSelection_.Selected();
+            !voxelSaveState_.IsDirty() && !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo() && !voxelSelection_.Selected();
     }
     else if (frame == 10U)
     {
@@ -3121,13 +3231,20 @@ bool EditorWorkspace::RunVoxelSaveSmokeStep(const std::size_t frame)
         static_cast<void>(voxelSelection_.SetHovered(hit));
         static_cast<void>(voxelSelection_.SelectHovered());
         const bool erased = EraseSelectedVoxel();
-        const bool saved = erased && voxelSaveState_.IsDirty() &&
+        const bool dirtyAfterErase = erased && voxelSaveState_.IsDirty();
+        UndoCommand();
+        const Voxel::Voxel* restored = grid->Get(
+            voxelSaveSmokeX_, voxelSaveSmokeY_, voxelSaveSmokeZ_);
+        const bool saved = dirtyAfterErase && restored &&
+            restored->IsOccupied() &&
+            restored->ColorIndex == voxelSaveSmokeColor_ &&
             SaveVoxelModel();
         voxel = grid->Get(
             voxelSaveSmokeX_, voxelSaveSmokeY_, voxelSaveSmokeZ_);
         voxelSaveSmokeErasedAndSaved_ = saved && voxel != nullptr &&
-            !voxel->IsOccupied() && !voxelSaveState_.IsDirty() &&
-            commandHistory_.CanUndo();
+            voxel->IsOccupied() &&
+            voxel->ColorIndex == voxelSaveSmokeColor_ &&
+            !voxelSaveState_.IsDirty() && voxelEditHistory_.CanRedo();
     }
     else if (frame == 15U)
     {
@@ -3139,18 +3256,85 @@ bool EditorWorkspace::RunVoxelSaveSmokeStep(const std::size_t frame)
         grid = activeVoxelModel_->GetGrid(0U);
         const Voxel::Voxel* voxel = grid ? grid->Get(
             voxelSaveSmokeX_, voxelSaveSmokeY_, voxelSaveSmokeZ_) : nullptr;
-        const auto temporary =
-            std::filesystem::path(voxelSaveSmokePath_.string() + ".tmp");
-        const auto backup =
-            std::filesystem::path(voxelSaveSmokePath_.string() + ".bak");
+        const auto temporary = VoxelDocumentSaveService::TemporaryPathFor(
+            voxelSaveSmokePath_);
+        const auto backup = VoxelDocumentSaveService::BackupPathFor(
+            voxelSaveSmokePath_);
         voxelSaveSmokeEraseReloaded_ = voxel != nullptr &&
-            !voxel->IsOccupied() && grid->OccupiedVoxelCount() + 1U ==
-                voxelSaveSmokeInitialVoxelCount_ &&
-            !voxelSaveState_.IsDirty() && !commandHistory_.CanUndo() &&
-            !commandHistory_.CanRedo() && !voxelSelection_.Selected() &&
+            voxel->IsOccupied() &&
+            voxel->ColorIndex == voxelSaveSmokeColor_ &&
+            grid->OccupiedVoxelCount() == voxelSaveSmokeInitialVoxelCount_ &&
+            !voxelSaveState_.IsDirty() && !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo() && !voxelSelection_.Selected() &&
             !std::filesystem::exists(temporary) &&
             !std::filesystem::exists(backup);
         voxelSaveSmokeRenderBaseline_ = viewportRenderer_.ModelRenderCount();
+    }
+    else if (frame == 20U)
+    {
+        const auto baselineHash = HashFileContents(voxelSaveSmokePath_);
+        if (!baselineHash) return false;
+        voxelSaveSmokeFailureBaselineHash_ = *baselineHash;
+        const Voxel::Voxel* voxel = grid->Get(
+            voxelSaveSmokeX_, voxelSaveSmokeY_, voxelSaveSmokeZ_);
+        if (voxel == nullptr || !voxel->IsOccupied()) return false;
+        const std::uint8_t failureColor = static_cast<std::uint8_t>(
+            voxelSaveSmokeColor_ == 255U ? 254U : voxelSaveSmokeColor_ + 1U);
+        static_cast<void>(paintPaletteSelection_.SetIndex(failureColor));
+        const VoxelRaycastHit hit{
+            {voxelSaveSmokeX_, voxelSaveSmokeY_, voxelSaveSmokeZ_},
+            VoxelHitFace::NegativeX, 0.0F, {}, voxel->ColorIndex};
+        static_cast<void>(voxelSelection_.SetHovered(hit));
+        static_cast<void>(voxelSelection_.SelectHovered());
+        if (!PaintSelectedVoxel() || !voxelSaveState_.IsDirty()) return false;
+        const std::filesystem::path temporary =
+            VoxelDocumentSaveService::TemporaryPathFor(voxelSaveSmokePath_);
+        {
+            std::ofstream blocker(temporary, std::ios::binary | std::ios::trunc);
+            blocker << "controlled smoke transaction blocker";
+        }
+        const bool confirmationRequested = !dirtyActionConfirmation_.Request(
+            DestructiveAction::CloseProject, true);
+        const bool saveFailed = !SaveVoxelModel();
+        const auto afterFailureHash = HashFileContents(voxelSaveSmokePath_);
+        voxelSaveSmokeFailureRolledBack_ = confirmationRequested &&
+            saveFailed && dirtyActionConfirmation_.IsPending() &&
+            projectManager_.HasActiveProject() &&
+            voxelDocumentSession_.HasActiveDocument() &&
+            voxelSaveState_.IsDirty() && afterFailureHash &&
+            *afterFailureHash == voxelSaveSmokeFailureBaselineHash_;
+        dirtyActionConfirmation_.Cancel();
+        std::error_code cleanup;
+        std::filesystem::remove(temporary, cleanup);
+        if (cleanup) return false;
+    }
+    else if (frame == 22U)
+    {
+        const bool cancelRequested = !dirtyActionConfirmation_.Request(
+            DestructiveAction::CloseProject, voxelSaveState_.IsDirty());
+        dirtyActionConfirmation_.Cancel();
+        const bool cancelKeptDocument =
+            projectManager_.HasActiveProject() &&
+            voxelDocumentSession_.HasActiveDocument() &&
+            voxelSaveState_.IsDirty();
+        const bool discardRequested = !dirtyActionConfirmation_.Request(
+            DestructiveAction::CloseProject, voxelSaveState_.IsDirty());
+        const auto action = dirtyActionConfirmation_.Discard();
+        if (action) ExecutePendingDirtyAction(*action);
+        voxelSaveSmokeDirtyCloseProtected_ = cancelRequested &&
+            cancelKeptDocument && discardRequested &&
+            action == DestructiveAction::CloseProject;
+        voxelSaveSmokeCleanupComplete_ =
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !activeVoxelModel_ && !viewportState_.HasModel() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                VoxelDocumentSaveService::TemporaryPathFor(
+                    voxelSaveSmokePath_)) &&
+            !std::filesystem::exists(
+                VoxelDocumentSaveService::BackupPathFor(
+                    voxelSaveSmokePath_));
     }
     return true;
 }
@@ -3161,7 +3345,12 @@ bool EditorWorkspace::VoxelSaveSmokePassed() const noexcept
         voxelSaveSmokePaintReloaded_ &&
         voxelSaveSmokeErasedAndSaved_ &&
         voxelSaveSmokeEraseReloaded_ &&
-        viewportRenderer_.ModelRenderCount() > voxelSaveSmokeRenderBaseline_;
+        voxelSaveSmokeRevisionPreserved_ &&
+        voxelSaveSmokeMetadataUpdated_ &&
+        voxelSaveSmokeThumbnailUpdated_ &&
+        voxelSaveSmokeFailureRolledBack_ &&
+        voxelSaveSmokeDirtyCloseProtected_ &&
+        voxelSaveSmokeCleanupComplete_;
 }
 
 bool EditorWorkspace::RunAddVoxelSmokeStep(const std::size_t frame)
@@ -3265,8 +3454,8 @@ bool EditorWorkspace::RunAddVoxelSmokeStep(const std::size_t frame)
         addVoxelSmokeReloaded_ = voxel != nullptr && voxel->IsOccupied() &&
             voxel->ColorIndex == 255U && grid->OccupiedVoxelCount() == 2U &&
             viewportState_.Statistics().TriangleCount == 20U &&
-            !voxelSaveState_.IsDirty() && !commandHistory_.CanUndo() &&
-            !commandHistory_.CanRedo();
+            !voxelSaveState_.IsDirty() && !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo();
         addVoxelSmokeReloadRenderBaseline_ =
             viewportRenderer_.ModelRenderCount();
     }

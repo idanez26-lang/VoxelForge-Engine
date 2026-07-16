@@ -266,9 +266,12 @@ void EditorLayer::OnImGuiRender()
         smokeTestFrameLimit_ > 0 &&
         renderedFrameCount_ >= smokeTestFrameLimit_;
 
+    const bool saveSmokeCompletedWithCleanup =
+        voxelSaveSmokeTest_ && workspace_.VoxelSaveSmokePassed();
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
-         (smokeTestComplete && !workspace_.HasRenderedVoxelViewport())))
+         (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
+          !saveSmokeCompletedWithCleanup)))
     {
         throw std::runtime_error("Viewport smoke test did not render a GPU frame.");
     }

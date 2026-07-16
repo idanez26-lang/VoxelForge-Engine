@@ -11,19 +11,14 @@ namespace VoxelForge::Editor
 [[nodiscard]] inline std::filesystem::path DeriveVoxelSavePath(
     const std::filesystem::path& sourcePath)
 {
-    std::filesystem::path result = sourcePath;
-    std::string extension = result.extension().string();
+    std::string extension = sourcePath.extension().string();
     std::transform(
         extension.begin(), extension.end(), extension.begin(),
         [](const unsigned char character)
         {
             return static_cast<char>(std::tolower(character));
         });
-    if (extension != ".vfvoxel")
-    {
-        result.replace_extension(".vfvoxel");
-    }
-    return result;
+    return extension == ".vox" ? sourcePath : std::filesystem::path{};
 }
 
 class VoxelSaveState final

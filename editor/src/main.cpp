@@ -164,7 +164,7 @@ public:
         }
         voxPath_ = externalSource
             ? parent_ / "castle.vox"
-            : project->RootPath() / "Assets" / "sample.vox";
+            : project->RootPath() / "Assets" / "Models" / "sample.vox";
 
         std::vector<std::uint8_t> size;
         AppendU32(size, 3U); AppendU32(size, 3U); AppendU32(size, 3U);

@@ -61,6 +61,14 @@ public:
         return result;
     }
 
+    [[nodiscard]] std::optional<DestructiveAction>
+    ContinueAfterSuccessfulSave() noexcept
+    {
+        const auto result = pending_;
+        pending_.reset();
+        return result;
+    }
+
     void Cancel() noexcept { pending_.reset(); }
     [[nodiscard]] bool IsPending() const noexcept { return pending_.has_value(); }
 

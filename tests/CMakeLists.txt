@@ -304,6 +304,19 @@ add_test(
     NAME VoxelForge.Editor.VoxelSave
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelSaveTests>
 )
+add_executable(
+    VoxelForgeEditorVoxelDocumentSaveServiceTests
+    Editor/VoxelDocumentSaveServiceTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelDocumentSaveServiceTests
+    PRIVATE VoxelForgeEditorVoxelSave
+)
+vf_configure_test(VoxelForgeEditorVoxelDocumentSaveServiceTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelDocumentSaveService
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelDocumentSaveServiceTests>
+)
 target_link_libraries(
     VoxelForgeProjectManagerTests
     PRIVATE
@@ -356,6 +369,20 @@ vf_configure_test(VoxelForgeAssetVoxelDocumentTests)
 add_test(
     NAME VoxelForge.Asset.VoxelDocument
     COMMAND $<TARGET_FILE:VoxelForgeAssetVoxelDocumentTests>
+)
+
+add_executable(
+    VoxelForgeAssetVoxDocumentWriterTests
+    Asset/VoxDocumentWriterTests.cpp
+)
+target_link_libraries(
+    VoxelForgeAssetVoxDocumentWriterTests
+    PRIVATE VoxelForgeAsset
+)
+vf_configure_test(VoxelForgeAssetVoxDocumentWriterTests)
+add_test(
+    NAME VoxelForge.Asset.VoxDocumentWriter
+    COMMAND $<TARGET_FILE:VoxelForgeAssetVoxDocumentWriterTests>
 )
 
 add_executable(
@@ -440,10 +467,12 @@ set_tests_properties(
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
+    VoxelForge.Editor.VoxelDocumentSaveService
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
     VoxelForge.Asset.VoxModelAnalyzer
     VoxelForge.Asset.VoxelDocument
+    VoxelForge.Asset.VoxDocumentWriter
     VoxelForge.Voxel.Core
     VoxelForge.Voxel.Serializer
     VoxelForge.Mesh.VoxelMeshBuilder

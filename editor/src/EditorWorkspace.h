@@ -19,6 +19,7 @@
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
 #include "VoxelSave/VoxelSaveState.h"
+#include "VoxelSave/VoxelDocumentSaveService.h"
 #include "VoxelSelection/VoxelSelectionState.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
@@ -180,6 +181,7 @@ private:
         const std::filesystem::path& projectFilePath);
     void SaveProject();
     [[nodiscard]] bool SaveVoxelModel();
+    [[nodiscard]] bool HasUnsavedVoxelChanges() const noexcept;
     void CloseProject();
     void SynchronizeProjectAssets();
     void BeginModelImport(std::vector<std::filesystem::path> sourcePaths);
@@ -224,6 +226,7 @@ private:
     Mesh::VoxelDocumentMeshCache voxelDocumentMeshCache_;
     std::optional<Voxel::VoxelModel> activeVoxelModel_;
     VoxelSaveState voxelSaveState_;
+    VoxelDocumentSaveService voxelDocumentSaveService_;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
     VoxelToolInputController voxelToolInput_;
@@ -323,10 +326,18 @@ private:
     std::uint32_t voxelSaveSmokeY_ = 0U;
     std::uint32_t voxelSaveSmokeZ_ = 0U;
     std::uint8_t voxelSaveSmokeColor_ = 0U;
+    std::uint64_t voxelSaveSmokeRevisionAfterEdit_ = 0U;
+    std::uint64_t voxelSaveSmokeFailureBaselineHash_ = 0U;
     bool voxelSaveSmokePaintedAndSaved_ = false;
     bool voxelSaveSmokePaintReloaded_ = false;
     bool voxelSaveSmokeErasedAndSaved_ = false;
     bool voxelSaveSmokeEraseReloaded_ = false;
+    bool voxelSaveSmokeRevisionPreserved_ = false;
+    bool voxelSaveSmokeMetadataUpdated_ = false;
+    bool voxelSaveSmokeThumbnailUpdated_ = false;
+    bool voxelSaveSmokeFailureRolledBack_ = false;
+    bool voxelSaveSmokeDirtyCloseProtected_ = false;
+    bool voxelSaveSmokeCleanupComplete_ = false;
     std::filesystem::path addVoxelSmokeSavePath_;
     VoxelCoordinates addVoxelSmokeTarget_{};
     std::size_t addVoxelSmokePreviewUploadBaseline_ = 0U;
