@@ -794,6 +794,12 @@ bool ViewportRenderer::HasModelMesh() const noexcept
         indexCount_ > 0U;
 }
 
+bool ViewportRenderer::HasHighlightMesh() const noexcept
+{
+    return highlightVertexBuffer_ != nullptr &&
+        highlightIndexBuffer_ != nullptr && highlightIndexCount_ > 0U;
+}
+
 void ViewportRenderer::SetError(std::string message)
 {
     lastError_ = std::move(message);

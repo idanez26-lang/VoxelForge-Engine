@@ -39,21 +39,22 @@ EditorLayer::EditorLayer(
     const bool dragDropImportSmokeTest,
     std::vector<std::filesystem::path> dragDropSmokePaths,
     const bool voxelDocumentSmokeTest,
-    const bool voxelRenderSyncSmokeTest)
+    const bool voxelRenderSyncSmokeTest,
+    const bool voxelRayPickingSmokeTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
           std::move(windowTitleCallback),
           qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest ||
               dragDropImportSmokeTest || voxelDocumentSmokeTest ||
-              voxelRenderSyncSmokeTest
+              voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
               : ProjectDialogPreferences::DefaultStorageFilePath(),
           qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest ||
               dragDropImportSmokeTest || voxelDocumentSmokeTest ||
-              voxelRenderSyncSmokeTest),
+              voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -73,12 +74,15 @@ EditorLayer::EditorLayer(
       dragDropImportSmokeTest_(dragDropImportSmokeTest),
       dragDropSmokePaths_(std::move(dragDropSmokePaths)),
       voxelDocumentSmokeTest_(voxelDocumentSmokeTest),
-      voxelRenderSyncSmokeTest_(voxelRenderSyncSmokeTest)
+      voxelRenderSyncSmokeTest_(voxelRenderSyncSmokeTest),
+      voxelRayPickingSmokeTest_(voxelRayPickingSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
     if (voxelRenderSyncSmokeTest_)
         voxelRenderSyncSmokeSourcePath_ = startupVoxPath_;
+    if (voxelRayPickingSmokeTest_)
+        voxelRayPickingSmokeSourcePath_ = startupVoxPath_;
 }
 
 void EditorLayer::OnAttach()
@@ -219,6 +223,11 @@ void EditorLayer::OnImGuiRender()
             renderedFrameCount_, voxelRenderSyncSmokeSourcePath_));
     }
     workspace_.Draw();
+    if (voxelRayPickingSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunVoxelRayPickingSmokeStep(
+            renderedFrameCount_, voxelRayPickingSmokeSourcePath_));
+    }
 
     ++renderedFrameCount_;
 
@@ -293,6 +302,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Voxel render synchronization smoke test did not complete.");
+    }
+    if (voxelRayPickingSmokeTest_ && smokeTestComplete &&
+        !workspace_.VoxelRayPickingSmokePassed())
+    {
+        throw std::runtime_error(
+            "Voxel ray picking smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

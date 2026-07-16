@@ -2,6 +2,7 @@
 
 #include "EditorMath.h"
 #include "VoxelSelection/VoxelRay.h"
+#include "VoxelSelection/VoxelRayTransform.h"
 
 #include "VoxelForge/Mesh/MeshData.h"
 #include "VoxelForge/Voxel/VoxelGrid.h"
@@ -24,7 +25,11 @@ namespace VoxelForge::Editor
     const VoxelRay& viewportRay,
     const Vec3 modelCenter) noexcept
 {
-    return {viewportRay.Origin + modelCenter, viewportRay.Direction};
+    const VoxelModelTransform transform =
+        CenteredVoxelModelTransform(modelCenter);
+    return {
+        TransformPoint(transform.InverseModelMatrix, viewportRay.Origin),
+        TransformVector(transform.InverseModelMatrix, viewportRay.Direction)};
 }
 
 [[nodiscard]] inline Vec3 CalculateVoxelMeshCenter(

@@ -90,6 +90,7 @@ add_library(VoxelForgeEditorVoxelSelection STATIC)
 target_sources(
     VoxelForgeEditorVoxelSelection
     PRIVATE
+        src/VoxelSelection/ViewportRayBuilder.cpp
         src/VoxelSelection/VoxelRaycast.cpp
         src/VoxelSelection/VoxelSelectionState.cpp
 )
@@ -97,7 +98,8 @@ target_include_directories(
     VoxelForgeEditorVoxelSelection
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(VoxelForgeEditorVoxelSelection PUBLIC VoxelForgeVoxel)
+target_link_libraries(
+    VoxelForgeEditorVoxelSelection PUBLIC VoxelForgeVoxel VoxelForgeAsset)
 target_compile_features(VoxelForgeEditorVoxelSelection PUBLIC cxx_std_20)
 if(MSVC)
     target_compile_options(

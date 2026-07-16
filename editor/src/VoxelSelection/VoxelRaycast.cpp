@@ -6,13 +6,14 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 namespace VoxelForge::Editor
 {
 namespace
 {
 constexpr float DirectionEpsilon = 1.0e-7F;
-constexpr float BoundaryEpsilon = 1.0e-5F;
+constexpr float BoundaryEpsilon = VoxelRaycastEpsilon;
 
 struct GridIntersection final
 {
@@ -67,20 +68,13 @@ std::uint32_t InitialCell(
         std::floor(std::clamp(adjusted, 0.0F, upper)));
 }
 
-bool IsOccupied(
-    const Voxel::VoxelGrid& grid,
-    const VoxelCoordinates coordinates,
-    std::uint8_t& colorIndex) noexcept
+struct TraversalHit final
 {
-    const Voxel::Voxel* voxel = grid.Get(
-        coordinates.X, coordinates.Y, coordinates.Z);
-    if (voxel == nullptr || !voxel->IsOccupied())
-    {
-        return false;
-    }
-    colorIndex = voxel->ColorIndex;
-    return true;
-}
+    VoxelCoordinates Coordinates{};
+    VoxelHitFace Face = VoxelHitFace::None;
+    float Distance = 0.0F;
+    std::uint8_t ColorIndex = 0U;
+};
 
 VoxelHitFace StartingFace(
     const Vec3 point,
@@ -107,26 +101,22 @@ VoxelHitFace StartingFace(
                                   : VoxelHitFace::NegativeZ;
     return VoxelHitFace::None;
 }
-}
 
-std::optional<VoxelRaycastHit> RaycastVoxelGrid(
-    const Voxel::VoxelGrid& grid,
-    const VoxelRay& ray) noexcept
+template<typename Occupancy>
+std::optional<TraversalHit> TraverseGrid(
+    const std::uint32_t width,
+    const std::uint32_t height,
+    const std::uint32_t depth,
+    const VoxelRay& ray,
+    const float maximumDistance,
+    const std::uint64_t requestedMaximumSteps,
+    Occupancy&& occupancy) noexcept
 {
-    if (grid.Width() == 0U || grid.Height() == 0U || grid.Depth() == 0U)
-    {
-        return std::nullopt;
-    }
-    if (!std::isfinite(ray.Origin.X) || !std::isfinite(ray.Origin.Y) ||
-        !std::isfinite(ray.Origin.Z) ||
-        !std::isfinite(ray.Direction.X) ||
-        !std::isfinite(ray.Direction.Y) ||
-        !std::isfinite(ray.Direction.Z))
-    {
-        return std::nullopt;
-    }
-    const Vec3 direction = Normalize(ray.Direction);
-    if (Length(direction) <= DirectionEpsilon)
+    if (width == 0U || height == 0U || depth == 0U ||
+        !IsFinite(ray.Origin) || !IsFinite(ray.Direction) ||
+        Length(ray.Direction) <= DirectionEpsilon ||
+        !std::isfinite(maximumDistance) || maximumDistance < 0.0F ||
+        requestedMaximumSteps == 0U)
     {
         return std::nullopt;
     }
@@ -134,14 +124,14 @@ std::optional<VoxelRaycastHit> RaycastVoxelGrid(
     GridIntersection intersection{
         -std::numeric_limits<float>::infinity(),
         std::numeric_limits<float>::infinity(), VoxelHitFace::None};
-    if (!UpdateSlab(ray.Origin.X, direction.X,
-            static_cast<float>(grid.Width()), VoxelHitFace::NegativeX,
+    if (!UpdateSlab(ray.Origin.X, ray.Direction.X,
+            static_cast<float>(width), VoxelHitFace::NegativeX,
             VoxelHitFace::PositiveX, intersection) ||
-        !UpdateSlab(ray.Origin.Y, direction.Y,
-            static_cast<float>(grid.Height()), VoxelHitFace::NegativeY,
+        !UpdateSlab(ray.Origin.Y, ray.Direction.Y,
+            static_cast<float>(height), VoxelHitFace::NegativeY,
             VoxelHitFace::PositiveY, intersection) ||
-        !UpdateSlab(ray.Origin.Z, direction.Z,
-            static_cast<float>(grid.Depth()), VoxelHitFace::NegativeZ,
+        !UpdateSlab(ray.Origin.Z, ray.Direction.Z,
+            static_cast<float>(depth), VoxelHitFace::NegativeZ,
             VoxelHitFace::PositiveZ, intersection) ||
         intersection.Exit < 0.0F)
     {
@@ -149,9 +139,9 @@ std::optional<VoxelRaycastHit> RaycastVoxelGrid(
     }
 
     const bool strictlyInside =
-        ray.Origin.X > 0.0F && ray.Origin.X < static_cast<float>(grid.Width()) &&
-        ray.Origin.Y > 0.0F && ray.Origin.Y < static_cast<float>(grid.Height()) &&
-        ray.Origin.Z > 0.0F && ray.Origin.Z < static_cast<float>(grid.Depth());
+        ray.Origin.X > 0.0F && ray.Origin.X < static_cast<float>(width) &&
+        ray.Origin.Y > 0.0F && ray.Origin.Y < static_cast<float>(height) &&
+        ray.Origin.Z > 0.0F && ray.Origin.Z < static_cast<float>(depth);
     if (!strictlyInside && intersection.Exit <= BoundaryEpsilon &&
         intersection.Entry <= 0.0F)
     {
@@ -159,79 +149,242 @@ std::optional<VoxelRaycastHit> RaycastVoxelGrid(
     }
 
     const float startDistance = std::max(intersection.Entry, 0.0F);
-    const Vec3 start = ray.Origin + direction * startDistance;
+    if (startDistance > maximumDistance + BoundaryEpsilon)
+        return std::nullopt;
+    const Vec3 start = ray.Origin + ray.Direction * startDistance;
     VoxelCoordinates cell{
-        InitialCell(start.X, direction.X, grid.Width()),
-        InitialCell(start.Y, direction.Y, grid.Height()),
-        InitialCell(start.Z, direction.Z, grid.Depth())};
+        InitialCell(start.X, ray.Direction.X, width),
+        InitialCell(start.Y, ray.Direction.Y, height),
+        InitialCell(start.Z, ray.Direction.Z, depth)};
     VoxelHitFace face = StartingFace(
-        start, direction, intersection.EntryFace, strictlyInside);
+        start, ray.Direction, intersection.EntryFace, strictlyInside);
 
-    const int stepX = direction.X > DirectionEpsilon ? 1 :
-        (direction.X < -DirectionEpsilon ? -1 : 0);
-    const int stepY = direction.Y > DirectionEpsilon ? 1 :
-        (direction.Y < -DirectionEpsilon ? -1 : 0);
-    const int stepZ = direction.Z > DirectionEpsilon ? 1 :
-        (direction.Z < -DirectionEpsilon ? -1 : 0);
+    const int stepX = ray.Direction.X > DirectionEpsilon ? 1 :
+        (ray.Direction.X < -DirectionEpsilon ? -1 : 0);
+    const int stepY = ray.Direction.Y > DirectionEpsilon ? 1 :
+        (ray.Direction.Y < -DirectionEpsilon ? -1 : 0);
+    const int stepZ = ray.Direction.Z > DirectionEpsilon ? 1 :
+        (ray.Direction.Z < -DirectionEpsilon ? -1 : 0);
     const float infinity = std::numeric_limits<float>::infinity();
     const auto firstBoundary = [](const std::uint32_t coordinate, const int step)
     {
         return static_cast<float>(coordinate + (step > 0 ? 1U : 0U));
     };
     float nextX = stepX == 0 ? infinity :
-        (firstBoundary(cell.X, stepX) - ray.Origin.X) / direction.X;
+        (firstBoundary(cell.X, stepX) - ray.Origin.X) / ray.Direction.X;
     float nextY = stepY == 0 ? infinity :
-        (firstBoundary(cell.Y, stepY) - ray.Origin.Y) / direction.Y;
+        (firstBoundary(cell.Y, stepY) - ray.Origin.Y) / ray.Direction.Y;
     float nextZ = stepZ == 0 ? infinity :
-        (firstBoundary(cell.Z, stepZ) - ray.Origin.Z) / direction.Z;
-    const float deltaX = stepX == 0 ? infinity : std::abs(1.0F / direction.X);
-    const float deltaY = stepY == 0 ? infinity : std::abs(1.0F / direction.Y);
-    const float deltaZ = stepZ == 0 ? infinity : std::abs(1.0F / direction.Z);
+        (firstBoundary(cell.Z, stepZ) - ray.Origin.Z) / ray.Direction.Z;
+    const float deltaX = stepX == 0 ? infinity :
+        std::abs(1.0F / ray.Direction.X);
+    const float deltaY = stepY == 0 ? infinity :
+        std::abs(1.0F / ray.Direction.Y);
+    const float deltaZ = stepZ == 0 ? infinity :
+        std::abs(1.0F / ray.Direction.Z);
 
-    const std::uint64_t maximumSteps =
-        static_cast<std::uint64_t>(grid.Width()) + grid.Height() +
-        grid.Depth() + 3U;
+    const std::uint64_t dimensionStepLimit =
+        static_cast<std::uint64_t>(width) + height + depth + 3U;
+    const std::uint64_t maximumSteps = std::min(
+        requestedMaximumSteps,
+        std::min(dimensionStepLimit, MaximumVoxelRaycastSteps));
     float distance = startDistance;
     for (std::uint64_t iteration = 0U; iteration < maximumSteps; ++iteration)
     {
-        std::uint8_t colorIndex = 0U;
-        if (IsOccupied(grid, cell, colorIndex))
-        {
-            return VoxelRaycastHit{
-                cell, face, distance, ray.Origin + direction * distance,
-                colorIndex};
-        }
+        if (const std::optional<std::uint8_t> color = occupancy(cell))
+            return TraversalHit{cell, face, distance, *color};
 
-        if (nextX <= nextY && nextX <= nextZ)
+        const float nextDistance = std::min({nextX, nextY, nextZ});
+        if (!std::isfinite(nextDistance) ||
+            nextDistance > intersection.Exit + BoundaryEpsilon ||
+            nextDistance > maximumDistance + BoundaryEpsilon)
         {
-            distance = nextX;
-            nextX += deltaX;
-            const auto next = static_cast<std::int64_t>(cell.X) + stepX;
-            if (next < 0 || next >= static_cast<std::int64_t>(grid.Width())) break;
-            cell.X = static_cast<std::uint32_t>(next);
+            break;
+        }
+        const bool crossX = std::abs(nextX - nextDistance) <= BoundaryEpsilon;
+        const bool crossY = std::abs(nextY - nextDistance) <= BoundaryEpsilon;
+        const bool crossZ = std::abs(nextZ - nextDistance) <= BoundaryEpsilon;
+        distance = nextDistance;
+
+        // Simultaneous crossings advance every tied axis so cells touched only
+        // at an edge/corner are not reported. X, then Y, then Z determines the
+        // face for deterministic diagnostics when several axes are equal.
+        if (crossX)
             face = stepX > 0 ? VoxelHitFace::NegativeX : VoxelHitFace::PositiveX;
-        }
-        else if (nextY <= nextZ)
-        {
-            distance = nextY;
-            nextY += deltaY;
-            const auto next = static_cast<std::int64_t>(cell.Y) + stepY;
-            if (next < 0 || next >= static_cast<std::int64_t>(grid.Height())) break;
-            cell.Y = static_cast<std::uint32_t>(next);
+        else if (crossY)
             face = stepY > 0 ? VoxelHitFace::NegativeY : VoxelHitFace::PositiveY;
-        }
         else
-        {
-            distance = nextZ;
-            nextZ += deltaZ;
-            const auto next = static_cast<std::int64_t>(cell.Z) + stepZ;
-            if (next < 0 || next >= static_cast<std::int64_t>(grid.Depth())) break;
-            cell.Z = static_cast<std::uint32_t>(next);
             face = stepZ > 0 ? VoxelHitFace::NegativeZ : VoxelHitFace::PositiveZ;
-        }
-        if (distance > intersection.Exit + BoundaryEpsilon) break;
+
+        bool withinBounds = true;
+        const auto advance = [&withinBounds](
+            std::uint32_t& coordinate,
+            const int step,
+            const std::uint32_t dimension)
+        {
+            const std::int64_t next =
+                static_cast<std::int64_t>(coordinate) + step;
+            if (next < 0 || next >= static_cast<std::int64_t>(dimension))
+            {
+                withinBounds = false;
+                return;
+            }
+            coordinate = static_cast<std::uint32_t>(next);
+        };
+        if (crossX) { advance(cell.X, stepX, width); nextX += deltaX; }
+        if (crossY) { advance(cell.Y, stepY, height); nextY += deltaY; }
+        if (crossZ) { advance(cell.Z, stepZ, depth); nextZ += deltaZ; }
+        if (!withinBounds) break;
     }
     return std::nullopt;
+}
+
+bool TransformPairIsValid(const VoxelModelTransform& transform) noexcept
+{
+    if (!IsFinite(transform.ModelMatrix) ||
+        !IsFinite(transform.InverseModelMatrix)) return false;
+    const Matrix4 product = MultiplyMatrix(
+        transform.ModelMatrix, transform.InverseModelMatrix);
+    const Matrix4 identity = IdentityMatrix();
+    for (std::size_t index = 0U; index < product.size(); ++index)
+    {
+        if (std::abs(product[index] - identity[index]) > 2.0e-3F)
+            return false;
+    }
+    return true;
+}
+}
+
+std::optional<VoxelRaycastHit> RaycastVoxelGrid(
+    const Voxel::VoxelGrid& grid,
+    const VoxelRay& ray) noexcept
+{
+    const Vec3 direction = Normalize(ray.Direction);
+    const auto hit = TraverseGrid(
+        grid.Width(), grid.Height(), grid.Depth(),
+        {ray.Origin, direction}, DefaultVoxelRaycastMaximumDistance,
+        MaximumVoxelRaycastSteps,
+        [&grid](const VoxelCoordinates coordinates)
+            -> std::optional<std::uint8_t>
+        {
+            const Voxel::Voxel* voxel = grid.Get(
+                coordinates.X, coordinates.Y, coordinates.Z);
+            return voxel != nullptr && voxel->IsOccupied()
+                ? std::optional<std::uint8_t>(voxel->ColorIndex)
+                : std::nullopt;
+        });
+    if (!hit) return std::nullopt;
+    const Vec3 impact = ray.Origin + direction * hit->Distance;
+    return VoxelRaycastHit{
+        hit->Coordinates, hit->Face, hit->Distance, impact,
+        hit->ColorIndex};
+}
+
+std::optional<VoxelRaycastHit> RaycastVoxelDocument(
+    const Asset::Voxel::VoxelDocument& document,
+    const VoxelRay& worldRay,
+    const VoxelRaycastOptions& options) noexcept
+{
+    const Asset::Voxel::VoxelSubModel* model =
+        document.GetModel(options.SubModelIndex);
+    if (model == nullptr || !TransformPairIsValid(options.Transform) ||
+        !IsFinite(worldRay.Origin) || !IsFinite(worldRay.Direction))
+    {
+        return std::nullopt;
+    }
+    const Vec3 worldDirection = Normalize(worldRay.Direction);
+    if (Length(worldDirection) <= DirectionEpsilon) return std::nullopt;
+    const VoxelRay localRay{
+        TransformPoint(options.Transform.InverseModelMatrix, worldRay.Origin),
+        TransformVector(options.Transform.InverseModelMatrix, worldDirection)};
+    if (!IsFinite(localRay.Origin) || !IsFinite(localRay.Direction))
+        return std::nullopt;
+    const Asset::Voxel::VoxelDimensions dimensions = model->Dimensions();
+    const auto hit = TraverseGrid(
+        dimensions.X, dimensions.Y, dimensions.Z, localRay,
+        options.MaximumDistance, options.MaximumSteps,
+        [model](const VoxelCoordinates coordinates)
+            -> std::optional<std::uint8_t>
+        {
+            const auto voxel = model->GetVoxel({
+                static_cast<std::int32_t>(coordinates.X),
+                static_cast<std::int32_t>(coordinates.Y),
+                static_cast<std::int32_t>(coordinates.Z)});
+            return voxel
+                ? std::optional<std::uint8_t>(voxel->PaletteIndex)
+                : std::nullopt;
+        });
+    if (!hit) return std::nullopt;
+
+    const Asset::Voxel::VoxelPosition voxelPosition{
+        static_cast<std::int32_t>(hit->Coordinates.X),
+        static_cast<std::int32_t>(hit->Coordinates.Y),
+        static_cast<std::int32_t>(hit->Coordinates.Z)};
+    const Asset::Voxel::VoxelPosition integerNormal =
+        VoxelHitFaceIntegerNormal(hit->Face);
+    const Asset::Voxel::VoxelPosition adjacent{
+        voxelPosition.X + integerNormal.X,
+        voxelPosition.Y + integerNormal.Y,
+        voxelPosition.Z + integerNormal.Z};
+    const bool adjacentWithinBounds =
+        hit->Face != VoxelHitFace::None &&
+        adjacent.X >= 0 && adjacent.Y >= 0 && adjacent.Z >= 0 &&
+        static_cast<std::uint32_t>(adjacent.X) < dimensions.X &&
+        static_cast<std::uint32_t>(adjacent.Y) < dimensions.Y &&
+        static_cast<std::uint32_t>(adjacent.Z) < dimensions.Z;
+    const Vec3 localPosition =
+        localRay.Origin + localRay.Direction * hit->Distance;
+    const Vec3 worldPosition = TransformPoint(
+        options.Transform.ModelMatrix, localPosition);
+    const Vec3 localNormal = VoxelHitFaceNormal(hit->Face);
+    const Matrix4& inverse = options.Transform.InverseModelMatrix;
+    const Vec3 worldNormal = Normalize({
+        inverse[0] * localNormal.X + inverse[4] * localNormal.Y +
+            inverse[8] * localNormal.Z,
+        inverse[1] * localNormal.X + inverse[5] * localNormal.Y +
+            inverse[9] * localNormal.Z,
+        inverse[2] * localNormal.X + inverse[6] * localNormal.Y +
+            inverse[10] * localNormal.Z});
+    if (!IsFinite(localPosition) || !IsFinite(worldPosition) ||
+        !IsFinite(worldNormal)) return std::nullopt;
+    return VoxelRaycastHit{
+        hit->Coordinates,
+        hit->Face,
+        hit->Distance,
+        localPosition,
+        hit->ColorIndex,
+        options.SubModelIndex,
+        adjacent,
+        adjacentWithinBounds,
+        localPosition,
+        worldPosition,
+        worldNormal};
+}
+
+Asset::Voxel::VoxelPosition VoxelHitFaceIntegerNormal(
+    const VoxelHitFace face) noexcept
+{
+    switch (face)
+    {
+    case VoxelHitFace::NegativeX: return {-1, 0, 0};
+    case VoxelHitFace::PositiveX: return {1, 0, 0};
+    case VoxelHitFace::NegativeY: return {0, -1, 0};
+    case VoxelHitFace::PositiveY: return {0, 1, 0};
+    case VoxelHitFace::NegativeZ: return {0, 0, -1};
+    case VoxelHitFace::PositiveZ: return {0, 0, 1};
+    case VoxelHitFace::None: return {};
+    }
+    return {};
+}
+
+Vec3 VoxelHitFaceNormal(const VoxelHitFace face) noexcept
+{
+    const Asset::Voxel::VoxelPosition normal =
+        VoxelHitFaceIntegerNormal(face);
+    return {
+        static_cast<float>(normal.X),
+        static_cast<float>(normal.Y),
+        static_cast<float>(normal.Z)};
 }
 
 const char* VoxelHitFaceName(const VoxelHitFace face) noexcept

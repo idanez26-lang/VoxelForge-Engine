@@ -53,6 +53,7 @@ public:
     [[nodiscard]] std::size_t ModelRenderCount() const noexcept;
     [[nodiscard]] std::size_t ModelUploadCount() const noexcept;
     [[nodiscard]] bool HasModelMesh() const noexcept;
+    [[nodiscard]] bool HasHighlightMesh() const noexcept;
 
 private:
     [[nodiscard]] bool EnsurePipeline();

@@ -165,6 +165,25 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorVoxelRayPickingTests
+    Editor/VoxelRayPickingTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp
+)
+target_include_directories(
+    VoxelForgeEditorVoxelRayPickingTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelRayPickingTests
+    PRIVATE VoxelForgeEditorVoxelSelection VoxelForgeImGui
+)
+vf_configure_test(VoxelForgeEditorVoxelRayPickingTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelRayPicking
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelRayPickingTests>
+)
+
+add_executable(
     VoxelForgeEditorCommandHistoryTests
     Editor/CommandHistoryTests.cpp
 )
@@ -372,6 +391,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxThumbnail
     VoxelForge.Editor.VoxelViewport
     VoxelForge.Editor.VoxelSelection
+    VoxelForge.Editor.VoxelRayPicking
     VoxelForge.Editor.CommandHistory
     VoxelForge.Editor.EraseVoxel
     VoxelForge.Editor.PaintVoxel
@@ -438,6 +458,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelRenderSyncSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-render-sync-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelRayPickingSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-ray-picking-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -451,6 +475,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.DragDropImportSmoke
         VoxelForge.Editor.VoxelDocumentSmoke
         VoxelForge.Editor.VoxelRenderSyncSmoke
+        VoxelForge.Editor.VoxelRayPickingSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

@@ -99,6 +99,10 @@ public:
         std::size_t frame,
         const std::filesystem::path& sourcePath);
     [[nodiscard]] bool VoxelRenderSyncSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelRayPickingSmokeStep(
+        std::size_t frame,
+        const std::filesystem::path& sourcePath);
+    [[nodiscard]] bool VoxelRayPickingSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -350,6 +354,19 @@ private:
     bool voxelRenderSyncUnchangedSkipped_ = false;
     bool voxelRenderSyncClosed_ = false;
     bool voxelRenderSyncSourcePreserved_ = false;
+    std::uintmax_t voxelRayPickingSmokeSourceSize_ = 0U;
+    std::uint64_t voxelRayPickingSmokeSourceHash_ = 0U;
+    std::filesystem::file_time_type voxelRayPickingSmokeSourceTime_{};
+    std::uint64_t voxelRayPickingInitialRevision_ = 0U;
+    std::size_t voxelRayPickingHighlightUploadBaseline_ = 0U;
+    bool voxelRayPickingInitialDirty_ = false;
+    bool voxelRayPickingRayBuilt_ = false;
+    bool voxelRayPickingHitVerified_ = false;
+    bool voxelRayPickingHighlightRendered_ = false;
+    bool voxelRayPickingMissCleared_ = false;
+    bool voxelRayPickingDocumentUnchanged_ = false;
+    bool voxelRayPickingClosed_ = false;
+    bool voxelRayPickingSourcePreserved_ = false;
     std::optional<std::uint64_t> uploadedDocumentIdentity_;
     std::optional<std::uint64_t> uploadedDocumentRevision_;
     std::optional<std::uint64_t> failedDocumentIdentity_;

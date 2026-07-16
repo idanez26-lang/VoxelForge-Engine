@@ -1,5 +1,6 @@
 #include "EditorWorkspace.h"
 #include "VoxelModelTransform.h"
+#include "VoxelSelection/ViewportRayBuilder.h"
 #include "VoxelSelection/VoxelRaycast.h"
 #include "EditorWindowTitle.h"
 
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <optional>
 #include <memory>
@@ -956,9 +958,20 @@ void EditorWorkspace::DrawScenePanel()
             ? voxelSelection_.Hovered() : voxelSelection_.Selected();
         if (detail)
         {
-            ImGui::TextDisabled("Face: %s | Color index: %u",
-                VoxelHitFaceName(detail->Face), detail->ColorIndex);
+            ImGui::TextDisabled(
+                "Sub-model: %zu | Face: %s | Distance: %.3f | Color: %u",
+                detail->SubModelIndex, VoxelHitFaceName(detail->Face),
+                detail->Distance, detail->ColorIndex);
+            ImGui::TextDisabled(
+                "Adjacent: %d, %d, %d%s",
+                detail->AdjacentPosition.X,
+                detail->AdjacentPosition.Y,
+                detail->AdjacentPosition.Z,
+                detail->AdjacentWithinBounds ? "" : " (outside bounds)");
         }
+        ImGui::TextDisabled("Picking: %s",
+            VoxelPickingInteractionStateName(
+                voxelSelection_.InteractionState()));
     }
     else
     {
@@ -997,26 +1010,49 @@ void EditorWorkspace::DrawScenePanel()
         const ImGuiIO& io = ImGui::GetIO();
         const bool sceneFocused = ImGui::IsWindowFocused(
             ImGuiFocusedFlags_RootAndChildWindows);
-        const bool selectionInputAvailable = imageHovered && sceneFocused &&
-            !ImGui::IsAnyItemActive() && !io.WantTextInput;
         const bool cameraControl =
             ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
             ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-        if (selectionInputAvailable && hasModel && viewportGrid != nullptr &&
-            !cameraControl)
+        const bool incompatiblePopupOpen = ImGui::IsPopupOpen(
+            nullptr,
+            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+        const bool inputBlocked = ImGui::IsAnyItemActive() ||
+            io.WantTextInput || incompatiblePopupOpen;
+        const bool selectionInputAvailable = imageHovered && sceneFocused &&
+            !inputBlocked && !cameraControl;
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        std::optional<VoxelRaycastHit> hoveredHit;
+        VoxelPickingInteractionState pickingState =
+            VoxelPickingInteractionState::Unavailable;
+        if (!imageHovered)
+            pickingState = VoxelPickingInteractionState::OutsideViewport;
+        else if (inputBlocked || !sceneFocused)
+            pickingState = VoxelPickingInteractionState::Blocked;
+        else if (cameraControl)
+            pickingState = VoxelPickingInteractionState::CameraInteraction;
+        else if (document == nullptr)
+            pickingState = VoxelPickingInteractionState::NoDocument;
+        else if (hasModel)
         {
-            const float normalizedX =
-                2.0F * (io.MousePos.x - imageOrigin.x) / available.x - 1.0F;
-            const float normalizedY =
-                1.0F - 2.0F * (io.MousePos.y - imageOrigin.y) / available.y;
-            const VoxelRay ray = ViewportToVoxelGrid(
-                viewportCamera_.CreateViewportRay(normalizedX, normalizedY),
-                voxelModelCenter_);
-            if (voxelSelection_.SetHovered(
-                    RaycastVoxelGrid(*viewportGrid, ray)))
-                UpdateVoxelHighlights();
+            const ViewportRayBuildResult ray = BuildViewportRay(
+                {io.MousePos.x, io.MousePos.y},
+                {imageOrigin.x, imageOrigin.y, available.x, available.y},
+                viewportCamera_.GetViewProjection(),
+                viewportCamera_.GetPosition());
+            if (ray.Succeeded())
+            {
+                VoxelRaycastOptions options;
+                options.Transform =
+                    CenteredVoxelModelTransform(voxelModelCenter_);
+                hoveredHit = RaycastVoxelDocument(
+                    *document, *ray.Ray, options);
+                pickingState = hoveredHit
+                    ? VoxelPickingInteractionState::Hit
+                    : VoxelPickingInteractionState::NoHit;
+            }
         }
-        else if (voxelSelection_.SetHovered(std::nullopt))
+        if (voxelSelection_.SetHovered(pickingState, std::move(hoveredHit)))
         {
             UpdateVoxelHighlights();
         }
@@ -1037,9 +1073,6 @@ void EditorWorkspace::DrawScenePanel()
         }
         viewportCamera_.Update(imageHovered, available.y);
         const bool sceneActive = imageHovered || sceneFocused;
-        const bool incompatiblePopupOpen = ImGui::IsPopupOpen(
-            nullptr,
-            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
         const bool shortcutsEnabled = sceneActive &&
             !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
             !incompatiblePopupOpen;
@@ -2661,8 +2694,24 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
     if (grid == nullptr) return false;
     if (frame == 0U)
     {
-        const auto hit = RaycastVoxelGrid(
-            *grid, {{-1.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        std::optional<VoxelRaycastHit> hit;
+        if (const Asset::Voxel::VoxelDocument* document =
+                voxelDocumentSession_.ActiveDocument())
+        {
+            VoxelRaycastOptions options;
+            options.Transform = CenteredVoxelModelTransform(voxelModelCenter_);
+            hit = RaycastVoxelDocument(
+                *document,
+                {VoxelGridToViewport(
+                     {-1.0F, 1.5F, 1.5F}, voxelModelCenter_),
+                 {1.0F, 0.0F, 0.0F}},
+                options);
+        }
+        else
+        {
+            hit = RaycastVoxelGrid(
+                *grid, {{-1.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        }
         if (!hit) return false;
         static_cast<void>(voxelSelection_.SetHovered(hit));
         static_cast<void>(voxelSelection_.SelectHovered());
@@ -3577,6 +3626,112 @@ bool EditorWorkspace::VoxelRenderSyncSmokePassed() const noexcept
         voxelRenderSyncSourcePreserved_;
 }
 
+bool EditorWorkspace::RunVoxelRayPickingSmokeStep(
+    const std::size_t frame,
+    const std::filesystem::path& sourcePath)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    constexpr ViewportRectangle SmokeViewport{100.0F, 50.0F, 640.0F, 480.0F};
+    if (frame == 0U)
+    {
+        if (document == nullptr) return false;
+        std::error_code error;
+        voxelRayPickingSmokeSourceSize_ =
+            std::filesystem::file_size(sourcePath, error);
+        if (error) return false;
+        voxelRayPickingSmokeSourceTime_ =
+            std::filesystem::last_write_time(sourcePath, error);
+        const auto hash = HashFileContents(sourcePath);
+        if (error || !hash) return false;
+        voxelRayPickingSmokeSourceHash_ = *hash;
+        voxelRayPickingInitialRevision_ = document->GetRevision();
+        voxelRayPickingInitialDirty_ = document->IsDirty();
+        voxelRayPickingHighlightUploadBaseline_ =
+            viewportRenderer_.HighlightUploadCount();
+
+        viewportCamera_.Frame(3.0F, 3.0F, 3.0F);
+        viewportCamera_.SetView(EditorCameraView::Front);
+        viewportCamera_.SetAspectRatio(4.0F / 3.0F);
+        const ViewportRayBuildResult ray = BuildViewportRay(
+            {420.0F, 290.0F}, SmokeViewport,
+            viewportCamera_.GetViewProjection(), viewportCamera_.GetPosition());
+        voxelRayPickingRayBuilt_ = ray.Succeeded() &&
+            std::abs(Length(ray.Ray->Direction) - 1.0F) <= 0.001F;
+        if (!voxelRayPickingRayBuilt_) return false;
+        VoxelRaycastOptions options;
+        options.Transform = CenteredVoxelModelTransform(voxelModelCenter_);
+        const auto hit = RaycastVoxelDocument(*document, *ray.Ray, options);
+        voxelRayPickingHitVerified_ = hit &&
+            hit->Coordinates == VoxelCoordinates{1U, 1U, 2U} &&
+            hit->Face == VoxelHitFace::PositiveZ &&
+            hit->AdjacentPosition == Asset::Voxel::VoxelPosition{1, 1, 3} &&
+            !hit->AdjacentWithinBounds && std::isfinite(hit->Distance) &&
+            hit->Distance > 0.0F;
+        if (!voxelRayPickingHitVerified_) return false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 1U)
+    {
+        if (document == nullptr) return false;
+        voxelRayPickingHighlightRendered_ =
+            viewportRenderer_.HighlightUploadCount() >
+                voxelRayPickingHighlightUploadBaseline_ &&
+            viewportRenderer_.HighlightRenderCount() > 0U;
+        voxelRayPickingDocumentUnchanged_ =
+            document->GetRevision() == voxelRayPickingInitialRevision_ &&
+            document->IsDirty() == voxelRayPickingInitialDirty_;
+        const ViewportRayBuildResult emptyRay = BuildViewportRay(
+            {100.0F, 50.0F}, SmokeViewport,
+            viewportCamera_.GetViewProjection(), viewportCamera_.GetPosition());
+        if (!emptyRay.Succeeded()) return false;
+        VoxelRaycastOptions options;
+        options.Transform = CenteredVoxelModelTransform(voxelModelCenter_);
+        const auto miss = RaycastVoxelDocument(
+            *document, *emptyRay.Ray, options);
+        if (miss) return false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::NoHit));
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 2U)
+    {
+        if (document == nullptr) return false;
+        voxelRayPickingMissCleared_ = !voxelSelection_.Hovered() &&
+            !viewportRenderer_.HasHighlightMesh();
+        voxelRayPickingDocumentUnchanged_ =
+            voxelRayPickingDocumentUnchanged_ &&
+            document->GetRevision() == voxelRayPickingInitialRevision_ &&
+            document->IsDirty() == voxelRayPickingInitialDirty_;
+        std::error_code error;
+        const auto hash = HashFileContents(sourcePath);
+        voxelRayPickingSourcePreserved_ = hash &&
+            *hash == voxelRayPickingSmokeSourceHash_ &&
+            std::filesystem::file_size(sourcePath, error) ==
+                voxelRayPickingSmokeSourceSize_ && !error &&
+            std::filesystem::last_write_time(sourcePath, error) ==
+                voxelRayPickingSmokeSourceTime_ && !error;
+        ClearVoxelViewport();
+        voxelRayPickingClosed_ =
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel();
+    }
+    return VoxelRayPickingSmokePassed();
+}
+
+bool EditorWorkspace::VoxelRayPickingSmokePassed() const noexcept
+{
+    return voxelRayPickingRayBuilt_ && voxelRayPickingHitVerified_ &&
+        voxelRayPickingHighlightRendered_ && voxelRayPickingMissCleared_ &&
+        voxelRayPickingDocumentUnchanged_ && voxelRayPickingClosed_ &&
+        voxelRayPickingSourcePreserved_;
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -3825,6 +3980,25 @@ bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
     {
         return false;
     }
+
+    const auto hitStillExists = [document](
+        const std::optional<VoxelRaycastHit>& hit)
+    {
+        return !hit || document->HasVoxel({
+            static_cast<std::int32_t>(hit->Coordinates.X),
+            static_cast<std::int32_t>(hit->Coordinates.Y),
+            static_cast<std::int32_t>(hit->Coordinates.Z)},
+            hit->SubModelIndex);
+    };
+    bool highlightChanged = false;
+    if (!hitStillExists(voxelSelection_.Hovered()))
+    {
+        highlightChanged |= voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::NoHit);
+    }
+    if (!hitStillExists(voxelSelection_.Selected()))
+        highlightChanged |= voxelSelection_.ClearSelection();
+    if (highlightChanged) UpdateVoxelHighlights();
 
     voxelModelCenter_ = modelCenter;
     const VoxelViewportStatistics& statistics = viewportState_.Statistics();
