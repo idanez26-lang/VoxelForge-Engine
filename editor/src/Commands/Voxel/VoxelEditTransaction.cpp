@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace VoxelForge::Editor
 {
@@ -140,6 +141,179 @@ CommandResult ApplyVoxelEdit(
     {
         rollback();
         return CommandResult::Failure("Unable to update the active voxel grid.");
+    }
+
+    CommandResult rebuilt;
+    try
+    {
+        rebuilt = session.RebuildActiveVoxelMesh();
+    }
+    catch (const std::exception& exception)
+    {
+        rollback();
+        return CommandResult::Failure(
+            std::string("Voxel mesh rebuild threw an exception: ") +
+            exception.what());
+    }
+    catch (...)
+    {
+        rollback();
+        return CommandResult::Failure(
+            "Voxel mesh rebuild threw an unknown exception.");
+    }
+    if (!rebuilt)
+    {
+        rollback();
+        return CommandResult::Failure(rebuilt.Message);
+    }
+
+    session.CompleteVoxelEdit();
+    return CommandResult::Success();
+}
+
+CommandResult ApplyVoxelChanges(
+    VoxelEditSession& session,
+    const std::uint64_t modelGeneration,
+    const std::span<const VoxelChange> changes,
+    const VoxelChangeDirection direction)
+{
+    if (changes.empty())
+        return CommandResult::Failure("Voxel change set is empty.");
+    if (session.VoxelModelGeneration() != modelGeneration)
+        return CommandResult::Failure("The voxel model session has changed.");
+    Voxel::VoxelModel* model = session.ActiveVoxelModel();
+    Asset::Voxel::VoxelDocument* document = session.ActiveVoxelDocument();
+    if (model == nullptr || document == nullptr)
+        return CommandResult::Failure(
+            "An editable voxel document and compatibility model are required.");
+
+    struct GridSnapshot final
+    {
+        std::size_t ModelIndex = 0U;
+        Voxel::VoxelGrid Grid;
+    };
+    std::vector<VoxelChange> directedChanges;
+    std::vector<GridSnapshot> gridSnapshots;
+    std::optional<Asset::Voxel::VoxelDocument> documentSnapshot;
+    try
+    {
+        directedChanges.reserve(changes.size());
+        gridSnapshots.reserve(model->GridCount());
+        for (const VoxelChange& source : changes)
+        {
+            VoxelChange directed = source;
+            if (direction == VoxelChangeDirection::Backward)
+            {
+                std::swap(directed.ExistedBefore, directed.ExistsAfter);
+                std::swap(
+                    directed.PaletteIndexBefore,
+                    directed.PaletteIndexAfter);
+            }
+            if (directed.Position.X < 0 || directed.Position.Y < 0 ||
+                directed.Position.Z < 0)
+            {
+                return CommandResult::Failure(
+                    "Voxel change coordinates cannot be negative.");
+            }
+            Voxel::VoxelGrid* grid = model->GetGrid(directed.SubModelIndex);
+            if (grid == nullptr)
+                return CommandResult::Failure(
+                    "Voxel change references an unavailable compatibility grid.");
+            const auto x = static_cast<std::uint32_t>(directed.Position.X);
+            const auto y = static_cast<std::uint32_t>(directed.Position.Y);
+            const auto z = static_cast<std::uint32_t>(directed.Position.Z);
+            const Voxel::Voxel* current = grid->Get(x, y, z);
+            if (current == nullptr)
+                return CommandResult::Failure(
+                    "Voxel change coordinates lie outside the compatibility grid.");
+            const bool gridMatches = directed.ExistedBefore
+                ? current->IsOccupied() &&
+                    current->ColorIndex == directed.PaletteIndexBefore
+                : !current->IsOccupied();
+            if (!gridMatches)
+                return CommandResult::Failure(
+                    "VoxelDocument and compatibility grid differ from the expected state.");
+            directedChanges.push_back(directed);
+        }
+        documentSnapshot = *document;
+        for (std::size_t index = 0U; index < model->GridCount(); ++index)
+        {
+            bool referenced = false;
+            for (const VoxelChange& change : directedChanges)
+            {
+                if (change.SubModelIndex == index)
+                {
+                    referenced = true;
+                    break;
+                }
+            }
+            if (referenced)
+                gridSnapshots.push_back({index, *model->GetGrid(index)});
+        }
+    }
+    catch (const std::exception& exception)
+    {
+        return CommandResult::Failure(
+            std::string("Unable to start atomic voxel history edit: ") +
+            exception.what());
+    }
+    catch (...)
+    {
+        return CommandResult::Failure(
+            "Unable to start atomic voxel history edit.");
+    }
+
+    const auto rollback = [&]() noexcept
+    {
+        if (documentSnapshot) *document = std::move(*documentSnapshot);
+        for (GridSnapshot& snapshot : gridSnapshots)
+        {
+            if (Voxel::VoxelGrid* grid = model->GetGrid(snapshot.ModelIndex))
+                *grid = std::move(snapshot.Grid);
+        }
+    };
+
+    try
+    {
+        const Asset::Voxel::VoxelDocumentOperationResult documentResult =
+            document->ApplyVoxelChanges(directedChanges);
+        if (!documentResult.Succeeded || !documentResult.Changed)
+        {
+            rollback();
+            return CommandResult::Failure(
+                "VoxelDocument history edit failed: " + documentResult.Message);
+        }
+        for (const VoxelChange& change : directedChanges)
+        {
+            Voxel::VoxelGrid* grid = model->GetGrid(change.SubModelIndex);
+            const Voxel::Voxel replacement = change.ExistsAfter
+                ? Voxel::Voxel{
+                    change.PaletteIndexAfter, Voxel::Voxel::OccupiedFlag}
+                : Voxel::Voxel{};
+            if (!grid->Set(
+                    static_cast<std::uint32_t>(change.Position.X),
+                    static_cast<std::uint32_t>(change.Position.Y),
+                    static_cast<std::uint32_t>(change.Position.Z),
+                    replacement))
+            {
+                rollback();
+                return CommandResult::Failure(
+                    "Unable to update a compatibility grid voxel.");
+            }
+        }
+    }
+    catch (const std::exception& exception)
+    {
+        rollback();
+        return CommandResult::Failure(
+            std::string("Atomic voxel history edit threw an exception: ") +
+            exception.what());
+    }
+    catch (...)
+    {
+        rollback();
+        return CommandResult::Failure(
+            "Atomic voxel history edit threw an unknown exception.");
     }
 
     CommandResult rebuilt;

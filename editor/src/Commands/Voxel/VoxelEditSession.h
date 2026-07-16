@@ -31,6 +31,7 @@ public:
     }
     [[nodiscard]] virtual CommandResult RebuildActiveVoxelMesh() = 0;
     virtual void CompleteVoxelEdit() noexcept = 0;
+    virtual void UpdateVoxelEditSavedState(bool) noexcept {}
 };
 
 } // namespace VoxelForge::Editor

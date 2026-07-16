@@ -42,7 +42,8 @@ EditorLayer::EditorLayer(
     const bool voxelRenderSyncSmokeTest,
     const bool voxelRayPickingSmokeTest,
     const bool voxelPencilSmokeTest,
-    const bool voxelEraserSmokeTest)
+    const bool voxelEraserSmokeTest,
+    const bool voxelUndoRedoSmokeTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
@@ -50,7 +51,8 @@ EditorLayer::EditorLayer(
           qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest ||
               dragDropImportSmokeTest || voxelDocumentSmokeTest ||
               voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest ||
-              voxelPencilSmokeTest || voxelEraserSmokeTest
+              voxelPencilSmokeTest || voxelEraserSmokeTest ||
+              voxelUndoRedoSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -58,7 +60,8 @@ EditorLayer::EditorLayer(
           qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest ||
               dragDropImportSmokeTest || voxelDocumentSmokeTest ||
               voxelRenderSyncSmokeTest || voxelRayPickingSmokeTest ||
-              voxelPencilSmokeTest || voxelEraserSmokeTest),
+              voxelPencilSmokeTest || voxelEraserSmokeTest ||
+              voxelUndoRedoSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -81,7 +84,8 @@ EditorLayer::EditorLayer(
       voxelRenderSyncSmokeTest_(voxelRenderSyncSmokeTest),
       voxelRayPickingSmokeTest_(voxelRayPickingSmokeTest),
       voxelPencilSmokeTest_(voxelPencilSmokeTest),
-      voxelEraserSmokeTest_(voxelEraserSmokeTest)
+      voxelEraserSmokeTest_(voxelEraserSmokeTest),
+      voxelUndoRedoSmokeTest_(voxelUndoRedoSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -93,6 +97,8 @@ EditorLayer::EditorLayer(
         voxelPencilSmokeSourcePath_ = startupVoxPath_;
     if (voxelEraserSmokeTest_)
         voxelEraserSmokeSourcePath_ = startupVoxPath_;
+    if (voxelUndoRedoSmokeTest_)
+        voxelUndoRedoSmokeSourcePath_ = startupVoxPath_;
 }
 
 void EditorLayer::OnAttach()
@@ -248,6 +254,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunVoxelEraserSmokeStep(
             renderedFrameCount_, voxelEraserSmokeSourcePath_));
     }
+    if (voxelUndoRedoSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunVoxelUndoRedoSmokeStep(
+            renderedFrameCount_, voxelUndoRedoSmokeSourcePath_));
+    }
 
     ++renderedFrameCount_;
 
@@ -340,6 +351,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Voxel Eraser smoke test did not complete.");
+    }
+    if (voxelUndoRedoSmokeTest_ && smokeTestComplete &&
+        !workspace_.VoxelUndoRedoSmokePassed())
+    {
+        throw std::runtime_error(
+            "Voxel Undo/Redo smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

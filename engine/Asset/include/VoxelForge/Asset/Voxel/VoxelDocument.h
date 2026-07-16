@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -41,6 +42,19 @@ struct Voxel final
     std::uint8_t PaletteIndex = 0U;
 
     [[nodiscard]] bool operator==(const Voxel&) const noexcept = default;
+};
+
+struct VoxelDocumentChange final
+{
+    std::size_t SubModelIndex = 0U;
+    VoxelPosition Position{};
+    bool ExistedBefore = false;
+    std::uint8_t PaletteIndexBefore = 0U;
+    bool ExistsAfter = false;
+    std::uint8_t PaletteIndexAfter = 0U;
+
+    [[nodiscard]] bool operator==(
+        const VoxelDocumentChange&) const noexcept = default;
 };
 
 using VoxelColor = Vox::VoxColor;
@@ -174,7 +188,10 @@ public:
     [[nodiscard]] VoxelDocumentOperationResult SetPaletteColor(
         std::size_t paletteIndex,
         VoxelColor color);
+    [[nodiscard]] VoxelDocumentOperationResult ApplyVoxelChanges(
+        std::span<const VoxelDocumentChange> changes);
     void MarkSaved() noexcept;
+    void UpdateDirtyFromHistory(bool isAtSavedState) noexcept;
 
 private:
     friend class VoxDocumentLoader;

@@ -45,6 +45,11 @@ public:
         dirty_ = false;
     }
 
+    void UpdateFromHistory(const bool isAtSavedState) noexcept
+    {
+        dirty_ = !isAtSavedState;
+    }
+
     void Clear() noexcept
     {
         savePath_.clear();

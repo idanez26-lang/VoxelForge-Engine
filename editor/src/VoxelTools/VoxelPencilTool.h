@@ -11,6 +11,8 @@
 namespace VoxelForge::Editor
 {
 
+class VoxelEditHistory;
+
 enum class VoxelToolResultCode
 {
     Applied,
@@ -42,6 +44,7 @@ struct VoxelPencilContext final
     std::optional<VoxelRaycastHit> Hit;
     std::size_t PaletteIndex = 1U;
     bool Blocked = false;
+    VoxelEditHistory* History = nullptr;
 };
 
 class VoxelPencilTool final

@@ -1,6 +1,7 @@
 #include "VoxelPencilTool.h"
 
 #include "Commands/Voxel/VoxelEditTransaction.h"
+#include "VoxelHistory/VoxelEditHistory.h"
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
@@ -106,11 +107,32 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
     const Voxel::Voxel replacement{
         static_cast<std::uint8_t>(context.PaletteIndex),
         Voxel::Voxel::OccupiedFlag};
-    const CommandResult applied = ApplyVoxelEdit(
-        *context.EditSession,
-        context.EditSession->VoxelModelGeneration(),
-        x, y, z, *compatibilityVoxel, replacement,
-        context.SubModelIndex);
+    CommandResult applied;
+    if (context.History != nullptr)
+    {
+        const VoxelEditHistoryResult historyResult = context.History->Execute(
+            *context.EditSession,
+            VoxelEditOperation{
+                "Add Voxel",
+                {VoxelChange{
+                    context.SubModelIndex,
+                    adjacent,
+                    false,
+                    0U,
+                    true,
+                    static_cast<std::uint8_t>(context.PaletteIndex)}}});
+        applied = historyResult
+            ? CommandResult::Success()
+            : CommandResult::Failure(historyResult.Message);
+    }
+    else
+    {
+        applied = ApplyVoxelEdit(
+            *context.EditSession,
+            context.EditSession->VoxelModelGeneration(),
+            x, y, z, *compatibilityVoxel, replacement,
+            context.SubModelIndex);
+    }
     if (!applied)
     {
         return Refused(

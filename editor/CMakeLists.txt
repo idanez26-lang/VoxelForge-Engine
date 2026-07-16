@@ -141,6 +141,9 @@ target_sources(
         src/Commands/Voxel/EraseVoxelCommand.cpp
         src/Commands/Voxel/PaintVoxelCommand.cpp
         src/Commands/Voxel/VoxelEditTransaction.cpp
+        src/VoxelHistory/VoxelEditHistory.cpp
+        src/VoxelHistory/VoxelEditOperation.cpp
+        src/VoxelHistory/VoxelHistoryInput.cpp
         src/VoxelTools/VoxelEraserTool.cpp
         src/VoxelTools/VoxelPencilInput.cpp
         src/VoxelTools/VoxelPencilPreview.cpp

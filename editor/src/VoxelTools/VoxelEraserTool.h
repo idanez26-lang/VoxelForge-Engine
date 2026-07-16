@@ -11,6 +11,8 @@
 namespace VoxelForge::Editor
 {
 
+class VoxelEditHistory;
+
 enum class VoxelEraserResultCode
 {
     Applied,
@@ -41,6 +43,7 @@ struct VoxelEraserContext final
     std::size_t SubModelIndex = 0U;
     std::optional<VoxelRaycastHit> Hit;
     bool Blocked = false;
+    VoxelEditHistory* History = nullptr;
 };
 
 class VoxelEraserTool final

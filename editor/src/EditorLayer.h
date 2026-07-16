@@ -52,7 +52,8 @@ public:
         bool voxelRenderSyncSmokeTest = false,
         bool voxelRayPickingSmokeTest = false,
         bool voxelPencilSmokeTest = false,
-        bool voxelEraserSmokeTest = false);
+        bool voxelEraserSmokeTest = false,
+        bool voxelUndoRedoSmokeTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -111,6 +112,8 @@ private:
     std::filesystem::path voxelPencilSmokeSourcePath_;
     bool voxelEraserSmokeTest_ = false;
     std::filesystem::path voxelEraserSmokeSourcePath_;
+    bool voxelUndoRedoSmokeTest_ = false;
+    std::filesystem::path voxelUndoRedoSmokeSourcePath_;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

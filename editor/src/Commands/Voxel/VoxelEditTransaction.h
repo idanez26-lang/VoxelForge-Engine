@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Commands/Voxel/VoxelEditSession.h"
+#include "VoxelHistory/VoxelEditOperation.h"
 
 #include "VoxelForge/Voxel/Voxel.h"
 
 #include <cstdint>
+#include <span>
 
 namespace VoxelForge::Editor
 {
@@ -26,5 +28,17 @@ namespace VoxelForge::Editor
     Voxel::Voxel expected,
     Voxel::Voxel replacement,
     std::size_t modelIndex = 0U);
+
+enum class VoxelChangeDirection
+{
+    Forward,
+    Backward
+};
+
+[[nodiscard]] CommandResult ApplyVoxelChanges(
+    VoxelEditSession& session,
+    std::uint64_t modelGeneration,
+    std::span<const VoxelChange> changes,
+    VoxelChangeDirection direction);
 
 } // namespace VoxelForge::Editor

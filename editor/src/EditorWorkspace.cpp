@@ -471,23 +471,33 @@ void EditorWorkspace::DrawMainMenuBar()
 
     if (ImGui::BeginMenu("Edit"))
     {
-        const std::string undoLabel = commandHistory_.CanUndo()
-            ? "Undo " + std::string(commandHistory_.UndoName())
+        const bool documentHistory =
+            voxelDocumentSession_.HasActiveDocument();
+        const bool canUndo = documentHistory
+            ? voxelEditHistory_.CanUndo() : commandHistory_.CanUndo();
+        const bool canRedo = documentHistory
+            ? voxelEditHistory_.CanRedo() : commandHistory_.CanRedo();
+        const std::string_view undoName = documentHistory
+            ? voxelEditHistory_.UndoLabel() : commandHistory_.UndoName();
+        const std::string_view redoName = documentHistory
+            ? voxelEditHistory_.RedoLabel() : commandHistory_.RedoName();
+        const std::string undoLabel = canUndo
+            ? "Undo " + std::string(undoName)
             : "Undo";
         if (ImGui::MenuItem(
                 undoLabel.c_str(), "Ctrl+Z", false,
-                commandHistory_.CanUndo()))
+                canUndo && !voxelEditInProgress_))
         {
             UndoCommand();
         }
         DrawTooltip("Undo the last edit (Ctrl+Z)");
 
-        const std::string redoLabel = commandHistory_.CanRedo()
-            ? "Redo " + std::string(commandHistory_.RedoName())
+        const std::string redoLabel = canRedo
+            ? "Redo " + std::string(redoName)
             : "Redo";
         if (ImGui::MenuItem(
                 redoLabel.c_str(), "Ctrl+Y / Ctrl+Shift+Z", false,
-                commandHistory_.CanRedo()))
+                canRedo && !voxelEditInProgress_))
         {
             RedoCommand();
         }
@@ -605,6 +615,18 @@ void EditorWorkspace::HandleCommandShortcuts()
         ImGui::IsAnyItemActive(),
         incompatiblePopupOpen,
         projectManager_.HasActiveProject()};
+    const VoxelHistoryInputDecision historyDecision =
+        voxelHistoryInput_.Update({
+            io.KeyCtrl,
+            io.KeyShift,
+            ImGui::IsKeyDown(ImGuiKey_Z),
+            ImGui::IsKeyDown(ImGuiKey_Y),
+            context.TextInput || context.ActiveItem,
+            context.PopupOpen,
+            io.WantCaptureKeyboard && context.ActiveItem,
+            voxelDocumentSession_.HasActiveDocument(),
+            voxelEditInProgress_,
+            voxelEditHistory_.IsBusy()});
     if (context.TextInput || context.ActiveItem || context.PopupOpen)
     {
         return;
@@ -649,25 +671,28 @@ void EditorWorkspace::HandleCommandShortcuts()
     {
         RequestCloseProject();
     }
-    else if (ImGui::Shortcut(
-            ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, shortcutFlags))
-    {
-        if (commandHistory_.CanRedo()) RedoCommand();
-    }
-    else if (ImGui::Shortcut(
-                 ImGuiMod_Ctrl | ImGuiKey_Z, shortcutFlags))
-    {
-        if (commandHistory_.CanUndo()) UndoCommand();
-    }
-    else if (ImGui::Shortcut(
-                 ImGuiMod_Ctrl | ImGuiKey_Y, shortcutFlags))
-    {
-        if (commandHistory_.CanRedo()) RedoCommand();
-    }
+    else if (historyDecision == VoxelHistoryInputDecision::Undo &&
+             voxelEditHistory_.CanUndo())
+        UndoCommand();
+    else if (historyDecision == VoxelHistoryInputDecision::Redo &&
+             voxelEditHistory_.CanRedo())
+        RedoCommand();
 }
 
 void EditorWorkspace::UndoCommand()
 {
+    if (voxelDocumentSession_.HasActiveDocument())
+    {
+        if (voxelEditInProgress_ || voxelEditHistory_.IsBusy()) return;
+        voxelEditInProgress_ = true;
+        const VoxelEditHistoryResult result = voxelEditHistory_.Undo(*this);
+        voxelEditInProgress_ = false;
+        if (result)
+            AddConsoleMessage("[Edit] Undo: " + result.Label);
+        else if (result.Code != VoxelEditHistoryResultCode::NothingToUndo)
+            AddConsoleMessage("[Edit] Undo failed: " + result.Message);
+        return;
+    }
     const std::string name(commandHistory_.UndoName());
     const CommandResult result = commandHistory_.Undo();
     AddConsoleMessage(result
@@ -677,6 +702,18 @@ void EditorWorkspace::UndoCommand()
 
 void EditorWorkspace::RedoCommand()
 {
+    if (voxelDocumentSession_.HasActiveDocument())
+    {
+        if (voxelEditInProgress_ || voxelEditHistory_.IsBusy()) return;
+        voxelEditInProgress_ = true;
+        const VoxelEditHistoryResult result = voxelEditHistory_.Redo(*this);
+        voxelEditInProgress_ = false;
+        if (result)
+            AddConsoleMessage("[Edit] Redo: " + result.Label);
+        else if (result.Code != VoxelEditHistoryResultCode::NothingToRedo)
+            AddConsoleMessage("[Edit] Redo failed: " + result.Message);
+        return;
+    }
     const std::string name(commandHistory_.RedoName());
     const CommandResult result = commandHistory_.Redo();
     AddConsoleMessage(result
@@ -927,6 +964,18 @@ void EditorWorkspace::DrawScenePanel()
     drawToolButton(
         "Eraser", "Eraser [Active]", "Activate the Eraser tool (E)",
         ActiveVoxelTool::Eraser, ImVec4(0.58F, 0.20F, 0.08F, 1.0F));
+    ImGui::SameLine();
+    ImGui::BeginDisabled(
+        !voxelEditHistory_.CanUndo() || voxelEditInProgress_);
+    if (ImGui::Button("Undo")) UndoCommand();
+    ImGui::EndDisabled();
+    DrawTooltip("Undo the last edit (Ctrl+Z)");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(
+        !voxelEditHistory_.CanRedo() || voxelEditInProgress_);
+    if (ImGui::Button("Redo")) RedoCommand();
+    ImGui::EndDisabled();
+    DrawTooltip("Redo the last undone edit (Ctrl+Y or Ctrl+Shift+Z)");
 
     bool eraseRequested = false;
     bool addRequested = false;
@@ -1317,6 +1366,20 @@ void EditorWorkspace::DrawInspectorPanel()
         ImGui::Text("Dirty: %s", document->IsDirty() ? "Yes" : "No");
         ImGui::Text("Revision: %llu",
             static_cast<unsigned long long>(document->GetRevision()));
+        ImGui::Text("Undo Available: %s",
+            voxelEditHistory_.CanUndo() ? "Yes" : "No");
+        ImGui::Text("Redo Available: %s",
+            voxelEditHistory_.CanRedo() ? "Yes" : "No");
+        ImGui::Text("Undo Count: %zu", voxelEditHistory_.UndoCount());
+        ImGui::Text("Redo Count: %zu", voxelEditHistory_.RedoCount());
+        ImGui::Text("Next Undo: %s", voxelEditHistory_.CanUndo()
+            ? std::string(voxelEditHistory_.UndoLabel()).c_str() : "None");
+        ImGui::Text("Next Redo: %s", voxelEditHistory_.CanRedo()
+            ? std::string(voxelEditHistory_.RedoLabel()).c_str() : "None");
+        ImGui::Text("History Memory: %zu bytes",
+            voxelEditHistory_.EstimatedMemory());
+        ImGui::Text("Saved State: %s",
+            voxelEditHistory_.IsAtSavedState() ? "Current" : "Different");
         ImGui::Text("Active Tool: %s",
             ActiveVoxelToolName(voxelToolState_.ActiveTool()));
         if (voxelToolState_.IsPencilActive())
@@ -2310,6 +2373,11 @@ bool EditorWorkspace::SaveVoxelModel()
     }
 
     voxelSaveState_.MarkSaved();
+    if (Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument())
+    {
+        voxelEditHistory_.MarkSavedState(*document);
+    }
     static_cast<void>(assetBrowser_.Refresh());
     AddConsoleMessage(
         "Voxel model saved: " + voxelSaveState_.SavePath().string());
@@ -2699,6 +2767,8 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     }
     else
     {
+        voxelEditHistory_.Clear();
+        voxelHistoryInput_.Reset();
         voxelDocumentSession_.Close();
         voxelDocumentMeshCache_.Clear();
         uploadedDocumentIdentity_.reset();
@@ -2723,6 +2793,8 @@ bool EditorWorkspace::OpenVoxInViewportNow(
         return false;
     }
     commandHistory_.Clear();
+    voxelEditHistory_.Clear();
+    voxelHistoryInput_.Reset();
     activeVoxelModel_ = std::move(*model);
     paintPaletteSelection_.OnModelLoaded();
     ++voxelModelGeneration_;
@@ -2742,6 +2814,8 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     }
     if (document)
     {
+        voxelEditHistory_.MarkSavedState(
+            *voxelDocumentSession_.ActiveDocument());
         uploadedDocumentIdentity_ = voxelDocumentSession_.Generation();
         uploadedDocumentRevision_ = document->GetRevision();
     }
@@ -3012,7 +3086,7 @@ bool EditorWorkspace::RunVoxelSaveSmokeStep(const std::size_t frame)
             voxelSaveSmokeX_, voxelSaveSmokeY_, voxelSaveSmokeZ_);
         voxelSaveSmokePaintedAndSaved_ = saved && voxel != nullptr &&
             voxel->ColorIndex == voxelSaveSmokeColor_ &&
-            !voxelSaveState_.IsDirty() && commandHistory_.CanUndo() &&
+            !voxelSaveState_.IsDirty() && voxelEditHistory_.CanUndo() &&
             std::filesystem::is_regular_file(voxelSaveSmokePath_);
     }
     else if (frame == 5U)
@@ -3174,7 +3248,7 @@ bool EditorWorkspace::RunAddVoxelSmokeStep(const std::size_t frame)
         addVoxelSmokeRedoneAndSaved_ = rendered && saved &&
             voxel->ColorIndex == 255U && grid->OccupiedVoxelCount() == 2U &&
             viewportState_.Statistics().TriangleCount == 20U &&
-            !voxelSaveState_.IsDirty() && commandHistory_.CanUndo();
+            !voxelSaveState_.IsDirty() && voxelEditHistory_.CanUndo();
     }
     else if (frame == 25U)
     {
@@ -4220,6 +4294,229 @@ bool EditorWorkspace::VoxelEraserSmokePassed() const noexcept
         voxelEraserSmokeClosed_ && voxelEraserSmokeSourcePreserved_;
 }
 
+bool EditorWorkspace::RunVoxelUndoRedoSmokeStep(
+    const std::size_t frame,
+    const std::filesystem::path& sourcePath)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const auto metrics = [this, document]()
+    {
+        return std::array<std::uint64_t, 3U>{
+            document ? document->GetRevision() : 0U,
+            static_cast<std::uint64_t>(voxelDocumentMeshCache_.BuildCount()),
+            static_cast<std::uint64_t>(viewportRenderer_.ModelUploadCount())};
+    };
+    const auto advancedOnce = [this, document](
+        const std::array<std::uint64_t, 3U>& before)
+    {
+        return document != nullptr &&
+            document->GetRevision() == before[0] + 1U &&
+            voxelDocumentMeshCache_.BuildCount() == before[1] + 1U &&
+            viewportRenderer_.ModelUploadCount() == before[2] + 1U;
+    };
+
+    if (frame == 0U)
+    {
+        if (document == nullptr || document->GetVoxelCount() != 1U ||
+            !voxelEditHistory_.IsAtSavedState() ||
+            voxelEditHistory_.CanUndo() || document->IsDirty()) return false;
+        std::error_code error;
+        voxelUndoRedoSmokeSourceSize_ =
+            std::filesystem::file_size(sourcePath, error);
+        voxelUndoRedoSmokeSourceTime_ =
+            std::filesystem::last_write_time(sourcePath, error);
+        const auto hash = HashFileContents(sourcePath);
+        if (error || !hash || GetBackendDisplayName() != "Direct3D 12")
+            return false;
+        voxelUndoRedoSmokeSourceHash_ = *hash;
+        voxelUndoRedoSmokeInitialRevision_ = document->GetRevision();
+        voxelUndoRedoSmokeInitialVoxelCount_ = document->GetVoxelCount();
+        voxelUndoRedoSmokeInitialBuildCount_ =
+            voxelDocumentMeshCache_.BuildCount();
+        voxelUndoRedoSmokeInitialUploadCount_ =
+            viewportRenderer_.ModelUploadCount();
+
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        const auto hit = RaycastVoxelDocument(
+            *document, {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit) return false;
+        voxelUndoRedoSmokePencilTarget_ = hit->AdjacentPosition;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        const auto before = metrics();
+        voxelUndoRedoSmokePencilExecuted_ = ApplyVoxelPencil() &&
+            advancedOnce(before) &&
+            document->HasVoxel(voxelUndoRedoSmokePencilTarget_) &&
+            document->IsDirty() && voxelEditHistory_.UndoCount() == 1U &&
+            voxelEditHistory_.UndoLabel() == "Add Voxel" &&
+            !voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 1U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokePencilExecuted_)
+            return false;
+        const auto before = metrics();
+        const VoxelEditHistoryResult undone = voxelEditHistory_.Undo(*this);
+        voxelUndoRedoSmokePencilUndone_ = undone && advancedOnce(before) &&
+            !document->HasVoxel(voxelUndoRedoSmokePencilTarget_) &&
+            document->GetVoxelCount() == voxelUndoRedoSmokeInitialVoxelCount_ &&
+            !document->IsDirty() && voxelEditHistory_.IsAtSavedState() &&
+            voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 2U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokePencilUndone_)
+            return false;
+        const auto before = metrics();
+        const VoxelEditHistoryResult redone = voxelEditHistory_.Redo(*this);
+        voxelUndoRedoSmokePencilRedone_ = redone && advancedOnce(before) &&
+            document->HasVoxel(voxelUndoRedoSmokePencilTarget_) &&
+            document->IsDirty() && !voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 3U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokePencilRedone_)
+            return false;
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Eraser);
+        const auto hit = RaycastVoxelDocument(
+            *document, {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+        if (!hit || hit->Coordinates != VoxelCoordinates{0U, 1U, 1U})
+            return false;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        const auto before = metrics();
+        const bool erased = ApplyVoxelEraser();
+        voxelUndoRedoSmokeEraserCycle_ = erased && advancedOnce(before) &&
+            lastVoxelEraserResult_ &&
+            lastVoxelEraserResult_->RemovedPaletteIndex == 1U &&
+            !document->HasVoxel(voxelUndoRedoSmokePencilTarget_) &&
+            voxelEditHistory_.UndoLabel() == "Remove Voxel";
+    }
+    else if (frame == 4U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokeEraserCycle_)
+            return false;
+        const auto before = metrics();
+        const VoxelEditHistoryResult undone = voxelEditHistory_.Undo(*this);
+        const auto restored = document->GetVoxel(voxelUndoRedoSmokePencilTarget_);
+        voxelUndoRedoSmokeEraserCycle_ = undone && advancedOnce(before) &&
+            restored && restored->PaletteIndex == 1U;
+    }
+    else if (frame == 5U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokeEraserCycle_)
+            return false;
+        const auto before = metrics();
+        const VoxelEditHistoryResult redone = voxelEditHistory_.Redo(*this);
+        voxelUndoRedoSmokeEraserCycle_ = redone && advancedOnce(before) &&
+            !document->HasVoxel(voxelUndoRedoSmokePencilTarget_);
+    }
+    else if (frame == 6U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokeEraserCycle_)
+            return false;
+        const auto undoBefore = metrics();
+        const VoxelEditHistoryResult undone = voxelEditHistory_.Undo(*this);
+        if (!undone || !advancedOnce(undoBefore)) return false;
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+        const auto hit = RaycastVoxelDocument(
+            *document, {{4.0F, 1.5F, 1.5F}, {-1.0F, 0.0F, 0.0F}});
+        if (!hit || hit->AdjacentPosition !=
+                Asset::Voxel::VoxelPosition{2, 1, 1}) return false;
+        voxelUndoRedoSmokeBranchTarget_ = hit->AdjacentPosition;
+        static_cast<void>(voxelSelection_.SetHovered(
+            VoxelPickingInteractionState::Hit, hit));
+        const auto pencilBefore = metrics();
+        voxelUndoRedoSmokeBranchClearedRedo_ = ApplyVoxelPencil() &&
+            advancedOnce(pencilBefore) &&
+            document->HasVoxel(voxelUndoRedoSmokeBranchTarget_) &&
+            !voxelEditHistory_.CanRedo() &&
+            voxelEditHistory_.UndoLabel() == "Add Voxel";
+    }
+    else if (frame == 7U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokeBranchClearedRedo_)
+            return false;
+        const auto before = metrics();
+        const VoxelEditHistoryResult executed = voxelEditHistory_.Execute(
+            *this,
+            VoxelEditOperation{
+                "Synthetic Multi Edit",
+                {
+                    VoxelChange{0U, {0, 0, 0}, false, 0U, true, 2U},
+                    VoxelChange{0U, {2, 2, 2}, false, 0U, true, 3U},
+                    VoxelChange{0U, voxelUndoRedoSmokeBranchTarget_,
+                        true, 1U, false, 0U}
+                }});
+        voxelUndoRedoSmokeMultiExecuted_ = executed && advancedOnce(before) &&
+            document->HasVoxel({0, 0, 0}) &&
+            document->HasVoxel({2, 2, 2}) &&
+            !document->HasVoxel(voxelUndoRedoSmokeBranchTarget_) &&
+            voxelEditHistory_.UndoLabel() == "Synthetic Multi Edit";
+    }
+    else if (frame == 8U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokeMultiExecuted_)
+            return false;
+        const auto before = metrics();
+        const VoxelEditHistoryResult undone = voxelEditHistory_.Undo(*this);
+        voxelUndoRedoSmokeMultiUndone_ = undone && advancedOnce(before) &&
+            !document->HasVoxel({0, 0, 0}) &&
+            !document->HasVoxel({2, 2, 2}) &&
+            document->HasVoxel(voxelUndoRedoSmokeBranchTarget_);
+    }
+    else if (frame == 9U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokeMultiUndone_)
+            return false;
+        const auto before = metrics();
+        const VoxelEditHistoryResult redone = voxelEditHistory_.Redo(*this);
+        voxelUndoRedoSmokeMultiRedone_ = redone && advancedOnce(before) &&
+            document->HasVoxel({0, 0, 0}) &&
+            document->HasVoxel({2, 2, 2}) &&
+            !document->HasVoxel(voxelUndoRedoSmokeBranchTarget_) &&
+            document->GetRevision() == voxelUndoRedoSmokeInitialRevision_ + 11U;
+    }
+    else if (frame == 10U)
+    {
+        if (document == nullptr || !voxelUndoRedoSmokeMultiRedone_)
+            return false;
+        std::error_code error;
+        const auto hash = HashFileContents(sourcePath);
+        voxelUndoRedoSmokeSourcePreserved_ = hash &&
+            *hash == voxelUndoRedoSmokeSourceHash_ &&
+            std::filesystem::file_size(sourcePath, error) ==
+                voxelUndoRedoSmokeSourceSize_ && !error &&
+            std::filesystem::last_write_time(sourcePath, error) ==
+                voxelUndoRedoSmokeSourceTime_ && !error;
+        ClearVoxelViewport();
+        voxelUndoRedoSmokeClosed_ =
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() && !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo() &&
+            voxelEditHistory_.EstimatedMemory() == 0U;
+    }
+    return VoxelUndoRedoSmokePassed();
+}
+
+bool EditorWorkspace::VoxelUndoRedoSmokePassed() const noexcept
+{
+    return voxelUndoRedoSmokePencilExecuted_ &&
+        voxelUndoRedoSmokePencilUndone_ &&
+        voxelUndoRedoSmokePencilRedone_ &&
+        voxelUndoRedoSmokeEraserCycle_ &&
+        voxelUndoRedoSmokeBranchClearedRedo_ &&
+        voxelUndoRedoSmokeMultiExecuted_ &&
+        voxelUndoRedoSmokeMultiUndone_ &&
+        voxelUndoRedoSmokeMultiRedone_ &&
+        voxelUndoRedoSmokeClosed_ && voxelUndoRedoSmokeSourcePreserved_;
+}
+
 bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     const std::size_t frame,
     const std::filesystem::path& parentDirectory)
@@ -4302,10 +4599,38 @@ bool EditorWorkspace::EraseSelectedVoxel()
     }
 
     const VoxelCoordinates coordinates = selected->Coordinates;
-    CommandResult result = commandHistory_.Execute(
-        std::make_unique<EraseVoxelCommand>(
-            static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
-            coordinates.X, coordinates.Y, coordinates.Z));
+    CommandResult result;
+    if (Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument())
+    {
+        const Asset::Voxel::VoxelPosition position{
+            static_cast<std::int32_t>(coordinates.X),
+            static_cast<std::int32_t>(coordinates.Y),
+            static_cast<std::int32_t>(coordinates.Z)};
+        const auto voxel = document->GetVoxel(position, selected->SubModelIndex);
+        if (!voxel)
+            result = CommandResult::Failure(
+                "Selected voxel is absent from the active document.");
+        else
+        {
+            const VoxelEditHistoryResult historyResult =
+                voxelEditHistory_.Execute(*this, {
+                    "Erase Voxel",
+                    {VoxelChange{
+                        selected->SubModelIndex, position,
+                        true, voxel->PaletteIndex, false, 0U}}});
+            result = historyResult
+                ? CommandResult::Success()
+                : CommandResult::Failure(historyResult.Message);
+        }
+    }
+    else
+    {
+        result = commandHistory_.Execute(
+            std::make_unique<EraseVoxelCommand>(
+                static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
+                coordinates.X, coordinates.Y, coordinates.Z));
+    }
     if (!result)
     {
         AddConsoleMessage("Erase failed: " + result.Message);
@@ -4337,10 +4662,38 @@ bool EditorWorkspace::PaintSelectedVoxel()
     const std::uint8_t colorIndex = paintPaletteSelection_.Index();
     // Paint v1 deliberately uses the shared full mesh rebuild because palette
     // indices are currently baked into mesh vertices.
-    CommandResult result = commandHistory_.Execute(
-        std::make_unique<PaintVoxelCommand>(
-            static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
-            coordinates.X, coordinates.Y, coordinates.Z, colorIndex));
+    CommandResult result;
+    if (Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument())
+    {
+        const Asset::Voxel::VoxelPosition position{
+            static_cast<std::int32_t>(coordinates.X),
+            static_cast<std::int32_t>(coordinates.Y),
+            static_cast<std::int32_t>(coordinates.Z)};
+        const auto voxel = document->GetVoxel(position, selected->SubModelIndex);
+        if (!voxel)
+            result = CommandResult::Failure(
+                "Selected voxel is absent from the active document.");
+        else
+        {
+            const VoxelEditHistoryResult historyResult =
+                voxelEditHistory_.Execute(*this, {
+                    "Paint Voxel",
+                    {VoxelChange{
+                        selected->SubModelIndex, position,
+                        true, voxel->PaletteIndex, true, colorIndex}}});
+            result = historyResult
+                ? CommandResult::Success()
+                : CommandResult::Failure(historyResult.Message);
+        }
+    }
+    else
+    {
+        result = commandHistory_.Execute(
+            std::make_unique<PaintVoxelCommand>(
+                static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
+                coordinates.X, coordinates.Y, coordinates.Z, colorIndex));
+    }
     if (!result)
     {
         AddConsoleMessage("Paint failed: " + result.Message);
@@ -4370,11 +4723,34 @@ bool EditorWorkspace::AddAdjacentVoxel()
     }
 
     const VoxelCoordinates destination = *target.Coordinates;
-    CommandResult result = commandHistory_.Execute(
-        std::make_unique<AddVoxelCommand>(
-            static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
-            destination.X, destination.Y, destination.Z,
-            paintPaletteSelection_.Index()));
+    CommandResult result;
+    if (voxelDocumentSession_.HasActiveDocument())
+    {
+        const VoxelEditHistoryResult historyResult =
+            voxelEditHistory_.Execute(*this, {
+                "Add Voxel",
+                {VoxelChange{
+                    0U,
+                    {
+                        static_cast<std::int32_t>(destination.X),
+                        static_cast<std::int32_t>(destination.Y),
+                        static_cast<std::int32_t>(destination.Z)},
+                    false,
+                    0U,
+                    true,
+                    paintPaletteSelection_.Index()}}});
+        result = historyResult
+            ? CommandResult::Success()
+            : CommandResult::Failure(historyResult.Message);
+    }
+    else
+    {
+        result = commandHistory_.Execute(
+            std::make_unique<AddVoxelCommand>(
+                static_cast<VoxelEditSession&>(*this), voxelModelGeneration_,
+                destination.X, destination.Y, destination.Z,
+                paintPaletteSelection_.Index()));
+    }
     if (!result)
     {
         AddConsoleMessage("Add voxel failed: " + result.Message);
@@ -4403,7 +4779,8 @@ bool EditorWorkspace::ApplyVoxelPencil()
             0U,
             voxelSelection_.Hovered(),
             voxelToolState_.ActivePaletteIndex(),
-            !voxelToolState_.IsPencilActive()});
+            !voxelToolState_.IsPencilActive(),
+            &voxelEditHistory_});
     }
     catch (const std::exception& exception)
     {
@@ -4452,7 +4829,8 @@ bool EditorWorkspace::ApplyVoxelEraser()
             voxelDocumentSession_.ActiveDocument(),
             0U,
             voxelSelection_.Hovered(),
-            !voxelToolState_.IsEraserActive()});
+            !voxelToolState_.IsEraserActive(),
+            &voxelEditHistory_});
     }
     catch (const std::exception& exception)
     {
@@ -4643,6 +5021,12 @@ void EditorWorkspace::CompleteVoxelEdit() noexcept
     voxelSaveState_.MarkModified();
 }
 
+void EditorWorkspace::UpdateVoxelEditSavedState(
+    const bool isAtSavedState) noexcept
+{
+    voxelSaveState_.UpdateFromHistory(isAtSavedState);
+}
+
 std::size_t EditorWorkspace::VoxelHighlightUploadCount() const noexcept
 {
     return viewportRenderer_.HighlightUploadCount();
@@ -4724,6 +5108,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
 void EditorWorkspace::ClearVoxelViewport() noexcept
 {
     commandHistory_.Clear();
+    voxelEditHistory_.Clear();
+    voxelHistoryInput_.Reset();
     ++voxelModelGeneration_;
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);

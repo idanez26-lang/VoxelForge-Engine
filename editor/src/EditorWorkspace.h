@@ -21,6 +21,8 @@
 #include "VoxelSave/VoxelSaveState.h"
 #include "VoxelSelection/VoxelSelectionState.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
+#include "VoxelHistory/VoxelEditHistory.h"
+#include "VoxelHistory/VoxelHistoryInput.h"
 #include "VoxelTools/VoxelEraserTool.h"
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
@@ -116,6 +118,10 @@ public:
         std::size_t frame,
         const std::filesystem::path& sourcePath);
     [[nodiscard]] bool VoxelEraserSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelUndoRedoSmokeStep(
+        std::size_t frame,
+        const std::filesystem::path& sourcePath);
+    [[nodiscard]] bool VoxelUndoRedoSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -200,6 +206,7 @@ private:
         ActiveVoxelDocument() noexcept override;
     [[nodiscard]] CommandResult RebuildActiveVoxelMesh() override;
     void CompleteVoxelEdit() noexcept override;
+    void UpdateVoxelEditSavedState(bool isAtSavedState) noexcept override;
 
     void AddConsoleMessage(std::string message);
     [[nodiscard]] std::string GetBackendDisplayName() const;
@@ -222,6 +229,8 @@ private:
     VoxelToolInputController voxelToolInput_;
     VoxelToolInputController voxelToolSmokeInput_;
     VoxelPlacementPreview voxelPlacementPreview_;
+    VoxelEditHistory voxelEditHistory_;
+    VoxelHistoryInputController voxelHistoryInput_;
     std::optional<VoxelToolResult> lastVoxelToolResult_;
     std::optional<VoxelEraserResult> lastVoxelEraserResult_;
     PaintPaletteSelection paintPaletteSelection_;
@@ -425,6 +434,25 @@ private:
     bool voxelEraserSmokeLastRemoved_ = false;
     bool voxelEraserSmokeClosed_ = false;
     bool voxelEraserSmokeSourcePreserved_ = false;
+    std::uintmax_t voxelUndoRedoSmokeSourceSize_ = 0U;
+    std::uint64_t voxelUndoRedoSmokeSourceHash_ = 0U;
+    std::filesystem::file_time_type voxelUndoRedoSmokeSourceTime_{};
+    std::uint64_t voxelUndoRedoSmokeInitialRevision_ = 0U;
+    std::uint64_t voxelUndoRedoSmokeInitialVoxelCount_ = 0U;
+    std::size_t voxelUndoRedoSmokeInitialBuildCount_ = 0U;
+    std::size_t voxelUndoRedoSmokeInitialUploadCount_ = 0U;
+    Asset::Voxel::VoxelPosition voxelUndoRedoSmokePencilTarget_{};
+    Asset::Voxel::VoxelPosition voxelUndoRedoSmokeBranchTarget_{};
+    bool voxelUndoRedoSmokePencilExecuted_ = false;
+    bool voxelUndoRedoSmokePencilUndone_ = false;
+    bool voxelUndoRedoSmokePencilRedone_ = false;
+    bool voxelUndoRedoSmokeEraserCycle_ = false;
+    bool voxelUndoRedoSmokeBranchClearedRedo_ = false;
+    bool voxelUndoRedoSmokeMultiExecuted_ = false;
+    bool voxelUndoRedoSmokeMultiUndone_ = false;
+    bool voxelUndoRedoSmokeMultiRedone_ = false;
+    bool voxelUndoRedoSmokeClosed_ = false;
+    bool voxelUndoRedoSmokeSourcePreserved_ = false;
     std::optional<std::uint64_t> uploadedDocumentIdentity_;
     std::optional<std::uint64_t> uploadedDocumentRevision_;
     std::optional<std::uint64_t> failedDocumentIdentity_;

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <unordered_set>
 
 namespace VoxelForge::Asset::Voxel
 {
@@ -324,9 +325,111 @@ VoxelDocumentOperationResult VoxelDocument::SetPaletteColor(
     return Success(true, "Palette color changed.");
 }
 
+VoxelDocumentOperationResult VoxelDocument::ApplyVoxelChanges(
+    const std::span<const VoxelDocumentChange> changes)
+{
+    if (changes.empty())
+        return Success(false, "Voxel change set is empty.");
+
+    struct ChangeKey final
+    {
+        std::size_t ModelIndex = 0U;
+        VoxelPosition Position{};
+
+        [[nodiscard]] bool operator==(
+            const ChangeKey&) const noexcept = default;
+    };
+    struct ChangeKeyHash final
+    {
+        [[nodiscard]] std::size_t operator()(
+            const ChangeKey& key) const noexcept
+        {
+            const std::size_t positionHash = VoxelPositionHash{}(key.Position);
+            return positionHash ^
+                (key.ModelIndex + 0x9e3779b9U +
+                 (positionHash << 6U) + (positionHash >> 2U));
+        }
+    };
+
+    std::unordered_set<ChangeKey, ChangeKeyHash> uniqueChanges;
+    uniqueChanges.reserve(changes.size());
+    for (const VoxelDocumentChange& change : changes)
+    {
+        if (change.SubModelIndex >= models_.size())
+            return Failure(VoxelDocumentError::InvalidModelIndex,
+                "Voxel change sub-model index is invalid.");
+        const VoxelSubModel& model = models_[change.SubModelIndex];
+        if (!model.Contains(change.Position))
+            return Failure(VoxelDocumentError::OutOfBounds,
+                "Voxel change position lies outside its sub-model dimensions.");
+        if ((change.ExistedBefore && change.PaletteIndexBefore == 0U) ||
+            (change.ExistsAfter && change.PaletteIndexAfter == 0U))
+        {
+            return Failure(VoxelDocumentError::InvalidPaletteIndex,
+                "Voxel changes require palette indices between 1 and 255.");
+        }
+        if (change.ExistedBefore == change.ExistsAfter &&
+            (!change.ExistedBefore ||
+             change.PaletteIndexBefore == change.PaletteIndexAfter))
+        {
+            return Failure(VoxelDocumentError::DuplicateVoxel,
+                "Voxel change has identical before and after states.");
+        }
+        if (!uniqueChanges.emplace(ChangeKey{
+                change.SubModelIndex, change.Position}).second)
+        {
+            return Failure(VoxelDocumentError::DuplicateVoxel,
+                "Voxel change set contains the same position more than once.");
+        }
+        const std::optional<Voxel> current = model.GetVoxel(change.Position);
+        const bool matchesBefore = change.ExistedBefore
+            ? current && current->PaletteIndex == change.PaletteIndexBefore
+            : !current;
+        if (!matchesBefore)
+            return Failure(VoxelDocumentError::DuplicateVoxel,
+                "Voxel document no longer matches the expected before state.");
+    }
+
+    std::vector<bool> recalculateBounds(models_.size(), false);
+    for (const VoxelDocumentChange& change : changes)
+    {
+        VoxelSubModel& model = models_[change.SubModelIndex];
+        if (change.ExistedBefore && !change.ExistsAfter)
+        {
+            model.voxels_.erase(change.Position);
+            --voxelCount_;
+            recalculateBounds[change.SubModelIndex] = true;
+        }
+        else if (!change.ExistedBefore && change.ExistsAfter)
+        {
+            model.voxels_.emplace(
+                change.Position, Voxel{change.PaletteIndexAfter});
+            ++voxelCount_;
+            model.ExtendBounds(change.Position);
+        }
+        else
+        {
+            model.voxels_.at(change.Position).PaletteIndex =
+                change.PaletteIndexAfter;
+        }
+    }
+    for (std::size_t index = 0U; index < models_.size(); ++index)
+    {
+        if (recalculateBounds[index]) models_[index].RecalculateBounds();
+    }
+    RecordChange();
+    return Success(true, "Voxel changes applied atomically.");
+}
+
 void VoxelDocument::MarkSaved() noexcept
 {
     dirty_ = false;
+}
+
+void VoxelDocument::UpdateDirtyFromHistory(
+    const bool isAtSavedState) noexcept
+{
+    dirty_ = !isAtSavedState;
 }
 
 VoxelDocumentOperationResult VoxelDocument::ValidateMutation(

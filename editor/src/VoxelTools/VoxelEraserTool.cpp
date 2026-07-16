@@ -1,6 +1,7 @@
 #include "VoxelEraserTool.h"
 
 #include "Commands/Voxel/VoxelEditTransaction.h"
+#include "VoxelHistory/VoxelEditHistory.h"
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
@@ -97,11 +98,32 @@ VoxelEraserResult VoxelEraserTool::Apply(
     }
 
     const std::uint8_t removedPaletteIndex = documentVoxel->PaletteIndex;
-    const CommandResult applied = ApplyVoxelEdit(
-        *context.EditSession,
-        context.EditSession->VoxelModelGeneration(),
-        x, y, z, *compatibilityVoxel, Voxel::Voxel{},
-        context.SubModelIndex);
+    CommandResult applied;
+    if (context.History != nullptr)
+    {
+        const VoxelEditHistoryResult historyResult = context.History->Execute(
+            *context.EditSession,
+            VoxelEditOperation{
+                "Remove Voxel",
+                {VoxelChange{
+                    context.SubModelIndex,
+                    position,
+                    true,
+                    removedPaletteIndex,
+                    false,
+                    0U}}});
+        applied = historyResult
+            ? CommandResult::Success()
+            : CommandResult::Failure(historyResult.Message);
+    }
+    else
+    {
+        applied = ApplyVoxelEdit(
+            *context.EditSession,
+            context.EditSession->VoxelModelGeneration(),
+            x, y, z, *compatibilityVoxel, Voxel::Voxel{},
+            context.SubModelIndex);
+    }
     if (!applied)
     {
         return Refused(VoxelEraserResultCode::Failed, position,
