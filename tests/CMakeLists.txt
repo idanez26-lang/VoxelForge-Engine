@@ -72,6 +72,7 @@ add_test(
 add_executable(
     VoxelForgeEditorModelImportTests
     Editor/ModelImportTests.cpp
+    Editor/DragDropImportTests.cpp
 )
 target_link_libraries(
     VoxelForgeEditorModelImportTests
@@ -81,6 +82,10 @@ vf_configure_test(VoxelForgeEditorModelImportTests)
 add_test(
     NAME VoxelForge.Editor.ModelImport
     COMMAND $<TARGET_FILE:VoxelForgeEditorModelImportTests>
+)
+add_test(
+    NAME VoxelForge.Editor.DragDropImport
+    COMMAND $<TARGET_FILE:VoxelForgeEditorModelImportTests> --drag-drop-only
 )
 
 add_executable(
@@ -333,6 +338,7 @@ set_tests_properties(
     VoxelForge.Editor.WindowTitle
     VoxelForge.Editor.AssetBrowser
     VoxelForge.Editor.ModelImport
+    VoxelForge.Editor.DragDropImport
     VoxelForge.Editor.AssetMetadata
     VoxelForge.Editor.AssetInspector
     VoxelForge.Editor.VoxThumbnail
@@ -390,6 +396,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.ModelImportSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --model-import-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.DragDropImportSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --drag-drop-import-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -400,6 +410,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelSaveSmoke
         VoxelForge.Editor.AddVoxelSmoke
         VoxelForge.Editor.ModelImportSmoke
+        VoxelForge.Editor.DragDropImportSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

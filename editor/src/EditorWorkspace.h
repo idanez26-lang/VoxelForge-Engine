@@ -10,6 +10,7 @@
 #include "Commands/Voxel/PaintVoxelCommand.h"
 #include "EditorCamera.h"
 #include "EditorExitRequest.h"
+#include "DragDropImport/DragDropImportController.h"
 #include "ModelImport/ModelImportService.h"
 #include "Platform/FileDialogService.h"
 #include "Platform/ProjectFolderOpener.h"
@@ -56,6 +57,13 @@ public:
     ~EditorWorkspace();
 
     void Draw();
+    void BeginFileDrop(float x, float y) noexcept;
+    void UpdateFileDropPosition(float x, float y) noexcept;
+    void AddDroppedFile(
+        const std::filesystem::path& path,
+        float x,
+        float y);
+    void CompleteFileDrop(float x, float y);
     [[nodiscard]] bool ConsumeExitRequest() noexcept;
     [[nodiscard]] bool RequestApplicationExit();
     [[nodiscard]] bool OpenVoxInViewport(
@@ -77,6 +85,10 @@ public:
         const std::filesystem::path& sourcePath,
         bool importVisualSet = false);
     [[nodiscard]] bool ModelImportSmokePassed() const noexcept;
+    [[nodiscard]] bool RunDragDropImportSmokeStep(
+        std::size_t frame,
+        const std::vector<std::filesystem::path>& sourcePaths);
+    [[nodiscard]] bool DragDropImportSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -101,6 +113,9 @@ private:
     void DrawConsolePanel();
     void DrawProfilerPanel();
     void DrawStatusBar();
+    void DrawFileDropOverlay(
+        const DragDropRect& rect,
+        DragDropImportTarget target) const;
     void DrawAboutPopup();
     void DrawProjectDialogs();
     void DrawNewProjectDialog();
@@ -136,7 +151,7 @@ private:
     void SynchronizeProjectAssets();
     void BeginModelImport(std::vector<std::filesystem::path> sourcePaths);
     void ContinueModelImport(ModelImportCollisionAction collisionAction);
-    void FinishModelImport();
+    void FinishModelImport(bool cancelled = false);
     void LogModelImport(const ModelImportResult& result);
     [[nodiscard]] bool OpenVoxInViewportNow(
         const std::filesystem::path& filePath);
@@ -162,6 +177,7 @@ private:
     AssetBrowser assetBrowser_;
     AssetInspectorViewModel assetInspector_;
     ModelImportService modelImportService_;
+    DragDropImportController dragDropImport_;
     EditorCamera viewportCamera_;
     ViewportRenderer viewportRenderer_;
     VoxelViewportState viewportState_;
@@ -198,6 +214,14 @@ private:
     std::optional<std::filesystem::path> importedModelToOpen_;
     std::size_t pendingImportIndex_ = 0U;
     std::size_t requestedImportCount_ = 0U;
+    std::size_t completedImportCount_ = 0U;
+    std::size_t skippedImportCount_ = 0U;
+    std::size_t failedImportCount_ = 0U;
+    DragDropImportTarget pendingDropImportTarget_ =
+        DragDropImportTarget::None;
+    DragDropRect assetBrowserDropRect_{};
+    DragDropRect viewportDropRect_{};
+    bool importStartedFromDrop_ = false;
 
     bool showExplorer_ = true;
     bool showScene_ = true;
@@ -283,6 +307,14 @@ private:
     std::filesystem::path modelImportSmokeDestination_;
     std::filesystem::path modelImportSmokeThumbnailPath_;
     std::string modelImportSmokeAssetId_;
+    std::vector<std::filesystem::path> dragDropSmokeImportedPaths_;
+    bool dragDropSmokeAssetImported_ = false;
+    bool dragDropSmokeAssetDidNotOpen_ = false;
+    bool dragDropSmokeInspected_ = false;
+    bool dragDropSmokeViewportOpened_ = false;
+    bool dragDropSmokeCollisionRenamed_ = false;
+    bool dragDropSmokeRefreshControlled_ = false;
+    bool dragDropSmokeClean_ = false;
 };
 
 } // namespace VoxelForge::Editor

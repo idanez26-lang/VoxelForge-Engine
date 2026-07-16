@@ -1,4 +1,5 @@
 #include "VoxelForge/Core/Event/EventDispatcher.h"
+#include "VoxelForge/Core/Event/FileDropEvent.h"
 #include "VoxelForge/Core/Event/KeyboardEvent.h"
 #include "VoxelForge/Core/Event/MouseEvent.h"
 #include "VoxelForge/Core/Event/WindowEvent.h"
@@ -19,5 +20,11 @@ int main()
     assert(keyEvent.IsInCategory(EventCategoryKeyboard));
     MouseButtonPressedEvent mouseEvent(MouseCode::Left);
     assert(mouseEvent.IsInCategory(EventCategoryMouseButton));
+    std::filesystem::path droppedPath = "castle.vox";
+    FileDropFileEvent dropEvent(droppedPath, 12.0F, 34.0F);
+    droppedPath = "changed-after-event.vox";
+    assert(dropEvent.GetPath() == std::filesystem::path("castle.vox"));
+    assert(dropEvent.GetX() == 12.0F && dropEvent.GetY() == 34.0F);
+    assert(dropEvent.IsInCategory(EventCategoryApplication));
     return 0;
 }

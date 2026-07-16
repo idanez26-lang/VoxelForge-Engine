@@ -8,6 +8,7 @@
 #include <functional>
 #include <filesystem>
 #include <memory>
+#include <vector>
 
 struct ImGuiViewport;
 using ImGuiID = unsigned int;
@@ -44,11 +45,14 @@ public:
         bool modelImportSmokeTest = false,
         bool modelImportVisualTest = false,
         bool qualityOfLifeSmokeTest = false,
-        std::filesystem::path qualityOfLifeParent = {});
+        std::filesystem::path qualityOfLifeParent = {},
+        bool dragDropImportSmokeTest = false,
+        std::vector<std::filesystem::path> dragDropSmokePaths = {});
 
     void OnAttach() override;
     void OnDetach() override;
     void OnUpdate() override;
+    void OnEvent(VoxelForge::Event& event) override;
     void OnImGuiRender() override;
     [[nodiscard]] bool RequestWindowClose();
 
@@ -90,6 +94,8 @@ private:
     bool modelImportVisualTest_ = false;
     bool qualityOfLifeSmokeTest_ = false;
     std::filesystem::path qualityOfLifeParent_;
+    bool dragDropImportSmokeTest_ = false;
+    std::vector<std::filesystem::path> dragDropSmokePaths_;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

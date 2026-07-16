@@ -294,6 +294,7 @@ bool AssetBrowser::RevealEntry(
         SetError(directory_.LastError());
         return false;
     }
+    ++refreshCount_;
     RefreshThumbnailPresentations();
     return SelectEntry(normalized);
 }

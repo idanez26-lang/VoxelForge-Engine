@@ -1,6 +1,7 @@
 #include "Window/SDLWindow.h"
 
 #include "VoxelForge/Core/Event/KeyboardEvent.h"
+#include "VoxelForge/Core/Event/FileDropEvent.h"
 #include "VoxelForge/Core/Event/MouseEvent.h"
 #include "VoxelForge/Core/Event/WindowEvent.h"
 #include "VoxelForge/Core/Logger.h"
@@ -13,6 +14,7 @@
 #include <imgui_impl_sdlgpu3.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -306,6 +308,44 @@ void SDLWindow::PollEvents()
                 VoxelForge::MouseButtonReleasedEvent buttonEvent(
                     static_cast<VoxelForge::MouseCode>(event.button.button));
                 eventCallback_(buttonEvent);
+                break;
+            }
+
+            case SDL_EVENT_DROP_BEGIN:
+            {
+                VoxelForge::FileDropBeginEvent dropEvent(
+                    event.drop.x, event.drop.y);
+                eventCallback_(dropEvent);
+                break;
+            }
+
+            case SDL_EVENT_DROP_POSITION:
+            {
+                VoxelForge::FileDropPositionEvent dropEvent(
+                    event.drop.x, event.drop.y);
+                eventCallback_(dropEvent);
+                break;
+            }
+
+            case SDL_EVENT_DROP_FILE:
+            {
+                if (event.drop.data != nullptr)
+                {
+                    const std::filesystem::path copiedPath(
+                        std::u8string(reinterpret_cast<const char8_t*>(
+                            event.drop.data)));
+                    VoxelForge::FileDropFileEvent dropEvent(
+                        copiedPath, event.drop.x, event.drop.y);
+                    eventCallback_(dropEvent);
+                }
+                break;
+            }
+
+            case SDL_EVENT_DROP_COMPLETE:
+            {
+                VoxelForge::FileDropCompleteEvent dropEvent(
+                    event.drop.x, event.drop.y);
+                eventCallback_(dropEvent);
                 break;
             }
 

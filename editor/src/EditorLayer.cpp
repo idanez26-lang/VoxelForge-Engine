@@ -1,6 +1,8 @@
 #include "EditorLayer.h"
 
 #include "VoxelForge/Core/Logger.h"
+#include "VoxelForge/Core/Event/EventDispatcher.h"
+#include "VoxelForge/Core/Event/FileDropEvent.h"
 #include "VoxelForge/Renderer/Renderer.h"
 
 #include <imgui.h>
@@ -33,17 +35,21 @@ EditorLayer::EditorLayer(
     const bool modelImportSmokeTest,
     const bool modelImportVisualTest,
     const bool qualityOfLifeSmokeTest,
-    std::filesystem::path qualityOfLifeParent)
+    std::filesystem::path qualityOfLifeParent,
+    const bool dragDropImportSmokeTest,
+    std::vector<std::filesystem::path> dragDropSmokePaths)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
           std::move(windowTitleCallback),
-          qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest
+          qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest ||
+              dragDropImportSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
               : ProjectDialogPreferences::DefaultStorageFilePath(),
-          qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest),
+          qualityOfLifeSmokeTest || modelImportSmokeTest || modelImportVisualTest ||
+              dragDropImportSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -59,7 +65,9 @@ EditorLayer::EditorLayer(
       modelImportSmokeTest_(modelImportSmokeTest),
       modelImportVisualTest_(modelImportVisualTest),
       qualityOfLifeSmokeTest_(qualityOfLifeSmokeTest),
-      qualityOfLifeParent_(std::move(qualityOfLifeParent))
+      qualityOfLifeParent_(std::move(qualityOfLifeParent)),
+      dragDropImportSmokeTest_(dragDropImportSmokeTest),
+      dragDropSmokePaths_(std::move(dragDropSmokePaths))
 {
 }
 
@@ -78,6 +86,36 @@ void EditorLayer::OnDetach()
 
 void EditorLayer::OnUpdate()
 {
+}
+
+void EditorLayer::OnEvent(VoxelForge::Event& event)
+{
+    VoxelForge::EventDispatcher dispatcher(event);
+    dispatcher.Dispatch<VoxelForge::FileDropBeginEvent>(
+        [this](VoxelForge::FileDropBeginEvent& drop)
+        {
+            workspace_.BeginFileDrop(drop.GetX(), drop.GetY());
+            return true;
+        });
+    dispatcher.Dispatch<VoxelForge::FileDropPositionEvent>(
+        [this](VoxelForge::FileDropPositionEvent& drop)
+        {
+            workspace_.UpdateFileDropPosition(drop.GetX(), drop.GetY());
+            return true;
+        });
+    dispatcher.Dispatch<VoxelForge::FileDropFileEvent>(
+        [this](VoxelForge::FileDropFileEvent& drop)
+        {
+            workspace_.AddDroppedFile(
+                drop.GetPath(), drop.GetX(), drop.GetY());
+            return true;
+        });
+    dispatcher.Dispatch<VoxelForge::FileDropCompleteEvent>(
+        [this](VoxelForge::FileDropCompleteEvent& drop)
+        {
+            workspace_.CompleteFileDrop(drop.GetX(), drop.GetY());
+            return true;
+        });
 }
 
 void EditorLayer::CreateDefaultScene()
@@ -105,7 +143,7 @@ void EditorLayer::CreateDefaultScene()
 void EditorLayer::OnImGuiRender()
 {
     if (!startupVoxPath_.empty() && !modelImportSmokeTest_ &&
-        !modelImportVisualTest_)
+        !modelImportVisualTest_ && !dragDropImportSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -154,6 +192,11 @@ void EditorLayer::OnImGuiRender()
     {
         static_cast<void>(workspace_.RunQualityOfLifeSmokeStep(
             renderedFrameCount_, qualityOfLifeParent_));
+    }
+    if (dragDropImportSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunDragDropImportSmokeStep(
+            renderedFrameCount_, dragDropSmokePaths_));
     }
     workspace_.Draw();
 
@@ -212,6 +255,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Quality of Life smoke test did not complete its controlled flow.");
+    }
+    if (dragDropImportSmokeTest_ && smokeTestComplete &&
+        !workspace_.DragDropImportSmokePassed())
+    {
+        throw std::runtime_error(
+            "Drag-drop import smoke test did not complete its controlled flow.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

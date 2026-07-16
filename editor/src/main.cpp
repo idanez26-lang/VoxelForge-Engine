@@ -31,6 +31,7 @@ constexpr std::size_t PaintVoxelSmokeTestFrameCount = 35;
 constexpr std::size_t VoxelSaveSmokeTestFrameCount = 30;
 constexpr std::size_t AddVoxelSmokeTestFrameCount = 40;
 constexpr std::size_t ModelImportSmokeTestFrameCount = 30;
+constexpr std::size_t DragDropImportSmokeTestFrameCount = 20;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -48,6 +49,7 @@ struct CommandLine final
     bool AddVoxelSmokeTest = false;
     bool ModelImportSmokeTest = false;
     bool ModelImportVisualTest = false;
+    bool DragDropImportSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -80,6 +82,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--model-import-smoke-test";
         result.ModelImportVisualTest |=
             argument == "--model-import-visual-test";
+        result.DragDropImportSmokeTest |=
+            argument == "--drag-drop-import-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -202,6 +206,29 @@ public:
             writeModel(parent_ / "bridge.vox", 9U, 2U, 3U, 40U);
     }
 
+    bool CreateDragDropSources()
+    {
+        const std::filesystem::path viewportSource =
+            parent_ / "ViewportDrop" / "tower.vox";
+        const std::filesystem::path collisionSource =
+            parent_ / "CollisionDrop" / "tower.vox";
+        std::error_code error;
+        std::filesystem::create_directories(
+            viewportSource.parent_path(), error);
+        if (error) return false;
+        std::filesystem::create_directories(
+            collisionSource.parent_path(), error);
+        if (error) return false;
+        if (!std::filesystem::copy_file(voxPath_, viewportSource,
+                std::filesystem::copy_options::none, error) || error)
+            return false;
+        if (!std::filesystem::copy_file(voxPath_, collisionSource,
+                std::filesystem::copy_options::none, error) || error)
+            return false;
+        dragDropPaths_ = {voxPath_, viewportSource, collisionSource};
+        return true;
+    }
+
     ~ViewportTestFixture()
     {
         std::error_code ignored;
@@ -223,9 +250,16 @@ public:
         return parent_;
     }
 
+    [[nodiscard]] const std::vector<std::filesystem::path>&
+        DragDropPaths() const noexcept
+    {
+        return dragDropPaths_;
+    }
+
 private:
     std::filesystem::path parent_;
     std::filesystem::path voxPath_;
+    std::vector<std::filesystem::path> dragDropPaths_;
 };
 }
 
@@ -248,6 +282,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.AddVoxelSmokeTest ||
             commandLine.ModelImportSmokeTest ||
             commandLine.ModelImportVisualTest ||
+            commandLine.DragDropImportSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
@@ -262,7 +297,8 @@ int main(const int argumentCount, char* arguments[])
                 projectManager,
                 commandLine.AddVoxelSmokeTest,
                 commandLine.ModelImportSmokeTest ||
-                    commandLine.ModelImportVisualTest))
+                    commandLine.ModelImportVisualTest ||
+                    commandLine.DragDropImportSmokeTest))
         {
             std::cerr << "[FATAL] Unable to create viewport test fixture.\n";
             return 1;
@@ -271,6 +307,12 @@ int main(const int argumentCount, char* arguments[])
             !viewportFixture.CreateThumbnailVisualSources())
         {
             std::cerr << "[FATAL] Unable to create thumbnail visual fixtures.\n";
+            return 1;
+        }
+        if (commandLine.DragDropImportSmokeTest &&
+            !viewportFixture.CreateDragDropSources())
+        {
+            std::cerr << "[FATAL] Unable to create drag-drop smoke fixtures.\n";
             return 1;
         }
 
@@ -294,6 +336,8 @@ int main(const int argumentCount, char* arguments[])
                     ? AddVoxelSmokeTestFrameCount
                     : commandLine.ModelImportSmokeTest
                     ? ModelImportSmokeTestFrameCount
+                    : commandLine.DragDropImportSmokeTest
+                    ? DragDropImportSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -310,7 +354,8 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.VoxelSaveSmokeTest ||
                     commandLine.AddVoxelSmokeTest ||
                     commandLine.ModelImportSmokeTest ||
-                    commandLine.ModelImportVisualTest,
+                    commandLine.ModelImportVisualTest ||
+                    commandLine.DragDropImportSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -323,7 +368,11 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.ModelImportVisualTest,
                 commandLine.QualityOfLifeSmokeTest,
                 commandLine.QualityOfLifeSmokeTest
-                    ? viewportFixture.Parent() : std::filesystem::path{});
+                    ? viewportFixture.Parent() : std::filesystem::path{},
+                commandLine.DragDropImportSmokeTest,
+                commandLine.DragDropImportSmokeTest
+                    ? viewportFixture.DragDropPaths()
+                    : std::vector<std::filesystem::path>{});
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(

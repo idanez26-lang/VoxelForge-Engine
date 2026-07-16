@@ -82,8 +82,13 @@ std::string ReadFile(const std::filesystem::path& path)
 }
 }
 
-int main()
+int RunDragDropImportTests();
+
+int main(const int argumentCount, char* arguments[])
 {
+    if (argumentCount == 2 &&
+        std::string(arguments[1]) == "--drag-drop-only")
+        return RunDragDropImportTests();
     TemporaryDirectory temporary;
     const auto project = temporary.Path() / "Project";
     const auto sources = temporary.Path() / "Sources";

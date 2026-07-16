@@ -10,7 +10,8 @@ enum class EventType : std::uint8_t
     WindowClose, WindowResize, WindowFocus, WindowLostFocus, WindowMoved,
     AppTick, AppUpdate, AppRender,
     KeyPressed, KeyReleased, KeyTyped,
-    MouseButtonPressed, MouseButtonReleased, MouseMoved, MouseScrolled
+    MouseButtonPressed, MouseButtonReleased, MouseMoved, MouseScrolled,
+    FileDropBegin, FileDropFile, FileDropPosition, FileDropComplete
 };
 
 enum EventCategory : std::uint32_t

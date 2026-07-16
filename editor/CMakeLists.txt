@@ -156,7 +156,9 @@ endif()
 add_library(VoxelForgeEditorModelImport STATIC)
 target_sources(
     VoxelForgeEditorModelImport
-    PRIVATE src/ModelImport/ModelImportService.cpp
+    PRIVATE
+        src/DragDropImport/DragDropImportController.cpp
+        src/ModelImport/ModelImportService.cpp
 )
 target_link_libraries(
     VoxelForgeEditorModelImport
