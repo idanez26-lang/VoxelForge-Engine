@@ -158,6 +158,8 @@ public:
     [[nodiscard]] bool VoxelLineSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelSphereSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelSphereSmokePassed() const noexcept;
+    [[nodiscard]] bool RunModernToolbarSmokeStep(std::size_t frame);
+    [[nodiscard]] bool ModernToolbarSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -475,6 +477,12 @@ private:
     bool voxelSphereSmokeRedone_ = false;
     bool voxelSphereSmokeSaved_ = false;
     bool voxelSphereSmokeCleaned_ = false;
+    std::filesystem::path modernToolbarSmokePath_;
+    bool modernToolbarSmokeDisabled_ = false;
+    bool modernToolbarSmokeToolsEnabled_ = false;
+    bool modernToolbarSmokeSingleActive_ = false;
+    bool modernToolbarSmokeSaved_ = false;
+    bool modernToolbarSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

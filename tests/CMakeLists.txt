@@ -334,6 +334,24 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelSphereTests>
 )
 add_executable(
+    VoxelForgeEditorToolbarTests
+    Editor/EditorToolbarTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Toolbar/EditorToolbarModel.cpp
+)
+target_include_directories(
+    VoxelForgeEditorToolbarTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeEditorToolbarTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorToolbarTests)
+add_test(
+    NAME VoxelForge.Editor.ModernToolbar
+    COMMAND $<TARGET_FILE:VoxelForgeEditorToolbarTests>
+)
+add_executable(
     VoxelForgeEditorVoxelEditHistoryTests
     Editor/VoxelEditHistoryTests.cpp
 )
@@ -630,6 +648,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelBox
     VoxelForge.Editor.VoxelLine
     VoxelForge.Editor.VoxelSphere
+    VoxelForge.Editor.ModernToolbar
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
@@ -761,6 +780,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelSphereSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-sphere-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.ModernToolbarSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --modern-toolbar-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -789,6 +812,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelBoxSmoke
         VoxelForge.Editor.VoxelLineSmoke
         VoxelForge.Editor.VoxelSphereSmoke
+        VoxelForge.Editor.ModernToolbarSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

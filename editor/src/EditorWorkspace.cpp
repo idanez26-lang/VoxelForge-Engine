@@ -4,6 +4,7 @@
 #include "VoxelSelection/VoxelRaycast.h"
 #include "EditorWindowTitle.h"
 #include "Layout/PalettePanelLayout.h"
+#include "Toolbar/EditorToolbar.h"
 
 #include "VoxelForge/Project/Project.h"
 #include "VoxelForge/Project/ProjectManager.h"
@@ -1213,57 +1214,19 @@ void EditorWorkspace::DrawScenePanel()
         voxelDocumentSession_.ActiveDocument();
     const bool canSave = activeDocument != nullptr &&
         activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
-    ImGui::BeginDisabled(!canSave);
-    if (ImGui::Button("Save")) static_cast<void>(SaveVoxelModel());
-    ImGui::EndDisabled();
-    DrawTooltip("Save the active VOX model");
-    ImGui::SameLine();
-
-    const auto drawToolButton = [this](
-        const char* inactiveLabel,
-        const char* activeLabel,
-        const char* tooltip,
-        const ActiveVoxelTool tool,
-        const ImVec4 activeColor)
+    const auto selectToolbarTool = [this](const ActiveVoxelTool tool)
     {
-        const bool active = voxelToolState_.ActiveTool() == tool;
-        if (active) ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
-        constexpr ImVec2 buttonSize(104.0F, 0.0F);
-        const bool clicked = ImGui::Button(
-            active ? activeLabel : inactiveLabel, buttonSize);
-        if (active) ImGui::PopStyleColor();
-        DrawTooltip(tooltip);
-        if (!clicked) return;
-        if (tool != ActiveVoxelTool::Box || active) CancelVoxelBox();
-        if (tool != ActiveVoxelTool::Line || active) CancelVoxelLine();
-        if (tool != ActiveVoxelTool::Sphere || active) CancelVoxelSphere();
-        voxelToolState_.SetActiveTool(active ? ActiveVoxelTool::None : tool);
+        if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
+        if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
+        if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
+        voxelToolState_.SetActiveTool(tool);
         voxelToolInput_.Reset();
         UpdateVoxelHighlights();
     };
-    drawToolButton(
-        "Pencil", "Pencil [Active]", "Activate the Pencil tool (P)",
-        ActiveVoxelTool::Pencil, ImVec4(0.20F, 0.48F, 0.28F, 1.0F));
-    ImGui::SameLine();
-    drawToolButton(
-        "Eraser", "Eraser [Active]", "Activate the Eraser tool (E)",
-        ActiveVoxelTool::Eraser, ImVec4(0.58F, 0.20F, 0.08F, 1.0F));
-    ImGui::SameLine();
-    drawToolButton(
-        "Fill", "Fill [Active]", "Activate the Fill tool",
-        ActiveVoxelTool::Fill, ImVec4(0.20F, 0.38F, 0.60F, 1.0F));
-    ImGui::SameLine();
-    drawToolButton(
-        "[ ] Box", "[ ] Box [Active]", "Create a solid voxel box",
-        ActiveVoxelTool::Box, ImVec4(0.45F, 0.30F, 0.62F, 1.0F));
-    ImGui::SameLine();
-    drawToolButton(
-        "/ Line", "/ Line [Active]", "Create a continuous voxel line",
-        ActiveVoxelTool::Line, ImVec4(0.18F, 0.48F, 0.56F, 1.0F));
-    ImGui::SameLine();
-    drawToolButton(
-        "( ) Sphere", "( ) Sphere [Active]", "Create a solid voxel sphere",
-        ActiveVoxelTool::Sphere, ImVec4(0.48F, 0.30F, 0.58F, 1.0F));
+    EditorToolbar::Draw(
+        {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool()},
+        {[this]() { static_cast<void>(SaveVoxelModel()); },
+         selectToolbarTool});
     ImGui::SameLine();
     ImGui::BeginDisabled(
         !voxelEditHistory_.CanUndo() || voxelEditInProgress_);
@@ -6423,6 +6386,111 @@ bool EditorWorkspace::VoxelSphereSmokePassed() const noexcept
     return voxelSphereSmokeCreated_ && voxelSphereSmokeApplied_ &&
         voxelSphereSmokeUndone_ && voxelSphereSmokeRedone_ &&
         voxelSphereSmokeSaved_ && voxelSphereSmokeCleaned_;
+}
+
+bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
+{
+    const auto toolbarState = [this]()
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        return EditorToolbarState{
+            document != nullptr,
+            document != nullptr && document->IsDirty() &&
+                !voxelDocumentSaveService_.IsBusy(),
+            voxelToolState_.ActiveTool()};
+    };
+    const auto activeToolCount = [](const EditorToolbarState state)
+    {
+        return std::count_if(
+            EditorToolbarModel::Buttons().begin(),
+            EditorToolbarModel::Buttons().end(),
+            [state](const EditorToolbarButton& button)
+            {
+                return EditorToolbarModel::IsActive(button, state);
+            });
+    };
+
+    if (frame == 0U)
+    {
+        const EditorToolbarState state = toolbarState();
+        modernToolbarSmokeDisabled_ = !state.HasDocument &&
+            std::none_of(
+                EditorToolbarModel::Buttons().begin(),
+                EditorToolbarModel::Buttons().end(),
+                [state](const EditorToolbarButton& button)
+                {
+                    return EditorToolbarModel::IsEnabled(button, state) ||
+                        EditorToolbarModel::IsActive(button, state);
+                });
+    }
+    else if (frame == 1U)
+    {
+        if (!modernToolbarSmokeDisabled_) return false;
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"ToolbarSmoke", {16U, 16U, 16U}});
+        modernToolbarSmokePath_ = flow.Creation.ModelPath;
+        Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        modernToolbarSmokeToolsEnabled_ = flow.Ready() && document != nullptr &&
+            std::all_of(
+                EditorToolbarModel::Buttons().begin() + 1,
+                EditorToolbarModel::Buttons().end(),
+                [state = toolbarState()](const EditorToolbarButton& button)
+                {
+                    return EditorToolbarModel::IsEnabled(button, state);
+                });
+        if (!modernToolbarSmokeToolsEnabled_) return false;
+
+        modernToolbarSmokeSingleActive_ = true;
+        for (const EditorToolbarButton& button : EditorToolbarModel::Buttons())
+        {
+            if (button.Tool == ActiveVoxelTool::None) continue;
+            voxelToolState_.SetActiveTool(button.Tool);
+            modernToolbarSmokeSingleActive_ &=
+                activeToolCount(toolbarState()) == 1;
+        }
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+        workplaneHit_ = WorkplaneHit{
+            WorkplaneHitStatus::Valid,
+            Asset::Voxel::VoxelPosition{8, 0, 8}, 1.0F};
+        modernToolbarSmokeSingleActive_ &= ApplyVoxelPencil() &&
+            document->IsDirty() &&
+            EditorToolbarModel::IsEnabled(
+                EditorToolbarModel::Buttons().front(), toolbarState());
+    }
+    else if (frame == 2U)
+    {
+        Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        modernToolbarSmokeSaved_ = modernToolbarSmokeSingleActive_ &&
+            document != nullptr && SaveVoxelModel() && !document->IsDirty() &&
+            !EditorToolbarModel::IsEnabled(
+                EditorToolbarModel::Buttons().front(), toolbarState());
+    }
+    else if (frame == 3U)
+    {
+        if (!modernToolbarSmokeSaved_) return false;
+        CloseProject();
+        const EditorToolbarState state = toolbarState();
+        modernToolbarSmokeCleaned_ = !projectManager_.HasActiveProject() &&
+            !state.HasDocument && activeToolCount(state) == 0 &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                modernToolbarSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                modernToolbarSmokePath_.string() + ".vfsave.bak");
+    }
+    return ModernToolbarSmokePassed();
+}
+
+bool EditorWorkspace::ModernToolbarSmokePassed() const noexcept
+{
+    return modernToolbarSmokeDisabled_ && modernToolbarSmokeToolsEnabled_ &&
+        modernToolbarSmokeSingleActive_ && modernToolbarSmokeSaved_ &&
+        modernToolbarSmokeCleaned_;
 }
 
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)

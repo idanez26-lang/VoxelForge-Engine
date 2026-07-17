@@ -1,0 +1,77 @@
+#include "EditorToolbarModel.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace VoxelForge::Editor
+{
+namespace
+{
+constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
+    ToolbarButtons{{
+        {EditorToolbarAction::Save, EditorToolbarGroup::File,
+         "Save", "Save the active voxel model", "Ctrl+S",
+         ActiveVoxelTool::None},
+        {EditorToolbarAction::Pencil, EditorToolbarGroup::DirectEdit,
+         "Pencil", "Draw voxels", "P", ActiveVoxelTool::Pencil},
+        {EditorToolbarAction::Eraser, EditorToolbarGroup::DirectEdit,
+         "Eraser", "Remove voxels", "E", ActiveVoxelTool::Eraser},
+        {EditorToolbarAction::Fill, EditorToolbarGroup::DirectEdit,
+         "Fill", "Recolor a connected area", "", ActiveVoxelTool::Fill},
+        {EditorToolbarAction::Box, EditorToolbarGroup::Construction,
+         "Box", "Create a filled voxel box", "", ActiveVoxelTool::Box},
+        {EditorToolbarAction::Line, EditorToolbarGroup::Construction,
+         "Line", "Create a voxel line", "", ActiveVoxelTool::Line},
+        {EditorToolbarAction::Sphere, EditorToolbarGroup::Construction,
+         "Sphere", "Create a filled voxel sphere", "",
+         ActiveVoxelTool::Sphere}
+    }};
+}
+
+const std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>&
+EditorToolbarModel::Buttons() noexcept
+{
+    return ToolbarButtons;
+}
+
+bool EditorToolbarModel::IsEnabled(
+    const EditorToolbarButton& button,
+    const EditorToolbarState& state) noexcept
+{
+    return button.Action == EditorToolbarAction::Save
+        ? state.CanSave : state.HasDocument;
+}
+
+bool EditorToolbarModel::IsActive(
+    const EditorToolbarButton& button,
+    const EditorToolbarState& state) noexcept
+{
+    return state.HasDocument && button.Tool != ActiveVoxelTool::None &&
+        button.Tool == state.ActiveTool;
+}
+
+EditorToolbarLayout EditorToolbarModel::CalculateLayout(
+    const float availableWidth,
+    const float fontSize) noexcept
+{
+    const float safeWidth = std::max(availableWidth, 1.0F);
+    const float safeFontSize = std::max(fontSize, 1.0F);
+    const float preferredButton = std::clamp(
+        std::ceil(safeFontSize * 2.05F), 32.0F, 40.0F);
+    const float regularSpacing = std::clamp(
+        std::floor(safeFontSize * 0.32F), 4.0F, 7.0F);
+    const float groupSpacing = std::clamp(
+        std::floor(safeFontSize * 0.75F), 10.0F, 16.0F);
+    const float singleRowWidth = preferredButton * ButtonCount +
+        regularSpacing * 8.0F + groupSpacing * 2.0F;
+    if (singleRowWidth <= safeWidth)
+        return {preferredButton, regularSpacing, groupSpacing, false};
+
+    constexpr float MinimumButtonSize = 24.0F;
+    const float wrappedButton = std::clamp(
+        (safeWidth - regularSpacing * 2.0F) / 3.0F,
+        MinimumButtonSize, preferredButton);
+    return {wrappedButton, regularSpacing, groupSpacing, true};
+}
+
+} // namespace VoxelForge::Editor
