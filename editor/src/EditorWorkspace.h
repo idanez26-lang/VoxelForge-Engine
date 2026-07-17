@@ -10,6 +10,7 @@
 #include "Commands/Voxel/PaintVoxelCommand.h"
 #include "EditorCamera.h"
 #include "EditorExitRequest.h"
+#include "Input/EditorInputService.h"
 #include "DragDropImport/DragDropImportController.h"
 #include "Layout/InspectorLayoutModel.h"
 #include "ModelImport/ModelImportService.h"
@@ -32,7 +33,6 @@
 #include "VoxelSelection/ViewportRayBuilder.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
-#include "VoxelHistory/VoxelHistoryInput.h"
 #include "VoxelTools/VoxelEraserTool.h"
 #include "VoxelTools/VoxelBoxService.h"
 #include "VoxelTools/VoxelFillService.h"
@@ -160,6 +160,8 @@ public:
     [[nodiscard]] bool VoxelSphereSmokePassed() const noexcept;
     [[nodiscard]] bool RunModernToolbarSmokeStep(std::size_t frame);
     [[nodiscard]] bool ModernToolbarSmokePassed() const noexcept;
+    [[nodiscard]] bool RunKeyboardShortcutsSmokeStep(std::size_t frame);
+    [[nodiscard]] bool KeyboardShortcutsSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -170,6 +172,10 @@ public:
 private:
     void DrawMainMenuBar();
     void HandleCommandShortcuts();
+    void ExecuteInputCommand(EditorInputCommand command);
+    void SelectVoxelTool(ActiveVoxelTool tool);
+    void CancelActiveInteraction() noexcept;
+    [[nodiscard]] EditorCommandAvailability CurrentCommandAvailability() const;
     void UndoCommand();
     void RedoCommand();
     void DrawDockSpace(ImGuiID dockspaceId);
@@ -290,6 +296,7 @@ private:
     WorkplaneService workplaneService_;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
+    EditorInputService editorInputService_;
     VoxelToolInputController voxelToolInput_;
     VoxelToolInputController voxelToolSmokeInput_;
     VoxelBoxInteraction voxelBoxInteraction_;
@@ -298,7 +305,6 @@ private:
     VoxelPlacementPreview voxelPlacementPreview_;
     std::optional<WorkplaneHit> workplaneHit_;
     VoxelEditHistory voxelEditHistory_;
-    VoxelHistoryInputController voxelHistoryInput_;
     std::optional<VoxelToolResult> lastVoxelToolResult_;
     std::optional<VoxelEraserResult> lastVoxelEraserResult_;
     std::optional<VoxelFillResult> lastVoxelFillResult_;
@@ -483,6 +489,14 @@ private:
     bool modernToolbarSmokeSingleActive_ = false;
     bool modernToolbarSmokeSaved_ = false;
     bool modernToolbarSmokeCleaned_ = false;
+    std::filesystem::path keyboardShortcutsSmokePath_;
+    bool keyboardShortcutsSmokeTools_ = false;
+    bool keyboardShortcutsSmokeEdited_ = false;
+    bool keyboardShortcutsSmokeSaved_ = false;
+    bool keyboardShortcutsSmokeUndone_ = false;
+    bool keyboardShortcutsSmokeRedone_ = false;
+    bool keyboardShortcutsSmokeCancelled_ = false;
+    bool keyboardShortcutsSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

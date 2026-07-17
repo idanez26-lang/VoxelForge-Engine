@@ -9,8 +9,7 @@ namespace VoxelForge::Editor
 
 struct EditorToolbarCallbacks final
 {
-    std::function<void()> Save;
-    std::function<void(ActiveVoxelTool)> SelectTool;
+    std::function<void(EditorInputCommand)> ExecuteCommand;
 };
 
 class EditorToolbar final
@@ -18,6 +17,7 @@ class EditorToolbar final
 public:
     static void Draw(
         const EditorToolbarState& state,
+        const EditorInputService& inputService,
         const EditorToolbarCallbacks& callbacks);
 };
 

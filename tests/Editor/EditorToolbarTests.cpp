@@ -18,6 +18,7 @@ void Require(const bool condition, const std::string_view message)
 
 void TestOrderGroupsAndTooltips()
 {
+    const EditorInputService inputService;
     const auto& buttons = EditorToolbarModel::Buttons();
     constexpr EditorToolbarAction expected[] = {
         EditorToolbarAction::Save,
@@ -45,11 +46,14 @@ void TestOrderGroupsAndTooltips()
         buttons[5].Group == EditorToolbarGroup::Construction &&
         buttons[6].Group == EditorToolbarGroup::Construction,
         "Toolbar visual groups are incorrect.");
-    Require(buttons[0].Shortcut == "Ctrl+S" &&
-        buttons[1].Shortcut == "P" && buttons[2].Shortcut == "E" &&
-        buttons[3].Shortcut.empty() && buttons[4].Shortcut.empty() &&
-        buttons[5].Shortcut.empty() && buttons[6].Shortcut.empty(),
-        "Toolbar advertises a shortcut that is not implemented.");
+    Require(inputService.ShortcutLabel(buttons[0].Command) == "Ctrl+S" &&
+        inputService.ShortcutLabel(buttons[1].Command) == "P" &&
+        inputService.ShortcutLabel(buttons[2].Command) == "E" &&
+        inputService.ShortcutLabel(buttons[3].Command) == "F" &&
+        inputService.ShortcutLabel(buttons[4].Command) == "B" &&
+        inputService.ShortcutLabel(buttons[5].Command) == "L" &&
+        inputService.ShortcutLabel(buttons[6].Command) == "S",
+        "Toolbar does not use the centralized shortcut bindings.");
 }
 
 void TestAvailabilityAndSingleActiveTool()

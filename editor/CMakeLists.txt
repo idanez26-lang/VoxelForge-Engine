@@ -47,6 +47,26 @@ else()
         VoxelForgeEditorAssetMetadata PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorDialogs STATIC)
+target_sources(
+    VoxelForgeEditorDialogs
+    PRIVATE
+        src/Dialogs/EditorDialogModel.cpp
+        src/Dialogs/EditorDialogStyle.cpp
+)
+target_include_directories(
+    VoxelForgeEditorDialogs
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(VoxelForgeEditorDialogs PRIVATE VoxelForgeImGui)
+target_compile_features(VoxelForgeEditorDialogs PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorDialogs PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorDialogs PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorAssetBrowser STATIC)
 target_sources(
     VoxelForgeEditorAssetBrowser
@@ -67,6 +87,7 @@ target_link_libraries(
         VoxelForgeAsset
         VoxelForgeEditorAssetMetadata
     PRIVATE
+        VoxelForgeEditorDialogs
         VoxelForgeImGui
 )
 target_compile_features(VoxelForgeEditorAssetBrowser PUBLIC cxx_std_20)
@@ -431,6 +452,7 @@ target_sources(
         src/EditorCamera.cpp
         src/EditorLayer.cpp
         src/EditorWorkspace.cpp
+        src/Input/EditorInputService.cpp
         src/Toolbar/EditorToolbar.cpp
         src/Toolbar/EditorToolbarModel.cpp
         src/ViewportInput/ViewportCameraInput.cpp
@@ -443,6 +465,7 @@ target_link_libraries(
     VoxelForgeEditor
     PRIVATE
         VoxelForgeEditorAssetBrowser
+        VoxelForgeEditorDialogs
         VoxelForgeEditorAssetInspector
         VoxelForgeEditorCommands
         VoxelForgeEditorModelImport

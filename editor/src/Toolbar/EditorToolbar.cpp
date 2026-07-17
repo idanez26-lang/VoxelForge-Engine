@@ -153,16 +153,20 @@ bool DrawIcon(
     return false;
 }
 
-void DrawTooltip(const EditorToolbarButton& button, const bool enabled)
+void DrawTooltip(
+    const EditorToolbarButton& button,
+    const EditorInputService& inputService,
+    const bool enabled)
 {
     if (!ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) return;
     ImGui::BeginTooltip();
     ImGui::TextUnformatted(button.Name.data(), button.Name.data() + button.Name.size());
     ImGui::TextDisabled("%.*s", static_cast<int>(button.Description.size()),
         button.Description.data());
-    if (!button.Shortcut.empty())
+    const std::string_view shortcut = inputService.ShortcutLabel(button.Command);
+    if (!shortcut.empty())
         ImGui::TextDisabled("Shortcut: %.*s",
-            static_cast<int>(button.Shortcut.size()), button.Shortcut.data());
+            static_cast<int>(shortcut.size()), shortcut.data());
     if (!enabled)
         ImGui::TextDisabled(button.Action == EditorToolbarAction::Save
             ? "No unsaved voxel model to save." : "Open a voxel model to use this tool.");
@@ -172,6 +176,7 @@ void DrawTooltip(const EditorToolbarButton& button, const bool enabled)
 bool DrawButton(
     const EditorToolbarButton& button,
     const EditorToolbarState& state,
+    const EditorInputService& inputService,
     const float size)
 {
     const bool enabled = EditorToolbarModel::IsEnabled(button, state);
@@ -214,7 +219,7 @@ bool DrawButton(
              minimum.y + (size - textSize.y) * 0.5F},
             iconColor, fallback.c_str());
     }
-    DrawTooltip(button, enabled);
+    DrawTooltip(button, inputService, enabled);
     return enabled && clicked;
 }
 
@@ -231,6 +236,7 @@ void DrawSeparator(const float height, const float width)
 
 void EditorToolbar::Draw(
     const EditorToolbarState& state,
+    const EditorInputService& inputService,
     const EditorToolbarCallbacks& callbacks)
 {
     const EditorToolbarLayout layout = EditorToolbarModel::CalculateLayout(
@@ -259,16 +265,10 @@ void EditorToolbar::Draw(
             ImGui::SameLine(0.0F, layout.ItemSpacing);
         }
 
-        if (DrawButton(button, state, layout.ButtonSize))
+        if (DrawButton(button, state, inputService, layout.ButtonSize))
         {
-            if (button.Action == EditorToolbarAction::Save)
-            {
-                if (callbacks.Save) callbacks.Save();
-            }
-            else if (callbacks.SelectTool)
-            {
-                callbacks.SelectTool(button.Tool);
-            }
+            if (callbacks.ExecuteCommand)
+                callbacks.ExecuteCommand(button.Command);
         }
         first = false;
         previousGroup = button.Group;

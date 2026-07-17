@@ -4,6 +4,7 @@
 #include "VoxelSelection/VoxelRaycast.h"
 #include "EditorWindowTitle.h"
 #include "Layout/PalettePanelLayout.h"
+#include "Dialogs/EditorDialogStyle.h"
 #include "Toolbar/EditorToolbar.h"
 
 #include "VoxelForge/Project/Project.h"
@@ -519,6 +520,10 @@ void EditorWorkspace::DrawMainMenuBar()
     {
         return;
     }
+    const auto shortcut = [this](const EditorInputCommand command)
+    {
+        return editorInputService_.ShortcutLabel(command).data();
+    };
 
     if (ImGui::BeginMenu("File"))
     {
@@ -635,11 +640,11 @@ void EditorWorkspace::DrawMainMenuBar()
             !voxelDocumentSaveService_.IsBusy();
         if (ImGui::MenuItem(
                 "Save",
-                "Ctrl+S",
+                shortcut(EditorInputCommand::FileSave),
                 false,
                 canSaveVoxel))
         {
-            static_cast<void>(SaveVoxelModel());
+            ExecuteInputCommand(EditorInputCommand::FileSave);
         }
         DrawTooltip(
             "Save the active VOX model");
@@ -692,23 +697,29 @@ void EditorWorkspace::DrawMainMenuBar()
             ? "Undo " + std::string(undoName)
             : "Undo";
         if (ImGui::MenuItem(
-                undoLabel.c_str(), "Ctrl+Z", false,
+                undoLabel.c_str(), shortcut(EditorInputCommand::EditUndo), false,
                 canUndo && !voxelEditInProgress_))
         {
-            UndoCommand();
+            ExecuteInputCommand(EditorInputCommand::EditUndo);
         }
-        DrawTooltip("Undo the last edit (Ctrl+Z)");
+        const std::string undoTooltip = "Undo the last edit (" +
+            std::string(editorInputService_.ShortcutLabel(
+                EditorInputCommand::EditUndo)) + ")";
+        DrawTooltip(undoTooltip.c_str());
 
         const std::string redoLabel = canRedo
             ? "Redo " + std::string(redoName)
             : "Redo";
         if (ImGui::MenuItem(
-                redoLabel.c_str(), "Ctrl+Y / Ctrl+Shift+Z", false,
+                redoLabel.c_str(), shortcut(EditorInputCommand::EditRedo), false,
                 canRedo && !voxelEditInProgress_))
         {
-            RedoCommand();
+            ExecuteInputCommand(EditorInputCommand::EditRedo);
         }
-        DrawTooltip("Redo the last edit (Ctrl+Y)");
+        const std::string redoTooltip = "Redo the last edit (" +
+            std::string(editorInputService_.ShortcutLabel(
+                EditorInputCommand::EditRedo)) + ")";
+        DrawTooltip(redoTooltip.c_str());
 
         ImGui::Separator();
 
@@ -781,33 +792,31 @@ void EditorWorkspace::DrawMainMenuBar()
 
     if (ImGui::BeginMenu("Tools"))
     {
-        const auto selectVoxelTool = [this](const ActiveVoxelTool tool)
-        {
-            if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
-            if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
-            if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
-            voxelToolState_.SetActiveTool(tool);
-            voxelToolInput_.Reset();
-            UpdateVoxelHighlights();
-        };
+        const bool hasDocument = voxelDocumentSession_.HasActiveDocument();
         if (ImGui::MenuItem(
-                "Pencil", "P", voxelToolState_.IsPencilActive()))
-            selectVoxelTool(ActiveVoxelTool::Pencil);
+                "Pencil", shortcut(EditorInputCommand::ToolPencil),
+                voxelToolState_.IsPencilActive(), hasDocument))
+            ExecuteInputCommand(EditorInputCommand::ToolPencil);
         if (ImGui::MenuItem(
-                "Eraser", "E", voxelToolState_.IsEraserActive()))
-            selectVoxelTool(ActiveVoxelTool::Eraser);
+                "Eraser", shortcut(EditorInputCommand::ToolEraser),
+                voxelToolState_.IsEraserActive(), hasDocument))
+            ExecuteInputCommand(EditorInputCommand::ToolEraser);
         if (ImGui::MenuItem(
-                "Fill", nullptr, voxelToolState_.IsFillActive()))
-            selectVoxelTool(ActiveVoxelTool::Fill);
+                "Fill", shortcut(EditorInputCommand::ToolFill),
+                voxelToolState_.IsFillActive(), hasDocument))
+            ExecuteInputCommand(EditorInputCommand::ToolFill);
         if (ImGui::MenuItem(
-                "Box", nullptr, voxelToolState_.IsBoxActive()))
-            selectVoxelTool(ActiveVoxelTool::Box);
+                "Box", shortcut(EditorInputCommand::ToolBox),
+                voxelToolState_.IsBoxActive(), hasDocument))
+            ExecuteInputCommand(EditorInputCommand::ToolBox);
         if (ImGui::MenuItem(
-                "Line", nullptr, voxelToolState_.IsLineActive()))
-            selectVoxelTool(ActiveVoxelTool::Line);
+                "Line", shortcut(EditorInputCommand::ToolLine),
+                voxelToolState_.IsLineActive(), hasDocument))
+            ExecuteInputCommand(EditorInputCommand::ToolLine);
         if (ImGui::MenuItem(
-                "Sphere", nullptr, voxelToolState_.IsSphereActive()))
-            selectVoxelTool(ActiveVoxelTool::Sphere);
+                "Sphere", shortcut(EditorInputCommand::ToolSphere),
+                voxelToolState_.IsSphereActive(), hasDocument))
+            ExecuteInputCommand(EditorInputCommand::ToolSphere);
         ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
@@ -851,22 +860,39 @@ void EditorWorkspace::HandleCommandShortcuts()
         ImGui::IsAnyItemActive(),
         incompatiblePopupOpen,
         projectManager_.HasActiveProject()};
-    const VoxelHistoryInputDecision historyDecision =
-        voxelHistoryInput_.Update({
-            io.KeyCtrl,
-            io.KeyShift,
-            ImGui::IsKeyDown(ImGuiKey_Z),
-            ImGui::IsKeyDown(ImGuiKey_Y),
-            context.TextInput || context.ActiveItem,
-            context.PopupOpen,
-            io.WantCaptureKeyboard && context.ActiveItem,
-            voxelDocumentSession_.HasActiveDocument(),
-            voxelEditInProgress_,
-            voxelEditHistory_.IsBusy()});
-    if (context.TextInput || context.ActiveItem || context.PopupOpen)
-    {
-        return;
-    }
+
+    EditorInputFrame inputFrame;
+    inputFrame.Control = io.KeyCtrl;
+    inputFrame.Shift = io.KeyShift;
+    inputFrame.Alt = io.KeyAlt;
+    inputFrame.TextInputActive = io.WantTextInput;
+    inputFrame.DialogTextInputActive = incompatiblePopupOpen && io.WantTextInput;
+    inputFrame.RenameActive = incompatiblePopupOpen && io.WantTextInput;
+    inputFrame.NumericInputActive = context.ActiveItem && !io.WantTextInput;
+    inputFrame.PopupOpen = incompatiblePopupOpen;
+    inputFrame.SetPressed(
+        EditorInputKey::P, ImGui::IsKeyPressed(ImGuiKey_P, false));
+    inputFrame.SetPressed(
+        EditorInputKey::E, ImGui::IsKeyPressed(ImGuiKey_E, false));
+    inputFrame.SetPressed(
+        EditorInputKey::F, ImGui::IsKeyPressed(ImGuiKey_F, false));
+    inputFrame.SetPressed(
+        EditorInputKey::B, ImGui::IsKeyPressed(ImGuiKey_B, false));
+    inputFrame.SetPressed(
+        EditorInputKey::L, ImGui::IsKeyPressed(ImGuiKey_L, false));
+    inputFrame.SetPressed(
+        EditorInputKey::S, ImGui::IsKeyPressed(ImGuiKey_S, false));
+    inputFrame.SetPressed(
+        EditorInputKey::Z, ImGui::IsKeyPressed(ImGuiKey_Z, false));
+    inputFrame.SetPressed(
+        EditorInputKey::Y, ImGui::IsKeyPressed(ImGuiKey_Y, false));
+    inputFrame.SetPressed(
+        EditorInputKey::Escape,
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false));
+    ExecuteInputCommand(editorInputService_.Resolve(
+        inputFrame, CurrentCommandAvailability()));
+
+    if (inputFrame.IsBlocked()) return;
 
     constexpr ImGuiInputFlags shortcutFlags = ImGuiInputFlags_RouteGlobal;
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, shortcutFlags) &&
@@ -897,32 +923,81 @@ void EditorWorkspace::HandleCommandShortcuts()
     {
         AddConsoleMessage("Save As is not implemented yet.");
     }
-    else if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, shortcutFlags))
-    {
-        const Asset::Voxel::VoxelDocument* document =
-            voxelDocumentSession_.ActiveDocument();
-        if (document)
-        {
-            if (document->IsDirty() &&
-                !voxelDocumentSaveService_.IsBusy())
-                static_cast<void>(SaveVoxelModel());
-        }
-        else if (CanRunProjectShortcut(ProjectShortcut::SaveProject, context))
-        {
-            SaveProject();
-        }
-    }
     else if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_W, shortcutFlags) &&
              CanRunProjectShortcut(ProjectShortcut::CloseProject, context))
     {
         RequestCloseProject();
     }
-    else if (historyDecision == VoxelHistoryInputDecision::Undo &&
-             voxelEditHistory_.CanUndo())
-        UndoCommand();
-    else if (historyDecision == VoxelHistoryInputDecision::Redo &&
-             voxelEditHistory_.CanRedo())
-        RedoCommand();
+}
+
+EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
+{
+    const Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const bool documentHistory = document != nullptr;
+    return {
+        documentHistory,
+        documentHistory
+            ? document->IsDirty() && !voxelDocumentSaveService_.IsBusy()
+            : projectManager_.HasActiveProject(),
+        !voxelEditInProgress_ && !voxelEditHistory_.IsBusy() &&
+            (documentHistory ? voxelEditHistory_.CanUndo()
+                             : commandHistory_.CanUndo()),
+        !voxelEditInProgress_ && !voxelEditHistory_.IsBusy() &&
+            (documentHistory ? voxelEditHistory_.CanRedo()
+                             : commandHistory_.CanRedo()),
+        voxelBoxInteraction_.IsActive() || voxelLineInteraction_.IsActive() ||
+            voxelSphereInteraction_.IsActive() ||
+            voxelSelection_.Selected().has_value()};
+}
+
+void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
+{
+    switch (command)
+    {
+    case EditorInputCommand::ToolPencil:
+        SelectVoxelTool(ActiveVoxelTool::Pencil); break;
+    case EditorInputCommand::ToolEraser:
+        SelectVoxelTool(ActiveVoxelTool::Eraser); break;
+    case EditorInputCommand::ToolFill:
+        SelectVoxelTool(ActiveVoxelTool::Fill); break;
+    case EditorInputCommand::ToolBox:
+        SelectVoxelTool(ActiveVoxelTool::Box); break;
+    case EditorInputCommand::ToolLine:
+        SelectVoxelTool(ActiveVoxelTool::Line); break;
+    case EditorInputCommand::ToolSphere:
+        SelectVoxelTool(ActiveVoxelTool::Sphere); break;
+    case EditorInputCommand::FileSave:
+        if (voxelDocumentSession_.HasActiveDocument())
+            static_cast<void>(SaveVoxelModel());
+        else
+            SaveProject();
+        break;
+    case EditorInputCommand::EditUndo: UndoCommand(); break;
+    case EditorInputCommand::EditRedo: RedoCommand(); break;
+    case EditorInputCommand::InteractionCancel: CancelActiveInteraction(); break;
+    case EditorInputCommand::None:
+    case EditorInputCommand::Count:
+    default: break;
+    }
+}
+
+void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
+{
+    if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
+    if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
+    if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
+    voxelToolState_.SetActiveTool(tool);
+    voxelToolInput_.Reset();
+    UpdateVoxelHighlights();
+}
+
+void EditorWorkspace::CancelActiveInteraction() noexcept
+{
+    if (voxelBoxInteraction_.IsActive()) CancelVoxelBox();
+    if (voxelLineInteraction_.IsActive()) CancelVoxelLine();
+    if (voxelSphereInteraction_.IsActive()) CancelVoxelSphere();
+    if (voxelSelection_.ClearSelection()) UpdateVoxelHighlights();
 }
 
 void EditorWorkspace::UndoCommand()
@@ -1177,7 +1252,7 @@ void EditorWorkspace::DrawScenePanel()
     {
         FrameVoxelViewport();
     }
-    DrawTooltip("Frame the active voxel model (F)");
+    DrawTooltip("Frame the active voxel model");
     ImGui::SameLine();
     const char* viewNames[] = {
         "Perspective", "Front", "Back", "Left", "Right", "Top", "Bottom"};
@@ -1214,31 +1289,33 @@ void EditorWorkspace::DrawScenePanel()
         voxelDocumentSession_.ActiveDocument();
     const bool canSave = activeDocument != nullptr &&
         activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
-    const auto selectToolbarTool = [this](const ActiveVoxelTool tool)
-    {
-        if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
-        if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
-        if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
-        voxelToolState_.SetActiveTool(tool);
-        voxelToolInput_.Reset();
-        UpdateVoxelHighlights();
-    };
     EditorToolbar::Draw(
         {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool()},
-        {[this]() { static_cast<void>(SaveVoxelModel()); },
-         selectToolbarTool});
+        editorInputService_,
+        {[this](const EditorInputCommand command)
+         {
+             ExecuteInputCommand(command);
+         }});
     ImGui::SameLine();
     ImGui::BeginDisabled(
         !voxelEditHistory_.CanUndo() || voxelEditInProgress_);
-    if (ImGui::Button("Undo")) UndoCommand();
+    if (ImGui::Button("Undo"))
+        ExecuteInputCommand(EditorInputCommand::EditUndo);
     ImGui::EndDisabled();
-    DrawTooltip("Undo the last edit (Ctrl+Z)");
+    const std::string undoTooltip = "Undo the last edit (" +
+        std::string(editorInputService_.ShortcutLabel(
+            EditorInputCommand::EditUndo)) + ")";
+    DrawTooltip(undoTooltip.c_str());
     ImGui::SameLine();
     ImGui::BeginDisabled(
         !voxelEditHistory_.CanRedo() || voxelEditInProgress_);
-    if (ImGui::Button("Redo")) RedoCommand();
+    if (ImGui::Button("Redo"))
+        ExecuteInputCommand(EditorInputCommand::EditRedo);
     ImGui::EndDisabled();
-    DrawTooltip("Redo the last undone edit (Ctrl+Y or Ctrl+Shift+Z)");
+    const std::string redoTooltip = "Redo the last undone edit (" +
+        std::string(editorInputService_.ShortcutLabel(
+            EditorInputCommand::EditRedo)) + ")";
+    DrawTooltip(redoTooltip.c_str());
 
     bool eraseRequested = false;
     bool addRequested = false;
@@ -1280,7 +1357,7 @@ void EditorWorkspace::DrawScenePanel()
             "Right-click a .vox file and choose Open in Viewport.");
     }
     ImGui::TextDisabled(
-        "Right: orbit | Middle: pan | Wheel: zoom | F: frame | Home: reset");
+        "Right: orbit | Middle: pan | Wheel: zoom | Home: reset");
 
     ImVec2 available = ImGui::GetContentRegionAvail();
     available.x = std::max(available.x, 1.0F);
@@ -1530,7 +1607,7 @@ void EditorWorkspace::DrawScenePanel()
         const ViewportCameraActions cameraActions =
             ResolveViewportCameraActions({
                 shortcutsEnabled,
-                ImGui::IsKeyPressed(ImGuiKey_F, false),
+                false,
                 ImGui::IsKeyPressed(ImGuiKey_Home, false),
                 leftClickCount});
         if (cameraActions.FrameRequested)
@@ -1539,29 +1616,8 @@ void EditorWorkspace::DrawScenePanel()
             viewportCamera_.Reset();
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
             eraseRequested = true;
-        const ActiveVoxelTool shortcutTool = ResolveVoxelToolShortcut(
-            voxelToolState_.ActiveTool(),
-            ImGui::IsKeyPressed(ImGuiKey_P, false),
-            ImGui::IsKeyPressed(ImGuiKey_E, false),
-            shortcutsEnabled);
-        if (shortcutTool != voxelToolState_.ActiveTool())
-        {
-            if (shortcutTool != ActiveVoxelTool::Box) CancelVoxelBox();
-            if (shortcutTool != ActiveVoxelTool::Line) CancelVoxelLine();
-            if (shortcutTool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
-            voxelToolState_.SetActiveTool(shortcutTool);
-            voxelToolInput_.Reset();
-            UpdateVoxelHighlights();
-        }
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_A, false))
             addRequested = true;
-        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-        {
-            if (voxelBoxInteraction_.IsActive()) CancelVoxelBox();
-            else if (voxelLineInteraction_.IsActive()) CancelVoxelLine();
-            else if (voxelSphereInteraction_.IsActive()) CancelVoxelSphere();
-            else if (voxelSelection_.ClearSelection()) UpdateVoxelHighlights();
-        }
     }
     else if (!viewportRenderer_.LastError().empty())
     {
@@ -2139,19 +2195,24 @@ void EditorWorkspace::DrawPalettePanel()
     ImGui::TextDisabled("(coming later)");
 
     if (openColorEditor) ImGui::OpenPopup("Color Editor Preview");
-    if (ImGui::BeginPopupModal(
-            "Color Editor Preview", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    if (EditorDialogStyle::BeginPopup(
+            "Color Editor Preview",
+            EditorDialogIntent::Information,
+            "Color editor",
+            "Color editing is prepared for a future release."))
     {
         ImGui::Text("Palette Index: %zu",
             paletteColorEditorIndex_.value_or(active->Index));
         ImGui::TextUnformatted(
             "Color editing is prepared but intentionally disabled in v1.");
-        if (ImGui::Button("Close"))
+        if (EditorDialogStyle::ActionButton("Close", true) ||
+            EditorDialogStyle::Shortcuts(false) ==
+                EditorDialogShortcut::Cancel)
         {
             paletteColorEditorIndex_.reset();
             ImGui::CloseCurrentPopup();
         }
-        ImGui::EndPopup();
+        EditorDialogStyle::EndPopup();
     }
     ImGui::End();
 }
@@ -2301,10 +2362,11 @@ void EditorWorkspace::DrawAboutPopup()
         showAboutPopup_ = false;
     }
 
-    if (ImGui::BeginPopupModal(
+    if (EditorDialogStyle::BeginPopup(
             AboutPopupName,
-            nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+            EditorDialogIntent::Information,
+            "VoxelForge Studio",
+            "Create faster. Stay the craftsperson."))
     {
         ImGui::TextUnformatted("VoxelForge Studio");
         ImGui::Separator();
@@ -2313,12 +2375,14 @@ void EditorWorkspace::DrawAboutPopup()
         ImGui::TextDisabled("Early development build");
         ImGui::Spacing();
 
-        if (ImGui::Button("Close"))
+        if (EditorDialogStyle::ActionButton("Close", true) ||
+            EditorDialogStyle::Shortcuts(false) ==
+                EditorDialogShortcut::Cancel)
         {
             ImGui::CloseCurrentPopup();
         }
 
-        ImGui::EndPopup();
+        EditorDialogStyle::EndPopup();
     }
 }
 
@@ -2335,9 +2399,11 @@ void EditorWorkspace::DrawModelImportDialogs()
         ImGui::OpenPopup(ImportConfirmationPopupName);
         showImportConfirmationPopup_ = false;
     }
-    if (ImGui::BeginPopupModal(
-            ImportConfirmationPopupName, nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+    if (EditorDialogStyle::BeginPopup(
+            ImportConfirmationPopupName,
+            EditorDialogIntent::Import,
+            "Import models",
+            "Copy the selected VOX models into Assets/Models."))
     {
         if (importStartedFromDrop_)
         {
@@ -2361,16 +2427,10 @@ void EditorWorkspace::DrawModelImportDialogs()
         }
         const char* importLabel = selectedImportPaths_.size() == 1U
             ? "Import" : "Import All";
-        if (ImGui::Button(importLabel))
-        {
-            std::vector<std::filesystem::path> paths =
-                std::move(selectedImportPaths_);
-            if (importStartedFromDrop_) dragDropImport_.MarkImporting();
-            ImGui::CloseCurrentPopup();
-            BeginModelImport(std::move(paths));
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel"))
+        const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts();
+        EditorDialogStyle::BeginActions();
+        if (EditorDialogStyle::ActionButton("Cancel", false) ||
+            shortcut == EditorDialogShortcut::Cancel)
         {
             selectedImportPaths_.clear();
             if (importStartedFromDrop_) dragDropImport_.Cancel();
@@ -2378,7 +2438,17 @@ void EditorWorkspace::DrawModelImportDialogs()
             pendingDropImportTarget_ = DragDropImportTarget::None;
             ImGui::CloseCurrentPopup();
         }
-        ImGui::EndPopup();
+        ImGui::SameLine();
+        if (EditorDialogStyle::ActionButton(importLabel, true) ||
+            shortcut == EditorDialogShortcut::Confirm)
+        {
+            std::vector<std::filesystem::path> paths =
+                std::move(selectedImportPaths_);
+            if (importStartedFromDrop_) dragDropImport_.MarkImporting();
+            ImGui::CloseCurrentPopup();
+            BeginModelImport(std::move(paths));
+        }
+        EditorDialogStyle::EndPopup();
     }
 
     if (showImportCollisionPopup_)
@@ -2386,9 +2456,11 @@ void EditorWorkspace::DrawModelImportDialogs()
         ImGui::OpenPopup(ImportCollisionPopupName);
         showImportCollisionPopup_ = false;
     }
-    if (ImGui::BeginPopupModal(
-            ImportCollisionPopupName, nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+    if (EditorDialogStyle::BeginPopup(
+            ImportCollisionPopupName,
+            EditorDialogIntent::Warning,
+            "Model already exists",
+            "Choose how VoxelForge should resolve this file-name collision."))
     {
         ImGui::TextUnformatted("Le fichier existe déjà.");
         if (pendingImportCollision_)
@@ -2396,30 +2468,35 @@ void EditorWorkspace::DrawModelImportDialogs()
             ImGui::TextWrapped("%s",
                 pendingImportCollision_->DestinationPath.string().c_str());
         }
-        if (ImGui::Button("Remplacer"))
+        const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts();
+        EditorDialogStyle::BeginActions();
+        if (EditorDialogStyle::ActionButton("Annuler", false) ||
+            shortcut == EditorDialogShortcut::Cancel)
         {
             ImGui::CloseCurrentPopup();
-            ContinueModelImport(ModelImportCollisionAction::Replace);
+            ContinueModelImport(ModelImportCollisionAction::Cancel);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Renommer"))
-        {
-            ImGui::CloseCurrentPopup();
-            ContinueModelImport(ModelImportCollisionAction::Rename);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Ignorer"))
+        if (EditorDialogStyle::ActionButton("Ignorer", false))
         {
             ImGui::CloseCurrentPopup();
             ContinueModelImport(ModelImportCollisionAction::Skip);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Annuler"))
+        if (EditorDialogStyle::ActionButton(
+                "Remplacer", false, true, true))
         {
             ImGui::CloseCurrentPopup();
-            ContinueModelImport(ModelImportCollisionAction::Cancel);
+            ContinueModelImport(ModelImportCollisionAction::Replace);
         }
-        ImGui::EndPopup();
+        ImGui::SameLine();
+        if (EditorDialogStyle::ActionButton("Renommer", true) ||
+            shortcut == EditorDialogShortcut::Confirm)
+        {
+            ImGui::CloseCurrentPopup();
+            ContinueModelImport(ModelImportCollisionAction::Rename);
+        }
+        EditorDialogStyle::EndPopup();
     }
 
     if (showOpenImportedModelPopup_)
@@ -2427,15 +2504,29 @@ void EditorWorkspace::DrawModelImportDialogs()
         ImGui::OpenPopup(OpenImportedModelPopupName);
         showOpenImportedModelPopup_ = false;
     }
-    if (ImGui::BeginPopupModal(
-            OpenImportedModelPopupName, nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+    if (EditorDialogStyle::BeginPopup(
+            OpenImportedModelPopupName,
+            EditorDialogIntent::Open,
+            "Open imported model",
+            "The import is complete. Open this model in the viewport now?"))
     {
         ImGui::TextUnformatted("Open in Viewport?");
         if (importedModelToOpen_)
             ImGui::TextDisabled("%s",
                 importedModelToOpen_->filename().string().c_str());
-        if (ImGui::Button("Oui"))
+        const bool canOpen = importedModelToOpen_.has_value();
+        const EditorDialogShortcut shortcut =
+            EditorDialogStyle::Shortcuts(canOpen);
+        EditorDialogStyle::BeginActions();
+        if (EditorDialogStyle::ActionButton("Non", false) ||
+            shortcut == EditorDialogShortcut::Cancel)
+        {
+            importedModelToOpen_.reset();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (EditorDialogStyle::ActionButton("Oui", true, canOpen) ||
+            shortcut == EditorDialogShortcut::Confirm)
         {
             const std::filesystem::path path =
                 importedModelToOpen_.value_or(std::filesystem::path{});
@@ -2443,13 +2534,7 @@ void EditorWorkspace::DrawModelImportDialogs()
             ImGui::CloseCurrentPopup();
             if (!path.empty()) static_cast<void>(OpenVoxInViewport(path));
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Non"))
-        {
-            importedModelToOpen_.reset();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
+        EditorDialogStyle::EndPopup();
     }
 }
 
@@ -2501,9 +2586,11 @@ void EditorWorkspace::DrawDirtyConfirmationDialog()
         ImGui::GetMainViewport()->GetCenter(),
         ImGuiCond_Always,
         ImVec2(0.5F, 0.5F));
-    if (!ImGui::BeginPopupModal(
-            DirtyConfirmationPopupName, nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+    if (!EditorDialogStyle::BeginPopup(
+            DirtyConfirmationPopupName,
+            EditorDialogIntent::Save,
+            "Unsaved changes",
+            "Save your voxel model before continuing?"))
         return;
 
     const Asset::Voxel::VoxelDocument* document =
@@ -2511,28 +2598,12 @@ void EditorWorkspace::DrawDirtyConfirmationDialog()
     const std::string fileName = document
         ? document->SourcePath().filename().string() : "active model";
     ImGui::TextWrapped("Save changes to %s?", fileName.c_str());
-    ImGui::Spacing();
-    ImGui::BeginDisabled(voxelDocumentSaveService_.IsBusy());
-    if (ImGui::Button("Save"))
-    {
-        if (SaveVoxelModel())
-        {
-            const auto action =
-                dirtyActionConfirmation_.ContinueAfterSuccessfulSave();
-            ImGui::CloseCurrentPopup();
-            if (action) ExecutePendingDirtyAction(*action);
-        }
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Don't Save"))
-    {
-        const auto action = dirtyActionConfirmation_.Discard();
-        ImGui::CloseCurrentPopup();
-        if (action) ExecutePendingDirtyAction(*action);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel"))
+    const bool canSave = !voxelDocumentSaveService_.IsBusy();
+    const EditorDialogShortcut shortcut =
+        EditorDialogStyle::Shortcuts(canSave);
+    EditorDialogStyle::BeginActions();
+    if (EditorDialogStyle::ActionButton("Cancel", false) ||
+        shortcut == EditorDialogShortcut::Cancel)
     {
         dirtyActionConfirmation_.Cancel();
         pendingProjectPath_.clear();
@@ -2542,7 +2613,27 @@ void EditorWorkspace::DrawDirtyConfirmationDialog()
             VoxelModelCreationCollisionAction::Ask;
         ImGui::CloseCurrentPopup();
     }
-    ImGui::EndPopup();
+    ImGui::SameLine();
+    if (EditorDialogStyle::ActionButton(
+            "Don't Save", false, true, true))
+    {
+        const auto action = dirtyActionConfirmation_.Discard();
+        ImGui::CloseCurrentPopup();
+        if (action) ExecutePendingDirtyAction(*action);
+    }
+    ImGui::SameLine();
+    if (EditorDialogStyle::ActionButton("Save", true, canSave) ||
+        shortcut == EditorDialogShortcut::Confirm)
+    {
+        if (SaveVoxelModel())
+        {
+            const auto action =
+                dirtyActionConfirmation_.ContinueAfterSuccessfulSave();
+            ImGui::CloseCurrentPopup();
+            if (action) ExecutePendingDirtyAction(*action);
+        }
+    }
+    EditorDialogStyle::EndPopup();
 }
 
 void EditorWorkspace::DrawVoxelModelCreationDialogs()
@@ -2557,16 +2648,33 @@ void EditorWorkspace::DrawVoxelModelCreationDialogs()
     ImGui::SetNextWindowPos(
         ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
         ImVec2(0.5F, 0.5F));
-    if (ImGui::BeginPopupModal(
-            CreatePopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    if (EditorDialogStyle::BeginPopup(
+            CreatePopup,
+            EditorDialogIntent::Create,
+            "Create voxel model",
+            "Name the model and choose the editable voxel volume.",
+            true))
     {
-        ImGui::TextUnformatted("Create an empty VOX model.");
+        EditorDialogStyle::FullWidthField();
         ImGui::InputText(
-            "Name", newVoxelModelName_.data(), newVoxelModelName_.size());
+            "##VoxelModelName", newVoxelModelName_.data(), newVoxelModelName_.size());
+        ImGui::TextDisabled("Model name");
+        EditorDialogStyle::FullWidthField();
         ImGui::InputInt3("Dimensions", newVoxelModelDimensions_.data());
         ImGui::TextDisabled("Valid range: 1..256. Default: 64 x 64 x 64.");
-        DrawErrorMessage(voxelModelCreationError_);
-        if (ImGui::Button("Create"))
+        EditorDialogStyle::DrawMessage(
+            voxelModelCreationError_, EditorDialogIntent::Destructive);
+        const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts();
+        EditorDialogStyle::BeginActions();
+        if (EditorDialogStyle::ActionButton("Cancel", false) ||
+            shortcut == EditorDialogShortcut::Cancel)
+        {
+            voxelModelCreationError_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (EditorDialogStyle::ActionButton("Create", true) ||
+            shortcut == EditorDialogShortcut::Confirm)
         {
             VoxelModelCreationRequest request;
             request.Name = newVoxelModelName_.data();
@@ -2594,13 +2702,7 @@ void EditorWorkspace::DrawVoxelModelCreationDialogs()
                 ImGui::CloseCurrentPopup();
             }
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel"))
-        {
-            voxelModelCreationError_.clear();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
+        EditorDialogStyle::EndPopup();
     }
 
     if (showVoxelModelCollisionPopup_)
@@ -2611,19 +2713,26 @@ void EditorWorkspace::DrawVoxelModelCreationDialogs()
     ImGui::SetNextWindowPos(
         ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
         ImVec2(0.5F, 0.5F));
-    if (ImGui::BeginPopupModal(
-            CollisionPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    if (EditorDialogStyle::BeginPopup(
+            CollisionPopup,
+            EditorDialogIntent::Warning,
+            "Model already exists",
+            "Rename the new model, replace the existing file, or cancel."))
     {
         ImGui::TextWrapped("The model already exists.");
-        if (ImGui::Button("Rename"))
+        const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts();
+        EditorDialogStyle::BeginActions();
+        if (EditorDialogStyle::ActionButton("Cancel", false) ||
+            shortcut == EditorDialogShortcut::Cancel)
         {
+            pendingVoxelModelCreation_ = {};
             pendingVoxelModelCollisionAction_ =
-                VoxelModelCreationCollisionAction::Rename;
-            CreateVoxelModelNow();
+                VoxelModelCreationCollisionAction::Ask;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Replace"))
+        if (EditorDialogStyle::ActionButton(
+                "Replace", false, true, true))
         {
             pendingVoxelModelCollisionAction_ =
                 VoxelModelCreationCollisionAction::Replace;
@@ -2631,14 +2740,15 @@ void EditorWorkspace::DrawVoxelModelCreationDialogs()
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel"))
+        if (EditorDialogStyle::ActionButton("Rename", true) ||
+            shortcut == EditorDialogShortcut::Confirm)
         {
-            pendingVoxelModelCreation_ = {};
             pendingVoxelModelCollisionAction_ =
-                VoxelModelCreationCollisionAction::Ask;
+                VoxelModelCreationCollisionAction::Rename;
+            CreateVoxelModelNow();
             ImGui::CloseCurrentPopup();
         }
-        ImGui::EndPopup();
+        EditorDialogStyle::EndPopup();
     }
 }
 
@@ -2687,21 +2797,17 @@ void EditorWorkspace::DrawNewProjectDialog()
         showNewProjectPopup_ = false;
     }
 
-    ImGui::SetNextWindowSizeConstraints(
-        ImVec2(440.0F, 0.0F), ImVec2(760.0F, 600.0F));
-    ImGui::SetNextWindowPos(
-        ImGui::GetMainViewport()->GetCenter(),
-        ImGuiCond_Always,
-        ImVec2(0.5F, 0.5F));
-    if (!ImGui::BeginPopupModal(PopupName, nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+    if (!EditorDialogStyle::BeginPopup(
+            PopupName,
+            EditorDialogIntent::Create,
+            "Create project",
+            "Choose a name and location. VoxelForge creates the complete project structure.",
+            true))
     {
         return;
     }
 
-    ImGui::TextDisabled("Create a project folder and its Assets directory.");
-    ImGui::Spacing();
-    ImGui::SetNextItemWidth(std::max(260.0F, ImGui::GetContentRegionAvail().x));
+    EditorDialogStyle::FullWidthField();
     bool fieldsChanged = ImGui::InputText(
         "##NewProjectName", newProjectName_.data(), newProjectName_.size());
     ImGui::TextDisabled("Project Name");
@@ -2754,11 +2860,21 @@ void EditorWorkspace::DrawNewProjectDialog()
         : std::string_view(projectDialogError_);
     DrawErrorMessage(displayedError);
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::BeginDisabled(!validation.IsValid());
-
-    if (ImGui::Button("Create"))
+    const EditorDialogShortcut shortcut =
+        EditorDialogStyle::Shortcuts(validation.IsValid());
+    EditorDialogStyle::BeginActions();
+    if (EditorDialogStyle::ActionButton("Cancel", false) ||
+        shortcut == EditorDialogShortcut::Cancel)
+    {
+        projectDialogError_.clear();
+        newProjectName_.fill('\0');
+        newProjectParentPath_.fill('\0');
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (EditorDialogStyle::ActionButton(
+            "Create", true, validation.IsValid()) ||
+        shortcut == EditorDialogShortcut::Confirm)
     {
         CreateProject();
         if (projectDialogError_.empty() &&
@@ -2766,19 +2882,7 @@ void EditorWorkspace::DrawNewProjectDialog()
             ImGui::CloseCurrentPopup();
     }
 
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
-
-    if (ImGui::Button("Cancel"))
-    {
-        projectDialogError_.clear();
-        newProjectName_.fill('\0');
-        newProjectParentPath_.fill('\0');
-        ImGui::CloseCurrentPopup();
-    }
-
-    ImGui::EndPopup();
+    EditorDialogStyle::EndPopup();
 }
 
 void EditorWorkspace::DrawOpenProjectDialog()
@@ -2791,20 +2895,16 @@ void EditorWorkspace::DrawOpenProjectDialog()
         showOpenProjectPopup_ = false;
     }
 
-    ImGui::SetNextWindowSizeConstraints(
-        ImVec2(440.0F, 0.0F), ImVec2(760.0F, 500.0F));
-    ImGui::SetNextWindowPos(
-        ImGui::GetMainViewport()->GetCenter(),
-        ImGuiCond_Always,
-        ImVec2(0.5F, 0.5F));
-    if (!ImGui::BeginPopupModal(PopupName, nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+    if (!EditorDialogStyle::BeginPopup(
+            PopupName,
+            EditorDialogIntent::Open,
+            "Open project",
+            "Select a .vfproject file to continue your previous session.",
+            true))
     {
         return;
     }
 
-    ImGui::TextDisabled("Select a VoxelForge project file.");
-    ImGui::Spacing();
     ImGui::SetNextItemWidth(std::max(
         180.0F, ImGui::GetContentRegionAvail().x - 92.0F));
     if (DrawPathInput("##OpenProjectFile", openProjectFilePath_))
@@ -2846,11 +2946,20 @@ void EditorWorkspace::DrawOpenProjectDialog()
         : std::string_view(projectDialogError_);
     DrawErrorMessage(displayedError);
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::BeginDisabled(!inputError.empty());
-
-    if (ImGui::Button("Open"))
+    const EditorDialogShortcut shortcut =
+        EditorDialogStyle::Shortcuts(inputError.empty());
+    EditorDialogStyle::BeginActions();
+    if (EditorDialogStyle::ActionButton("Cancel", false) ||
+        shortcut == EditorDialogShortcut::Cancel)
+    {
+        projectDialogError_.clear();
+        openProjectFilePath_.fill('\0');
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (EditorDialogStyle::ActionButton(
+            "Open", true, inputError.empty()) ||
+        shortcut == EditorDialogShortcut::Confirm)
     {
         if (HasUnsavedVoxelChanges())
         {
@@ -2864,18 +2973,7 @@ void EditorWorkspace::DrawOpenProjectDialog()
         }
     }
 
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
-
-    if (ImGui::Button("Cancel"))
-    {
-        projectDialogError_.clear();
-        openProjectFilePath_.fill('\0');
-        ImGui::CloseCurrentPopup();
-    }
-
-    ImGui::EndPopup();
+    EditorDialogStyle::EndPopup();
 }
 
 bool EditorWorkspace::DrawPathInput(
@@ -3669,7 +3767,6 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     else
     {
         voxelEditHistory_.Clear();
-        voxelHistoryInput_.Reset();
         voxelDocumentSession_.Close();
         voxelDocumentMeshCache_.Clear();
         uploadedDocumentIdentity_.reset();
@@ -3695,7 +3792,6 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     }
     commandHistory_.Clear();
     voxelEditHistory_.Clear();
-    voxelHistoryInput_.Reset();
     activeVoxelModel_ = std::move(*model);
     paintPaletteSelection_.OnModelLoaded();
     ++voxelModelGeneration_;
@@ -6493,6 +6589,122 @@ bool EditorWorkspace::ModernToolbarSmokePassed() const noexcept
         modernToolbarSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunKeyboardShortcutsSmokeStep(const std::size_t frame)
+{
+    const auto runShortcut = [this](
+        const EditorInputKey key, const bool control = false)
+    {
+        EditorInputFrame input;
+        input.Control = control;
+        input.SetPressed(key);
+        const EditorInputCommand command = editorInputService_.Resolve(
+            input, CurrentCommandAvailability());
+        ExecuteInputCommand(command);
+        return command;
+    };
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"KeyboardSmoke", {16U, 16U, 16U}});
+        keyboardShortcutsSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || document == nullptr ||
+            runShortcut(EditorInputKey::P) !=
+                EditorInputCommand::ToolPencil ||
+            !voxelToolState_.IsPencilActive())
+            return false;
+        workplaneHit_ = WorkplaneHit{
+            WorkplaneHitStatus::Valid,
+            Asset::Voxel::VoxelPosition{8, 0, 8}, 1.0F};
+        keyboardShortcutsSmokeEdited_ = ApplyVoxelPencil() &&
+            document->GetVoxelCount() == 1U;
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !keyboardShortcutsSmokeEdited_) return false;
+        const bool boxSelected = runShortcut(EditorInputKey::B) ==
+                EditorInputCommand::ToolBox &&
+            voxelToolState_.IsBoxActive();
+        const bool boxApplied = boxSelected && voxelBoxInteraction_.Begin(
+                {1, 0, 1}, voxelDocumentSession_.Generation()) &&
+            voxelBoxInteraction_.Update(
+                Asset::Voxel::VoxelPosition{2, 1, 2}) && ApplyVoxelBox();
+        const bool lineSelected = runShortcut(EditorInputKey::L) ==
+                EditorInputCommand::ToolLine &&
+            voxelToolState_.IsLineActive();
+        const bool lineApplied = lineSelected && voxelLineInteraction_.Begin(
+                {4, 0, 4}, voxelDocumentSession_.Generation()) &&
+            voxelLineInteraction_.Update(
+                Asset::Voxel::VoxelPosition{6, 0, 4}) && ApplyVoxelLine();
+        keyboardShortcutsSmokeTools_ = boxApplied && lineApplied &&
+            document->GetVoxelCount() == 12U &&
+            voxelEditHistory_.UndoCount() == 3U;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !keyboardShortcutsSmokeTools_) return false;
+        keyboardShortcutsSmokeSaved_ =
+            runShortcut(EditorInputKey::S, true) ==
+                EditorInputCommand::FileSave &&
+            std::filesystem::is_regular_file(keyboardShortcutsSmokePath_) &&
+            !document->IsDirty();
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !keyboardShortcutsSmokeSaved_) return false;
+        keyboardShortcutsSmokeUndone_ =
+            runShortcut(EditorInputKey::Z, true) ==
+                EditorInputCommand::EditUndo &&
+            document->GetVoxelCount() == 9U && document->IsDirty() &&
+            voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 4U)
+    {
+        if (!document || !keyboardShortcutsSmokeUndone_) return false;
+        keyboardShortcutsSmokeRedone_ =
+            runShortcut(EditorInputKey::Y, true) ==
+                EditorInputCommand::EditRedo &&
+            document->GetVoxelCount() == 12U && !document->IsDirty();
+        SelectVoxelTool(ActiveVoxelTool::Box);
+        const bool previewStarted = voxelBoxInteraction_.Begin(
+            {10, 0, 10}, voxelDocumentSession_.Generation());
+        keyboardShortcutsSmokeCancelled_ = keyboardShortcutsSmokeRedone_ &&
+            previewStarted && runShortcut(EditorInputKey::Escape) ==
+                EditorInputCommand::InteractionCancel &&
+            !voxelBoxInteraction_.IsActive() &&
+            document->GetVoxelCount() == 12U;
+    }
+    else if (frame == 5U)
+    {
+        if (!keyboardShortcutsSmokeCancelled_) return false;
+        CloseProject();
+        keyboardShortcutsSmokeCleaned_ =
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !voxelBoxInteraction_.IsActive() &&
+            !voxelLineInteraction_.IsActive() &&
+            !voxelSphereInteraction_.IsActive() &&
+            !std::filesystem::exists(
+                keyboardShortcutsSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                keyboardShortcutsSmokePath_.string() + ".vfsave.bak");
+    }
+    return KeyboardShortcutsSmokePassed();
+}
+
+bool EditorWorkspace::KeyboardShortcutsSmokePassed() const noexcept
+{
+    return keyboardShortcutsSmokeTools_ && keyboardShortcutsSmokeEdited_ &&
+        keyboardShortcutsSmokeSaved_ && keyboardShortcutsSmokeUndone_ &&
+        keyboardShortcutsSmokeRedone_ && keyboardShortcutsSmokeCancelled_ &&
+        keyboardShortcutsSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
 {
     if (frame == 1U) return false;
@@ -7669,7 +7881,6 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
 {
     commandHistory_.Clear();
     voxelEditHistory_.Clear();
-    voxelHistoryInput_.Reset();
     ++voxelModelGeneration_;
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);

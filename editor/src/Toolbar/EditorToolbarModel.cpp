@@ -10,20 +10,26 @@ namespace
 constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
     ToolbarButtons{{
         {EditorToolbarAction::Save, EditorToolbarGroup::File,
-         "Save", "Save the active voxel model", "Ctrl+S",
+         "Save", "Save the active voxel model", EditorInputCommand::FileSave,
          ActiveVoxelTool::None},
         {EditorToolbarAction::Pencil, EditorToolbarGroup::DirectEdit,
-         "Pencil", "Draw voxels", "P", ActiveVoxelTool::Pencil},
+         "Pencil", "Draw voxels", EditorInputCommand::ToolPencil,
+         ActiveVoxelTool::Pencil},
         {EditorToolbarAction::Eraser, EditorToolbarGroup::DirectEdit,
-         "Eraser", "Remove voxels", "E", ActiveVoxelTool::Eraser},
+         "Eraser", "Remove voxels", EditorInputCommand::ToolEraser,
+         ActiveVoxelTool::Eraser},
         {EditorToolbarAction::Fill, EditorToolbarGroup::DirectEdit,
-         "Fill", "Recolor a connected area", "", ActiveVoxelTool::Fill},
+         "Fill", "Recolor a connected area", EditorInputCommand::ToolFill,
+         ActiveVoxelTool::Fill},
         {EditorToolbarAction::Box, EditorToolbarGroup::Construction,
-         "Box", "Create a filled voxel box", "", ActiveVoxelTool::Box},
+         "Box", "Create a filled voxel box", EditorInputCommand::ToolBox,
+         ActiveVoxelTool::Box},
         {EditorToolbarAction::Line, EditorToolbarGroup::Construction,
-         "Line", "Create a voxel line", "", ActiveVoxelTool::Line},
+         "Line", "Create a voxel line", EditorInputCommand::ToolLine,
+         ActiveVoxelTool::Line},
         {EditorToolbarAction::Sphere, EditorToolbarGroup::Construction,
-         "Sphere", "Create a filled voxel sphere", "",
+         "Sphere", "Create a filled voxel sphere",
+         EditorInputCommand::ToolSphere,
          ActiveVoxelTool::Sphere}
     }};
 }

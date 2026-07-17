@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Input/EditorInputService.h"
 #include "VoxelTools/VoxelToolState.h"
 
 #include <array>
@@ -33,7 +34,7 @@ struct EditorToolbarButton final
     EditorToolbarGroup Group = EditorToolbarGroup::File;
     std::string_view Name;
     std::string_view Description;
-    std::string_view Shortcut;
+    EditorInputCommand Command = EditorInputCommand::None;
     ActiveVoxelTool Tool = ActiveVoxelTool::None;
 };
 

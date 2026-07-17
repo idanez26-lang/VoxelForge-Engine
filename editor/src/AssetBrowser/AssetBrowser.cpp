@@ -1,4 +1,5 @@
 #include "AssetBrowser.h"
+#include "Dialogs/EditorDialogStyle.h"
 
 #include "VoxelForge/Asset/Vox/VoxImporter.h"
 
@@ -924,10 +925,12 @@ void AssetBrowser::DrawNewFolderPopup()
         openNewFolderPopup_ = false;
     }
 
-    if (!ImGui::BeginPopupModal(
+    if (!EditorDialogStyle::BeginPopup(
             NewFolderPopupName,
-            nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+            EditorDialogIntent::Create,
+            "Create folder",
+            "Add a new folder inside the current Assets location.",
+            true))
     {
         return;
     }
@@ -938,21 +941,36 @@ void AssetBrowser::DrawNewFolderPopup()
         newFolderAssetsRoot_.reset();
         newFolderName_.fill('\0');
         ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+        EditorDialogStyle::EndPopup();
         return;
     }
 
+    EditorDialogStyle::FullWidthField();
     if (ImGui::InputText(
-            "Folder Name",
+            "##FolderName",
             newFolderName_.data(),
             newFolderName_.size()))
     {
         error_.clear();
     }
 
-    DrawError(error_);
+    ImGui::TextDisabled("Folder name");
+    EditorDialogStyle::DrawMessage(error_, EditorDialogIntent::Destructive);
 
-    if (ImGui::Button("Create"))
+    const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts();
+    EditorDialogStyle::BeginActions();
+
+    if (EditorDialogStyle::ActionButton("Cancel", false) ||
+        shortcut == EditorDialogShortcut::Cancel)
+    {
+        newFolderAssetsRoot_.reset();
+        newFolderName_.fill('\0');
+        error_.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (EditorDialogStyle::ActionButton("Create", true) ||
+        shortcut == EditorDialogShortcut::Confirm)
     {
         if (directory_.CreateFolder(newFolderName_.data()))
         {
@@ -969,17 +987,7 @@ void AssetBrowser::DrawNewFolderPopup()
         }
     }
 
-    ImGui::SameLine();
-
-    if (ImGui::Button("Cancel"))
-    {
-        newFolderAssetsRoot_.reset();
-        newFolderName_.fill('\0');
-        error_.clear();
-        ImGui::CloseCurrentPopup();
-    }
-
-    ImGui::EndPopup();
+    EditorDialogStyle::EndPopup();
 }
 
 void AssetBrowser::DrawRenamePopup()
@@ -990,10 +998,12 @@ void AssetBrowser::DrawRenamePopup()
         openRenamePopup_ = false;
     }
 
-    if (!ImGui::BeginPopupModal(
+    if (!EditorDialogStyle::BeginPopup(
             RenamePopupName,
-            nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+            EditorDialogIntent::Information,
+            "Rename asset",
+            "Choose a clear name for the selected asset.",
+            true))
     {
         return;
     }
@@ -1004,7 +1014,7 @@ void AssetBrowser::DrawRenamePopup()
         pendingRename_.reset();
         renameName_.fill('\0');
         ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+        EditorDialogStyle::EndPopup();
         return;
     }
 
@@ -1012,8 +1022,9 @@ void AssetBrowser::DrawRenamePopup()
     ImGui::TextDisabled(
         "For files, the current extension is kept when the new name has no extension.");
 
+    EditorDialogStyle::FullWidthField();
     if (ImGui::InputText(
-            "New Name",
+            "##NewAssetName",
             renameName_.data(),
             renameName_.size()))
     {
@@ -1021,9 +1032,23 @@ void AssetBrowser::DrawRenamePopup()
         statusMessage_.clear();
     }
 
-    DrawError(error_);
+    ImGui::TextDisabled("New name");
+    EditorDialogStyle::DrawMessage(error_, EditorDialogIntent::Destructive);
 
-    if (ImGui::Button("Rename"))
+    const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts();
+    EditorDialogStyle::BeginActions();
+
+    if (EditorDialogStyle::ActionButton("Cancel", false) ||
+        shortcut == EditorDialogShortcut::Cancel)
+    {
+        pendingRename_.reset();
+        renameName_.fill('\0');
+        error_.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (EditorDialogStyle::ActionButton("Rename", true) ||
+        shortcut == EditorDialogShortcut::Confirm)
     {
         selectedRelativePath_ = pendingRename_->RelativePath;
         const AssetOperationResult result =
@@ -1037,17 +1062,7 @@ void AssetBrowser::DrawRenamePopup()
         }
     }
 
-    ImGui::SameLine();
-
-    if (ImGui::Button("Cancel"))
-    {
-        pendingRename_.reset();
-        renameName_.fill('\0');
-        error_.clear();
-        ImGui::CloseCurrentPopup();
-    }
-
-    ImGui::EndPopup();
+    EditorDialogStyle::EndPopup();
 }
 
 void AssetBrowser::DrawDeletePopup()
@@ -1061,10 +1076,11 @@ void AssetBrowser::DrawDeletePopup()
     ImGui::SetNextWindowContentSize(
         ImVec2(DeletePopupContentWidth, 0.0F));
 
-    if (!ImGui::BeginPopupModal(
+    if (!EditorDialogStyle::BeginPopup(
             DeletePopupName,
-            nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+            EditorDialogIntent::Destructive,
+            "Delete asset",
+            "Permanently remove the selected entry from this project."))
     {
         return;
     }
@@ -1074,7 +1090,7 @@ void AssetBrowser::DrawDeletePopup()
     {
         pendingDelete_.reset();
         ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+        EditorDialogStyle::EndPopup();
         return;
     }
 
@@ -1106,10 +1122,22 @@ void AssetBrowser::DrawDeletePopup()
         DrawError(assessment.Message);
     }
 
-    DrawError(error_);
-    ImGui::BeginDisabled(assessment.IsNonEmptyDirectory);
+    EditorDialogStyle::DrawMessage(error_, EditorDialogIntent::Destructive);
+    const EditorDialogShortcut shortcut =
+        EditorDialogStyle::Shortcuts(!assessment.IsNonEmptyDirectory);
+    EditorDialogStyle::BeginActions();
 
-    if (ImGui::Button("Delete"))
+    if (EditorDialogStyle::ActionButton("Cancel", false) ||
+        shortcut == EditorDialogShortcut::Cancel)
+    {
+        pendingDelete_.reset();
+        error_.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (EditorDialogStyle::ActionButton(
+            "Delete", true, !assessment.IsNonEmptyDirectory) ||
+        shortcut == EditorDialogShortcut::Confirm)
     {
         selectedRelativePath_ = pendingDelete_->RelativePath;
         const AssetOperationResult result = DeleteSelectedEntry();
@@ -1121,17 +1149,7 @@ void AssetBrowser::DrawDeletePopup()
         }
     }
 
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-
-    if (ImGui::Button("Cancel"))
-    {
-        pendingDelete_.reset();
-        error_.clear();
-        ImGui::CloseCurrentPopup();
-    }
-
-    ImGui::EndPopup();
+    EditorDialogStyle::EndPopup();
 }
 
 void AssetBrowser::DrawVoxInspectionPopup()
@@ -1142,10 +1160,11 @@ void AssetBrowser::DrawVoxInspectionPopup()
         openVoxInspectionPopup_ = false;
     }
 
-    if (!ImGui::BeginPopupModal(
+    if (!EditorDialogStyle::BeginPopup(
             VoxInspectionPopupName,
-            nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize))
+            EditorDialogIntent::Information,
+            "VOX inspection",
+            "Review the model structure before opening or editing it."))
     {
         return;
     }
@@ -1203,13 +1222,14 @@ void AssetBrowser::DrawVoxInspectionPopup()
 
     ImGui::Spacing();
 
-    if (ImGui::Button("Close"))
+    if (EditorDialogStyle::ActionButton("Close", true) ||
+        EditorDialogStyle::Shortcuts(false) == EditorDialogShortcut::Cancel)
     {
         ImGui::CloseCurrentPopup();
         voxInspectionReport_.reset();
     }
 
-    ImGui::EndPopup();
+    EditorDialogStyle::EndPopup();
 }
 
 void AssetBrowser::RequestNewFolder()

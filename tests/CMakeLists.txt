@@ -336,6 +336,7 @@ add_test(
 add_executable(
     VoxelForgeEditorToolbarTests
     Editor/EditorToolbarTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Input/EditorInputService.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/Toolbar/EditorToolbarModel.cpp
 )
 target_include_directories(
@@ -350,6 +351,33 @@ vf_configure_test(VoxelForgeEditorToolbarTests)
 add_test(
     NAME VoxelForge.Editor.ModernToolbar
     COMMAND $<TARGET_FILE:VoxelForgeEditorToolbarTests>
+)
+add_executable(
+    VoxelForgeEditorInputServiceTests
+    Editor/EditorInputServiceTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Input/EditorInputService.cpp
+)
+target_include_directories(
+    VoxelForgeEditorInputServiceTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+vf_configure_test(VoxelForgeEditorInputServiceTests)
+add_test(
+    NAME VoxelForge.Editor.KeyboardShortcuts
+    COMMAND $<TARGET_FILE:VoxelForgeEditorInputServiceTests>
+)
+add_executable(
+    VoxelForgeEditorDialogTests
+    Editor/EditorDialogTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorDialogTests
+    PRIVATE VoxelForgeEditorDialogs
+)
+vf_configure_test(VoxelForgeEditorDialogTests)
+add_test(
+    NAME VoxelForge.Editor.ModernDialogs
+    COMMAND $<TARGET_FILE:VoxelForgeEditorDialogTests>
 )
 add_executable(
     VoxelForgeEditorVoxelEditHistoryTests
@@ -649,6 +677,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelLine
     VoxelForge.Editor.VoxelSphere
     VoxelForge.Editor.ModernToolbar
+    VoxelForge.Editor.KeyboardShortcuts
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
@@ -784,6 +813,14 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.ModernToolbarSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --modern-toolbar-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.KeyboardShortcutsSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --keyboard-shortcuts-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.ModernDialogsSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --modern-dialogs-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -813,6 +850,8 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelLineSmoke
         VoxelForge.Editor.VoxelSphereSmoke
         VoxelForge.Editor.ModernToolbarSmoke
+        VoxelForge.Editor.KeyboardShortcutsSmoke
+        VoxelForge.Editor.ModernDialogsSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

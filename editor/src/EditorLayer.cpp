@@ -56,6 +56,7 @@ EditorLayer::EditorLayer(
     const bool voxelLineSmokeTest,
     const bool voxelSphereSmokeTest,
     const bool modernToolbarSmokeTest,
+    const bool keyboardShortcutsSmokeTest,
     std::filesystem::path imguiIniPathOverride)
     : Layer("VoxelForge Editor Layer"),
       layoutPersistence_(std::move(imguiIniPathOverride)),
@@ -71,7 +72,8 @@ EditorLayer::EditorLayer(
               persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest ||
               directCreationFlowSmokeTest || paletteUiSmokeTest ||
               voxelFillSmokeTest || voxelBoxSmokeTest || voxelLineSmokeTest ||
-              voxelSphereSmokeTest || modernToolbarSmokeTest
+              voxelSphereSmokeTest || modernToolbarSmokeTest ||
+              keyboardShortcutsSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -85,7 +87,8 @@ EditorLayer::EditorLayer(
               persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest ||
               directCreationFlowSmokeTest || paletteUiSmokeTest ||
               voxelFillSmokeTest || voxelBoxSmokeTest || voxelLineSmokeTest ||
-              voxelSphereSmokeTest || modernToolbarSmokeTest),
+              voxelSphereSmokeTest || modernToolbarSmokeTest ||
+              keyboardShortcutsSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -121,7 +124,8 @@ EditorLayer::EditorLayer(
       voxelBoxSmokeTest_(voxelBoxSmokeTest),
       voxelLineSmokeTest_(voxelLineSmokeTest),
       voxelSphereSmokeTest_(voxelSphereSmokeTest),
-      modernToolbarSmokeTest_(modernToolbarSmokeTest)
+      modernToolbarSmokeTest_(modernToolbarSmokeTest),
+      keyboardShortcutsSmokeTest_(keyboardShortcutsSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -236,7 +240,8 @@ void EditorLayer::OnImGuiRender()
         !persistentWorkplaneSmokeTest_ && !projectSessionRestoreSmokeTest_ &&
         !directCreationFlowSmokeTest_ && !paletteUiSmokeTest_ &&
         !voxelFillSmokeTest_ && !voxelBoxSmokeTest_ && !voxelLineSmokeTest_ &&
-        !voxelSphereSmokeTest_ && !modernToolbarSmokeTest_)
+        !voxelSphereSmokeTest_ && !modernToolbarSmokeTest_ &&
+        !keyboardShortcutsSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -346,6 +351,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunModernToolbarSmokeStep(
             renderedFrameCount_));
     }
+    if (keyboardShortcutsSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunKeyboardShortcutsSmokeStep(
+            renderedFrameCount_));
+    }
     workspace_.Draw();
     if (voxelRayPickingSmokeTest_)
     {
@@ -408,7 +418,9 @@ void EditorLayer::OnImGuiRender()
         (voxelBoxSmokeTest_ && workspace_.VoxelBoxSmokePassed()) ||
         (voxelLineSmokeTest_ && workspace_.VoxelLineSmokePassed()) ||
         (voxelSphereSmokeTest_ && workspace_.VoxelSphereSmokePassed()) ||
-        (modernToolbarSmokeTest_ && workspace_.ModernToolbarSmokePassed());
+        (modernToolbarSmokeTest_ && workspace_.ModernToolbarSmokePassed()) ||
+        (keyboardShortcutsSmokeTest_ &&
+         workspace_.KeyboardShortcutsSmokePassed());
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
@@ -567,6 +579,12 @@ void EditorLayer::OnImGuiRender()
         !workspace_.ModernToolbarSmokePassed())
     {
         throw std::runtime_error("Modern Toolbar smoke test did not complete.");
+    }
+    if (keyboardShortcutsSmokeTest_ && smokeTestComplete &&
+        !workspace_.KeyboardShortcutsSmokePassed())
+    {
+        throw std::runtime_error(
+            "Keyboard Shortcuts smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)
