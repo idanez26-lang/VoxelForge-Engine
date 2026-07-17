@@ -44,6 +44,8 @@ public:
     void Zoom(float wheelDelta) noexcept;
     void Frame(float width, float height, float depth) noexcept;
     void Reset() noexcept;
+    [[nodiscard]] bool RestoreState(
+        const EditorCameraState& state) noexcept;
     void SetView(EditorCameraView view) noexcept;
     void SetAspectRatio(float aspectRatio) noexcept;
 

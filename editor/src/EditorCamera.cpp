@@ -109,6 +109,50 @@ void EditorCamera::Reset() noexcept
     view_ = EditorCameraView::Perspective;
 }
 
+bool EditorCamera::RestoreState(const EditorCameraState& state) noexcept
+{
+    const auto finite = [](const Vec3& value)
+    {
+        return std::isfinite(value.X) && std::isfinite(value.Y) &&
+            std::isfinite(value.Z);
+    };
+    if (!finite(state.Position) || !finite(state.RotationDegrees) ||
+        !finite(state.Target) || !std::isfinite(state.Distance) ||
+        state.Distance < 0.1F || state.Distance > 10000.0F ||
+        state.RotationDegrees.X < -89.0F ||
+        state.RotationDegrees.X > 89.0F ||
+        std::abs(state.RotationDegrees.Z) > 0.001F ||
+        state.View > EditorCameraView::Bottom)
+    {
+        return false;
+    }
+
+    const Vec3 previousTarget = target_;
+    const float previousYaw = yawDegrees_;
+    const float previousPitch = pitchDegrees_;
+    const float previousDistance = distance_;
+    const EditorCameraView previousView = view_;
+    target_ = state.Target;
+    pitchDegrees_ = state.RotationDegrees.X;
+    yawDegrees_ = state.RotationDegrees.Y;
+    distance_ = state.Distance;
+    view_ = state.View;
+    const Vec3 restoredPosition = GetPosition();
+    constexpr float PositionTolerance = 0.001F;
+    if (std::abs(restoredPosition.X - state.Position.X) > PositionTolerance ||
+        std::abs(restoredPosition.Y - state.Position.Y) > PositionTolerance ||
+        std::abs(restoredPosition.Z - state.Position.Z) > PositionTolerance)
+    {
+        target_ = previousTarget;
+        yawDegrees_ = previousYaw;
+        pitchDegrees_ = previousPitch;
+        distance_ = previousDistance;
+        view_ = previousView;
+        return false;
+    }
+    return true;
+}
+
 void EditorCamera::SetView(const EditorCameraView view) noexcept
 {
     view_ = view;

@@ -17,6 +17,7 @@
 #include "Platform/ProjectFolderOpener.h"
 #include "Project/ProjectDialogPreferences.h"
 #include "Project/QualityOfLifeLogic.h"
+#include "ProjectSession/ProjectSessionService.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -137,6 +138,8 @@ public:
     [[nodiscard]] bool DoubleClickCameraSmokePassed() const noexcept;
     [[nodiscard]] bool RunPersistentWorkplaneSmokeStep(std::size_t frame);
     [[nodiscard]] bool PersistentWorkplaneSmokePassed() const noexcept;
+    [[nodiscard]] bool RunProjectSessionRestoreSmokeStep(std::size_t frame);
+    [[nodiscard]] bool ProjectSessionRestoreSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -205,6 +208,8 @@ private:
     [[nodiscard]] bool HasUnsavedVoxelChanges() const noexcept;
     void CloseProject();
     void SynchronizeProjectAssets();
+    [[nodiscard]] bool SaveActiveProjectSession();
+    void RestoreActiveProjectSession();
     void BeginModelImport(std::vector<std::filesystem::path> sourcePaths);
     void ContinueModelImport(ModelImportCollisionAction collisionAction);
     void FinishModelImport(bool cancelled = false);
@@ -273,6 +278,7 @@ private:
     std::unique_ptr<FileDialogService> fileDialogService_;
     std::unique_ptr<ProjectFolderOpener> projectFolderOpener_;
     ProjectDialogPreferences projectDialogPreferences_;
+    ProjectSessionService projectSessionService_;
     DirtyActionConfirmation dirtyActionConfirmation_;
     std::filesystem::path pendingProjectPath_;
     std::filesystem::path pendingVoxelPath_;
@@ -373,6 +379,15 @@ private:
     bool persistentWorkplaneSmokeSaved_ = false;
     bool persistentWorkplaneSmokeReopened_ = false;
     bool persistentWorkplaneSmokeCleaned_ = false;
+    std::filesystem::path projectSessionSmokeProjectFile_;
+    std::filesystem::path projectSessionSmokeModelPath_;
+    EditorCameraState projectSessionSmokeCamera_{};
+    std::uint64_t projectSessionSmokeRevision_ = 0U;
+    std::size_t projectSessionSmokeRefreshCount_ = 0U;
+    bool projectSessionSmokeCreated_ = false;
+    bool projectSessionSmokeSavedOnClose_ = false;
+    bool projectSessionSmokeRestored_ = false;
+    bool projectSessionSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

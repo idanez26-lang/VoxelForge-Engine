@@ -68,6 +68,48 @@ std::string LowercaseExtension(const std::filesystem::path& path)
     return extension;
 }
 
+ProjectSessionCameraView ToSessionView(const EditorCameraView view) noexcept
+{
+    switch (view)
+    {
+    case EditorCameraView::Front: return ProjectSessionCameraView::Front;
+    case EditorCameraView::Back: return ProjectSessionCameraView::Back;
+    case EditorCameraView::Left: return ProjectSessionCameraView::Left;
+    case EditorCameraView::Right: return ProjectSessionCameraView::Right;
+    case EditorCameraView::Top: return ProjectSessionCameraView::Top;
+    case EditorCameraView::Bottom: return ProjectSessionCameraView::Bottom;
+    case EditorCameraView::Perspective:
+        return ProjectSessionCameraView::Perspective;
+    }
+    return ProjectSessionCameraView::Perspective;
+}
+
+EditorCameraView FromSessionView(const ProjectSessionCameraView view) noexcept
+{
+    switch (view)
+    {
+    case ProjectSessionCameraView::Front: return EditorCameraView::Front;
+    case ProjectSessionCameraView::Back: return EditorCameraView::Back;
+    case ProjectSessionCameraView::Left: return EditorCameraView::Left;
+    case ProjectSessionCameraView::Right: return EditorCameraView::Right;
+    case ProjectSessionCameraView::Top: return EditorCameraView::Top;
+    case ProjectSessionCameraView::Bottom: return EditorCameraView::Bottom;
+    case ProjectSessionCameraView::Perspective:
+        return EditorCameraView::Perspective;
+    }
+    return EditorCameraView::Perspective;
+}
+
+ProjectSessionVector3 ToSessionVector(const Vec3& value) noexcept
+{
+    return {value.X, value.Y, value.Z};
+}
+
+Vec3 FromSessionVector(const ProjectSessionVector3& value) noexcept
+{
+    return {value.X, value.Y, value.Z};
+}
+
 bool IsVisibleRecentProject(const std::filesystem::path& path)
 {
     std::error_code error;
@@ -2559,6 +2601,7 @@ void EditorWorkspace::CreateProject()
 
 void EditorWorkspace::CreateProjectNow()
 {
+    static_cast<void>(SaveActiveProjectSession());
     const std::filesystem::path parent(newProjectParentPath_.data());
     const auto project = projectManager_.CreateProject(
         newProjectName_.data(),
@@ -2591,6 +2634,7 @@ bool EditorWorkspace::OpenProject(
     const std::filesystem::path& projectFilePath,
     const bool recentProject)
 {
+    static_cast<void>(SaveActiveProjectSession());
     const auto project = projectManager_.OpenProject(projectFilePath);
 
     if (!project)
@@ -2613,6 +2657,7 @@ bool EditorWorkspace::OpenProject(
     failedRecentProjectPath_.reset();
     ClearVoxelViewport();
     SynchronizeProjectAssets();
+    RestoreActiveProjectSession();
     if (!projectDialogPreferences_.SetLastOpenDirectory(
             projectFilePath.parent_path()))
         AddConsoleMessage(
@@ -2740,6 +2785,7 @@ void EditorWorkspace::RequestExit()
     if (dirtyActionConfirmation_.Request(
             DestructiveAction::ExitApplication, HasUnsavedVoxelChanges()))
     {
+        static_cast<void>(SaveActiveProjectSession());
         exitRequest_.RequestExit();
         return;
     }
@@ -2808,6 +2854,7 @@ void EditorWorkspace::ExecutePendingDirtyAction(const DestructiveAction action)
         CreateVoxelModelNow();
         break;
     case DestructiveAction::ExitApplication:
+        static_cast<void>(SaveActiveProjectSession());
         exitRequest_.RequestExit();
         break;
     case DestructiveAction::ReplaceVoxelModel:
@@ -2836,6 +2883,7 @@ void EditorWorkspace::CloseProject()
     }
 
     const std::string projectName = activeProject->Name();
+    static_cast<void>(SaveActiveProjectSession());
     ClearVoxelViewport();
     projectManager_.CloseProject();
     SynchronizeProjectAssets();
@@ -2867,6 +2915,7 @@ void EditorWorkspace::SynchronizeProjectAssets()
         modelImportService_.ClearProjectRoot();
         voxelDocumentSaveService_.ClearProject();
         voxelModelCreationService_.ClearProject();
+        projectSessionService_.ClearProject();
         assetBrowser_.ClearAssetsRoot();
         assetInspector_.ClearProject();
         return;
@@ -2890,6 +2939,97 @@ void EditorWorkspace::SynchronizeProjectAssets()
     if (!voxelModelCreationService_.SetProjectRoot(project->RootPath()))
         AddConsoleMessage("Voxel model creation service setup failed: " +
             voxelModelCreationService_.LastError());
+    if (!projectSessionService_.SetProjectRoot(project->RootPath()))
+        AddConsoleMessage("Project session setup failed.");
+}
+
+bool EditorWorkspace::SaveActiveProjectSession()
+{
+    const auto& project = projectManager_.ActiveProject();
+    if (!project || projectSessionService_.ProjectRoot().empty()) return true;
+
+    ProjectSessionData session;
+    if (voxelDocumentSession_.HasActiveDocument())
+    {
+        std::error_code error;
+        session.LastModel = std::filesystem::relative(
+            voxelDocumentSession_.SourcePath(), project->RootPath(), error);
+        if (error || !ProjectSessionService::IsValidModelPath(session.LastModel))
+        {
+            AddConsoleMessage("Project session save warning: active model path "
+                "is not a valid project model.");
+            return false;
+        }
+    }
+
+    const EditorCameraState camera = viewportCamera_.CaptureState();
+    session.Camera = {
+        ToSessionVector(camera.Position),
+        ToSessionVector(camera.RotationDegrees),
+        camera.Distance,
+        ToSessionVector(camera.Target),
+        ToSessionView(camera.View)};
+    session.ActiveTool = voxelToolState_.IsEraserActive()
+        ? ProjectSessionTool::Eraser : ProjectSessionTool::Pencil;
+
+    std::string error;
+    if (!projectSessionService_.Save(session, error))
+    {
+        AddConsoleMessage("Project session save warning: " + error);
+        return false;
+    }
+    return true;
+}
+
+void EditorWorkspace::RestoreActiveProjectSession()
+{
+    const auto& project = projectManager_.ActiveProject();
+    if (!project || projectSessionService_.ProjectRoot().empty()) return;
+
+    const ProjectSessionLoadResult loaded = projectSessionService_.Load();
+    if (loaded.Status == ProjectSessionLoadStatus::NotFound) return;
+    if (!loaded.Loaded())
+    {
+        AddConsoleMessage("Project session ignored: " + loaded.Message);
+        return;
+    }
+
+    voxelToolState_.SetActiveTool(
+        loaded.Session.ActiveTool == ProjectSessionTool::Eraser
+            ? ActiveVoxelTool::Eraser : ActiveVoxelTool::Pencil);
+    if (loaded.Session.LastModel.empty()) return;
+
+    const std::filesystem::path modelPath =
+        project->RootPath() / loaded.Session.LastModel;
+    std::error_code error;
+    const std::filesystem::file_status status =
+        std::filesystem::symlink_status(modelPath, error);
+    if (error || !std::filesystem::is_regular_file(status) ||
+        std::filesystem::is_symlink(status))
+    {
+        AddConsoleMessage("Last model not found.");
+        return;
+    }
+    if (!OpenVoxInViewportNow(modelPath))
+    {
+        AddConsoleMessage("Last model could not be restored.");
+        return;
+    }
+
+    const std::filesystem::path browserPath =
+        loaded.Session.LastModel.lexically_relative("Assets");
+    if (!assetBrowser_.RevealEntry(browserPath))
+        AddConsoleMessage("Last model could not be selected in Asset Browser.");
+
+    if (!loaded.CameraValid || !viewportCamera_.RestoreState({
+            FromSessionVector(loaded.Session.Camera.Position),
+            FromSessionVector(loaded.Session.Camera.RotationDegrees),
+            loaded.Session.Camera.Distance,
+            FromSessionVector(loaded.Session.Camera.Target),
+            FromSessionView(loaded.Session.Camera.View)}))
+    {
+        AddConsoleMessage("Project session camera invalid; framed model used.");
+    }
 }
 
 void EditorWorkspace::BeginModelImport(
@@ -5237,6 +5377,91 @@ bool EditorWorkspace::PersistentWorkplaneSmokePassed() const noexcept
         persistentWorkplaneSmokeSaved_ &&
         persistentWorkplaneSmokeReopened_ &&
         persistentWorkplaneSmokeCleaned_;
+}
+
+bool EditorWorkspace::RunProjectSessionRestoreSmokeStep(
+    const std::size_t frame)
+{
+    if (frame == 0U)
+    {
+        const auto& project = projectManager_.ActiveProject();
+        if (!project) return false;
+        projectSessionSmokeProjectFile_ = project->ProjectFilePath();
+        const VoxelModelCreationResult created =
+            voxelModelCreationService_.CreateModel({
+                "SessionRestore", {16U, 16U, 16U}});
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        projectSessionSmokeModelPath_ = created.ModelPath;
+        viewportCamera_.Orbit(53.0F, -21.0F);
+        viewportCamera_.Pan(17.0F, -8.0F, 720.0F);
+        viewportCamera_.Zoom(2.0F);
+        projectSessionSmokeCamera_ = viewportCamera_.CaptureState();
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Eraser);
+        projectSessionSmokeRevision_ = document
+            ? document->GetRevision() : 0U;
+        projectSessionSmokeRefreshCount_ = assetBrowser_.RefreshCount();
+        projectSessionSmokeCreated_ = created.Succeeded() && created.Opened &&
+            document != nullptr && !document->IsDirty() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 1U)
+    {
+        if (!projectSessionSmokeCreated_) return false;
+        const std::filesystem::path sessionPath =
+            projectSessionService_.SessionPath();
+        CloseProject();
+        projectSessionSmokeSavedOnClose_ =
+            !projectManager_.HasActiveProject() &&
+            std::filesystem::is_regular_file(sessionPath) &&
+            !std::filesystem::exists(sessionPath.string() + ".tmp") &&
+            !std::filesystem::exists(sessionPath.string() + ".bak");
+    }
+    else if (frame == 2U)
+    {
+        if (!projectSessionSmokeSavedOnClose_ ||
+            !OpenProject(projectSessionSmokeProjectFile_, false))
+            return false;
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        projectSessionSmokeRestored_ = document != nullptr &&
+            document->SourcePath().lexically_normal() ==
+                projectSessionSmokeModelPath_.lexically_normal() &&
+            viewportCamera_.CaptureState() == projectSessionSmokeCamera_ &&
+            voxelToolState_.IsEraserActive() && !document->IsDirty() &&
+            document->GetRevision() == projectSessionSmokeRevision_ &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            assetBrowser_.SelectedRelativePath() ==
+                std::optional<std::filesystem::path>(
+                    "Models/SessionRestore.vox") &&
+            assetBrowser_.RefreshCount() ==
+                projectSessionSmokeRefreshCount_ + 1U;
+    }
+    else if (frame == 3U)
+    {
+        if (!projectSessionSmokeRestored_) return false;
+        const std::filesystem::path sessionPath =
+            projectSessionService_.SessionPath();
+        CloseProject();
+        projectSessionSmokeCleaned_ =
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(sessionPath.string() + ".tmp") &&
+            !std::filesystem::exists(sessionPath.string() + ".bak");
+    }
+    return ProjectSessionRestoreSmokePassed();
+}
+
+bool EditorWorkspace::ProjectSessionRestoreSmokePassed() const noexcept
+{
+    return projectSessionSmokeCreated_ &&
+        projectSessionSmokeSavedOnClose_ && projectSessionSmokeRestored_ &&
+        projectSessionSmokeCleaned_;
 }
 
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)

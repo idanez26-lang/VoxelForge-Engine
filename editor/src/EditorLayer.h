@@ -57,7 +57,8 @@ public:
         bool firstCreationExperienceSmokeTest = false,
         bool layoutStabilitySmokeTest = false,
         bool doubleClickCameraSmokeTest = false,
-        bool persistentWorkplaneSmokeTest = false);
+        bool persistentWorkplaneSmokeTest = false,
+        bool projectSessionRestoreSmokeTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -122,6 +123,7 @@ private:
     bool layoutStabilitySmokeTest_ = false;
     bool doubleClickCameraSmokeTest_ = false;
     bool persistentWorkplaneSmokeTest_ = false;
+    bool projectSessionRestoreSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

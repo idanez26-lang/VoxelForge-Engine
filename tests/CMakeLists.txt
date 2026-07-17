@@ -370,6 +370,24 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorPersistentWorkplaneTests>
 )
 add_executable(
+    VoxelForgeEditorProjectSessionTests
+    Editor/ProjectSessionTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp
+)
+target_include_directories(
+    VoxelForgeEditorProjectSessionTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeEditorProjectSessionTests
+    PRIVATE VoxelForgeEditorProjectSession VoxelForgeImGui
+)
+vf_configure_test(VoxelForgeEditorProjectSessionTests)
+add_test(
+    NAME VoxelForge.Editor.ProjectSession
+    COMMAND $<TARGET_FILE:VoxelForgeEditorProjectSessionTests>
+)
+add_executable(
     VoxelForgeEditorLayoutStabilityTests
     Editor/LayoutStabilityTests.cpp
 )
@@ -536,6 +554,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelDocumentSaveService
     VoxelForge.Editor.FirstCreationExperience
     VoxelForge.Editor.PersistentWorkplane
+    VoxelForge.Editor.ProjectSession
     VoxelForge.Editor.LayoutStability
     VoxelForge.Project.Manager
     VoxelForge.Asset.VoxImporter
@@ -630,6 +649,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.PersistentWorkplaneSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --persistent-construction-plane-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.ProjectSessionRestoreSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --project-session-restore-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -651,6 +674,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.LayoutStabilitySmoke
         VoxelForge.Editor.DoubleClickCameraSmoke
         VoxelForge.Editor.PersistentWorkplaneSmoke
+        VoxelForge.Editor.ProjectSessionRestoreSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

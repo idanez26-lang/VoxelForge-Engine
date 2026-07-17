@@ -42,6 +42,7 @@ constexpr std::size_t FirstCreationExperienceSmokeTestFrameCount = 10;
 constexpr std::size_t LayoutStabilitySmokeTestFrameCount = 11;
 constexpr std::size_t DoubleClickCameraSmokeTestFrameCount = 11;
 constexpr std::size_t PersistentWorkplaneSmokeTestFrameCount = 10;
+constexpr std::size_t ProjectSessionRestoreSmokeTestFrameCount = 6;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -70,6 +71,7 @@ struct CommandLine final
     bool LayoutStabilitySmokeTest = false;
     bool DoubleClickCameraSmokeTest = false;
     bool PersistentWorkplaneSmokeTest = false;
+    bool ProjectSessionRestoreSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -124,6 +126,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--double-click-camera-smoke-test";
         result.PersistentWorkplaneSmokeTest |=
             argument == "--persistent-construction-plane-smoke-test";
+        result.ProjectSessionRestoreSmokeTest |=
+            argument == "--project-session-restore-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -343,6 +347,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.LayoutStabilitySmokeTest ||
             commandLine.DoubleClickCameraSmokeTest ||
             commandLine.PersistentWorkplaneSmokeTest ||
+            commandLine.ProjectSessionRestoreSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         if (viewportTest && !viewportFixture.Prepare())
         {
@@ -356,7 +361,8 @@ int main(const int argumentCount, char* arguments[])
         const bool fixtureCreated = !viewportTest ||
             (commandLine.FirstCreationExperienceSmokeTest ||
              commandLine.LayoutStabilitySmokeTest ||
-             commandLine.PersistentWorkplaneSmokeTest
+             commandLine.PersistentWorkplaneSmokeTest ||
+             commandLine.ProjectSessionRestoreSmokeTest
                 ? viewportFixture.CreateEmptyProject(projectManager)
                 : viewportFixture.Create(
                     projectManager,
@@ -427,6 +433,8 @@ int main(const int argumentCount, char* arguments[])
                     ? DoubleClickCameraSmokeTestFrameCount
                     : commandLine.PersistentWorkplaneSmokeTest
                     ? PersistentWorkplaneSmokeTestFrameCount
+                    : commandLine.ProjectSessionRestoreSmokeTest
+                    ? ProjectSessionRestoreSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -454,7 +462,8 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.FirstCreationExperienceSmokeTest ||
                     commandLine.LayoutStabilitySmokeTest ||
                     commandLine.DoubleClickCameraSmokeTest ||
-                    commandLine.PersistentWorkplaneSmokeTest,
+                    commandLine.PersistentWorkplaneSmokeTest ||
+                    commandLine.ProjectSessionRestoreSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -481,7 +490,8 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.FirstCreationExperienceSmokeTest,
                 commandLine.LayoutStabilitySmokeTest,
                 commandLine.DoubleClickCameraSmokeTest,
-                commandLine.PersistentWorkplaneSmokeTest);
+                commandLine.PersistentWorkplaneSmokeTest,
+                commandLine.ProjectSessionRestoreSmokeTest);
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(
