@@ -431,17 +431,12 @@ void TestInputController()
 void TestToolState()
 {
     Editor::VoxelToolState state;
-    Require(state.IsPencilActive() &&
-        state.ActivePaletteIndex() == Editor::VoxelToolState::DefaultPaletteIndex &&
-        !state.SetActivePaletteIndex(0U) &&
-        !state.SetActivePaletteIndex(256U) &&
-        state.SetActivePaletteIndex(255U) &&
-        state.ActivePaletteIndex() == 255U,
-        "Centralized Pencil state or palette validation is incorrect.");
+    Require(state.IsPencilActive(),
+        "Pencil should be the default editing tool.");
     state.SetActiveTool(Editor::ActiveVoxelTool::None);
     Require(!state.IsPencilActive(), "Pencil tool did not deactivate.");
     state.Reset();
-    Require(state.IsPencilActive() && state.ActivePaletteIndex() == 1U,
+    Require(state.IsPencilActive(),
         "Pencil tool state did not reset.");
 }
 }

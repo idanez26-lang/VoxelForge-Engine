@@ -49,8 +49,11 @@ EditorLayer::EditorLayer(
     const bool doubleClickCameraSmokeTest,
     const bool persistentWorkplaneSmokeTest,
     const bool projectSessionRestoreSmokeTest,
-    const bool directCreationFlowSmokeTest)
+    const bool directCreationFlowSmokeTest,
+    const bool paletteUiSmokeTest,
+    std::filesystem::path imguiIniPathOverride)
     : Layer("VoxelForge Editor Layer"),
+      layoutPersistence_(std::move(imguiIniPathOverride)),
       workspace_(
           projectManager,
           std::move(windowTitleCallback),
@@ -61,7 +64,7 @@ EditorLayer::EditorLayer(
               voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest ||
               layoutStabilitySmokeTest || doubleClickCameraSmokeTest ||
               persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest ||
-              directCreationFlowSmokeTest
+              directCreationFlowSmokeTest || paletteUiSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -73,7 +76,7 @@ EditorLayer::EditorLayer(
               voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest ||
               layoutStabilitySmokeTest || doubleClickCameraSmokeTest ||
               persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest ||
-              directCreationFlowSmokeTest),
+              directCreationFlowSmokeTest || paletteUiSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -103,7 +106,8 @@ EditorLayer::EditorLayer(
       doubleClickCameraSmokeTest_(doubleClickCameraSmokeTest),
       persistentWorkplaneSmokeTest_(persistentWorkplaneSmokeTest),
       projectSessionRestoreSmokeTest_(projectSessionRestoreSmokeTest),
-      directCreationFlowSmokeTest_(directCreationFlowSmokeTest)
+      directCreationFlowSmokeTest_(directCreationFlowSmokeTest),
+      paletteUiSmokeTest_(paletteUiSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -127,6 +131,12 @@ void EditorLayer::OnAttach()
 
 void EditorLayer::OnDetach()
 {
+    if (layoutPersistence_.IsInitialized() &&
+        ImGui::GetCurrentContext() != nullptr)
+    {
+        ImGui::SaveIniSettingsToDisk(layoutPersistence_.IniFilename());
+        ImGui::GetIO().IniFilename = nullptr;
+    }
     selectedEntity_ = nullptr;
     scene_.reset();
     Core::Logger::Instance().Info("Viewport 3D prototype detached.");
@@ -190,11 +200,27 @@ void EditorLayer::CreateDefaultScene()
 
 void EditorLayer::OnImGuiRender()
 {
+    if (!layoutPersistence_.IsInitialized())
+    {
+        if (!layoutPersistence_.Initialize())
+        {
+            throw std::runtime_error(
+                "ImGui layout initialization failed: " +
+                layoutPersistence_.LastError());
+        }
+        ImGuiIO& io = ImGui::GetIO();
+        io.IniFilename = layoutPersistence_.IniFilename();
+        ImGui::ClearIniSettings();
+        if (std::filesystem::is_regular_file(layoutPersistence_.Path()))
+        {
+            ImGui::LoadIniSettingsFromDisk(layoutPersistence_.IniFilename());
+        }
+    }
     if (!startupVoxPath_.empty() && !modelImportSmokeTest_ &&
         !modelImportVisualTest_ && !dragDropImportSmokeTest_ &&
         !firstCreationExperienceSmokeTest_ && !layoutStabilitySmokeTest_ &&
         !persistentWorkplaneSmokeTest_ && !projectSessionRestoreSmokeTest_ &&
-        !directCreationFlowSmokeTest_)
+        !directCreationFlowSmokeTest_ && !paletteUiSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -259,6 +285,26 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunVoxelRenderSyncSmokeStep(
             renderedFrameCount_, voxelRenderSyncSmokeSourcePath_));
     }
+    if (firstCreationExperienceSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunFirstCreationExperienceSmokeStep(
+            renderedFrameCount_));
+    }
+    if (persistentWorkplaneSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunPersistentWorkplaneSmokeStep(
+            renderedFrameCount_));
+    }
+    if (projectSessionRestoreSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunProjectSessionRestoreSmokeStep(
+            renderedFrameCount_));
+    }
+    if (directCreationFlowSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunDirectCreationFlowSmokeStep(
+            renderedFrameCount_));
+    }
     workspace_.Draw();
     if (voxelRayPickingSmokeTest_)
     {
@@ -280,11 +326,6 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunVoxelUndoRedoSmokeStep(
             renderedFrameCount_, voxelUndoRedoSmokeSourcePath_));
     }
-    if (firstCreationExperienceSmokeTest_)
-    {
-        static_cast<void>(workspace_.RunFirstCreationExperienceSmokeStep(
-            renderedFrameCount_));
-    }
     if (layoutStabilitySmokeTest_)
     {
         static_cast<void>(workspace_.RunLayoutStabilitySmokeStep(
@@ -295,19 +336,9 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunDoubleClickCameraSmokeStep(
             renderedFrameCount_));
     }
-    if (persistentWorkplaneSmokeTest_)
+    if (paletteUiSmokeTest_)
     {
-        static_cast<void>(workspace_.RunPersistentWorkplaneSmokeStep(
-            renderedFrameCount_));
-    }
-    if (projectSessionRestoreSmokeTest_)
-    {
-        static_cast<void>(workspace_.RunProjectSessionRestoreSmokeStep(
-            renderedFrameCount_));
-    }
-    if (directCreationFlowSmokeTest_)
-    {
-        static_cast<void>(workspace_.RunDirectCreationFlowSmokeStep(
+        static_cast<void>(workspace_.RunPaletteUiSmokeStep(
             renderedFrameCount_));
     }
 
@@ -330,7 +361,8 @@ void EditorLayer::OnImGuiRender()
         (projectSessionRestoreSmokeTest_ &&
             workspace_.ProjectSessionRestoreSmokePassed()) ||
         (directCreationFlowSmokeTest_ &&
-            workspace_.DirectCreationFlowSmokePassed());
+            workspace_.DirectCreationFlowSmokePassed()) ||
+        (paletteUiSmokeTest_ && workspace_.PaletteUiSmokePassed());
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
@@ -459,6 +491,11 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Direct creation flow smoke test did not complete.");
+    }
+    if (paletteUiSmokeTest_ && smokeTestComplete &&
+        !workspace_.PaletteUiSmokePassed())
+    {
+        throw std::runtime_error("Palette UI smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

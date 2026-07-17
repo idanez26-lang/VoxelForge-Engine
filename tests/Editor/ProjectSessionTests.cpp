@@ -61,6 +61,7 @@ ProjectSessionData ValidSession()
     session.Camera.Target = {1.0F, 2.0F, 3.0F};
     session.Camera.View = ProjectSessionCameraView::Perspective;
     session.ActiveTool = ProjectSessionTool::Eraser;
+    session.ActivePaletteIndex = 42U;
     return session;
 }
 
@@ -91,6 +92,8 @@ void TestAbsentSaveAndReopen()
         "Camera state was not preserved exactly.");
     Require(loaded.Session.ActiveTool == ProjectSessionTool::Eraser,
         "Active tool was not preserved.");
+    Require(loaded.Session.ActivePaletteIndex == 42U,
+        "Active palette index was not preserved.");
 }
 
 void TestValidationAndFallbacks()
@@ -114,12 +117,15 @@ void TestValidationAndFallbacks()
         "camera_target=0,0,0\n"
         "camera_distance=-1\n"
         "camera_view=Perspective\n"
-        "active_tool=RemovedTool\n");
+        "active_tool=RemovedTool\n"
+        "active_palette_index=999\n");
     const ProjectSessionLoadResult invalidCamera = service.Load();
     Require(invalidCamera.Loaded() && !invalidCamera.CameraValid,
         "Invalid camera should retain the session for Frame fallback.");
     Require(invalidCamera.Session.ActiveTool == ProjectSessionTool::Pencil,
         "Unknown tool should fall back to Pencil.");
+    Require(invalidCamera.Session.ActivePaletteIndex == 1U,
+        "Invalid palette index should fall back to one.");
     Require(invalidCamera.Session.LastModel ==
         std::filesystem::path("Assets/Models/Missing.vox"),
         "Missing model path should remain available to the workspace.");

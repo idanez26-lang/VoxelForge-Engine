@@ -222,6 +222,16 @@ ProjectSessionLoadResult ProjectSessionService::Load() const
 
     session.ActiveTool = values.at("active_tool") == "Eraser"
         ? ProjectSessionTool::Eraser : ProjectSessionTool::Pencil;
+    const auto paletteIndex = values.find("active_palette_index");
+    if (paletteIndex != values.end())
+    {
+        std::uint32_t parsedIndex = 0U;
+        if (ParseUnsigned(paletteIndex->second, parsedIndex) &&
+            parsedIndex >= 1U && parsedIndex <= 255U)
+        {
+            session.ActivePaletteIndex = parsedIndex;
+        }
+    }
     return {ProjectSessionLoadStatus::Loaded, std::move(session), cameraValid,
         cameraValid ? std::string{} : "Project session camera is invalid."};
 }
@@ -281,7 +291,11 @@ bool ProjectSessionService::Save(
         << "camera_view=" << ViewName(session.Camera.View) << '\n'
         << "active_tool="
         << (session.ActiveTool == ProjectSessionTool::Eraser
-            ? "Eraser" : "Pencil") << '\n';
+            ? "Eraser" : "Pencil") << '\n'
+        << "active_palette_index="
+        << (session.ActivePaletteIndex >= 1U &&
+                session.ActivePaletteIndex <= 255U
+            ? session.ActivePaletteIndex : 1U) << '\n';
     output.flush();
     output.close();
     if (!output)

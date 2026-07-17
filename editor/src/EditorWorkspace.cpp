@@ -3,6 +3,7 @@
 #include "VoxelSelection/ViewportRayBuilder.h"
 #include "VoxelSelection/VoxelRaycast.h"
 #include "EditorWindowTitle.h"
+#include "Layout/PalettePanelLayout.h"
 
 #include "VoxelForge/Project/Project.h"
 #include "VoxelForge/Project/ProjectManager.h"
@@ -137,6 +138,16 @@ void DrawTooltip(const char* text)
     {
         ImGui::SetTooltip("%s", text);
     }
+}
+
+ImVec4 ToImGuiColor(const Asset::Voxel::VoxelColor& color) noexcept
+{
+    constexpr float ByteScale = 1.0F / 255.0F;
+    return {
+        static_cast<float>(color.Red) * ByteScale,
+        static_cast<float>(color.Green) * ByteScale,
+        static_cast<float>(color.Blue) * ByteScale,
+        static_cast<float>(color.Alpha) * ByteScale};
 }
 
 bool CopyPathToBuffer(
@@ -435,6 +446,7 @@ void EditorWorkspace::Draw()
 
     DrawDockSpace(dockspaceId);
 
+    bool layoutRebuilt = false;
     if (layoutMissing || resetLayoutRequested_)
     {
         if (thumbnailVisualLayoutRequested_)
@@ -443,6 +455,7 @@ void EditorWorkspace::Draw()
             BuildDefaultLayout(dockspaceId);
         resetLayoutRequested_ = false;
         thumbnailVisualLayoutRequested_ = false;
+        layoutRebuilt = true;
     }
 
     if (!showScene_) viewportDropRect_ = {};
@@ -451,6 +464,7 @@ void EditorWorkspace::Draw()
     if (showExplorer_) DrawExplorerPanel();
     if (showScene_) DrawScenePanel();
     if (showInspector_ && !thumbnailVisualMode_) DrawInspectorPanel();
+    if (showPalette_ && !thumbnailVisualMode_) DrawPalettePanel();
     if (showAssetBrowser_)
     {
         if (thumbnailVisualMode_)
@@ -483,6 +497,8 @@ void EditorWorkspace::Draw()
     DrawModelImportDialogs();
     DrawDirtyConfirmationDialog();
     DrawFirstCreationOverlay();
+    if (layoutRebuilt && ImGui::GetIO().IniFilename != nullptr)
+        ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
 }
 
 bool EditorWorkspace::ConsumeExitRequest() noexcept
@@ -747,6 +763,7 @@ void EditorWorkspace::DrawMainMenuBar()
         ImGui::MenuItem("Explorer", nullptr, &showExplorer_);
         ImGui::MenuItem("Scene", nullptr, &showScene_);
         ImGui::MenuItem("Inspector", nullptr, &showInspector_);
+        ImGui::MenuItem("Palette", nullptr, &showPalette_);
         ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser_);
         ImGui::MenuItem("Console", nullptr, &showConsole_);
         ImGui::MenuItem("Profiler", nullptr, &showProfiler_);
@@ -988,12 +1005,19 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
         nullptr,
         &topId);
 
-    const ImGuiID rightId = ImGui::DockBuilderSplitNode(
+    ImGuiID rightId = ImGui::DockBuilderSplitNode(
         topId,
         ImGuiDir_Right,
         0.22F,
         nullptr,
         &topId);
+
+    const ImGuiID paletteId = ImGui::DockBuilderSplitNode(
+        rightId,
+        ImGuiDir_Down,
+        0.64F,
+        nullptr,
+        &rightId);
 
     const ImGuiID leftId = ImGui::DockBuilderSplitNode(
         topId,
@@ -1013,6 +1037,7 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     ImGui::DockBuilderDockWindow("Explorer", leftId);
     ImGui::DockBuilderDockWindow("Scene", topId);
     ImGui::DockBuilderDockWindow("Inspector", rightId);
+    ImGui::DockBuilderDockWindow("Palette", paletteId);
     ImGui::DockBuilderDockWindow("Asset Browser", bottomLeftId);
     ImGui::DockBuilderDockWindow("Console", bottomRightId);
     ImGui::DockBuilderFinish(dockspaceId);
@@ -1020,6 +1045,7 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     showExplorer_ = true;
     showScene_ = true;
     showInspector_ = true;
+    showPalette_ = true;
     showAssetBrowser_ = true;
     showConsole_ = true;
 }
@@ -1621,6 +1647,25 @@ void EditorWorkspace::DrawInspectorPanel()
             saveResult.SavedPath.empty() ? "None"
                 : saveResult.SavedPath.string().c_str());
     }
+    const std::optional<PaletteColorSelection> activePaletteColor =
+        paletteService_.ActiveColor();
+    ImGui::Text("Palette Active: %s",
+        paletteService_.HasActivePalette()
+            ? paletteService_.ActivePaletteName().c_str() : "--");
+    if (activePaletteColor)
+    {
+        ImGui::Text("Couleur Active: #%02X%02X%02X%02X",
+            activePaletteColor->Color.Red,
+            activePaletteColor->Color.Green,
+            activePaletteColor->Color.Blue,
+            activePaletteColor->Color.Alpha);
+        ImGui::Text("Index: %zu", activePaletteColor->Index);
+    }
+    else
+    {
+        ImGui::TextUnformatted("Couleur Active: --");
+        ImGui::TextUnformatted("Index: --");
+    }
     DrawInspectorDiagnostics(InspectorLayoutModel::Build({
         document != nullptr,
         document ? document->SourcePath().filename().string() : std::string{},
@@ -1628,7 +1673,7 @@ void EditorWorkspace::DrawInspectorPanel()
         voxelSelection_.Hovered(),
         voxelSelection_.InteractionState(),
         voxelToolState_.ActiveTool(),
-        voxelToolState_.ActivePaletteIndex(),
+        paletteService_.ActiveIndex().value_or(0U),
         voxelPlacementPreview_,
         lastVoxelToolResult_,
         lastVoxelEraserResult_}));
@@ -1847,6 +1892,158 @@ void EditorWorkspace::DrawInspectorPanel()
         wouldChange
             ? "Paint the selected voxel with the active color"
             : "Select an occupied voxel and choose a different color.");
+    ImGui::End();
+}
+
+void EditorWorkspace::DrawPalettePanel()
+{
+    if (!ImGui::Begin("Palette", &showPalette_))
+    {
+        ImGui::End();
+        return;
+    }
+
+    const PaletteService::Palette* palette = paletteService_.ActivePalette();
+    const std::optional<PaletteColorSelection> active =
+        paletteService_.ActiveColor();
+    if (palette == nullptr || !active)
+    {
+        ImGui::TextUnformatted("No active palette.");
+        ImGui::TextDisabled("Open a voxel model to display its colors.");
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextDisabled("Active Color");
+    const float activePreviewWidth =
+        std::max(1.0F, ImGui::GetContentRegionAvail().x);
+    static_cast<void>(ImGui::ColorButton(
+        "##ActivePaletteColor", ToImGuiColor(active->Color),
+        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop |
+            ImGuiColorEditFlags_NoPicker,
+        ImVec2(activePreviewWidth, 32.0F)));
+    ImGui::Text("Index: %zu", active->Index);
+    ImGui::SameLine();
+    ImGui::TextDisabled("#%02X%02X%02X%02X",
+        active->Color.Red, active->Color.Green,
+        active->Color.Blue, active->Color.Alpha);
+
+    const float itemSpacing = ImGui::GetStyle().ItemSpacing.x;
+    ImGui::Spacing();
+    ImGui::TextDisabled("Recent Colors");
+    const auto& recent = paletteService_.RecentColors();
+    constexpr std::size_t RecentSlotCount = PaletteService::RecentColorLimit;
+    const PaletteGridLayout recentLayout = CalculatePaletteGridLayout(
+        ImGui::GetContentRegionAvail().x,
+        itemSpacing,
+        24.0F,
+        RecentSlotCount);
+    for (std::size_t index = 0U; index < RecentSlotCount; ++index)
+    {
+        if (index % recentLayout.ColumnCount != 0U)
+            ImGui::SameLine(0.0F, itemSpacing);
+        ImGui::PushID(static_cast<int>(index));
+        const bool populated = index < recent.size();
+        const ImVec4 color = populated
+            ? ToImGuiColor(recent[index].Color)
+            : ImVec4(0.18F, 0.18F, 0.18F, 0.45F);
+        ImGui::BeginDisabled(!populated);
+        static_cast<void>(ImGui::ColorButton(
+                "##RecentColor", color,
+                ImGuiColorEditFlags_NoTooltip |
+                    ImGuiColorEditFlags_NoDragDrop |
+                    ImGuiColorEditFlags_NoPicker,
+                ImVec2(recentLayout.SwatchSize, recentLayout.SwatchSize)));
+        if (populated && ImGui::IsItemHovered())
+            ImGui::SetTooltip("Used palette index %zu", recent[index].Index);
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextDisabled("Palette");
+    const float footerHeight = ImGui::GetFrameHeightWithSpacing() +
+        ImGui::GetTextLineHeightWithSpacing() +
+        ImGui::GetStyle().ItemSpacing.y;
+    const float gridHeight = std::max(
+        96.0F, ImGui::GetContentRegionAvail().y - footerHeight);
+    bool openColorEditor = false;
+    if (ImGui::BeginChild(
+            "##PaletteGridRegion", ImVec2(0.0F, gridHeight), true))
+    {
+        constexpr float MinimumSwatchSize = 20.0F;
+        const PaletteGridLayout gridLayout = CalculatePaletteGridLayout(
+            ImGui::GetContentRegionAvail().x,
+            itemSpacing,
+            MinimumSwatchSize,
+            palette->size());
+        for (std::size_t index = 0U; index < palette->size(); ++index)
+        {
+            if (index % gridLayout.ColumnCount != 0U)
+                ImGui::SameLine(0.0F, itemSpacing);
+            ImGui::PushID(static_cast<int>(index));
+            const bool selectable = PaletteService::IsSelectableIndex(index);
+            const bool selected = index == active->Index;
+            ImGui::BeginDisabled(!selectable);
+            if (ImGui::ColorButton(
+                    "##Color", ToImGuiColor((*palette)[index]),
+                    ImGuiColorEditFlags_NoTooltip |
+                        ImGuiColorEditFlags_NoDragDrop,
+                    ImVec2(gridLayout.SwatchSize, gridLayout.SwatchSize)))
+            {
+                static_cast<void>(paletteService_.SelectColor(index));
+            }
+            if (selectable && ImGui::IsItemHovered() &&
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                paletteColorEditorIndex_ = index;
+                openColorEditor = true;
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip(selectable
+                    ? "Index %zu - double-click: color editor preview"
+                    : "Index 0 is reserved by VOX", index);
+            }
+            ImGui::EndDisabled();
+            if (selected)
+            {
+                const ImVec2 minimum = ImGui::GetItemRectMin();
+                const ImVec2 maximum = ImGui::GetItemRectMax();
+                ImDrawList* drawList = ImGui::GetWindowDrawList();
+                drawList->AddRect(
+                    minimum, maximum,
+                    IM_COL32(0, 0, 0, 255), 2.0F, 0, 3.0F);
+                drawList->AddRect(
+                    ImVec2(minimum.x + 2.0F, minimum.y + 2.0F),
+                    ImVec2(maximum.x - 2.0F, maximum.y - 2.0F),
+                    IM_COL32(255, 255, 255, 255), 1.0F, 0, 1.0F);
+            }
+            ImGui::PopID();
+        }
+    }
+    ImGui::EndChild();
+    ImGui::Separator();
+    ImGui::TextDisabled("Tool Options");
+    ImGui::SameLine();
+    ImGui::TextDisabled("(coming later)");
+
+    if (openColorEditor) ImGui::OpenPopup("Color Editor Preview");
+    if (ImGui::BeginPopupModal(
+            "Color Editor Preview", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::Text("Palette Index: %zu",
+            paletteColorEditorIndex_.value_or(active->Index));
+        ImGui::TextUnformatted(
+            "Color editing is prepared but intentionally disabled in v1.");
+        if (ImGui::Button("Close"))
+        {
+            paletteColorEditorIndex_.reset();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
     ImGui::End();
 }
 
@@ -3037,6 +3234,9 @@ bool EditorWorkspace::SaveActiveProjectSession()
         ToSessionView(camera.View)};
     session.ActiveTool = voxelToolState_.IsEraserActive()
         ? ProjectSessionTool::Eraser : ProjectSessionTool::Pencil;
+    session.ActivePaletteIndex =
+        paletteService_.ActiveIndex().value_or(
+            PaletteService::FirstSelectableIndex);
 
     std::string error;
     if (!projectSessionService_.Save(session, error))
@@ -3080,6 +3280,13 @@ void EditorWorkspace::RestoreActiveProjectSession()
     {
         AddConsoleMessage("Last model could not be restored.");
         return;
+    }
+    if (!paletteService_.SelectColor(loaded.Session.ActivePaletteIndex))
+    {
+        static_cast<void>(paletteService_.SelectColor(
+            PaletteService::FirstSelectableIndex));
+        AddConsoleMessage(
+            "Project session palette index invalid; index 1 used.");
     }
 
     const std::filesystem::path browserPath =
@@ -3367,6 +3574,17 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     ++voxelModelGeneration_;
     const Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
+    if (document)
+    {
+        paletteService_.SetPalette(
+            document->GetPalette(),
+            document->HasCustomPalette()
+                ? "Custom VOX Palette" : "Default VOX Palette");
+    }
+    else
+    {
+        paletteService_.Clear();
+    }
     const bool stateReplaced = document
         ? viewportState_.ReplaceDocument(
             filePath.filename().string(), *document, *renderMesh)
@@ -4620,7 +4838,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
             viewportRenderer_.ModelRenderCount();
 
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
-        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        static_cast<void>(paletteService_.SelectColor(1U));
         VoxelRaycastOptions options;
         const auto hit = RaycastVoxelDocument(
             *document,
@@ -4806,7 +5024,7 @@ bool EditorWorkspace::RunVoxelEraserSmokeStep(
             viewportRenderer_.ModelRenderCount();
 
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
-        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        static_cast<void>(paletteService_.SelectColor(1U));
         const auto hit = RaycastVoxelDocument(
             *document,
             {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
@@ -5006,7 +5224,7 @@ bool EditorWorkspace::RunVoxelUndoRedoSmokeStep(
             viewportRenderer_.ModelUploadCount();
 
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
-        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        static_cast<void>(paletteService_.SelectColor(1U));
         const auto hit = RaycastVoxelDocument(
             *document, {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
         if (!hit) return false;
@@ -5224,7 +5442,7 @@ bool EditorWorkspace::RunFirstCreationExperienceSmokeStep(
         workplaneHit_ = WorkplaneHit{
             WorkplaneHitStatus::Valid, firstCreationSmokeTarget_, 0.0F};
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
-        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        static_cast<void>(paletteService_.SelectColor(1U));
         firstCreationSmokePencilled_ = ApplyVoxelPencil() &&
             document->GetVoxelCount() == 1U &&
             document->HasVoxel(firstCreationSmokeTarget_) &&
@@ -5330,7 +5548,7 @@ bool EditorWorkspace::RunPersistentWorkplaneSmokeStep(
                 {WorkplaneAxis::Y, 0}, 64U, 64U};
         if (!persistentWorkplaneSmokeCreated_) return false;
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
-        static_cast<void>(voxelToolState_.SetActivePaletteIndex(1U));
+        static_cast<void>(paletteService_.SelectColor(1U));
     }
     else if (frame == 1U)
     {
@@ -5619,8 +5837,117 @@ bool EditorWorkspace::DirectCreationFlowSmokePassed() const noexcept
         directCreationSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunPaletteUiSmokeStep(const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        resetLayoutRequested_ = true;
+    }
+    else if (frame == 1U)
+    {
+        const auto& project = projectManager_.ActiveProject();
+        if (!project) return false;
+        paletteSmokeProjectFile_ = project->ProjectFilePath();
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"PaletteSmoke", {16U, 16U, 16U}});
+        paletteSmokeModelPath_ = flow.Creation.ModelPath;
+        paletteSmokeTarget_ = {7, 0, 7};
+        document = voxelDocumentSession_.ActiveDocument();
+        const bool selected = paletteService_.SelectColor(paletteSmokeIndex_);
+        const std::optional<PaletteColorSelection> active =
+            paletteService_.ActiveColor();
+        if (active) paletteSmokeColor_ = active->Color;
+        paletteSmokeCreated_ = flow.Ready() && document != nullptr &&
+            selected && active && active->Index == paletteSmokeIndex_ &&
+            paletteService_.ActivePalette() != nullptr &&
+            paletteService_.ActivePalette()->size() ==
+                PaletteService::PaletteSize &&
+            paletteService_.RecentColors().empty();
+        if (!paletteSmokeCreated_) return false;
+        workplaneHit_ = WorkplaneHit{
+            WorkplaneHitStatus::Valid, paletteSmokeTarget_, 1.0F};
+        paletteSmokePencilled_ = ApplyVoxelPencil() &&
+            document->GetVoxel(paletteSmokeTarget_).has_value() &&
+            document->GetVoxel(paletteSmokeTarget_)->PaletteIndex ==
+                paletteSmokeIndex_ &&
+            paletteService_.RecentColors().size() == 1U &&
+            paletteService_.RecentColors().front().Index == paletteSmokeIndex_;
+    }
+    else if (frame == 2U)
+    {
+        const ImGuiWindow* inspectorWindow =
+            ImGui::FindWindowByName("Inspector");
+        const ImGuiWindow* paletteWindow = ImGui::FindWindowByName("Palette");
+        paletteSmokeLayoutValid_ = inspectorWindow != nullptr &&
+            paletteWindow != nullptr && inspectorWindow->DockNode != nullptr &&
+            paletteWindow->DockNode != nullptr &&
+            inspectorWindow->DockNode != paletteWindow->DockNode &&
+            paletteWindow->Pos.y > inspectorWindow->Pos.y &&
+            std::abs(paletteWindow->Pos.x - inspectorWindow->Pos.x) <= 1.0F &&
+            std::abs(paletteWindow->Size.x - inspectorWindow->Size.x) <= 1.0F;
+        if (!paletteSmokePencilled_ || !SaveVoxelModel()) return false;
+        CloseProject();
+        paletteSmokeSavedAndClosed_ =
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !paletteService_.HasActivePalette() &&
+            paletteService_.RecentColors().empty();
+    }
+    else if (frame == 3U)
+    {
+        if (!paletteSmokeSavedAndClosed_ ||
+            !OpenProject(paletteSmokeProjectFile_, false))
+            return false;
+        document = voxelDocumentSession_.ActiveDocument();
+        const std::optional<PaletteColorSelection> active =
+            paletteService_.ActiveColor();
+        const std::optional<Asset::Voxel::Voxel> voxel = document
+            ? document->GetVoxel(paletteSmokeTarget_) : std::nullopt;
+        paletteSmokeRestored_ = document != nullptr && active && voxel &&
+            active->Index == paletteSmokeIndex_ &&
+            active->Color == paletteSmokeColor_ &&
+            voxel->PaletteIndex == paletteSmokeIndex_ &&
+            paletteService_.RecentColors().empty() &&
+            !document->IsDirty() && !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 4U)
+    {
+        if (!paletteSmokeRestored_) return false;
+        CloseProject();
+        const std::filesystem::path session =
+            paletteSmokeProjectFile_.parent_path() / ".vfsession";
+        paletteSmokeCleaned_ =
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !paletteService_.HasActivePalette() &&
+            paletteService_.RecentColors().empty() &&
+            !std::filesystem::exists(session.string() + ".tmp") &&
+            !std::filesystem::exists(session.string() + ".bak") &&
+            !std::filesystem::exists(
+                paletteSmokeModelPath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                paletteSmokeModelPath_.string() + ".vfsave.bak");
+    }
+    return PaletteUiSmokePassed();
+}
+
+bool EditorWorkspace::PaletteUiSmokePassed() const noexcept
+{
+    return paletteSmokeLayoutValid_ && paletteSmokeCreated_ &&
+        paletteSmokePencilled_ &&
+        paletteSmokeSavedAndClosed_ && paletteSmokeRestored_ &&
+        paletteSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
 {
+    if (frame == 1U) return false;
+    const std::size_t scenarioFrame = frame > 1U ? frame - 1U : frame;
     Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
     const auto recordRectangle = [this]()
@@ -5669,7 +5996,7 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
         return hit;
     };
 
-    if (frame == 0U)
+    if (scenarioFrame == 0U)
     {
         const VoxelModelCreationResult created =
             voxelModelCreationService_.CreateModel({
@@ -5687,7 +6014,7 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
             VoxelPickingInteractionState::NoHit, std::nullopt,
             layoutStabilitySmokeTarget_);
     }
-    else if (frame == 1U)
+    else if (scenarioFrame == 1U)
     {
         if (!layoutStabilitySmokeCreated_ || document == nullptr ||
             !recordRectangle() ||
@@ -5702,19 +6029,19 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
             VoxelPickingInteractionState::Hit,
             hitFor(VoxelHitFace::PositiveY));
     }
-    else if (frame == 2U)
+    else if (scenarioFrame == 2U)
     {
         if (!layoutStabilitySmokePencilled_ || !recordRectangle()) return false;
         setPickingState(
             VoxelPickingInteractionState::Hit,
             hitFor(VoxelHitFace::PositiveX));
     }
-    else if (frame == 3U)
+    else if (scenarioFrame == 3U)
     {
         if (!recordRectangle()) return false;
         setPickingState(VoxelPickingInteractionState::NoHit);
     }
-    else if (frame == 4U)
+    else if (scenarioFrame == 4U)
     {
         if (document == nullptr || !recordRectangle()) return false;
         UndoCommand();
@@ -5725,7 +6052,7 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
             VoxelPickingInteractionState::NoHit, std::nullopt,
             layoutStabilitySmokeTarget_);
     }
-    else if (frame == 5U)
+    else if (scenarioFrame == 5U)
     {
         if (!layoutStabilitySmokeUndone_ || !recordRectangle()) return false;
         RedoCommand();
@@ -5736,7 +6063,7 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
             VoxelPickingInteractionState::Hit,
             hitFor(VoxelHitFace::NegativeZ));
     }
-    else if (frame == 6U)
+    else if (scenarioFrame == 6U)
     {
         if (!layoutStabilitySmokeRedone_ || !recordRectangle()) return false;
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Eraser);
@@ -5744,30 +6071,26 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
             VoxelPickingInteractionState::Hit,
             hitFor(VoxelHitFace::NegativeX));
     }
-    else if (frame == 7U)
+    else if (scenarioFrame == 7U)
     {
         if (!recordRectangle() ||
             voxelToolState_.ActiveTool() != ActiveVoxelTool::Eraser)
             return false;
         setPickingState(VoxelPickingInteractionState::OutsideViewport);
     }
-    else if (frame == 8U)
+    else if (scenarioFrame == 8U)
     {
         if (!recordRectangle()) return false;
         layoutStabilitySmokeRectanglesStable_ =
             layoutStabilitySmokeRectanglesStable_ &&
             layoutStabilitySmokeRectangles_.size() == 8U;
-        CloseProject();
-        layoutStabilitySmokeCleaned_ =
-            !projectManager_.ActiveProject() &&
-            !voxelDocumentSession_.HasActiveDocument() &&
-            !voxelDocumentMeshCache_.HasMesh() &&
-            !viewportRenderer_.HasModelMesh() &&
-            !viewportRenderer_.HasHighlightMesh() &&
-            !viewportState_.HasModel() &&
-            !voxelPlacementPreview_.IsVisible() &&
-            !workplaneHit_ && !voxelEditHistory_.CanUndo() &&
-            !voxelEditHistory_.CanRedo() &&
+    }
+    else if (scenarioFrame == 9U)
+    {
+        if (!layoutStabilitySmokeRectanglesStable_) return false;
+        layoutStabilitySmokeReadyForShutdown_ =
+            projectManager_.ActiveProject() &&
+            voxelDocumentSession_.HasActiveDocument() &&
             !std::filesystem::exists(
                 layoutStabilitySmokePath_.string() + ".vfcreate.tmp") &&
             !std::filesystem::exists(
@@ -5781,7 +6104,7 @@ bool EditorWorkspace::LayoutStabilitySmokePassed() const noexcept
     return layoutStabilitySmokeCreated_ && layoutStabilitySmokePencilled_ &&
         layoutStabilitySmokeUndone_ && layoutStabilitySmokeRedone_ &&
         layoutStabilitySmokeRectanglesStable_ &&
-        layoutStabilitySmokeCleaned_;
+        layoutStabilitySmokeReadyForShutdown_;
 }
 
 bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
@@ -6167,6 +6490,8 @@ bool EditorWorkspace::ApplyVoxelPencil()
         ? voxelDocumentSession_.ActiveDocument()->GetVoxelCount() : 0U;
     voxelEditInProgress_ = true;
     VoxelToolResult result;
+    const std::optional<PaletteColorSelection> activeColor =
+        paletteService_.ActiveColor();
     try
     {
         result = VoxelPencilTool::Apply({
@@ -6174,7 +6499,7 @@ bool EditorWorkspace::ApplyVoxelPencil()
             voxelDocumentSession_.ActiveDocument(),
             0U,
             voxelSelection_.Hovered(),
-            voxelToolState_.ActivePaletteIndex(),
+            activeColor ? activeColor->Index : 0U,
             !voxelToolState_.IsPencilActive(),
             &voxelEditHistory_,
             workplaneHit_ ? workplaneHit_->Position : std::nullopt});
@@ -6196,6 +6521,7 @@ bool EditorWorkspace::ApplyVoxelPencil()
 
     if (result.Code == VoxelToolResultCode::Applied)
     {
+        static_cast<void>(paletteService_.RecordActiveColorUsage());
         workplaneHit_.reset();
         if (voxelCountBefore == 0U)
             firstCreationExperience_.OnFirstVoxelCreated();
@@ -6205,7 +6531,7 @@ bool EditorWorkspace::ApplyVoxelPencil()
             std::to_string(result.Position.Y) + ", " +
             std::to_string(result.Position.Z) +
             ") using palette index " +
-            std::to_string(voxelToolState_.ActivePaletteIndex()) + ".");
+            std::to_string(activeColor ? activeColor->Index : 0U) + ".");
         return true;
     }
     if (result.Code == VoxelToolResultCode::Failed)
@@ -6526,6 +6852,8 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     activeVoxelModel_.reset();
     static_cast<void>(voxelSelection_.Clear());
     voxelToolState_.Reset();
+    paletteService_.Clear();
+    paletteColorEditorIndex_.reset();
     voxelToolInput_.Reset();
     voxelToolSmokeInput_.Reset();
     voxelPlacementPreview_ = {};

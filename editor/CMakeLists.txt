@@ -155,6 +155,24 @@ else()
         VoxelForgeEditorVoxelDocument PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorPalette STATIC)
+target_sources(
+    VoxelForgeEditorPalette
+    PRIVATE src/Palette/PaletteService.cpp
+)
+target_include_directories(
+    VoxelForgeEditorPalette
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(VoxelForgeEditorPalette PUBLIC VoxelForgeAsset)
+target_compile_features(VoxelForgeEditorPalette PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorPalette PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorPalette PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorCommands STATIC)
 target_sources(
     VoxelForgeEditorCommands
@@ -217,7 +235,10 @@ endif()
 add_library(VoxelForgeEditorLayout STATIC)
 target_sources(
     VoxelForgeEditorLayout
-    PRIVATE src/Layout/InspectorLayoutModel.cpp
+    PRIVATE
+        src/Layout/EditorLayoutPersistence.cpp
+        src/Layout/InspectorLayoutModel.cpp
+        src/Layout/PalettePanelLayout.cpp
 )
 target_include_directories(
     VoxelForgeEditorLayout
@@ -422,6 +443,7 @@ target_link_libraries(
         VoxelForgeEditorQualityOfLife
         VoxelForgeEditorLayout
         VoxelForgeEditorProjectSession
+        VoxelForgeEditorPalette
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorVoxelDocument
         VoxelForgeEditorVoxelCreation

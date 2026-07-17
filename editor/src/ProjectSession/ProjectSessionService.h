@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -53,6 +54,7 @@ struct ProjectSessionData final
     std::filesystem::path LastModel;
     ProjectSessionCamera Camera{};
     ProjectSessionTool ActiveTool = ProjectSessionTool::Pencil;
+    std::size_t ActivePaletteIndex = 1U;
 };
 
 enum class ProjectSessionLoadStatus : std::uint8_t

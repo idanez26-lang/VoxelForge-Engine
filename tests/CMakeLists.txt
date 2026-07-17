@@ -367,6 +367,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorDirectCreationFlowTests>
 )
 add_executable(
+    VoxelForgeEditorPaletteServiceTests
+    Editor/PaletteServiceTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorPaletteServiceTests
+    PRIVATE VoxelForgeEditorPalette
+)
+vf_configure_test(VoxelForgeEditorPaletteServiceTests)
+add_test(
+    NAME VoxelForge.Editor.PaletteService
+    COMMAND $<TARGET_FILE:VoxelForgeEditorPaletteServiceTests>
+)
+add_executable(
     VoxelForgeEditorPersistentWorkplaneTests
     Editor/PersistentWorkplaneTests.cpp
 )
@@ -567,6 +580,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelDocumentSaveService
     VoxelForge.Editor.FirstCreationExperience
     VoxelForge.Editor.DirectCreationFlow
+    VoxelForge.Editor.PaletteService
     VoxelForge.Editor.PersistentWorkplane
     VoxelForge.Editor.ProjectSession
     VoxelForge.Editor.LayoutStability
@@ -671,6 +685,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.DirectCreationFlowSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --direct-creation-flow-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.PaletteUiSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --palette-ui-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -694,6 +712,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.PersistentWorkplaneSmoke
         VoxelForge.Editor.ProjectSessionRestoreSmoke
         VoxelForge.Editor.DirectCreationFlowSmoke
+        VoxelForge.Editor.PaletteUiSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

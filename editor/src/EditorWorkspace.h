@@ -13,6 +13,7 @@
 #include "DragDropImport/DragDropImportController.h"
 #include "Layout/InspectorLayoutModel.h"
 #include "ModelImport/ModelImportService.h"
+#include "Palette/PaletteService.h"
 #include "Platform/FileDialogService.h"
 #include "Platform/ProjectFolderOpener.h"
 #include "Project/ProjectDialogPreferences.h"
@@ -143,6 +144,8 @@ public:
     [[nodiscard]] bool ProjectSessionRestoreSmokePassed() const noexcept;
     [[nodiscard]] bool RunDirectCreationFlowSmokeStep(std::size_t frame);
     [[nodiscard]] bool DirectCreationFlowSmokePassed() const noexcept;
+    [[nodiscard]] bool RunPaletteUiSmokeStep(std::size_t frame);
+    [[nodiscard]] bool PaletteUiSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -163,6 +166,7 @@ private:
     void DrawScenePanel();
     void DrawWelcomeScreen();
     void DrawInspectorPanel();
+    void DrawPalettePanel();
     void DrawAssetBrowserPanel();
     void DrawConsolePanel();
     void DrawProfilerPanel();
@@ -246,6 +250,7 @@ private:
     WindowTitleCallback windowTitleCallback_;
     AssetBrowser assetBrowser_;
     AssetInspectorViewModel assetInspector_;
+    PaletteService paletteService_;
     ModelImportService modelImportService_;
     DragDropImportController dragDropImport_;
     EditorCamera viewportCamera_;
@@ -320,6 +325,7 @@ private:
     bool showExplorer_ = true;
     bool showScene_ = true;
     bool showInspector_ = true;
+    bool showPalette_ = true;
     bool showAssetBrowser_ = true;
     bool showConsole_ = true;
     bool showProfiler_ = false;
@@ -342,6 +348,7 @@ private:
     bool voxelEditInProgress_ = false;
     bool viewportFocusRequested_ = false;
     bool viewportFocusApplied_ = false;
+    std::optional<std::size_t> paletteColorEditorIndex_;
     std::filesystem::path firstCreationSmokePath_;
     Asset::Voxel::VoxelPosition firstCreationSmokeTarget_{};
     bool firstCreationSmokeCreated_ = false;
@@ -364,7 +371,7 @@ private:
     bool layoutStabilitySmokeUndone_ = false;
     bool layoutStabilitySmokeRedone_ = false;
     bool layoutStabilitySmokeRectanglesStable_ = false;
-    bool layoutStabilitySmokeCleaned_ = false;
+    bool layoutStabilitySmokeReadyForShutdown_ = false;
     EditorCameraState doubleClickCameraSmokeReference_{};
     bool doubleClickCameraSmokeGridStable_ = false;
     bool doubleClickCameraSmokeVoxelStable_ = false;
@@ -401,6 +408,17 @@ private:
     bool directCreationSmokePencilled_ = false;
     bool directCreationSmokeSaved_ = false;
     bool directCreationSmokeCleaned_ = false;
+    std::filesystem::path paletteSmokeProjectFile_;
+    std::filesystem::path paletteSmokeModelPath_;
+    Asset::Voxel::VoxelPosition paletteSmokeTarget_{};
+    Asset::Voxel::VoxelColor paletteSmokeColor_{};
+    std::size_t paletteSmokeIndex_ = 42U;
+    bool paletteSmokeLayoutValid_ = false;
+    bool paletteSmokeCreated_ = false;
+    bool paletteSmokePencilled_ = false;
+    bool paletteSmokeSavedAndClosed_ = false;
+    bool paletteSmokeRestored_ = false;
+    bool paletteSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

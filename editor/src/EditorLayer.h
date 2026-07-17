@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorWorkspace.h"
+#include "Layout/EditorLayoutPersistence.h"
 #include "VoxelForge/Core/Layer/Layer.h"
 #include "VoxelForge/Scene/Scene.h"
 
@@ -59,7 +60,9 @@ public:
         bool doubleClickCameraSmokeTest = false,
         bool persistentWorkplaneSmokeTest = false,
         bool projectSessionRestoreSmokeTest = false,
-        bool directCreationFlowSmokeTest = false);
+        bool directCreationFlowSmokeTest = false,
+        bool paletteUiSmokeTest = false,
+        std::filesystem::path imguiIniPathOverride = {});
 
     void OnAttach() override;
     void OnDetach() override;
@@ -87,6 +90,7 @@ private:
     std::unique_ptr<Scene::Scene> scene_;
     Scene::Entity* selectedEntity_ = nullptr;
 
+    EditorLayoutPersistence layoutPersistence_;
     EditorWorkspace workspace_;
     ApplicationCloseCallback applicationCloseCallback_;
 
@@ -126,6 +130,7 @@ private:
     bool persistentWorkplaneSmokeTest_ = false;
     bool projectSessionRestoreSmokeTest_ = false;
     bool directCreationFlowSmokeTest_ = false;
+    bool paletteUiSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

@@ -19,28 +19,14 @@ void VoxelToolState::SetActiveTool(const ActiveVoxelTool tool) noexcept
     activeTool_ = tool;
 }
 
-bool VoxelToolState::SetActivePaletteIndex(
-    const std::size_t paletteIndex) noexcept
-{
-    if (paletteIndex == 0U || paletteIndex > 255U) return false;
-    activePaletteIndex_ = paletteIndex;
-    return true;
-}
-
 void VoxelToolState::Reset() noexcept
 {
     activeTool_ = ActiveVoxelTool::Pencil;
-    activePaletteIndex_ = DefaultPaletteIndex;
 }
 
 ActiveVoxelTool VoxelToolState::ActiveTool() const noexcept
 {
     return activeTool_;
-}
-
-std::size_t VoxelToolState::ActivePaletteIndex() const noexcept
-{
-    return activePaletteIndex_;
 }
 
 bool VoxelToolState::IsPencilActive() const noexcept

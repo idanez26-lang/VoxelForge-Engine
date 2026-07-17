@@ -1,6 +1,9 @@
 #include "Layout/InspectorLayoutModel.h"
+#include "Layout/EditorLayoutPersistence.h"
+#include "Layout/PalettePanelLayout.h"
 
 #include <iostream>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -66,6 +69,52 @@ int main()
 {
     try
     {
+        const std::filesystem::path testRoot =
+            std::filesystem::temp_directory_path() /
+            "VoxelForgeLayoutPersistenceTests";
+        const std::filesystem::path localAppData = testRoot / "LocalAppData";
+        const std::filesystem::path canonical =
+            EditorLayoutPersistence::CanonicalPathFromLocalAppData(localAppData);
+        Require(canonical.is_absolute() &&
+                canonical == localAppData / "VoxelForge Studio" / "imgui.ini",
+            "The canonical ImGui layout path is not absolute or stable.");
+        const std::filesystem::path isolated =
+            testRoot / "Smoke" / "layout" / "imgui.ini";
+        EditorLayoutPersistence persistence(isolated);
+        Require(persistence.Initialize() && persistence.Path() == isolated &&
+                std::filesystem::is_directory(isolated.parent_path()),
+            "The isolated layout directory was not created.");
+        const char* const stablePointer = persistence.IniFilename();
+        Require(stablePointer != nullptr &&
+                std::filesystem::path(stablePointer) == isolated &&
+                stablePointer == persistence.IniFilename(),
+            "IniFilename does not have stable storage.");
+        EditorLayoutPersistence relative("imgui.ini");
+        Require(!relative.Initialize(),
+            "A relative ImGui layout path should be rejected.");
+        std::error_code cleanupError;
+        std::filesystem::remove_all(testRoot, cleanupError);
+        Require(!cleanupError,
+            "The layout persistence test fixture could not be cleaned.");
+
+        const PaletteGridLayout narrow = CalculatePaletteGridLayout(
+            18.0F, 8.0F, 20.0F, 256U);
+        const PaletteGridLayout wide = CalculatePaletteGridLayout(
+            640.0F, 8.0F, 20.0F, 256U);
+        const PaletteGridLayout emptyWidth = CalculatePaletteGridLayout(
+            0.0F, 8.0F, 20.0F, 256U);
+        const PaletteGridLayout emptyItems = CalculatePaletteGridLayout(
+            320.0F, 8.0F, 20.0F, 0U);
+        Require(narrow.IsValid() && narrow.ColumnCount == 1U &&
+                narrow.SwatchSize == 18.0F,
+            "A narrow Palette panel produced an invalid grid.");
+        Require(wide.IsValid() && wide.ColumnCount > narrow.ColumnCount &&
+                wide.SwatchSize >= 20.0F,
+            "A wide Palette panel does not use its available width.");
+        Require(emptyWidth.IsValid() && emptyWidth.ColumnCount == 1U &&
+                emptyItems.IsValid() && emptyItems.ColumnCount == 1U,
+            "Palette grid fallback allowed zero columns or invalid sizes.");
+
         const InspectorLayoutModel closed =
             InspectorLayoutModel::Build({});
         Require(Value(closed, "Document") == "--" &&
