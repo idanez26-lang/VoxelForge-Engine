@@ -354,6 +354,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorFirstCreationExperienceTests>
 )
 add_executable(
+    VoxelForgeEditorDirectCreationFlowTests
+    Editor/DirectCreationFlowTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorDirectCreationFlowTests
+    PRIVATE VoxelForgeEditorVoxelCreation
+)
+vf_configure_test(VoxelForgeEditorDirectCreationFlowTests)
+add_test(
+    NAME VoxelForge.Editor.DirectCreationFlow
+    COMMAND $<TARGET_FILE:VoxelForgeEditorDirectCreationFlowTests>
+)
+add_executable(
     VoxelForgeEditorPersistentWorkplaneTests
     Editor/PersistentWorkplaneTests.cpp
 )
@@ -553,6 +566,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelSave
     VoxelForge.Editor.VoxelDocumentSaveService
     VoxelForge.Editor.FirstCreationExperience
+    VoxelForge.Editor.DirectCreationFlow
     VoxelForge.Editor.PersistentWorkplane
     VoxelForge.Editor.ProjectSession
     VoxelForge.Editor.LayoutStability
@@ -653,6 +667,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.ProjectSessionRestoreSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --project-session-restore-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.DirectCreationFlowSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --direct-creation-flow-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -675,6 +693,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.DoubleClickCameraSmoke
         VoxelForge.Editor.PersistentWorkplaneSmoke
         VoxelForge.Editor.ProjectSessionRestoreSmoke
+        VoxelForge.Editor.DirectCreationFlowSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

@@ -63,6 +63,8 @@ struct VoxelModelCreationResult final
 class VoxelModelCreationService final
 {
 public:
+    using MetadataCallback = std::function<MetadataAnalysisResult(
+        const std::filesystem::path&)>;
     using ThumbnailCallback = std::function<VoxelModelCreationStepResult(
         const std::filesystem::path&)>;
     using AssetBrowserCallback = std::function<bool(
@@ -77,6 +79,7 @@ public:
         const std::filesystem::path& projectRoot);
     void ClearProject() noexcept;
     void SetThumbnailCallback(ThumbnailCallback callback);
+    void SetMetadataCallback(MetadataCallback callback);
     void SetAssetBrowserCallback(AssetBrowserCallback callback);
     void SetOpenCallback(OpenCallback callback);
 
@@ -107,6 +110,7 @@ private:
     std::filesystem::path modelsDirectory_;
     std::string lastError_;
     ModelAssetMetadataService metadataService_;
+    MetadataCallback metadataCallback_;
     ThumbnailCallback thumbnailCallback_;
     AssetBrowserCallback assetBrowserCallback_;
     OpenCallback openCallback_;

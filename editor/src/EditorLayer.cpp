@@ -48,7 +48,8 @@ EditorLayer::EditorLayer(
     const bool layoutStabilitySmokeTest,
     const bool doubleClickCameraSmokeTest,
     const bool persistentWorkplaneSmokeTest,
-    const bool projectSessionRestoreSmokeTest)
+    const bool projectSessionRestoreSmokeTest,
+    const bool directCreationFlowSmokeTest)
     : Layer("VoxelForge Editor Layer"),
       workspace_(
           projectManager,
@@ -59,7 +60,8 @@ EditorLayer::EditorLayer(
               voxelPencilSmokeTest || voxelEraserSmokeTest ||
               voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest ||
               layoutStabilitySmokeTest || doubleClickCameraSmokeTest ||
-              persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest
+              persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest ||
+              directCreationFlowSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -70,7 +72,8 @@ EditorLayer::EditorLayer(
               voxelPencilSmokeTest || voxelEraserSmokeTest ||
               voxelUndoRedoSmokeTest || firstCreationExperienceSmokeTest ||
               layoutStabilitySmokeTest || doubleClickCameraSmokeTest ||
-              persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest),
+              persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest ||
+              directCreationFlowSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -99,7 +102,8 @@ EditorLayer::EditorLayer(
       layoutStabilitySmokeTest_(layoutStabilitySmokeTest),
       doubleClickCameraSmokeTest_(doubleClickCameraSmokeTest),
       persistentWorkplaneSmokeTest_(persistentWorkplaneSmokeTest),
-      projectSessionRestoreSmokeTest_(projectSessionRestoreSmokeTest)
+      projectSessionRestoreSmokeTest_(projectSessionRestoreSmokeTest),
+      directCreationFlowSmokeTest_(directCreationFlowSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -189,7 +193,8 @@ void EditorLayer::OnImGuiRender()
     if (!startupVoxPath_.empty() && !modelImportSmokeTest_ &&
         !modelImportVisualTest_ && !dragDropImportSmokeTest_ &&
         !firstCreationExperienceSmokeTest_ && !layoutStabilitySmokeTest_ &&
-        !persistentWorkplaneSmokeTest_ && !projectSessionRestoreSmokeTest_)
+        !persistentWorkplaneSmokeTest_ && !projectSessionRestoreSmokeTest_ &&
+        !directCreationFlowSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -300,6 +305,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunProjectSessionRestoreSmokeStep(
             renderedFrameCount_));
     }
+    if (directCreationFlowSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunDirectCreationFlowSmokeStep(
+            renderedFrameCount_));
+    }
 
     ++renderedFrameCount_;
 
@@ -318,7 +328,9 @@ void EditorLayer::OnImGuiRender()
         (persistentWorkplaneSmokeTest_ &&
             workspace_.PersistentWorkplaneSmokePassed()) ||
         (projectSessionRestoreSmokeTest_ &&
-            workspace_.ProjectSessionRestoreSmokePassed());
+            workspace_.ProjectSessionRestoreSmokePassed()) ||
+        (directCreationFlowSmokeTest_ &&
+            workspace_.DirectCreationFlowSmokePassed());
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
@@ -441,6 +453,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Project session restore smoke test did not complete.");
+    }
+    if (directCreationFlowSmokeTest_ && smokeTestComplete &&
+        !workspace_.DirectCreationFlowSmokePassed())
+    {
+        throw std::runtime_error(
+            "Direct creation flow smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

@@ -24,6 +24,7 @@
 #include "VoxelSave/VoxelSaveState.h"
 #include "VoxelSave/VoxelDocumentSaveService.h"
 #include "VoxelCreation/FirstCreationExperience.h"
+#include "VoxelCreation/DirectCreationFlowService.h"
 #include "VoxelCreation/VoxelModelCreationService.h"
 #include "VoxelCreation/WorkplaneService.h"
 #include "VoxelSelection/VoxelSelectionState.h"
@@ -140,6 +141,8 @@ public:
     [[nodiscard]] bool PersistentWorkplaneSmokePassed() const noexcept;
     [[nodiscard]] bool RunProjectSessionRestoreSmokeStep(std::size_t frame);
     [[nodiscard]] bool ProjectSessionRestoreSmokePassed() const noexcept;
+    [[nodiscard]] bool RunDirectCreationFlowSmokeStep(std::size_t frame);
+    [[nodiscard]] bool DirectCreationFlowSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -254,6 +257,7 @@ private:
     VoxelSaveState voxelSaveState_;
     VoxelDocumentSaveService voxelDocumentSaveService_;
     VoxelModelCreationService voxelModelCreationService_;
+    DirectCreationFlowService directCreationFlowService_;
     FirstCreationExperience firstCreationExperience_;
     WorkplaneService workplaneService_;
     VoxelSelectionState voxelSelection_;
@@ -336,6 +340,8 @@ private:
     bool voxelViewportRenderFailed_ = false;
     bool voxelSelectionClickCandidate_ = false;
     bool voxelEditInProgress_ = false;
+    bool viewportFocusRequested_ = false;
+    bool viewportFocusApplied_ = false;
     std::filesystem::path firstCreationSmokePath_;
     Asset::Voxel::VoxelPosition firstCreationSmokeTarget_{};
     bool firstCreationSmokeCreated_ = false;
@@ -388,6 +394,13 @@ private:
     bool projectSessionSmokeSavedOnClose_ = false;
     bool projectSessionSmokeRestored_ = false;
     bool projectSessionSmokeCleaned_ = false;
+    std::filesystem::path directCreationSmokePath_;
+    Asset::Voxel::VoxelPosition directCreationSmokeTarget_{};
+    bool directCreationSmokeCreated_ = false;
+    bool directCreationSmokeFocused_ = false;
+    bool directCreationSmokePencilled_ = false;
+    bool directCreationSmokeSaved_ = false;
+    bool directCreationSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

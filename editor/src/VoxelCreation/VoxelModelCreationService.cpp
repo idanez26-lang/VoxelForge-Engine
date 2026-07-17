@@ -146,6 +146,12 @@ void VoxelModelCreationService::SetThumbnailCallback(
     thumbnailCallback_ = std::move(callback);
 }
 
+void VoxelModelCreationService::SetMetadataCallback(
+    MetadataCallback callback)
+{
+    metadataCallback_ = std::move(callback);
+}
+
 void VoxelModelCreationService::SetAssetBrowserCallback(
     AssetBrowserCallback callback)
 {
@@ -260,34 +266,26 @@ VoxelModelCreationResult VoxelModelCreationService::CreateModel(
         return Fail(destination, "Unable to install the new model.");
     }
 
-    const MetadataAnalysisResult metadata =
-        metadataService_.AnalyzeAndUpdateMetadata(destination, true);
-    if (!metadata.Succeeded())
-    {
-        std::string cleanup;
-        static_cast<void>(RemoveRecognizedFile(destination, cleanup));
-        if (replacing)
-        {
-            std::error_code rollback;
-            std::filesystem::rename(backup, destination, rollback);
-            static_cast<void>(
-                metadataService_.AnalyzeAndUpdateMetadata(destination, true));
-        }
-        return Fail(destination,
-            "Model metadata creation failed: " + metadata.Message);
-    }
+    const MetadataAnalysisResult metadata = metadataCallback_
+        ? metadataCallback_(destination)
+        : metadataService_.AnalyzeAndUpdateMetadata(destination, true);
 
     VoxelModelCreationStepResult thumbnail{false,
         "Thumbnail service is unavailable."};
     if (thumbnailCallback_) thumbnail = thumbnailCallback_(destination);
-    ModelAssetMetadata finalMetadata = metadata.Metadata;
-    if (thumbnail.Succeeded)
+    ModelAssetMetadata finalMetadata = metadata.Succeeded()
+        ? metadata.Metadata : ModelAssetMetadata{};
+    bool metadataAvailable = metadata.Succeeded();
+    if (thumbnail.Succeeded || !metadataAvailable)
     {
         const MetadataReadResult refreshedMetadata =
             metadataService_.ReadMetadata(
                 metadataService_.MetadataPathFor(destination));
         if (refreshedMetadata.Succeeded)
+        {
             finalMetadata = refreshedMetadata.Metadata;
+            metadataAvailable = true;
+        }
     }
     const bool browserRefreshed = assetBrowserCallback_ &&
         assetBrowserCallback_(destination);
@@ -302,8 +300,13 @@ VoxelModelCreationResult VoxelModelCreationService::CreateModel(
     }
 
     std::string warning;
+    if (!metadataAvailable)
+        warning = "Metadata creation failed: " + metadata.Message;
     if (!thumbnail.Succeeded)
-        warning = "Thumbnail generation failed: " + thumbnail.Message;
+    {
+        if (!warning.empty()) warning += " ";
+        warning += "Thumbnail generation failed: " + thumbnail.Message;
+    }
     if (!browserRefreshed)
     {
         if (!warning.empty()) warning += " ";

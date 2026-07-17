@@ -305,7 +305,6 @@ EditorWorkspace::EditorWorkspace(
     voxelModelCreationService_.SetAssetBrowserCallback(
         [this](const std::filesystem::path& path)
         {
-            if (!assetBrowser_.Refresh()) return false;
             const auto& project = projectManager_.ActiveProject();
             return project && assetBrowser_.RevealEntry(
                 path.lexically_relative(project->RootPath() / "Assets"));
@@ -314,6 +313,53 @@ EditorWorkspace::EditorWorkspace(
         [this](const std::filesystem::path& path)
         {
             return OpenVoxInViewportNow(path);
+        });
+    directCreationFlowService_.SetViewportPreparationCallback(
+        [this](const std::filesystem::path& path)
+        {
+            const Asset::Voxel::VoxelDocument* document =
+                voxelDocumentSession_.ActiveDocument();
+            if (document == nullptr ||
+                document->SourcePath().lexically_normal() !=
+                    path.lexically_normal() || !viewportState_.HasModel())
+            {
+                return DirectCreationStepResult{
+                    false, "Created document is not active in the viewport."};
+            }
+            showScene_ = true;
+            viewportState_.SetGridVisible(true);
+            viewportState_.SetAxesVisible(true);
+            FrameVoxelViewport();
+            return DirectCreationStepResult{true, {}};
+        });
+    directCreationFlowService_.SetPencilActivationCallback(
+        [this](const std::filesystem::path&)
+        {
+            voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
+            voxelToolInput_.Reset();
+            UpdateVoxelHighlights();
+            return DirectCreationStepResult{
+                voxelToolState_.IsPencilActive(),
+                voxelToolState_.IsPencilActive()
+                    ? std::string{} : "Pencil could not be activated."};
+        });
+    directCreationFlowService_.SetWorkplanePreparationCallback(
+        [this](const std::filesystem::path&)
+        {
+            const Asset::Voxel::VoxelDocument* document =
+                voxelDocumentSession_.ActiveDocument();
+            const bool ready = document != nullptr &&
+                workplaneService_.Grid(*document).has_value() &&
+                viewportState_.IsGridVisible();
+            return DirectCreationStepResult{ready,
+                ready ? std::string{} : "Workplane is not ready."};
+        });
+    directCreationFlowService_.SetViewportFocusCallback(
+        [this](const std::filesystem::path&)
+        {
+            viewportFocusRequested_ = true;
+            viewportFocusApplied_ = false;
+            return DirectCreationStepResult{true, {}};
         });
     SynchronizeProjectAssets();
     if (!projectDialogPreferences_.Load())
@@ -1032,7 +1078,16 @@ void EditorWorkspace::DrawExplorerPanel()
 
 void EditorWorkspace::DrawScenePanel()
 {
-    if (!ImGui::Begin("Scene", &showScene_))
+    const bool focusRequested = std::exchange(
+        viewportFocusRequested_, false);
+    if (focusRequested) ImGui::SetNextWindowFocus();
+    const bool visible = ImGui::Begin("Scene", &showScene_);
+    if (focusRequested)
+    {
+        viewportFocusApplied_ = ImGui::IsWindowFocused(
+            ImGuiFocusedFlags_RootAndChildWindows);
+    }
+    if (!visible)
     {
         ImGui::End();
         return;
@@ -2706,9 +2761,11 @@ void EditorWorkspace::SaveProject()
 
 void EditorWorkspace::CreateVoxelModelNow()
 {
-    const VoxelModelCreationResult result =
-        voxelModelCreationService_.CreateModel(
+    const DirectCreationFlowResult flow =
+        directCreationFlowService_.Create(
+            voxelModelCreationService_,
             pendingVoxelModelCreation_, pendingVoxelModelCollisionAction_);
+    const VoxelModelCreationResult& result = flow.Creation;
     if (result.Status == VoxelModelCreationStatus::Collision)
     {
         showVoxelModelCollisionPopup_ = true;
@@ -2726,10 +2783,19 @@ void EditorWorkspace::CreateVoxelModelNow()
     }
     AddConsoleMessage(
         "[Create] Created " + result.ModelPath.filename().string() + ".");
-    if (!result.Warning.empty())
-        AddConsoleMessage("[Create] Warning: " + result.Warning);
-    firstCreationExperience_.Start(
-        projectDialogPreferences_.FirstCreationCompleted());
+    if (!flow.Warning.empty())
+        AddConsoleMessage("[Create] Warning: " + flow.Warning);
+    if (flow.Ready())
+    {
+        firstCreationExperience_.Start(
+            projectDialogPreferences_.FirstCreationCompleted());
+        AddConsoleMessage("[Create] Viewport ready for the first voxel.");
+    }
+    else
+    {
+        AddConsoleMessage("[Create] Direct creation incomplete: " +
+            flow.Message);
+    }
     pendingVoxelModelCreation_ = {};
     pendingVoxelModelCollisionAction_ =
         VoxelModelCreationCollisionAction::Ask;
@@ -5464,6 +5530,95 @@ bool EditorWorkspace::ProjectSessionRestoreSmokePassed() const noexcept
         projectSessionSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunDirectCreationFlowSmokeStep(
+    const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Eraser);
+        const std::size_t refreshBaseline = assetBrowser_.RefreshCount();
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_,
+            {"DirectCreation", {16U, 16U, 16U}});
+        document = voxelDocumentSession_.ActiveDocument();
+        directCreationSmokePath_ = flow.Creation.ModelPath;
+        directCreationSmokeTarget_ = {8, 0, 8};
+        EditorCamera expectedCamera;
+        expectedCamera.Frame(16.0F, 16.0F, 16.0F);
+        directCreationSmokeCreated_ = flow.Ready() &&
+            flow.Creation.ThumbnailGenerated && document != nullptr &&
+            document->SourcePath().lexically_normal() ==
+                directCreationSmokePath_.lexically_normal() &&
+            document->GetVoxelCount() == 0U && !document->IsDirty() &&
+            voxelToolState_.IsPencilActive() && viewportState_.HasModel() &&
+            viewportState_.IsGridVisible() &&
+            workplaneService_.Grid(*document).has_value() &&
+            viewportCamera_.CaptureState() == expectedCamera.CaptureState() &&
+            assetBrowser_.SelectedRelativePath() ==
+                std::optional<std::filesystem::path>(
+                    "Models/DirectCreation.vox") &&
+            assetBrowser_.RefreshCount() == refreshBaseline + 1U &&
+            viewportFocusRequested_ &&
+            std::filesystem::is_regular_file(directCreationSmokePath_) &&
+            std::filesystem::is_regular_file(
+                directCreationSmokePath_.string() + ".vfmeta");
+    }
+    else if (frame == 1U)
+    {
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!directCreationSmokeCreated_ || document == nullptr) return false;
+        directCreationSmokeFocused_ = viewportFocusApplied_;
+        workplaneHit_ = WorkplaneHit{
+            WorkplaneHitStatus::Valid, directCreationSmokeTarget_, 1.0F};
+        const std::uint64_t revision = document->GetRevision();
+        directCreationSmokePencilled_ = directCreationSmokeFocused_ &&
+            ApplyVoxelPencil() && document->GetVoxelCount() == 1U &&
+            document->HasVoxel(directCreationSmokeTarget_) &&
+            document->GetRevision() == revision + 1U &&
+            document->IsDirty() && voxelEditHistory_.CanUndo();
+    }
+    else if (frame == 2U)
+    {
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!directCreationSmokePencilled_ || document == nullptr) return false;
+        const std::uint64_t revision = document->GetRevision();
+        directCreationSmokeSaved_ = SaveVoxelModel() &&
+            !document->IsDirty() && document->GetRevision() == revision;
+    }
+    else if (frame == 3U)
+    {
+        if (!directCreationSmokeSaved_) return false;
+        CloseProject();
+        directCreationSmokeCleaned_ =
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !viewportRenderer_.HasHighlightMesh() &&
+            !viewportState_.HasModel() && !workplaneHit_ &&
+            !viewportFocusRequested_ && !voxelEditHistory_.CanUndo() &&
+            !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                directCreationSmokePath_.string() + ".vfcreate.tmp") &&
+            !std::filesystem::exists(
+                directCreationSmokePath_.string() + ".vfcreate.bak") &&
+            !std::filesystem::exists(
+                directCreationSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                directCreationSmokePath_.string() + ".vfsave.bak");
+    }
+    return DirectCreationFlowSmokePassed();
+}
+
+bool EditorWorkspace::DirectCreationFlowSmokePassed() const noexcept
+{
+    return directCreationSmokeCreated_ && directCreationSmokeFocused_ &&
+        directCreationSmokePencilled_ && directCreationSmokeSaved_ &&
+        directCreationSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
 {
     Asset::Voxel::VoxelDocument* document =
@@ -6035,6 +6190,8 @@ bool EditorWorkspace::ApplyVoxelPencil()
         result.Error = "Unknown Pencil failure.";
     }
     voxelEditInProgress_ = false;
+    viewportFocusRequested_ = false;
+    viewportFocusApplied_ = false;
     lastVoxelToolResult_ = result;
 
     if (result.Code == VoxelToolResultCode::Applied)

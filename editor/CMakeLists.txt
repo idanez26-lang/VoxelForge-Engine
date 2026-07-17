@@ -303,6 +303,7 @@ add_library(VoxelForgeEditorVoxelCreation STATIC)
 target_sources(
     VoxelForgeEditorVoxelCreation
     PRIVATE
+        src/VoxelCreation/DirectCreationFlowService.cpp
         src/VoxelCreation/FirstCreationExperience.cpp
         src/VoxelCreation/VoxelConstructionPlane.cpp
         src/VoxelCreation/VoxelModelCreationService.cpp
