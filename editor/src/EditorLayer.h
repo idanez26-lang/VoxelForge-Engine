@@ -65,6 +65,7 @@ public:
         bool voxelFillSmokeTest = false,
         bool voxelBoxSmokeTest = false,
         bool voxelLineSmokeTest = false,
+        bool voxelSphereSmokeTest = false,
         std::filesystem::path imguiIniPathOverride = {});
 
     void OnAttach() override;
@@ -137,6 +138,7 @@ private:
     bool voxelFillSmokeTest_ = false;
     bool voxelBoxSmokeTest_ = false;
     bool voxelLineSmokeTest_ = false;
+    bool voxelSphereSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

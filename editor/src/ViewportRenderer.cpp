@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <type_traits>
@@ -151,6 +152,52 @@ void AppendVoxelBoxOutline(
             AppendBox(vertices, indices,
                 {x - thickness, y - thickness, z0},
                 {x + thickness, y + thickness, z1}, color);
+}
+
+void AppendSphereOutline(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const VoxelSpherePreview sphere,
+    const Vec3 modelCenter,
+    const std::array<float, 4>& color)
+{
+    constexpr std::size_t segmentCount = 48U;
+    constexpr float pi = 3.14159265358979323846F;
+    constexpr float thickness = 0.035F;
+    const Vec3 center = VoxelGridToViewport(
+        {static_cast<float>(sphere.Center.X) + 0.5F,
+         static_cast<float>(sphere.Center.Y) + 0.5F,
+         static_cast<float>(sphere.Center.Z) + 0.5F}, modelCenter);
+    const float radius = static_cast<float>(sphere.Radius) + 0.5F;
+    const auto appendSegment = [&](const Vec3 start, const Vec3 end)
+    {
+        AppendBox(vertices, indices,
+            {std::min(start.X, end.X) - thickness,
+             std::min(start.Y, end.Y) - thickness,
+             std::min(start.Z, end.Z) - thickness},
+            {std::max(start.X, end.X) + thickness,
+             std::max(start.Y, end.Y) + thickness,
+             std::max(start.Z, end.Z) + thickness}, color);
+    };
+    const auto circlePoint = [center, radius](
+        const std::size_t plane, const float angle)
+    {
+        const float cosine = std::cos(angle) * radius;
+        const float sine = std::sin(angle) * radius;
+        if (plane == 0U) return Vec3{center.X + cosine, center.Y + sine, center.Z};
+        if (plane == 1U) return Vec3{center.X + cosine, center.Y, center.Z + sine};
+        return Vec3{center.X, center.Y + cosine, center.Z + sine};
+    };
+    for (std::size_t plane = 0U; plane < 3U; ++plane)
+        for (std::size_t segment = 0U; segment < segmentCount; ++segment)
+        {
+            const float angleA = 2.0F * pi * static_cast<float>(segment) /
+                static_cast<float>(segmentCount);
+            const float angleB = 2.0F * pi * static_cast<float>(segment + 1U) /
+                static_cast<float>(segmentCount);
+            appendSegment(
+                circlePoint(plane, angleA), circlePoint(plane, angleB));
+        }
 }
 
 Asset::Voxel::VoxelPosition ToVoxelPosition(
@@ -462,6 +509,7 @@ void ViewportRenderer::ConfigureHighlights(
     const VoxelPlacementPreviewStyle placementPreviewStyle,
     std::optional<VoxelBoxBounds> boxPreview,
     std::vector<Asset::Voxel::VoxelPosition> linePreview,
+    std::optional<VoxelSpherePreview> spherePreview,
     const Vec3 modelCenter) noexcept
 {
     if (hovered == selected) hovered.reset();
@@ -470,6 +518,7 @@ void ViewportRenderer::ConfigureHighlights(
         placementPreviewStyle_ == placementPreviewStyle &&
         boxPreviewHighlight_ == boxPreview &&
         linePreviewHighlights_ == linePreview &&
+        spherePreviewHighlight_ == spherePreview &&
         modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
         modelCenter_.Z == modelCenter.Z)
     {
@@ -481,10 +530,12 @@ void ViewportRenderer::ConfigureHighlights(
     placementPreviewStyle_ = placementPreviewStyle;
     boxPreviewHighlight_ = boxPreview;
     linePreviewHighlights_ = std::move(linePreview);
+    spherePreviewHighlight_ = spherePreview;
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
         selectedHighlight_.has_value() || placementPreviewHighlight_.has_value() ||
-        boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty();
+        boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
+        spherePreviewHighlight_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
 }
 
@@ -512,6 +563,9 @@ bool ViewportRenderer::EnsureHighlights()
         AppendVoxelOutline(
             vertices, indices, position, modelCenter_,
             ValidPlacementPreviewColor);
+    if (spherePreviewHighlight_)
+        AppendSphereOutline(vertices, indices, *spherePreviewHighlight_,
+            modelCenter_, ValidPlacementPreviewColor);
     if (hoveredHighlight_)
         AppendVoxelOutline(vertices, indices,
             ToVoxelPosition(*hoveredHighlight_), modelCenter_,
@@ -807,7 +861,7 @@ void ViewportRenderer::ClearModel() noexcept
     ConfigureHighlights(
         std::nullopt, std::nullopt, std::nullopt,
         VoxelPlacementPreviewStyle::PencilInvalid,
-        std::nullopt, {}, {});
+        std::nullopt, {}, std::nullopt, {});
 }
 
 void ViewportRenderer::ReleaseHighlights() noexcept

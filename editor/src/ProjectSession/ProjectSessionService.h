@@ -47,7 +47,8 @@ enum class ProjectSessionTool : std::uint8_t
     Eraser,
     Fill,
     Box,
-    Line
+    Line,
+    Sphere
 };
 
 struct ProjectSessionData final

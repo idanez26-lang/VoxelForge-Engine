@@ -221,6 +221,23 @@ void TestLineToolPersistence()
         "Line tool was not restored from the project session.");
 }
 
+void TestSphereToolPersistence()
+{
+    TemporaryProject project;
+    ProjectSessionService service;
+    Require(service.SetProjectRoot(project.Root()),
+        "Project root should be accepted for Sphere session test.");
+    ProjectSessionData session = ValidSession();
+    session.ActiveTool = ProjectSessionTool::Sphere;
+    std::string error;
+    Require(service.Save(session, error),
+        "Sphere session save failed: " + error);
+    const ProjectSessionLoadResult loaded = service.Load();
+    Require(loaded.Loaded() &&
+        loaded.Session.ActiveTool == ProjectSessionTool::Sphere,
+        "Sphere tool was not restored from the project session.");
+}
+
 void TestProjectSwitchAndClose()
 {
     TemporaryProject first;
@@ -251,6 +268,7 @@ int main()
         TestFillToolPersistence();
         TestBoxToolPersistence();
         TestLineToolPersistence();
+        TestSphereToolPersistence();
         TestProjectSwitchAndClose();
         std::cout << "Project session tests passed.\n";
         return 0;

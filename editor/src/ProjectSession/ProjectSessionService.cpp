@@ -229,6 +229,8 @@ ProjectSessionLoadResult ProjectSessionService::Load() const
         ? ProjectSessionTool::Box
         : activeTool == "Line"
         ? ProjectSessionTool::Line
+        : activeTool == "Sphere"
+        ? ProjectSessionTool::Sphere
         : ProjectSessionTool::Pencil;
     const auto paletteIndex = values.find("active_palette_index");
     if (paletteIndex != values.end())
@@ -305,7 +307,9 @@ bool ProjectSessionService::Save(
             : session.ActiveTool == ProjectSessionTool::Box
             ? "Box"
             : session.ActiveTool == ProjectSessionTool::Line
-            ? "Line" : "Pencil") << '\n'
+            ? "Line"
+            : session.ActiveTool == ProjectSessionTool::Sphere
+            ? "Sphere" : "Pencil") << '\n'
         << "active_palette_index="
         << (session.ActivePaletteIndex >= 1U &&
                 session.ActivePaletteIndex <= 255U

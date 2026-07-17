@@ -321,6 +321,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelLineTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelSphereTests
+    Editor/VoxelSphereTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelSphereTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeEditorPalette
+)
+vf_configure_test(VoxelForgeEditorVoxelSphereTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelSphere
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelSphereTests>
+)
+add_executable(
     VoxelForgeEditorVoxelEditHistoryTests
     Editor/VoxelEditHistoryTests.cpp
 )
@@ -616,6 +629,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxelFill
     VoxelForge.Editor.VoxelBox
     VoxelForge.Editor.VoxelLine
+    VoxelForge.Editor.VoxelSphere
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
@@ -743,6 +757,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelLineSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-line-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelSphereSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-sphere-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -770,6 +788,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelFillSmoke
         VoxelForge.Editor.VoxelBoxSmoke
         VoxelForge.Editor.VoxelLineSmoke
+        VoxelForge.Editor.VoxelSphereSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

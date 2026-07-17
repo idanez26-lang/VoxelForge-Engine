@@ -784,6 +784,7 @@ void EditorWorkspace::DrawMainMenuBar()
         {
             if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
             if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
+            if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
             voxelToolState_.SetActiveTool(tool);
             voxelToolInput_.Reset();
             UpdateVoxelHighlights();
@@ -803,6 +804,9 @@ void EditorWorkspace::DrawMainMenuBar()
         if (ImGui::MenuItem(
                 "Line", nullptr, voxelToolState_.IsLineActive()))
             selectVoxelTool(ActiveVoxelTool::Line);
+        if (ImGui::MenuItem(
+                "Sphere", nullptr, voxelToolState_.IsSphereActive()))
+            selectVoxelTool(ActiveVoxelTool::Sphere);
         ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
@@ -1232,6 +1236,7 @@ void EditorWorkspace::DrawScenePanel()
         if (!clicked) return;
         if (tool != ActiveVoxelTool::Box || active) CancelVoxelBox();
         if (tool != ActiveVoxelTool::Line || active) CancelVoxelLine();
+        if (tool != ActiveVoxelTool::Sphere || active) CancelVoxelSphere();
         voxelToolState_.SetActiveTool(active ? ActiveVoxelTool::None : tool);
         voxelToolInput_.Reset();
         UpdateVoxelHighlights();
@@ -1255,6 +1260,10 @@ void EditorWorkspace::DrawScenePanel()
     drawToolButton(
         "/ Line", "/ Line [Active]", "Create a continuous voxel line",
         ActiveVoxelTool::Line, ImVec4(0.18F, 0.48F, 0.56F, 1.0F));
+    ImGui::SameLine();
+    drawToolButton(
+        "( ) Sphere", "( ) Sphere [Active]", "Create a solid voxel sphere",
+        ActiveVoxelTool::Sphere, ImVec4(0.48F, 0.30F, 0.58F, 1.0F));
     ImGui::SameLine();
     ImGui::BeginDisabled(
         !voxelEditHistory_.CanUndo() || voxelEditInProgress_);
@@ -1349,6 +1358,12 @@ void EditorWorkspace::DrawScenePanel()
         {
             CancelVoxelLine();
         }
+        if (voxelToolState_.IsSphereActive() &&
+            voxelSphereInteraction_.IsActive() &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            CancelVoxelSphere();
+        }
         const bool sceneFocused = ImGui::IsWindowFocused(
             ImGuiFocusedFlags_RootAndChildWindows);
         const VoxelCameraInteraction cameraInteraction =
@@ -1400,7 +1415,8 @@ void EditorWorkspace::DrawScenePanel()
                 if (!hoveredHit &&
                     (voxelToolState_.IsPencilActive() ||
                      voxelToolState_.IsBoxActive() ||
-                     voxelToolState_.IsLineActive()))
+                     voxelToolState_.IsLineActive() ||
+                     voxelToolState_.IsSphereActive()))
                 {
                     workplaneHit_ = workplaneService_.Intersect(
                         *document, 0U, *ray.Ray, voxelModelCenter_);
@@ -1433,6 +1449,12 @@ void EditorWorkspace::DrawScenePanel()
         }
         if (voxelToolState_.IsLineActive() && voxelLineInteraction_.IsActive() &&
             voxelLineInteraction_.Update(CurrentTwoPointToolTarget()))
+        {
+            UpdateVoxelHighlights();
+        }
+        if (voxelToolState_.IsSphereActive() &&
+            voxelSphereInteraction_.IsActive() &&
+            voxelSphereInteraction_.Update(CurrentTwoPointToolTarget()))
         {
             UpdateVoxelHighlights();
         }
@@ -1498,6 +1520,24 @@ void EditorWorkspace::DrawScenePanel()
                     }
                 }
             }
+            else if (voxelToolState_.IsSphereActive())
+            {
+                const auto target = CurrentTwoPointToolTarget();
+                if (target)
+                {
+                    if (!voxelSphereInteraction_.IsActive())
+                    {
+                        static_cast<void>(voxelSphereInteraction_.Begin(
+                            *target, voxelDocumentSession_.Generation()));
+                        UpdateVoxelHighlights();
+                    }
+                    else
+                    {
+                        static_cast<void>(voxelSphereInteraction_.Update(target));
+                        static_cast<void>(ApplyVoxelSphere());
+                    }
+                }
+            }
         }
 
         if (!voxelToolState_.IsEditingToolActive() && selectionInputAvailable &&
@@ -1545,6 +1585,7 @@ void EditorWorkspace::DrawScenePanel()
         {
             if (shortcutTool != ActiveVoxelTool::Box) CancelVoxelBox();
             if (shortcutTool != ActiveVoxelTool::Line) CancelVoxelLine();
+            if (shortcutTool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
             voxelToolState_.SetActiveTool(shortcutTool);
             voxelToolInput_.Reset();
             UpdateVoxelHighlights();
@@ -1555,6 +1596,7 @@ void EditorWorkspace::DrawScenePanel()
         {
             if (voxelBoxInteraction_.IsActive()) CancelVoxelBox();
             else if (voxelLineInteraction_.IsActive()) CancelVoxelLine();
+            else if (voxelSphereInteraction_.IsActive()) CancelVoxelSphere();
             else if (voxelSelection_.ClearSelection()) UpdateVoxelHighlights();
         }
     }
@@ -3344,6 +3386,8 @@ bool EditorWorkspace::SaveActiveProjectSession()
         ? ProjectSessionTool::Box
         : voxelToolState_.IsLineActive()
         ? ProjectSessionTool::Line
+        : voxelToolState_.IsSphereActive()
+        ? ProjectSessionTool::Sphere
         : ProjectSessionTool::Pencil;
     session.ActivePaletteIndex =
         paletteService_.ActiveIndex().value_or(
@@ -3380,6 +3424,8 @@ void EditorWorkspace::RestoreActiveProjectSession()
             ? ActiveVoxelTool::Box
             : loaded.Session.ActiveTool == ProjectSessionTool::Line
             ? ActiveVoxelTool::Line
+            : loaded.Session.ActiveTool == ProjectSessionTool::Sphere
+            ? ActiveVoxelTool::Sphere
             : ActiveVoxelTool::Pencil);
     if (loaded.Session.LastModel.empty()) return;
 
@@ -6304,6 +6350,81 @@ bool EditorWorkspace::VoxelLineSmokePassed() const noexcept
         voxelLineSmokeSaved_ && voxelLineSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunVoxelSphereSmokeStep(const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"SphereSmoke", {24U, 24U, 24U}});
+        voxelSphereSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Sphere);
+        voxelSphereSmokeCreated_ = flow.Ready() && document != nullptr &&
+            paletteService_.SelectColor(31U);
+        if (!voxelSphereSmokeCreated_) return false;
+        const auto expected = VoxelSphereService::CalculatePositions(
+            *document, 0U, {12, 8, 12}, {16, 8, 12});
+        voxelSphereSmokeApplied_ = voxelSphereInteraction_.Begin(
+                {12, 8, 12}, voxelDocumentSession_.Generation()) &&
+            voxelSphereInteraction_.Update(
+                Asset::Voxel::VoxelPosition{16, 8, 12}) &&
+            ApplyVoxelSphere() && !expected.empty() &&
+            document->GetVoxelCount() == expected.size() &&
+            document->GetRevision() == 1U &&
+            document->GetVoxel({12, 8, 12})->PaletteIndex == 31U &&
+            document->GetVoxel({16, 8, 12})->PaletteIndex == 31U &&
+            voxelEditHistory_.UndoCount() == 1U &&
+            !voxelSphereInteraction_.IsActive();
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelSphereSmokeApplied_) return false;
+        UndoCommand();
+        voxelSphereSmokeUndone_ = document->GetVoxelCount() == 0U &&
+            document->GetRevision() == 2U &&
+            voxelEditHistory_.RedoCount() == 1U;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelSphereSmokeUndone_) return false;
+        RedoCommand();
+        voxelSphereSmokeRedone_ = document->GetVoxelCount() > 0U &&
+            document->GetRevision() == 3U &&
+            voxelEditHistory_.RedoCount() == 0U;
+    }
+    else if (frame == 3U)
+    {
+        voxelSphereSmokeSaved_ = voxelSphereSmokeRedone_ && SaveVoxelModel() &&
+            std::filesystem::is_regular_file(voxelSphereSmokePath_) &&
+            document && !document->IsDirty();
+    }
+    else if (frame == 4U)
+    {
+        if (!voxelSphereSmokeSaved_) return false;
+        CloseProject();
+        voxelSphereSmokeCleaned_ = !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !voxelSphereInteraction_.IsActive() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelSphereSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelSphereSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelSphereSmokePassed();
+}
+
+bool EditorWorkspace::VoxelSphereSmokePassed() const noexcept
+{
+    return voxelSphereSmokeCreated_ && voxelSphereSmokeApplied_ &&
+        voxelSphereSmokeUndone_ && voxelSphereSmokeRedone_ &&
+        voxelSphereSmokeSaved_ && voxelSphereSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
 {
     if (frame == 1U) return false;
@@ -7026,6 +7147,13 @@ void EditorWorkspace::CancelVoxelLine() noexcept
     UpdateVoxelHighlights();
 }
 
+void EditorWorkspace::CancelVoxelSphere() noexcept
+{
+    if (!voxelSphereInteraction_.IsActive()) return;
+    voxelSphereInteraction_.Cancel();
+    UpdateVoxelHighlights();
+}
+
 bool EditorWorkspace::ApplyVoxelBox()
 {
     if (voxelEditInProgress_ || !voxelBoxInteraction_.CornerA() ||
@@ -7121,6 +7249,56 @@ bool EditorWorkspace::ApplyVoxelLine()
     }
     if (result.Code == VoxelLineResultCode::Failed)
         AddConsoleMessage("[Edit] Line failed: " + result.Error);
+    return false;
+}
+
+bool EditorWorkspace::ApplyVoxelSphere()
+{
+    if (voxelEditInProgress_ || !voxelSphereInteraction_.Center() ||
+        !voxelSphereInteraction_.RadiusPoint() ||
+        voxelSphereInteraction_.DocumentGeneration() !=
+            voxelDocumentSession_.Generation())
+    {
+        CancelVoxelSphere();
+        return false;
+    }
+    voxelEditInProgress_ = true;
+    VoxelSphereResult result;
+    const auto activeColor = paletteService_.ActiveColor();
+    try
+    {
+        result = VoxelSphereService::Apply({
+            static_cast<VoxelEditSession*>(this),
+            voxelDocumentSession_.ActiveDocument(), 0U,
+            *voxelSphereInteraction_.Center(),
+            *voxelSphereInteraction_.RadiusPoint(),
+            activeColor ? activeColor->Index : 0U,
+            !voxelToolState_.IsSphereActive(), &voxelEditHistory_});
+    }
+    catch (const std::exception& exception)
+    {
+        result.Code = VoxelSphereResultCode::Failed;
+        result.Error = exception.what();
+    }
+    catch (...)
+    {
+        result.Code = VoxelSphereResultCode::Failed;
+        result.Error = "Unknown Sphere failure.";
+    }
+    voxelEditInProgress_ = false;
+    voxelSphereInteraction_.Cancel();
+    lastVoxelSphereResult_ = result;
+    UpdateVoxelHighlights();
+    if (result.Code == VoxelSphereResultCode::Applied)
+    {
+        static_cast<void>(paletteService_.RecordActiveColorUsage());
+        AddConsoleMessage(
+            "[Edit] Created solid sphere with " +
+            std::to_string(result.ChangedVoxelCount) + " voxel(s)." );
+        return true;
+    }
+    if (result.Code == VoxelSphereResultCode::Failed)
+        AddConsoleMessage("[Edit] Sphere failed: " + result.Error);
     return false;
 }
 
@@ -7309,6 +7487,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<Asset::Voxel::VoxelPosition> placementPosition;
     std::optional<VoxelBoxBounds> boxPreview;
     std::vector<Asset::Voxel::VoxelPosition> linePreview;
+    std::optional<VoxelSpherePreview> spherePreview;
     VoxelPlacementPreviewStyle placementStyle =
         VoxelPlacementPreviewStyle::PencilInvalid;
     if (voxelToolState_.IsPencilActive())
@@ -7378,6 +7557,19 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             }
         }
     }
+    else if (voxelToolState_.IsSphereActive())
+    {
+        voxelPlacementPreview_ = {};
+        if (voxelSphereInteraction_.Center() &&
+            voxelSphereInteraction_.RadiusPoint())
+        {
+            spherePreview = VoxelSpherePreview{
+                *voxelSphereInteraction_.Center(),
+                VoxelSphereService::CalculateRadius(
+                    *voxelSphereInteraction_.Center(),
+                    *voxelSphereInteraction_.RadiusPoint())};
+        }
+    }
     else
     {
         voxelPlacementPreview_ = {};
@@ -7401,6 +7593,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         placementStyle,
         boxPreview,
         std::move(linePreview),
+        spherePreview,
         voxelModelCenter_);
 }
 
@@ -7428,6 +7621,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     voxelToolSmokeInput_.Reset();
     voxelBoxInteraction_.Cancel();
     voxelLineInteraction_.Cancel();
+    voxelSphereInteraction_.Cancel();
     voxelPlacementPreview_ = {};
     workplaneHit_.reset();
     currentViewportRectangle_ = {};
@@ -7440,6 +7634,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     lastVoxelFillResult_.reset();
     lastVoxelBoxResult_.reset();
     lastVoxelLineResult_.reset();
+    lastVoxelSphereResult_.reset();
     voxelEditInProgress_ = false;
     voxelModelCenter_ = {};
     voxelViewportRendered_ = false;

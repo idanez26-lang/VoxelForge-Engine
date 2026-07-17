@@ -190,6 +190,7 @@ target_sources(
         src/VoxelTools/VoxelBoxService.cpp
         src/VoxelTools/VoxelFillService.cpp
         src/VoxelTools/VoxelLineService.cpp
+        src/VoxelTools/VoxelSphereService.cpp
         src/VoxelTools/VoxelPencilInput.cpp
         src/VoxelTools/VoxelPencilPreview.cpp
         src/VoxelTools/VoxelPencilTool.cpp

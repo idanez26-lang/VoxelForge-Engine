@@ -12,7 +12,8 @@ enum class ActiveVoxelTool : std::uint8_t
     Eraser,
     Fill,
     Box,
-    Line
+    Line,
+    Sphere
 };
 
 [[nodiscard]] const char* ActiveVoxelToolName(
@@ -30,6 +31,7 @@ public:
     [[nodiscard]] bool IsFillActive() const noexcept;
     [[nodiscard]] bool IsBoxActive() const noexcept;
     [[nodiscard]] bool IsLineActive() const noexcept;
+    [[nodiscard]] bool IsSphereActive() const noexcept;
     [[nodiscard]] bool IsEditingToolActive() const noexcept;
 
 private:

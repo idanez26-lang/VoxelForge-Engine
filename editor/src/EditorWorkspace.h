@@ -37,6 +37,7 @@
 #include "VoxelTools/VoxelBoxService.h"
 #include "VoxelTools/VoxelFillService.h"
 #include "VoxelTools/VoxelLineService.h"
+#include "VoxelTools/VoxelSphereService.h"
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
 #include "VoxelTools/VoxelPencilTool.h"
@@ -155,6 +156,8 @@ public:
     [[nodiscard]] bool VoxelBoxSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelLineSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelLineSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelSphereSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelSphereSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -246,10 +249,12 @@ private:
     [[nodiscard]] bool ApplyVoxelFill();
     [[nodiscard]] bool ApplyVoxelBox();
     [[nodiscard]] bool ApplyVoxelLine();
+    [[nodiscard]] bool ApplyVoxelSphere();
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
         CurrentTwoPointToolTarget() const noexcept;
     void CancelVoxelBox() noexcept;
     void CancelVoxelLine() noexcept;
+    void CancelVoxelSphere() noexcept;
 
     [[nodiscard]] std::uint64_t VoxelModelGeneration() const noexcept override;
     [[nodiscard]] Voxel::VoxelModel* ActiveVoxelModel() noexcept override;
@@ -287,6 +292,7 @@ private:
     VoxelToolInputController voxelToolSmokeInput_;
     VoxelBoxInteraction voxelBoxInteraction_;
     VoxelLineInteraction voxelLineInteraction_;
+    VoxelSphereInteraction voxelSphereInteraction_;
     VoxelPlacementPreview voxelPlacementPreview_;
     std::optional<WorkplaneHit> workplaneHit_;
     VoxelEditHistory voxelEditHistory_;
@@ -296,6 +302,7 @@ private:
     std::optional<VoxelFillResult> lastVoxelFillResult_;
     std::optional<VoxelBoxResult> lastVoxelBoxResult_;
     std::optional<VoxelLineResult> lastVoxelLineResult_;
+    std::optional<VoxelSphereResult> lastVoxelSphereResult_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -461,6 +468,13 @@ private:
     bool voxelLineSmokeRedone_ = false;
     bool voxelLineSmokeSaved_ = false;
     bool voxelLineSmokeCleaned_ = false;
+    std::filesystem::path voxelSphereSmokePath_;
+    bool voxelSphereSmokeCreated_ = false;
+    bool voxelSphereSmokeApplied_ = false;
+    bool voxelSphereSmokeUndone_ = false;
+    bool voxelSphereSmokeRedone_ = false;
+    bool voxelSphereSmokeSaved_ = false;
+    bool voxelSphereSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

@@ -3,6 +3,7 @@
 #include "EditorCamera.h"
 #include "VoxelSelection/VoxelRaycast.h"
 #include "VoxelTools/VoxelBoxService.h"
+#include "VoxelTools/VoxelSphereService.h"
 
 #include "VoxelForge/Mesh/MeshData.h"
 #include "VoxelForge/Asset/Voxel/VoxelDocument.h"
@@ -48,6 +49,7 @@ public:
         VoxelPlacementPreviewStyle placementPreviewStyle,
         std::optional<VoxelBoxBounds> boxPreview,
         std::vector<Asset::Voxel::VoxelPosition> linePreview,
+        std::optional<VoxelSpherePreview> spherePreview,
         Vec3 modelCenter) noexcept;
     void ClearModel() noexcept;
     [[nodiscard]] bool Render(
@@ -114,6 +116,7 @@ private:
         VoxelPlacementPreviewStyle::PencilInvalid;
     std::optional<VoxelBoxBounds> boxPreviewHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
+    std::optional<VoxelSpherePreview> spherePreviewHighlight_;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;
     std::size_t highlightRenderCount_ = 0U;
