@@ -34,6 +34,7 @@
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelHistory/VoxelHistoryInput.h"
 #include "VoxelTools/VoxelEraserTool.h"
+#include "VoxelTools/VoxelFillService.h"
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
 #include "VoxelTools/VoxelPencilTool.h"
@@ -146,6 +147,8 @@ public:
     [[nodiscard]] bool DirectCreationFlowSmokePassed() const noexcept;
     [[nodiscard]] bool RunPaletteUiSmokeStep(std::size_t frame);
     [[nodiscard]] bool PaletteUiSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelFillSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelFillSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -234,6 +237,7 @@ private:
     [[nodiscard]] bool AddAdjacentVoxel();
     [[nodiscard]] bool ApplyVoxelPencil();
     [[nodiscard]] bool ApplyVoxelEraser();
+    [[nodiscard]] bool ApplyVoxelFill();
 
     [[nodiscard]] std::uint64_t VoxelModelGeneration() const noexcept override;
     [[nodiscard]] Voxel::VoxelModel* ActiveVoxelModel() noexcept override;
@@ -275,6 +279,7 @@ private:
     VoxelHistoryInputController voxelHistoryInput_;
     std::optional<VoxelToolResult> lastVoxelToolResult_;
     std::optional<VoxelEraserResult> lastVoxelEraserResult_;
+    std::optional<VoxelFillResult> lastVoxelFillResult_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -419,6 +424,13 @@ private:
     bool paletteSmokeSavedAndClosed_ = false;
     bool paletteSmokeRestored_ = false;
     bool paletteSmokeCleaned_ = false;
+    std::filesystem::path voxelFillSmokePath_;
+    bool voxelFillSmokeSeeded_ = false;
+    bool voxelFillSmokeApplied_ = false;
+    bool voxelFillSmokeUndone_ = false;
+    bool voxelFillSmokeRedone_ = false;
+    bool voxelFillSmokeSaved_ = false;
+    bool voxelFillSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

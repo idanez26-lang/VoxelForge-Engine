@@ -187,6 +187,7 @@ target_sources(
         src/VoxelHistory/VoxelEditOperation.cpp
         src/VoxelHistory/VoxelHistoryInput.cpp
         src/VoxelTools/VoxelEraserTool.cpp
+        src/VoxelTools/VoxelFillService.cpp
         src/VoxelTools/VoxelPencilInput.cpp
         src/VoxelTools/VoxelPencilPreview.cpp
         src/VoxelTools/VoxelPencilTool.cpp

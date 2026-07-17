@@ -780,6 +780,22 @@ void EditorWorkspace::DrawMainMenuBar()
 
     if (ImGui::BeginMenu("Tools"))
     {
+        const auto selectVoxelTool = [this](const ActiveVoxelTool tool)
+        {
+            voxelToolState_.SetActiveTool(tool);
+            voxelToolInput_.Reset();
+            UpdateVoxelHighlights();
+        };
+        if (ImGui::MenuItem(
+                "Pencil", "P", voxelToolState_.IsPencilActive()))
+            selectVoxelTool(ActiveVoxelTool::Pencil);
+        if (ImGui::MenuItem(
+                "Eraser", "E", voxelToolState_.IsEraserActive()))
+            selectVoxelTool(ActiveVoxelTool::Eraser);
+        if (ImGui::MenuItem(
+                "Fill", nullptr, voxelToolState_.IsFillActive()))
+            selectVoxelTool(ActiveVoxelTool::Fill);
+        ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
             AddConsoleMessage("Voxel Editor is not available yet.");
@@ -1218,6 +1234,10 @@ void EditorWorkspace::DrawScenePanel()
         "Eraser", "Eraser [Active]", "Activate the Eraser tool (E)",
         ActiveVoxelTool::Eraser, ImVec4(0.58F, 0.20F, 0.08F, 1.0F));
     ImGui::SameLine();
+    drawToolButton(
+        "Fill", "Fill [Active]", "Activate the Fill tool",
+        ActiveVoxelTool::Fill, ImVec4(0.20F, 0.38F, 0.60F, 1.0F));
+    ImGui::SameLine();
     ImGui::BeginDisabled(
         !voxelEditHistory_.CanUndo() || voxelEditInProgress_);
     if (ImGui::Button("Undo")) UndoCommand();
@@ -1399,6 +1419,8 @@ void EditorWorkspace::DrawScenePanel()
                 static_cast<void>(ApplyVoxelPencil());
             else if (voxelToolState_.IsEraserActive())
                 static_cast<void>(ApplyVoxelEraser());
+            else if (voxelToolState_.IsFillActive())
+                static_cast<void>(ApplyVoxelFill());
         }
 
         if (!voxelToolState_.IsEditingToolActive() && selectionInputAvailable &&
@@ -3233,7 +3255,10 @@ bool EditorWorkspace::SaveActiveProjectSession()
         ToSessionVector(camera.Target),
         ToSessionView(camera.View)};
     session.ActiveTool = voxelToolState_.IsEraserActive()
-        ? ProjectSessionTool::Eraser : ProjectSessionTool::Pencil;
+        ? ProjectSessionTool::Eraser
+        : voxelToolState_.IsFillActive()
+        ? ProjectSessionTool::Fill
+        : ProjectSessionTool::Pencil;
     session.ActivePaletteIndex =
         paletteService_.ActiveIndex().value_or(
             PaletteService::FirstSelectableIndex);
@@ -3262,7 +3287,10 @@ void EditorWorkspace::RestoreActiveProjectSession()
 
     voxelToolState_.SetActiveTool(
         loaded.Session.ActiveTool == ProjectSessionTool::Eraser
-            ? ActiveVoxelTool::Eraser : ActiveVoxelTool::Pencil);
+            ? ActiveVoxelTool::Eraser
+            : loaded.Session.ActiveTool == ProjectSessionTool::Fill
+            ? ActiveVoxelTool::Fill
+            : ActiveVoxelTool::Pencil);
     if (loaded.Session.LastModel.empty()) return;
 
     const std::filesystem::path modelPath =
@@ -5944,6 +5972,95 @@ bool EditorWorkspace::PaletteUiSmokePassed() const noexcept
         paletteSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunVoxelFillSmokeStep(const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"FillSmoke", {16U, 16U, 16U}});
+        voxelFillSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || document == nullptr) return false;
+        const std::vector<VoxelChange> seed{
+            {0U, {1, 0, 1}, false, 0U, true, 2U},
+            {0U, {2, 0, 1}, false, 0U, true, 2U},
+            {0U, {1, 0, 2}, false, 0U, true, 2U},
+            {0U, {2, 0, 2}, false, 0U, true, 2U},
+            {0U, {8, 0, 8}, false, 0U, true, 3U},
+            {0U, {9, 0, 8}, false, 0U, true, 3U},
+            {0U, {8, 0, 9}, false, 0U, true, 3U},
+            {0U, {9, 0, 9}, false, 0U, true, 3U}};
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Draw Fill Smoke Zones", seed});
+        voxelFillSmokeSeeded_ = seeded && document->GetVoxelCount() == 8U &&
+            document->GetRevision() == 1U;
+        if (!voxelFillSmokeSeeded_ || !paletteService_.SelectColor(4U))
+            return false;
+        VoxelRaycastHit hit;
+        hit.Coordinates = {1U, 0U, 1U};
+        hit.Face = VoxelHitFace::PositiveY;
+        hit.SubModelIndex = 0U;
+        hit.DocumentRevision = document->GetRevision();
+        static_cast<void>(voxelSelection_.SetHovered(hit));
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Fill);
+        voxelFillSmokeApplied_ = ApplyVoxelFill() &&
+            document->GetRevision() == 2U &&
+            document->GetVoxel({1, 0, 1})->PaletteIndex == 4U &&
+            document->GetVoxel({2, 0, 2})->PaletteIndex == 4U &&
+            document->GetVoxel({8, 0, 8})->PaletteIndex == 3U &&
+            voxelEditHistory_.UndoCount() == 2U && lastVoxelFillResult_ &&
+            lastVoxelFillResult_->ChangedVoxelCount == 4U;
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelFillSmokeApplied_) return false;
+        UndoCommand();
+        voxelFillSmokeUndone_ = document->GetRevision() == 3U &&
+            document->GetVoxel({1, 0, 1})->PaletteIndex == 2U &&
+            document->GetVoxel({8, 0, 8})->PaletteIndex == 3U &&
+            voxelEditHistory_.RedoCount() == 1U;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelFillSmokeUndone_) return false;
+        RedoCommand();
+        voxelFillSmokeRedone_ = document->GetRevision() == 4U &&
+            document->GetVoxel({1, 0, 1})->PaletteIndex == 4U &&
+            document->GetVoxel({8, 0, 8})->PaletteIndex == 3U &&
+            voxelEditHistory_.RedoCount() == 0U;
+    }
+    else if (frame == 3U)
+    {
+        voxelFillSmokeSaved_ = voxelFillSmokeRedone_ && SaveVoxelModel() &&
+            std::filesystem::is_regular_file(voxelFillSmokePath_) &&
+            document && !document->IsDirty();
+    }
+    else if (frame == 4U)
+    {
+        if (!voxelFillSmokeSaved_) return false;
+        CloseProject();
+        voxelFillSmokeCleaned_ = !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelFillSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelFillSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelFillSmokePassed();
+}
+
+bool EditorWorkspace::VoxelFillSmokePassed() const noexcept
+{
+    return voxelFillSmokeSeeded_ && voxelFillSmokeApplied_ &&
+        voxelFillSmokeUndone_ && voxelFillSmokeRedone_ &&
+        voxelFillSmokeSaved_ && voxelFillSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
 {
     if (frame == 1U) return false;
@@ -6593,6 +6710,52 @@ bool EditorWorkspace::ApplyVoxelEraser()
     return false;
 }
 
+bool EditorWorkspace::ApplyVoxelFill()
+{
+    if (voxelEditInProgress_) return false;
+    voxelEditInProgress_ = true;
+    VoxelFillResult result;
+    const std::optional<PaletteColorSelection> activeColor =
+        paletteService_.ActiveColor();
+    try
+    {
+        result = VoxelFillService::Apply({
+            static_cast<VoxelEditSession*>(this),
+            voxelDocumentSession_.ActiveDocument(),
+            0U,
+            voxelSelection_.Hovered(),
+            activeColor ? activeColor->Index : 0U,
+            !voxelToolState_.IsFillActive(),
+            &voxelEditHistory_});
+    }
+    catch (const std::exception& exception)
+    {
+        result.Code = VoxelFillResultCode::Failed;
+        result.Error = exception.what();
+    }
+    catch (...)
+    {
+        result.Code = VoxelFillResultCode::Failed;
+        result.Error = "Unknown Fill failure.";
+    }
+    voxelEditInProgress_ = false;
+    lastVoxelFillResult_ = result;
+
+    if (result.Code == VoxelFillResultCode::Applied)
+    {
+        static_cast<void>(paletteService_.RecordActiveColorUsage());
+        AddConsoleMessage(
+            "[Edit] Filled " + std::to_string(result.ChangedVoxelCount) +
+            " voxel(s) from palette index " +
+            std::to_string(result.PreviousPaletteIndex) + " to " +
+            std::to_string(result.NewPaletteIndex) + ".");
+        return true;
+    }
+    if (result.Code == VoxelFillResultCode::Failed)
+        AddConsoleMessage("[Edit] Fill failed: " + result.Error);
+    return false;
+}
+
 std::uint64_t EditorWorkspace::VoxelModelGeneration() const noexcept
 {
     return voxelModelGeneration_;
@@ -6810,6 +6973,10 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         placementStyle = VoxelPlacementPreviewStyle::Eraser;
         if (placementPosition) hoveredCoordinates.reset();
     }
+    else if (voxelToolState_.IsFillActive())
+    {
+        voxelPlacementPreview_ = {};
+    }
     else
     {
         voxelPlacementPreview_ = {};
@@ -6865,6 +7032,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     firstCreationExperience_.Hide();
     lastVoxelToolResult_.reset();
     lastVoxelEraserResult_.reset();
+    lastVoxelFillResult_.reset();
     voxelEditInProgress_ = false;
     voxelModelCenter_ = {};
     voxelViewportRendered_ = false;

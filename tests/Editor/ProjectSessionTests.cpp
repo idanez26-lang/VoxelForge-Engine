@@ -170,6 +170,23 @@ void TestCameraRestore()
         "Rejected camera state must not alter the current camera.");
 }
 
+void TestFillToolPersistence()
+{
+    TemporaryProject project;
+    ProjectSessionService service;
+    Require(service.SetProjectRoot(project.Root()),
+        "Project root should be accepted for Fill session test.");
+    ProjectSessionData session = ValidSession();
+    session.ActiveTool = ProjectSessionTool::Fill;
+    std::string error;
+    Require(service.Save(session, error),
+        "Fill session save failed: " + error);
+    const ProjectSessionLoadResult loaded = service.Load();
+    Require(loaded.Loaded() &&
+        loaded.Session.ActiveTool == ProjectSessionTool::Fill,
+        "Fill tool was not restored from the project session.");
+}
+
 void TestProjectSwitchAndClose()
 {
     TemporaryProject first;
@@ -197,6 +214,7 @@ int main()
         TestAbsentSaveAndReopen();
         TestValidationAndFallbacks();
         TestCameraRestore();
+        TestFillToolPersistence();
         TestProjectSwitchAndClose();
         std::cout << "Project session tests passed.\n";
         return 0;

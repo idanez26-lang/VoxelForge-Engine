@@ -10,6 +10,7 @@ const char* ActiveVoxelToolName(const ActiveVoxelTool tool) noexcept
     case ActiveVoxelTool::None: return "None";
     case ActiveVoxelTool::Pencil: return "Pencil";
     case ActiveVoxelTool::Eraser: return "Eraser";
+    case ActiveVoxelTool::Fill: return "Fill";
     }
     return "None";
 }
@@ -39,10 +40,16 @@ bool VoxelToolState::IsEraserActive() const noexcept
     return activeTool_ == ActiveVoxelTool::Eraser;
 }
 
+bool VoxelToolState::IsFillActive() const noexcept
+{
+    return activeTool_ == ActiveVoxelTool::Fill;
+}
+
 bool VoxelToolState::IsEditingToolActive() const noexcept
 {
     return activeTool_ == ActiveVoxelTool::Pencil ||
-        activeTool_ == ActiveVoxelTool::Eraser;
+        activeTool_ == ActiveVoxelTool::Eraser ||
+        activeTool_ == ActiveVoxelTool::Fill;
 }
 
 ActiveVoxelTool ResolveVoxelToolShortcut(

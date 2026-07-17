@@ -44,7 +44,8 @@ struct ProjectSessionCamera final
 enum class ProjectSessionTool : std::uint8_t
 {
     Pencil,
-    Eraser
+    Eraser,
+    Fill
 };
 
 struct ProjectSessionData final

@@ -282,6 +282,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelEraserTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelFillTests
+    Editor/VoxelFillTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelFillTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeEditorPalette
+)
+vf_configure_test(VoxelForgeEditorVoxelFillTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelFill
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelFillTests>
+)
+add_executable(
     VoxelForgeEditorVoxelEditHistoryTests
     Editor/VoxelEditHistoryTests.cpp
 )
@@ -574,6 +587,7 @@ set_tests_properties(
     VoxelForge.Editor.AddVoxel
     VoxelForge.Editor.VoxelPencil
     VoxelForge.Editor.VoxelEraser
+    VoxelForge.Editor.VoxelFill
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
@@ -689,6 +703,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.PaletteUiSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --palette-ui-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelFillSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-fill-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -713,6 +731,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.ProjectSessionRestoreSmoke
         VoxelForge.Editor.DirectCreationFlowSmoke
         VoxelForge.Editor.PaletteUiSmoke
+        VoxelForge.Editor.VoxelFillSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

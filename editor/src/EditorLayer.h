@@ -62,6 +62,7 @@ public:
         bool projectSessionRestoreSmokeTest = false,
         bool directCreationFlowSmokeTest = false,
         bool paletteUiSmokeTest = false,
+        bool voxelFillSmokeTest = false,
         std::filesystem::path imguiIniPathOverride = {});
 
     void OnAttach() override;
@@ -131,6 +132,7 @@ private:
     bool projectSessionRestoreSmokeTest_ = false;
     bool directCreationFlowSmokeTest_ = false;
     bool paletteUiSmokeTest_ = false;
+    bool voxelFillSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

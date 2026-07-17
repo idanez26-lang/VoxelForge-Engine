@@ -45,6 +45,7 @@ constexpr std::size_t PersistentWorkplaneSmokeTestFrameCount = 10;
 constexpr std::size_t ProjectSessionRestoreSmokeTestFrameCount = 6;
 constexpr std::size_t DirectCreationFlowSmokeTestFrameCount = 6;
 constexpr std::size_t PaletteUiSmokeTestFrameCount = 6;
+constexpr std::size_t VoxelFillSmokeTestFrameCount = 6;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -76,6 +77,7 @@ struct CommandLine final
     bool ProjectSessionRestoreSmokeTest = false;
     bool DirectCreationFlowSmokeTest = false;
     bool PaletteUiSmokeTest = false;
+    bool VoxelFillSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -135,6 +137,7 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.DirectCreationFlowSmokeTest |=
             argument == "--direct-creation-flow-smoke-test";
         result.PaletteUiSmokeTest |= argument == "--palette-ui-smoke-test";
+        result.VoxelFillSmokeTest |= argument == "--voxel-fill-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -362,6 +365,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.ProjectSessionRestoreSmokeTest ||
             commandLine.DirectCreationFlowSmokeTest ||
             commandLine.PaletteUiSmokeTest ||
+            commandLine.VoxelFillSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         const bool isolatedTest = commandLine.SmokeTest || viewportTest;
         if (isolatedTest && !viewportFixture.Prepare())
@@ -379,7 +383,8 @@ int main(const int argumentCount, char* arguments[])
              commandLine.PersistentWorkplaneSmokeTest ||
              commandLine.ProjectSessionRestoreSmokeTest ||
              commandLine.DirectCreationFlowSmokeTest ||
-             commandLine.PaletteUiSmokeTest
+             commandLine.PaletteUiSmokeTest ||
+             commandLine.VoxelFillSmokeTest
                 ? viewportFixture.CreateEmptyProject(projectManager)
                 : viewportFixture.Create(
                     projectManager,
@@ -456,6 +461,8 @@ int main(const int argumentCount, char* arguments[])
                     ? DirectCreationFlowSmokeTestFrameCount
                     : commandLine.PaletteUiSmokeTest
                     ? PaletteUiSmokeTestFrameCount
+                    : commandLine.VoxelFillSmokeTest
+                    ? VoxelFillSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -486,7 +493,8 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.PersistentWorkplaneSmokeTest ||
                     commandLine.ProjectSessionRestoreSmokeTest ||
                     commandLine.DirectCreationFlowSmokeTest ||
-                    commandLine.PaletteUiSmokeTest,
+                    commandLine.PaletteUiSmokeTest ||
+                    commandLine.VoxelFillSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -517,6 +525,7 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.ProjectSessionRestoreSmokeTest,
                 commandLine.DirectCreationFlowSmokeTest,
                 commandLine.PaletteUiSmokeTest,
+                commandLine.VoxelFillSmokeTest,
                 isolatedTest ? viewportFixture.ImGuiIniPath()
                              : std::filesystem::path{});
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =

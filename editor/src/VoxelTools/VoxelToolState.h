@@ -9,7 +9,8 @@ enum class ActiveVoxelTool : std::uint8_t
 {
     None,
     Pencil,
-    Eraser
+    Eraser,
+    Fill
 };
 
 [[nodiscard]] const char* ActiveVoxelToolName(
@@ -24,6 +25,7 @@ public:
     [[nodiscard]] ActiveVoxelTool ActiveTool() const noexcept;
     [[nodiscard]] bool IsPencilActive() const noexcept;
     [[nodiscard]] bool IsEraserActive() const noexcept;
+    [[nodiscard]] bool IsFillActive() const noexcept;
     [[nodiscard]] bool IsEditingToolActive() const noexcept;
 
 private:
