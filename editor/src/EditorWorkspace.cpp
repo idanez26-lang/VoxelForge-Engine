@@ -782,6 +782,8 @@ void EditorWorkspace::DrawMainMenuBar()
     {
         const auto selectVoxelTool = [this](const ActiveVoxelTool tool)
         {
+            if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
+            if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
             voxelToolState_.SetActiveTool(tool);
             voxelToolInput_.Reset();
             UpdateVoxelHighlights();
@@ -795,6 +797,12 @@ void EditorWorkspace::DrawMainMenuBar()
         if (ImGui::MenuItem(
                 "Fill", nullptr, voxelToolState_.IsFillActive()))
             selectVoxelTool(ActiveVoxelTool::Fill);
+        if (ImGui::MenuItem(
+                "Box", nullptr, voxelToolState_.IsBoxActive()))
+            selectVoxelTool(ActiveVoxelTool::Box);
+        if (ImGui::MenuItem(
+                "Line", nullptr, voxelToolState_.IsLineActive()))
+            selectVoxelTool(ActiveVoxelTool::Line);
         ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
@@ -1222,6 +1230,8 @@ void EditorWorkspace::DrawScenePanel()
         if (active) ImGui::PopStyleColor();
         DrawTooltip(tooltip);
         if (!clicked) return;
+        if (tool != ActiveVoxelTool::Box || active) CancelVoxelBox();
+        if (tool != ActiveVoxelTool::Line || active) CancelVoxelLine();
         voxelToolState_.SetActiveTool(active ? ActiveVoxelTool::None : tool);
         voxelToolInput_.Reset();
         UpdateVoxelHighlights();
@@ -1237,6 +1247,14 @@ void EditorWorkspace::DrawScenePanel()
     drawToolButton(
         "Fill", "Fill [Active]", "Activate the Fill tool",
         ActiveVoxelTool::Fill, ImVec4(0.20F, 0.38F, 0.60F, 1.0F));
+    ImGui::SameLine();
+    drawToolButton(
+        "[ ] Box", "[ ] Box [Active]", "Create a solid voxel box",
+        ActiveVoxelTool::Box, ImVec4(0.45F, 0.30F, 0.62F, 1.0F));
+    ImGui::SameLine();
+    drawToolButton(
+        "/ Line", "/ Line [Active]", "Create a continuous voxel line",
+        ActiveVoxelTool::Line, ImVec4(0.18F, 0.48F, 0.56F, 1.0F));
     ImGui::SameLine();
     ImGui::BeginDisabled(
         !voxelEditHistory_.CanUndo() || voxelEditInProgress_);
@@ -1321,6 +1339,16 @@ void EditorWorkspace::DrawScenePanel()
 
         const bool imageHovered = ImGui::IsItemHovered();
         const ImGuiIO& io = ImGui::GetIO();
+        if (voxelToolState_.IsBoxActive() && voxelBoxInteraction_.IsActive() &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            CancelVoxelBox();
+        }
+        if (voxelToolState_.IsLineActive() && voxelLineInteraction_.IsActive() &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            CancelVoxelLine();
+        }
         const bool sceneFocused = ImGui::IsWindowFocused(
             ImGuiFocusedFlags_RootAndChildWindows);
         const VoxelCameraInteraction cameraInteraction =
@@ -1369,7 +1397,10 @@ void EditorWorkspace::DrawScenePanel()
                     CenteredVoxelModelTransform(voxelModelCenter_);
                 hoveredHit = RaycastVoxelDocument(
                     *document, *ray.Ray, options);
-                if (!hoveredHit && voxelToolState_.IsPencilActive())
+                if (!hoveredHit &&
+                    (voxelToolState_.IsPencilActive() ||
+                     voxelToolState_.IsBoxActive() ||
+                     voxelToolState_.IsLineActive()))
                 {
                     workplaneHit_ = workplaneService_.Intersect(
                         *document, 0U, *ray.Ray, voxelModelCenter_);
@@ -1392,6 +1423,16 @@ void EditorWorkspace::DrawScenePanel()
         }
         if (voxelSelection_.SetHovered(pickingState, std::move(hoveredHit)) ||
             previousWorkplaneHit != workplaneHit_)
+        {
+            UpdateVoxelHighlights();
+        }
+        if (voxelToolState_.IsBoxActive() && voxelBoxInteraction_.IsActive() &&
+            voxelBoxInteraction_.Update(CurrentTwoPointToolTarget()))
+        {
+            UpdateVoxelHighlights();
+        }
+        if (voxelToolState_.IsLineActive() && voxelLineInteraction_.IsActive() &&
+            voxelLineInteraction_.Update(CurrentTwoPointToolTarget()))
         {
             UpdateVoxelHighlights();
         }
@@ -1421,6 +1462,42 @@ void EditorWorkspace::DrawScenePanel()
                 static_cast<void>(ApplyVoxelEraser());
             else if (voxelToolState_.IsFillActive())
                 static_cast<void>(ApplyVoxelFill());
+            else if (voxelToolState_.IsBoxActive())
+            {
+                const auto target = CurrentTwoPointToolTarget();
+                if (target)
+                {
+                    if (!voxelBoxInteraction_.IsActive())
+                    {
+                        static_cast<void>(voxelBoxInteraction_.Begin(
+                            *target, voxelDocumentSession_.Generation()));
+                        UpdateVoxelHighlights();
+                    }
+                    else
+                    {
+                        static_cast<void>(voxelBoxInteraction_.Update(target));
+                        static_cast<void>(ApplyVoxelBox());
+                    }
+                }
+            }
+            else if (voxelToolState_.IsLineActive())
+            {
+                const auto target = CurrentTwoPointToolTarget();
+                if (target)
+                {
+                    if (!voxelLineInteraction_.IsActive())
+                    {
+                        static_cast<void>(voxelLineInteraction_.Begin(
+                            *target, voxelDocumentSession_.Generation()));
+                        UpdateVoxelHighlights();
+                    }
+                    else
+                    {
+                        static_cast<void>(voxelLineInteraction_.Update(target));
+                        static_cast<void>(ApplyVoxelLine());
+                    }
+                }
+            }
         }
 
         if (!voxelToolState_.IsEditingToolActive() && selectionInputAvailable &&
@@ -1466,15 +1543,20 @@ void EditorWorkspace::DrawScenePanel()
             shortcutsEnabled);
         if (shortcutTool != voxelToolState_.ActiveTool())
         {
+            if (shortcutTool != ActiveVoxelTool::Box) CancelVoxelBox();
+            if (shortcutTool != ActiveVoxelTool::Line) CancelVoxelLine();
             voxelToolState_.SetActiveTool(shortcutTool);
             voxelToolInput_.Reset();
             UpdateVoxelHighlights();
         }
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_A, false))
             addRequested = true;
-        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
-            voxelSelection_.ClearSelection())
-            UpdateVoxelHighlights();
+        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        {
+            if (voxelBoxInteraction_.IsActive()) CancelVoxelBox();
+            else if (voxelLineInteraction_.IsActive()) CancelVoxelLine();
+            else if (voxelSelection_.ClearSelection()) UpdateVoxelHighlights();
+        }
     }
     else if (!viewportRenderer_.LastError().empty())
     {
@@ -3258,6 +3340,10 @@ bool EditorWorkspace::SaveActiveProjectSession()
         ? ProjectSessionTool::Eraser
         : voxelToolState_.IsFillActive()
         ? ProjectSessionTool::Fill
+        : voxelToolState_.IsBoxActive()
+        ? ProjectSessionTool::Box
+        : voxelToolState_.IsLineActive()
+        ? ProjectSessionTool::Line
         : ProjectSessionTool::Pencil;
     session.ActivePaletteIndex =
         paletteService_.ActiveIndex().value_or(
@@ -3290,6 +3376,10 @@ void EditorWorkspace::RestoreActiveProjectSession()
             ? ActiveVoxelTool::Eraser
             : loaded.Session.ActiveTool == ProjectSessionTool::Fill
             ? ActiveVoxelTool::Fill
+            : loaded.Session.ActiveTool == ProjectSessionTool::Box
+            ? ActiveVoxelTool::Box
+            : loaded.Session.ActiveTool == ProjectSessionTool::Line
+            ? ActiveVoxelTool::Line
             : ActiveVoxelTool::Pencil);
     if (loaded.Session.LastModel.empty()) return;
 
@@ -6061,6 +6151,159 @@ bool EditorWorkspace::VoxelFillSmokePassed() const noexcept
         voxelFillSmokeSaved_ && voxelFillSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunVoxelBoxSmokeStep(const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"BoxSmoke", {16U, 16U, 16U}});
+        voxelBoxSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Box);
+        voxelBoxSmokeCreated_ = flow.Ready() && document != nullptr &&
+            paletteService_.SelectColor(6U) &&
+            voxelBoxInteraction_.Begin(
+                {2, 0, 2}, voxelDocumentSession_.Generation()) &&
+            voxelBoxInteraction_.Update(
+                Asset::Voxel::VoxelPosition{11, 9, 11});
+        if (!voxelBoxSmokeCreated_) return false;
+        voxelBoxSmokeApplied_ = ApplyVoxelBox() &&
+            document->GetVoxelCount() == 1000U &&
+            document->GetRevision() == 1U &&
+            document->GetVoxel({2, 0, 2})->PaletteIndex == 6U &&
+            document->GetVoxel({11, 9, 11})->PaletteIndex == 6U &&
+            voxelEditHistory_.UndoCount() == 1U &&
+            !voxelBoxInteraction_.IsActive();
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelBoxSmokeApplied_) return false;
+        UndoCommand();
+        voxelBoxSmokeUndone_ = document->GetVoxelCount() == 0U &&
+            document->GetRevision() == 2U &&
+            voxelEditHistory_.RedoCount() == 1U;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelBoxSmokeUndone_) return false;
+        RedoCommand();
+        voxelBoxSmokeRedone_ = document->GetVoxelCount() == 1000U &&
+            document->GetRevision() == 3U &&
+            voxelEditHistory_.RedoCount() == 0U;
+    }
+    else if (frame == 3U)
+    {
+        voxelBoxSmokeSaved_ = voxelBoxSmokeRedone_ && SaveVoxelModel() &&
+            std::filesystem::is_regular_file(voxelBoxSmokePath_) &&
+            document && !document->IsDirty();
+    }
+    else if (frame == 4U)
+    {
+        if (!voxelBoxSmokeSaved_) return false;
+        CloseProject();
+        voxelBoxSmokeCleaned_ = !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !voxelBoxInteraction_.IsActive() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelBoxSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelBoxSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelBoxSmokePassed();
+}
+
+bool EditorWorkspace::VoxelBoxSmokePassed() const noexcept
+{
+    return voxelBoxSmokeCreated_ && voxelBoxSmokeApplied_ &&
+        voxelBoxSmokeUndone_ && voxelBoxSmokeRedone_ &&
+        voxelBoxSmokeSaved_ && voxelBoxSmokeCleaned_;
+}
+
+bool EditorWorkspace::RunVoxelLineSmokeStep(const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"LineSmoke", {16U, 16U, 16U}});
+        voxelLineSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Line);
+        voxelLineSmokeCreated_ = flow.Ready() && document != nullptr &&
+            paletteService_.SelectColor(12U);
+        if (!voxelLineSmokeCreated_) return false;
+
+        const auto drawLine = [this](
+            const Asset::Voxel::VoxelPosition a,
+            const Asset::Voxel::VoxelPosition b)
+        {
+            return voxelLineInteraction_.Begin(
+                    a, voxelDocumentSession_.Generation()) &&
+                voxelLineInteraction_.Update(b) && ApplyVoxelLine();
+        };
+        voxelLineSmokeApplied_ =
+            drawLine({1, 0, 1}, {8, 0, 1}) &&
+            drawLine({1, 1, 2}, {8, 8, 9}) &&
+            document->GetVoxelCount() == 16U &&
+            document->GetRevision() == 2U &&
+            document->GetVoxel({1, 0, 1})->PaletteIndex == 12U &&
+            document->GetVoxel({8, 8, 9})->PaletteIndex == 12U &&
+            voxelEditHistory_.UndoCount() == 2U &&
+            !voxelLineInteraction_.IsActive();
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelLineSmokeApplied_) return false;
+        UndoCommand();
+        voxelLineSmokeUndone_ = document->GetVoxelCount() == 8U &&
+            document->GetRevision() == 3U &&
+            voxelEditHistory_.RedoCount() == 1U;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelLineSmokeUndone_) return false;
+        RedoCommand();
+        voxelLineSmokeRedone_ = document->GetVoxelCount() == 16U &&
+            document->GetRevision() == 4U &&
+            voxelEditHistory_.RedoCount() == 0U;
+    }
+    else if (frame == 3U)
+    {
+        voxelLineSmokeSaved_ = voxelLineSmokeRedone_ && SaveVoxelModel() &&
+            std::filesystem::is_regular_file(voxelLineSmokePath_) &&
+            document && !document->IsDirty();
+    }
+    else if (frame == 4U)
+    {
+        if (!voxelLineSmokeSaved_) return false;
+        CloseProject();
+        voxelLineSmokeCleaned_ = !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !voxelLineInteraction_.IsActive() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelLineSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelLineSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelLineSmokePassed();
+}
+
+bool EditorWorkspace::VoxelLineSmokePassed() const noexcept
+{
+    return voxelLineSmokeCreated_ && voxelLineSmokeApplied_ &&
+        voxelLineSmokeUndone_ && voxelLineSmokeRedone_ &&
+        voxelLineSmokeSaved_ && voxelLineSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
 {
     if (frame == 1U) return false;
@@ -6756,6 +6999,131 @@ bool EditorWorkspace::ApplyVoxelFill()
     return false;
 }
 
+std::optional<Asset::Voxel::VoxelPosition>
+EditorWorkspace::CurrentTwoPointToolTarget() const noexcept
+{
+    if (const auto& hit = voxelSelection_.Hovered();
+        hit && hit->AdjacentWithinBounds)
+    {
+        return hit->AdjacentPosition;
+    }
+    if (workplaneHit_ && workplaneHit_->IsValid())
+        return workplaneHit_->Position;
+    return std::nullopt;
+}
+
+void EditorWorkspace::CancelVoxelBox() noexcept
+{
+    if (!voxelBoxInteraction_.IsActive()) return;
+    voxelBoxInteraction_.Cancel();
+    UpdateVoxelHighlights();
+}
+
+void EditorWorkspace::CancelVoxelLine() noexcept
+{
+    if (!voxelLineInteraction_.IsActive()) return;
+    voxelLineInteraction_.Cancel();
+    UpdateVoxelHighlights();
+}
+
+bool EditorWorkspace::ApplyVoxelBox()
+{
+    if (voxelEditInProgress_ || !voxelBoxInteraction_.CornerA() ||
+        !voxelBoxInteraction_.CornerB() ||
+        voxelBoxInteraction_.DocumentGeneration() !=
+            voxelDocumentSession_.Generation())
+    {
+        CancelVoxelBox();
+        return false;
+    }
+    voxelEditInProgress_ = true;
+    VoxelBoxResult result;
+    const auto activeColor = paletteService_.ActiveColor();
+    try
+    {
+        result = VoxelBoxService::Apply({
+            static_cast<VoxelEditSession*>(this),
+            voxelDocumentSession_.ActiveDocument(), 0U,
+            *voxelBoxInteraction_.CornerA(), *voxelBoxInteraction_.CornerB(),
+            activeColor ? activeColor->Index : 0U,
+            !voxelToolState_.IsBoxActive(), &voxelEditHistory_});
+    }
+    catch (const std::exception& exception)
+    {
+        result.Code = VoxelBoxResultCode::Failed;
+        result.Error = exception.what();
+    }
+    catch (...)
+    {
+        result.Code = VoxelBoxResultCode::Failed;
+        result.Error = "Unknown Box failure.";
+    }
+    voxelEditInProgress_ = false;
+    voxelBoxInteraction_.Cancel();
+    lastVoxelBoxResult_ = result;
+    UpdateVoxelHighlights();
+    if (result.Code == VoxelBoxResultCode::Applied)
+    {
+        static_cast<void>(paletteService_.RecordActiveColorUsage());
+        AddConsoleMessage(
+            "[Edit] Created solid box with " +
+            std::to_string(result.ChangedVoxelCount) + " voxel(s)." );
+        return true;
+    }
+    if (result.Code == VoxelBoxResultCode::Failed)
+        AddConsoleMessage("[Edit] Box failed: " + result.Error);
+    return false;
+}
+
+bool EditorWorkspace::ApplyVoxelLine()
+{
+    if (voxelEditInProgress_ || !voxelLineInteraction_.PointA() ||
+        !voxelLineInteraction_.PointB() ||
+        voxelLineInteraction_.DocumentGeneration() !=
+            voxelDocumentSession_.Generation())
+    {
+        CancelVoxelLine();
+        return false;
+    }
+    voxelEditInProgress_ = true;
+    VoxelLineResult result;
+    const auto activeColor = paletteService_.ActiveColor();
+    try
+    {
+        result = VoxelLineService::Apply({
+            static_cast<VoxelEditSession*>(this),
+            voxelDocumentSession_.ActiveDocument(), 0U,
+            *voxelLineInteraction_.PointA(), *voxelLineInteraction_.PointB(),
+            activeColor ? activeColor->Index : 0U,
+            !voxelToolState_.IsLineActive(), &voxelEditHistory_});
+    }
+    catch (const std::exception& exception)
+    {
+        result.Code = VoxelLineResultCode::Failed;
+        result.Error = exception.what();
+    }
+    catch (...)
+    {
+        result.Code = VoxelLineResultCode::Failed;
+        result.Error = "Unknown Line failure.";
+    }
+    voxelEditInProgress_ = false;
+    voxelLineInteraction_.Cancel();
+    lastVoxelLineResult_ = result;
+    UpdateVoxelHighlights();
+    if (result.Code == VoxelLineResultCode::Applied)
+    {
+        static_cast<void>(paletteService_.RecordActiveColorUsage());
+        AddConsoleMessage(
+            "[Edit] Created line with " +
+            std::to_string(result.ChangedVoxelCount) + " voxel(s)." );
+        return true;
+    }
+    if (result.Code == VoxelLineResultCode::Failed)
+        AddConsoleMessage("[Edit] Line failed: " + result.Error);
+    return false;
+}
+
 std::uint64_t EditorWorkspace::VoxelModelGeneration() const noexcept
 {
     return voxelModelGeneration_;
@@ -6939,6 +7307,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<VoxelCoordinates> hoveredCoordinates =
         coordinates(voxelSelection_.Hovered());
     std::optional<Asset::Voxel::VoxelPosition> placementPosition;
+    std::optional<VoxelBoxBounds> boxPreview;
+    std::vector<Asset::Voxel::VoxelPosition> linePreview;
     VoxelPlacementPreviewStyle placementStyle =
         VoxelPlacementPreviewStyle::PencilInvalid;
     if (voxelToolState_.IsPencilActive())
@@ -6977,6 +7347,37 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     {
         voxelPlacementPreview_ = {};
     }
+    else if (voxelToolState_.IsBoxActive())
+    {
+        voxelPlacementPreview_ = {};
+        if (const auto* document = voxelDocumentSession_.ActiveDocument();
+            document && voxelBoxInteraction_.CornerA() &&
+            voxelBoxInteraction_.CornerB())
+        {
+            boxPreview = VoxelBoxService::CalculateBounds(
+                *document, 0U, *voxelBoxInteraction_.CornerA(),
+                *voxelBoxInteraction_.CornerB());
+        }
+    }
+    else if (voxelToolState_.IsLineActive())
+    {
+        voxelPlacementPreview_ = {};
+        if (const auto* document = voxelDocumentSession_.ActiveDocument();
+            document && voxelLineInteraction_.PointA() &&
+            voxelLineInteraction_.PointB())
+        {
+            try
+            {
+                linePreview = VoxelLineService::CalculatePositions(
+                    *document, 0U, *voxelLineInteraction_.PointA(),
+                    *voxelLineInteraction_.PointB());
+            }
+            catch (...)
+            {
+                linePreview.clear();
+            }
+        }
+    }
     else
     {
         voxelPlacementPreview_ = {};
@@ -6998,6 +7399,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         coordinates(voxelSelection_.Selected()),
         placementPosition,
         placementStyle,
+        boxPreview,
+        std::move(linePreview),
         voxelModelCenter_);
 }
 
@@ -7023,6 +7426,8 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     paletteColorEditorIndex_.reset();
     voxelToolInput_.Reset();
     voxelToolSmokeInput_.Reset();
+    voxelBoxInteraction_.Cancel();
+    voxelLineInteraction_.Cancel();
     voxelPlacementPreview_ = {};
     workplaneHit_.reset();
     currentViewportRectangle_ = {};
@@ -7033,6 +7438,8 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     lastVoxelToolResult_.reset();
     lastVoxelEraserResult_.reset();
     lastVoxelFillResult_.reset();
+    lastVoxelBoxResult_.reset();
+    lastVoxelLineResult_.reset();
     voxelEditInProgress_ = false;
     voxelModelCenter_ = {};
     voxelViewportRendered_ = false;

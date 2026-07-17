@@ -295,6 +295,32 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelFillTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelBoxTests
+    Editor/VoxelBoxTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelBoxTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeEditorPalette
+)
+vf_configure_test(VoxelForgeEditorVoxelBoxTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelBox
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelBoxTests>
+)
+add_executable(
+    VoxelForgeEditorVoxelLineTests
+    Editor/VoxelLineTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelLineTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeEditorPalette
+)
+vf_configure_test(VoxelForgeEditorVoxelLineTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelLine
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelLineTests>
+)
+add_executable(
     VoxelForgeEditorVoxelEditHistoryTests
     Editor/VoxelEditHistoryTests.cpp
 )
@@ -588,6 +614,8 @@ set_tests_properties(
     VoxelForge.Editor.VoxelPencil
     VoxelForge.Editor.VoxelEraser
     VoxelForge.Editor.VoxelFill
+    VoxelForge.Editor.VoxelBox
+    VoxelForge.Editor.VoxelLine
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
@@ -707,6 +735,14 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelFillSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-fill-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelBoxSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-box-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.VoxelLineSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-line-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -732,6 +768,8 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.DirectCreationFlowSmoke
         VoxelForge.Editor.PaletteUiSmoke
         VoxelForge.Editor.VoxelFillSmoke
+        VoxelForge.Editor.VoxelBoxSmoke
+        VoxelForge.Editor.VoxelLineSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

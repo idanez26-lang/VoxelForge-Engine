@@ -2,6 +2,7 @@
 
 #include "EditorCamera.h"
 #include "VoxelSelection/VoxelRaycast.h"
+#include "VoxelTools/VoxelBoxService.h"
 
 #include "VoxelForge/Mesh/MeshData.h"
 #include "VoxelForge/Asset/Voxel/VoxelDocument.h"
@@ -13,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include <vector>
 
 struct SDL_GPUBuffer;
 struct SDL_GPUDevice;
@@ -44,6 +46,8 @@ public:
         std::optional<VoxelCoordinates> selected,
         std::optional<Asset::Voxel::VoxelPosition> placementPreview,
         VoxelPlacementPreviewStyle placementPreviewStyle,
+        std::optional<VoxelBoxBounds> boxPreview,
+        std::vector<Asset::Voxel::VoxelPosition> linePreview,
         Vec3 modelCenter) noexcept;
     void ClearModel() noexcept;
     [[nodiscard]] bool Render(
@@ -108,6 +112,8 @@ private:
     std::optional<Asset::Voxel::VoxelPosition> placementPreviewHighlight_;
     VoxelPlacementPreviewStyle placementPreviewStyle_ =
         VoxelPlacementPreviewStyle::PencilInvalid;
+    std::optional<VoxelBoxBounds> boxPreviewHighlight_;
+    std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;
     std::size_t highlightRenderCount_ = 0U;

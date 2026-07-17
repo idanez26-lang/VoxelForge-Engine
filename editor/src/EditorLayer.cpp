@@ -52,6 +52,8 @@ EditorLayer::EditorLayer(
     const bool directCreationFlowSmokeTest,
     const bool paletteUiSmokeTest,
     const bool voxelFillSmokeTest,
+    const bool voxelBoxSmokeTest,
+    const bool voxelLineSmokeTest,
     std::filesystem::path imguiIniPathOverride)
     : Layer("VoxelForge Editor Layer"),
       layoutPersistence_(std::move(imguiIniPathOverride)),
@@ -66,7 +68,7 @@ EditorLayer::EditorLayer(
               layoutStabilitySmokeTest || doubleClickCameraSmokeTest ||
               persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest ||
               directCreationFlowSmokeTest || paletteUiSmokeTest ||
-              voxelFillSmokeTest
+              voxelFillSmokeTest || voxelBoxSmokeTest || voxelLineSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -79,7 +81,7 @@ EditorLayer::EditorLayer(
               layoutStabilitySmokeTest || doubleClickCameraSmokeTest ||
               persistentWorkplaneSmokeTest || projectSessionRestoreSmokeTest ||
               directCreationFlowSmokeTest || paletteUiSmokeTest ||
-              voxelFillSmokeTest),
+              voxelFillSmokeTest || voxelBoxSmokeTest || voxelLineSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -111,7 +113,9 @@ EditorLayer::EditorLayer(
       projectSessionRestoreSmokeTest_(projectSessionRestoreSmokeTest),
       directCreationFlowSmokeTest_(directCreationFlowSmokeTest),
       paletteUiSmokeTest_(paletteUiSmokeTest),
-      voxelFillSmokeTest_(voxelFillSmokeTest)
+      voxelFillSmokeTest_(voxelFillSmokeTest),
+      voxelBoxSmokeTest_(voxelBoxSmokeTest),
+      voxelLineSmokeTest_(voxelLineSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -225,7 +229,7 @@ void EditorLayer::OnImGuiRender()
         !firstCreationExperienceSmokeTest_ && !layoutStabilitySmokeTest_ &&
         !persistentWorkplaneSmokeTest_ && !projectSessionRestoreSmokeTest_ &&
         !directCreationFlowSmokeTest_ && !paletteUiSmokeTest_ &&
-        !voxelFillSmokeTest_)
+        !voxelFillSmokeTest_ && !voxelBoxSmokeTest_ && !voxelLineSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -315,6 +319,16 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunVoxelFillSmokeStep(
             renderedFrameCount_));
     }
+    if (voxelBoxSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunVoxelBoxSmokeStep(
+            renderedFrameCount_));
+    }
+    if (voxelLineSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunVoxelLineSmokeStep(
+            renderedFrameCount_));
+    }
     workspace_.Draw();
     if (voxelRayPickingSmokeTest_)
     {
@@ -373,7 +387,9 @@ void EditorLayer::OnImGuiRender()
         (directCreationFlowSmokeTest_ &&
             workspace_.DirectCreationFlowSmokePassed()) ||
         (paletteUiSmokeTest_ && workspace_.PaletteUiSmokePassed()) ||
-        (voxelFillSmokeTest_ && workspace_.VoxelFillSmokePassed());
+        (voxelFillSmokeTest_ && workspace_.VoxelFillSmokePassed()) ||
+        (voxelBoxSmokeTest_ && workspace_.VoxelBoxSmokePassed()) ||
+        (voxelLineSmokeTest_ && workspace_.VoxelLineSmokePassed());
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
@@ -512,6 +528,16 @@ void EditorLayer::OnImGuiRender()
         !workspace_.VoxelFillSmokePassed())
     {
         throw std::runtime_error("Voxel Fill smoke test did not complete.");
+    }
+    if (voxelBoxSmokeTest_ && smokeTestComplete &&
+        !workspace_.VoxelBoxSmokePassed())
+    {
+        throw std::runtime_error("Voxel Box smoke test did not complete.");
+    }
+    if (voxelLineSmokeTest_ && smokeTestComplete &&
+        !workspace_.VoxelLineSmokePassed())
+    {
+        throw std::runtime_error("Voxel Line smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

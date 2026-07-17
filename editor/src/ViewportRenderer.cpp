@@ -114,6 +114,45 @@ void AppendVoxelOutline(
                 {x + thickness, y + thickness, z1}, color);
 }
 
+void AppendVoxelBoxOutline(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const VoxelBoxBounds bounds,
+    const Vec3 center,
+    const std::array<float, 4>& color)
+{
+    constexpr float expansion = 0.018F;
+    constexpr float thickness = 0.035F;
+    const Vec3 minimum = VoxelGridToViewport(
+        {static_cast<float>(bounds.Minimum.X),
+         static_cast<float>(bounds.Minimum.Y),
+         static_cast<float>(bounds.Minimum.Z)}, center);
+    const float x0 = minimum.X - expansion;
+    const float y0 = minimum.Y - expansion;
+    const float z0 = minimum.Z - expansion;
+    const float x1 = minimum.X +
+        static_cast<float>(bounds.Maximum.X - bounds.Minimum.X + 1) + expansion;
+    const float y1 = minimum.Y +
+        static_cast<float>(bounds.Maximum.Y - bounds.Minimum.Y + 1) + expansion;
+    const float z1 = minimum.Z +
+        static_cast<float>(bounds.Maximum.Z - bounds.Minimum.Z + 1) + expansion;
+    for (const float y : {y0, y1})
+        for (const float z : {z0, z1})
+            AppendBox(vertices, indices,
+                {x0, y - thickness, z - thickness},
+                {x1, y + thickness, z + thickness}, color);
+    for (const float x : {x0, x1})
+        for (const float z : {z0, z1})
+            AppendBox(vertices, indices,
+                {x - thickness, y0, z - thickness},
+                {x + thickness, y1, z + thickness}, color);
+    for (const float x : {x0, x1})
+        for (const float y : {y0, y1})
+            AppendBox(vertices, indices,
+                {x - thickness, y - thickness, z0},
+                {x + thickness, y + thickness, z1}, color);
+}
+
 Asset::Voxel::VoxelPosition ToVoxelPosition(
     const VoxelCoordinates coordinates) noexcept
 {
@@ -421,12 +460,16 @@ void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelCoordinates> selected,
     std::optional<Asset::Voxel::VoxelPosition> placementPreview,
     const VoxelPlacementPreviewStyle placementPreviewStyle,
+    std::optional<VoxelBoxBounds> boxPreview,
+    std::vector<Asset::Voxel::VoxelPosition> linePreview,
     const Vec3 modelCenter) noexcept
 {
     if (hovered == selected) hovered.reset();
     if (hoveredHighlight_ == hovered && selectedHighlight_ == selected &&
         placementPreviewHighlight_ == placementPreview &&
         placementPreviewStyle_ == placementPreviewStyle &&
+        boxPreviewHighlight_ == boxPreview &&
+        linePreviewHighlights_ == linePreview &&
         modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
         modelCenter_.Z == modelCenter.Z)
     {
@@ -436,9 +479,12 @@ void ViewportRenderer::ConfigureHighlights(
     selectedHighlight_ = selected;
     placementPreviewHighlight_ = placementPreview;
     placementPreviewStyle_ = placementPreviewStyle;
+    boxPreviewHighlight_ = boxPreview;
+    linePreviewHighlights_ = std::move(linePreview);
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
-        selectedHighlight_.has_value() || placementPreviewHighlight_.has_value();
+        selectedHighlight_.has_value() || placementPreviewHighlight_.has_value() ||
+        boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty();
     if (!highlightsDirty_) ReleaseHighlights();
 }
 
@@ -458,6 +504,14 @@ bool ViewportRenderer::EnsureHighlights()
                     VoxelPlacementPreviewStyle::Eraser
                 ? EraserPlacementPreviewColor
                 : InvalidPlacementPreviewColor);
+    if (boxPreviewHighlight_)
+        AppendVoxelBoxOutline(
+            vertices, indices, *boxPreviewHighlight_, modelCenter_,
+            ValidPlacementPreviewColor);
+    for (const Asset::Voxel::VoxelPosition position : linePreviewHighlights_)
+        AppendVoxelOutline(
+            vertices, indices, position, modelCenter_,
+            ValidPlacementPreviewColor);
     if (hoveredHighlight_)
         AppendVoxelOutline(vertices, indices,
             ToVoxelPosition(*hoveredHighlight_), modelCenter_,
@@ -752,7 +806,8 @@ void ViewportRenderer::ClearModel() noexcept
     indexCount_ = 0U;
     ConfigureHighlights(
         std::nullopt, std::nullopt, std::nullopt,
-        VoxelPlacementPreviewStyle::PencilInvalid, {});
+        VoxelPlacementPreviewStyle::PencilInvalid,
+        std::nullopt, {}, {});
 }
 
 void ViewportRenderer::ReleaseHighlights() noexcept

@@ -187,6 +187,40 @@ void TestFillToolPersistence()
         "Fill tool was not restored from the project session.");
 }
 
+void TestBoxToolPersistence()
+{
+    TemporaryProject project;
+    ProjectSessionService service;
+    Require(service.SetProjectRoot(project.Root()),
+        "Project root should be accepted for Box session test.");
+    ProjectSessionData session = ValidSession();
+    session.ActiveTool = ProjectSessionTool::Box;
+    std::string error;
+    Require(service.Save(session, error),
+        "Box session save failed: " + error);
+    const ProjectSessionLoadResult loaded = service.Load();
+    Require(loaded.Loaded() &&
+        loaded.Session.ActiveTool == ProjectSessionTool::Box,
+        "Box tool was not restored from the project session.");
+}
+
+void TestLineToolPersistence()
+{
+    TemporaryProject project;
+    ProjectSessionService service;
+    Require(service.SetProjectRoot(project.Root()),
+        "Project root should be accepted for Line session test.");
+    ProjectSessionData session = ValidSession();
+    session.ActiveTool = ProjectSessionTool::Line;
+    std::string error;
+    Require(service.Save(session, error),
+        "Line session save failed: " + error);
+    const ProjectSessionLoadResult loaded = service.Load();
+    Require(loaded.Loaded() &&
+        loaded.Session.ActiveTool == ProjectSessionTool::Line,
+        "Line tool was not restored from the project session.");
+}
+
 void TestProjectSwitchAndClose()
 {
     TemporaryProject first;
@@ -215,6 +249,8 @@ int main()
         TestValidationAndFallbacks();
         TestCameraRestore();
         TestFillToolPersistence();
+        TestBoxToolPersistence();
+        TestLineToolPersistence();
         TestProjectSwitchAndClose();
         std::cout << "Project session tests passed.\n";
         return 0;
