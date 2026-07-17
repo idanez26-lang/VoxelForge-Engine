@@ -14,7 +14,7 @@ constexpr std::size_t Index(const EditorInputKey key) noexcept
 bool IsToolCommand(const EditorInputCommand command) noexcept
 {
     return command >= EditorInputCommand::ToolPencil &&
-        command <= EditorInputCommand::ToolSphere;
+        command <= EditorInputCommand::ToolSelection;
 }
 
 bool SameChord(
@@ -104,6 +104,7 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ToolBox: return "Tool.Box";
     case EditorInputCommand::ToolLine: return "Tool.Line";
     case EditorInputCommand::ToolSphere: return "Tool.Sphere";
+    case EditorInputCommand::ToolSelection: return "Tool.Selection";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";
     case EditorInputCommand::EditRedo: return "Edit.Redo";

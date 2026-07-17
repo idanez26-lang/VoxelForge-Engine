@@ -27,9 +27,10 @@ void TestOrderGroupsAndTooltips()
         EditorToolbarAction::Fill,
         EditorToolbarAction::Box,
         EditorToolbarAction::Line,
-        EditorToolbarAction::Sphere};
+        EditorToolbarAction::Sphere,
+        EditorToolbarAction::Selection};
     Require(buttons.size() == std::size(expected),
-        "Toolbar does not expose exactly seven actions.");
+        "Toolbar does not expose exactly eight actions.");
     for (std::size_t index = 0U; index < buttons.size(); ++index)
     {
         Require(buttons[index].Action == expected[index],
@@ -44,7 +45,8 @@ void TestOrderGroupsAndTooltips()
         buttons[3].Group == EditorToolbarGroup::DirectEdit &&
         buttons[4].Group == EditorToolbarGroup::Construction &&
         buttons[5].Group == EditorToolbarGroup::Construction &&
-        buttons[6].Group == EditorToolbarGroup::Construction,
+        buttons[6].Group == EditorToolbarGroup::Construction &&
+        buttons[7].Group == EditorToolbarGroup::Manipulation,
         "Toolbar visual groups are incorrect.");
     Require(inputService.ShortcutLabel(buttons[0].Command) == "Ctrl+S" &&
         inputService.ShortcutLabel(buttons[1].Command) == "P" &&
@@ -52,7 +54,8 @@ void TestOrderGroupsAndTooltips()
         inputService.ShortcutLabel(buttons[3].Command) == "F" &&
         inputService.ShortcutLabel(buttons[4].Command) == "B" &&
         inputService.ShortcutLabel(buttons[5].Command) == "L" &&
-        inputService.ShortcutLabel(buttons[6].Command) == "S",
+        inputService.ShortcutLabel(buttons[6].Command) == "S" &&
+        inputService.ShortcutLabel(buttons[7].Command) == "V",
         "Toolbar does not use the centralized shortcut bindings.");
 }
 
@@ -94,7 +97,9 @@ void TestVoxelToolStatePipeline()
         if (button.Tool == ActiveVoxelTool::None) continue;
         state.SetActiveTool(button.Tool);
         Require(state.ActiveTool() == button.Tool &&
-            state.IsEditingToolActive(),
+            (button.Tool == ActiveVoxelTool::Selection
+                ? !state.IsEditingToolActive()
+                : state.IsEditingToolActive()),
             "Toolbar tool selection bypasses or conflicts with VoxelToolState.");
     }
     state.Reset();

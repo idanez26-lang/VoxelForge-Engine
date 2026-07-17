@@ -33,7 +33,7 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 10U,
+    Require(service.Bindings().size() == 11U,
         "The expected command bindings are incomplete.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
@@ -45,6 +45,7 @@ void TestCommandsAndBindings()
         service.ShortcutLabel(EditorInputCommand::ToolBox) == "B" &&
         service.ShortcutLabel(EditorInputCommand::ToolLine) == "L" &&
         service.ShortcutLabel(EditorInputCommand::ToolSphere) == "S" &&
+        service.ShortcutLabel(EditorInputCommand::ToolSelection) == "V" &&
         service.ShortcutLabel(EditorInputCommand::FileSave) == "Ctrl+S",
         "Shortcut labels do not reflect the real bindings.");
 }
@@ -64,7 +65,9 @@ void TestToolSelection()
         Resolve(service, EditorInputKey::L, available) ==
             EditorInputCommand::ToolLine &&
         Resolve(service, EditorInputKey::S, available) ==
-            EditorInputCommand::ToolSphere,
+            EditorInputCommand::ToolSphere &&
+        Resolve(service, EditorInputKey::V, available) ==
+            EditorInputCommand::ToolSelection,
         "A tool shortcut resolves to the wrong command.");
     Require(Resolve(service, EditorInputKey::S, available, true) ==
             EditorInputCommand::FileSave,

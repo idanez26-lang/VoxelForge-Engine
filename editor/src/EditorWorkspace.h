@@ -20,6 +20,7 @@
 #include "Project/ProjectDialogPreferences.h"
 #include "Project/QualityOfLifeLogic.h"
 #include "ProjectSession/ProjectSessionService.h"
+#include "Selection/SelectionService.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -95,6 +96,7 @@ public:
     [[nodiscard]] bool HasVoxelViewportRenderError() const noexcept;
     void SetVoxelViewportView(EditorCameraView view) noexcept;
     [[nodiscard]] bool RunVoxelSelectionSmokeStep(std::size_t frame);
+    [[nodiscard]] bool SelectionSystemSmokePassed() const noexcept;
     [[nodiscard]] bool RunEraseVoxelSmokeStep(std::size_t frame);
     [[nodiscard]] bool EraseVoxelSmokePassed() const noexcept;
     [[nodiscard]] bool RunPaintVoxelSmokeStep(std::size_t frame);
@@ -294,6 +296,7 @@ private:
     DirectCreationFlowService directCreationFlowService_;
     FirstCreationExperience firstCreationExperience_;
     WorkplaneService workplaneService_;
+    SelectionService selectionService_;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
     EditorInputService editorInputService_;
@@ -381,6 +384,9 @@ private:
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
     bool voxelSelectionClickCandidate_ = false;
+    bool selectionSystemSmokeStarted_ = false;
+    bool selectionSystemSmokeToolChanged_ = false;
+    bool selectionSystemSmokePassed_ = false;
     bool voxelEditInProgress_ = false;
     bool viewportFocusRequested_ = false;
     bool viewportFocusApplied_ = false;

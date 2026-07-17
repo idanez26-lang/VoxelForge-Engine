@@ -504,7 +504,9 @@ void ViewportRenderer::ConfigureGuides(
 
 void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelCoordinates> hovered,
-    std::optional<VoxelCoordinates> selected,
+    std::vector<Asset::Voxel::VoxelPosition> selected,
+    std::optional<VoxelBoxBounds> selectionBounds,
+    const bool selectionToolStyle,
     std::optional<Asset::Voxel::VoxelPosition> placementPreview,
     const VoxelPlacementPreviewStyle placementPreviewStyle,
     std::optional<VoxelBoxBounds> boxPreview,
@@ -512,8 +514,16 @@ void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelSpherePreview> spherePreview,
     const Vec3 modelCenter) noexcept
 {
-    if (hovered == selected) hovered.reset();
-    if (hoveredHighlight_ == hovered && selectedHighlight_ == selected &&
+    if (hovered)
+    {
+        const auto hoveredPosition = ToVoxelPosition(*hovered);
+        if (std::find(selected.begin(), selected.end(), hoveredPosition) !=
+            selected.end())
+            hovered.reset();
+    }
+    if (hoveredHighlight_ == hovered && selectedHighlights_ == selected &&
+        selectionBoundsHighlight_ == selectionBounds &&
+        selectionToolStyle_ == selectionToolStyle &&
         placementPreviewHighlight_ == placementPreview &&
         placementPreviewStyle_ == placementPreviewStyle &&
         boxPreviewHighlight_ == boxPreview &&
@@ -525,7 +535,9 @@ void ViewportRenderer::ConfigureHighlights(
         return;
     }
     hoveredHighlight_ = hovered;
-    selectedHighlight_ = selected;
+    selectedHighlights_ = std::move(selected);
+    selectionBoundsHighlight_ = selectionBounds;
+    selectionToolStyle_ = selectionToolStyle;
     placementPreviewHighlight_ = placementPreview;
     placementPreviewStyle_ = placementPreviewStyle;
     boxPreviewHighlight_ = boxPreview;
@@ -533,7 +545,9 @@ void ViewportRenderer::ConfigureHighlights(
     spherePreviewHighlight_ = spherePreview;
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
-        selectedHighlight_.has_value() || placementPreviewHighlight_.has_value() ||
+        !selectedHighlights_.empty() ||
+        selectionBoundsHighlight_.has_value() ||
+        placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
         spherePreviewHighlight_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
@@ -570,10 +584,14 @@ bool ViewportRenderer::EnsureHighlights()
         AppendVoxelOutline(vertices, indices,
             ToVoxelPosition(*hoveredHighlight_), modelCenter_,
             {1.0F, 0.88F, 0.12F, 1.0F});
-    if (selectedHighlight_)
-        AppendVoxelOutline(vertices, indices,
-            ToVoxelPosition(*selectedHighlight_), modelCenter_,
-            {1.0F, 0.38F, 0.08F, 1.0F});
+    for (const auto position : selectedHighlights_)
+        AppendVoxelOutline(vertices, indices, position, modelCenter_,
+            selectionToolStyle_
+                ? std::array<float, 4>{0.12F, 0.72F, 1.0F, 1.0F}
+                : std::array<float, 4>{1.0F, 0.38F, 0.08F, 1.0F});
+    if (selectionBoundsHighlight_ && selectedHighlights_.size() > 1U)
+        AppendVoxelBoxOutline(vertices, indices, *selectionBoundsHighlight_,
+            modelCenter_, {0.18F, 0.82F, 1.0F, 0.82F});
     if (indices.empty())
     {
         highlightsDirty_ = false;
@@ -859,7 +877,7 @@ void ViewportRenderer::ClearModel() noexcept
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
     ConfigureHighlights(
-        std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, {}, std::nullopt, false, std::nullopt,
         VoxelPlacementPreviewStyle::PencilInvalid,
         std::nullopt, {}, std::nullopt, {});
 }

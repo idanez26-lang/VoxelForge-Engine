@@ -125,6 +125,24 @@ void DrawSphereIcon(ImDrawList& drawList, const ImVec2 minimum,
         0.0F, 20, thickness);
 }
 
+void DrawSelectionIcon(ImDrawList& drawList, const ImVec2 minimum,
+    const ImVec2 maximum, const ImU32 color, const float thickness)
+{
+    const float arm = (maximum.x - minimum.x) * 0.34F;
+    drawList.AddLine(minimum, {minimum.x + arm, minimum.y}, color, thickness);
+    drawList.AddLine(minimum, {minimum.x, minimum.y + arm}, color, thickness);
+    drawList.AddLine({maximum.x - arm, minimum.y},
+        {maximum.x, minimum.y}, color, thickness);
+    drawList.AddLine({maximum.x, minimum.y},
+        {maximum.x, minimum.y + arm}, color, thickness);
+    drawList.AddLine({minimum.x, maximum.y - arm},
+        {minimum.x, maximum.y}, color, thickness);
+    drawList.AddLine({minimum.x, maximum.y},
+        {minimum.x + arm, maximum.y}, color, thickness);
+    drawList.AddLine({maximum.x - arm, maximum.y}, maximum, color, thickness);
+    drawList.AddLine({maximum.x, maximum.y - arm}, maximum, color, thickness);
+}
+
 bool DrawIcon(
     ImDrawList& drawList,
     const EditorToolbarAction action,
@@ -149,6 +167,9 @@ bool DrawIcon(
         DrawLineIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Sphere:
         DrawSphereIcon(drawList, minimum, maximum, color, thickness); return true;
+    case EditorToolbarAction::Selection:
+        DrawSelectionIcon(drawList, minimum, maximum, color, thickness);
+        return true;
     }
     return false;
 }

@@ -14,6 +14,7 @@ const char* ActiveVoxelToolName(const ActiveVoxelTool tool) noexcept
     case ActiveVoxelTool::Box: return "Box";
     case ActiveVoxelTool::Line: return "Line";
     case ActiveVoxelTool::Sphere: return "Sphere";
+    case ActiveVoxelTool::Selection: return "Selection";
     }
     return "None";
 }
@@ -61,6 +62,11 @@ bool VoxelToolState::IsLineActive() const noexcept
 bool VoxelToolState::IsSphereActive() const noexcept
 {
     return activeTool_ == ActiveVoxelTool::Sphere;
+}
+
+bool VoxelToolState::IsSelectionActive() const noexcept
+{
+    return activeTool_ == ActiveVoxelTool::Selection;
 }
 
 bool VoxelToolState::IsEditingToolActive() const noexcept

@@ -44,7 +44,9 @@ public:
     void ConfigureGuides(float width, float height, float depth) noexcept;
     void ConfigureHighlights(
         std::optional<VoxelCoordinates> hovered,
-        std::optional<VoxelCoordinates> selected,
+        std::vector<Asset::Voxel::VoxelPosition> selected,
+        std::optional<VoxelBoxBounds> selectionBounds,
+        bool selectionToolStyle,
         std::optional<Asset::Voxel::VoxelPosition> placementPreview,
         VoxelPlacementPreviewStyle placementPreviewStyle,
         std::optional<VoxelBoxBounds> boxPreview,
@@ -110,7 +112,9 @@ private:
     bool guidesDirty_ = true;
     bool highlightsDirty_ = false;
     std::optional<VoxelCoordinates> hoveredHighlight_;
-    std::optional<VoxelCoordinates> selectedHighlight_;
+    std::vector<Asset::Voxel::VoxelPosition> selectedHighlights_;
+    std::optional<VoxelBoxBounds> selectionBoundsHighlight_;
+    bool selectionToolStyle_ = false;
     std::optional<Asset::Voxel::VoxelPosition> placementPreviewHighlight_;
     VoxelPlacementPreviewStyle placementPreviewStyle_ =
         VoxelPlacementPreviewStyle::PencilInvalid;

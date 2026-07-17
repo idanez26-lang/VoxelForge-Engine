@@ -102,7 +102,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.ViewportSmokeTest |= argument == "--viewport-smoke-test";
         result.ViewportVisualTest |= argument == "--viewport-visual-test";
         result.VoxelSelectionSmokeTest |=
-            argument == "--voxel-selection-smoke-test";
+            argument == "--voxel-selection-smoke-test" ||
+            argument == "--selection-system-smoke-test";
         result.VoxelSelectionVisualTest |=
             argument == "--voxel-selection-visual-test";
         result.EraseVoxelSmokeTest |=

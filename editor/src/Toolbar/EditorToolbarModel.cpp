@@ -30,7 +30,10 @@ constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
         {EditorToolbarAction::Sphere, EditorToolbarGroup::Construction,
          "Sphere", "Create a filled voxel sphere",
          EditorInputCommand::ToolSphere,
-         ActiveVoxelTool::Sphere}
+         ActiveVoxelTool::Sphere},
+        {EditorToolbarAction::Selection, EditorToolbarGroup::Manipulation,
+         "Selection", "Select voxels", EditorInputCommand::ToolSelection,
+         ActiveVoxelTool::Selection}
     }};
 }
 
@@ -69,7 +72,7 @@ EditorToolbarLayout EditorToolbarModel::CalculateLayout(
     const float groupSpacing = std::clamp(
         std::floor(safeFontSize * 0.75F), 10.0F, 16.0F);
     const float singleRowWidth = preferredButton * ButtonCount +
-        regularSpacing * 8.0F + groupSpacing * 2.0F;
+        regularSpacing * 10.0F + groupSpacing * 3.0F;
     if (singleRowWidth <= safeWidth)
         return {preferredButton, regularSpacing, groupSpacing, false};
 

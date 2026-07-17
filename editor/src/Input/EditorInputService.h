@@ -17,6 +17,7 @@ enum class EditorInputCommand : std::uint8_t
     ToolBox,
     ToolLine,
     ToolSphere,
+    ToolSelection,
     FileSave,
     EditUndo,
     EditRedo,
@@ -32,6 +33,7 @@ enum class EditorInputKey : std::uint8_t
     B,
     L,
     S,
+    V,
     Z,
     Y,
     Escape,
@@ -77,7 +79,7 @@ struct EditorCommandAvailability final
 class EditorInputService final
 {
 public:
-    static constexpr std::size_t BindingCount = 10U;
+    static constexpr std::size_t BindingCount = 11U;
 
     [[nodiscard]] EditorInputCommand Resolve(
         const EditorInputFrame& frame,
@@ -114,7 +116,9 @@ private:
         {EditorInputCommand::ToolLine, EditorInputKey::L,
          false, false, false, "L"},
         {EditorInputCommand::ToolSphere, EditorInputKey::S,
-         false, false, false, "S"}
+         false, false, false, "S"},
+        {EditorInputCommand::ToolSelection, EditorInputKey::V,
+         false, false, false, "V"}
     }};
 };
 

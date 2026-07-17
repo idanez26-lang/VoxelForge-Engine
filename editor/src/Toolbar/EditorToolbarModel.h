@@ -18,14 +18,16 @@ enum class EditorToolbarAction : std::uint8_t
     Fill,
     Box,
     Line,
-    Sphere
+    Sphere,
+    Selection
 };
 
 enum class EditorToolbarGroup : std::uint8_t
 {
     File,
     DirectEdit,
-    Construction
+    Construction,
+    Manipulation
 };
 
 struct EditorToolbarButton final
@@ -56,7 +58,7 @@ struct EditorToolbarLayout final
 class EditorToolbarModel final
 {
 public:
-    static constexpr std::size_t ButtonCount = 7U;
+    static constexpr std::size_t ButtonCount = 8U;
 
     [[nodiscard]] static const std::array<EditorToolbarButton, ButtonCount>&
         Buttons() noexcept;

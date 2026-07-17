@@ -430,6 +430,7 @@ void EditorLayer::OnImGuiRender()
     }
     if (voxelSelectionSmokeTest_ && smokeTestComplete &&
         (!voxelSelectionRayHit_ ||
+         !workspace_.SelectionSystemSmokePassed() ||
          workspace_.VoxelHighlightUploadCount() == 0U ||
          workspace_.VoxelHighlightRenderCount() < 5U))
     {

@@ -818,6 +818,11 @@ void EditorWorkspace::DrawMainMenuBar()
                 voxelToolState_.IsSphereActive(), hasDocument))
             ExecuteInputCommand(EditorInputCommand::ToolSphere);
         ImGui::Separator();
+        if (ImGui::MenuItem(
+                "Selection", shortcut(EditorInputCommand::ToolSelection),
+                voxelToolState_.IsSelectionActive(), hasDocument))
+            ExecuteInputCommand(EditorInputCommand::ToolSelection);
+        ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
             AddConsoleMessage("Voxel Editor is not available yet.");
@@ -882,6 +887,8 @@ void EditorWorkspace::HandleCommandShortcuts()
         EditorInputKey::L, ImGui::IsKeyPressed(ImGuiKey_L, false));
     inputFrame.SetPressed(
         EditorInputKey::S, ImGui::IsKeyPressed(ImGuiKey_S, false));
+    inputFrame.SetPressed(
+        EditorInputKey::V, ImGui::IsKeyPressed(ImGuiKey_V, false));
     inputFrame.SetPressed(
         EditorInputKey::Z, ImGui::IsKeyPressed(ImGuiKey_Z, false));
     inputFrame.SetPressed(
@@ -948,6 +955,7 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
                              : commandHistory_.CanRedo()),
         voxelBoxInteraction_.IsActive() || voxelLineInteraction_.IsActive() ||
             voxelSphereInteraction_.IsActive() ||
+            !selectionService_.Empty() ||
             voxelSelection_.Selected().has_value()};
 }
 
@@ -967,6 +975,8 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         SelectVoxelTool(ActiveVoxelTool::Line); break;
     case EditorInputCommand::ToolSphere:
         SelectVoxelTool(ActiveVoxelTool::Sphere); break;
+    case EditorInputCommand::ToolSelection:
+        SelectVoxelTool(ActiveVoxelTool::Selection); break;
     case EditorInputCommand::FileSave:
         if (voxelDocumentSession_.HasActiveDocument())
             static_cast<void>(SaveVoxelModel());
@@ -987,6 +997,8 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
     if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
+    if (tool == ActiveVoxelTool::Selection)
+        static_cast<void>(voxelSelection_.ClearSelection());
     voxelToolState_.SetActiveTool(tool);
     voxelToolInput_.Reset();
     UpdateVoxelHighlights();
@@ -997,7 +1009,9 @@ void EditorWorkspace::CancelActiveInteraction() noexcept
     if (voxelBoxInteraction_.IsActive()) CancelVoxelBox();
     if (voxelLineInteraction_.IsActive()) CancelVoxelLine();
     if (voxelSphereInteraction_.IsActive()) CancelVoxelSphere();
-    if (voxelSelection_.ClearSelection()) UpdateVoxelHighlights();
+    const bool selectionChanged = selectionService_.Clear();
+    const bool legacyChanged = voxelSelection_.ClearSelection();
+    if (selectionChanged || legacyChanged) UpdateVoxelHighlights();
 }
 
 void EditorWorkspace::UndoCommand()
@@ -1580,7 +1594,9 @@ void EditorWorkspace::DrawScenePanel()
             }
         }
 
-        if (!voxelToolState_.IsEditingToolActive() && selectionInputAvailable &&
+        if ((voxelToolState_.IsSelectionActive() ||
+             voxelToolState_.ActiveTool() == ActiveVoxelTool::None) &&
+            selectionInputAvailable &&
             ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             voxelSelectionClickCandidate_ = !cameraControl &&
                 !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
@@ -1590,9 +1606,34 @@ void EditorWorkspace::DrawScenePanel()
             voxelSelectionClickCandidate_ = false;
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
         {
-            if (voxelSelectionClickCandidate_ &&
-                voxelSelection_.SelectHovered())
-                UpdateVoxelHighlights();
+            if (voxelSelectionClickCandidate_)
+            {
+                bool changed = false;
+                if (voxelToolState_.IsSelectionActive())
+                {
+                    if (const auto& hit = voxelSelection_.Hovered())
+                    {
+                        const Asset::Voxel::VoxelPosition position{
+                            static_cast<std::int32_t>(hit->Coordinates.X),
+                            static_cast<std::int32_t>(hit->Coordinates.Y),
+                            static_cast<std::int32_t>(hit->Coordinates.Z)};
+                        const SelectionMode mode = io.KeyCtrl
+                            ? SelectionMode::Subtract
+                            : io.KeyShift ? SelectionMode::Add
+                                          : SelectionMode::Replace;
+                        changed = selectionService_.Select(position, mode);
+                    }
+                    else if (!io.KeyCtrl && !io.KeyShift)
+                    {
+                        changed = selectionService_.Clear();
+                    }
+                }
+                else
+                {
+                    changed = voxelSelection_.SelectHovered();
+                }
+                if (changed) UpdateVoxelHighlights();
+            }
             voxelSelectionClickCandidate_ = false;
         }
         viewportCamera_.Update(imageHovered, available.y);
@@ -2337,11 +2378,27 @@ void EditorWorkspace::DrawStatusBar()
             ? " | Model: " + viewportState_.Name() +
                 (voxelSaveState_.IsDirty() ? " *" : "")
             : "";
+        std::string selectionStatus;
+        if (voxelToolState_.IsSelectionActive())
+        {
+            selectionStatus = " | Selection: " +
+                std::to_string(selectionService_.Count()) + " voxel" +
+                (selectionService_.Count() == 1U ? "" : "s");
+            if (!selectionService_.Empty())
+            {
+                const auto dimensions =
+                    selectionService_.Bounds().Dimensions();
+                selectionStatus += " (" + std::to_string(dimensions.X) +
+                    "x" + std::to_string(dimensions.Y) + "x" +
+                    std::to_string(dimensions.Z) + ")";
+            }
+        }
 
         ImGui::Text(
-            "Ready | %s%s | FPS %.1f | %.2f ms | Backend: %s | ImGui %s",
+            "Ready | %s%s%s | FPS %.1f | %.2f ms | Backend: %s | ImGui %s",
             projectStatus.c_str(),
             modelStatus.c_str(),
+            selectionStatus.c_str(),
             io.Framerate,
             frameTime,
             backendName.c_str(),
@@ -3829,6 +3886,8 @@ bool EditorWorkspace::OpenVoxInViewportNow(
     }
     voxelModelCenter_ = modelCenter;
     voxelSaveState_.OnModelLoaded(filePath);
+    selectionService_.SetDocumentGeneration(
+        voxelDocumentSession_.Generation());
     static_cast<void>(voxelSelection_.Clear());
     UpdateVoxelHighlights();
     voxelViewportRendered_ = false;
@@ -3894,14 +3953,64 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
         if (!hit) return false;
         static_cast<void>(voxelSelection_.SetHovered(hit));
         static_cast<void>(voxelSelection_.SelectHovered());
+        EditorInputFrame input;
+        input.SetPressed(EditorInputKey::V);
+        const EditorInputCommand command = editorInputService_.Resolve(
+            input, CurrentCommandAvailability());
+        const auto toolbarButton = std::find_if(
+            EditorToolbarModel::Buttons().begin(),
+            EditorToolbarModel::Buttons().end(),
+            [](const EditorToolbarButton& button)
+            {
+                return button.Action == EditorToolbarAction::Selection;
+            });
+        if (command != EditorInputCommand::ToolSelection ||
+            toolbarButton == EditorToolbarModel::Buttons().end() ||
+            !EditorToolbarModel::IsEnabled(
+                *toolbarButton,
+                {true, false, voxelToolState_.ActiveTool()}))
+            return false;
+        ExecuteInputCommand(command);
+        const Asset::Voxel::VoxelPosition first{
+            static_cast<std::int32_t>(hit->Coordinates.X),
+            static_cast<std::int32_t>(hit->Coordinates.Y),
+            static_cast<std::int32_t>(hit->Coordinates.Z)};
+        if (!selectionService_.Select(first, SelectionMode::Replace))
+            return false;
+        const Asset::Voxel::VoxelPosition second{1, 1, 1};
+        static_cast<void>(selectionService_.Select(second, SelectionMode::Add));
+        if (selectionService_.Count() < 1U ||
+            !selectionService_.Contains(first) ||
+            !selectionService_.Bounds().Valid)
+            return false;
+        selectionSystemSmokeStarted_ =
+            voxelToolState_.IsSelectionActive();
         UpdateVoxelHighlights();
+    }
+    else if (frame == 10U)
+    {
+        const std::size_t count = selectionService_.Count();
+        SelectVoxelTool(ActiveVoxelTool::Pencil);
+        SelectVoxelTool(ActiveVoxelTool::Selection);
+        selectionSystemSmokeToolChanged_ = selectionSystemSmokeStarted_ &&
+            voxelToolState_.IsSelectionActive() && count > 0U &&
+            selectionService_.Count() == count;
     }
     else if (frame == 20U)
     {
         static_cast<void>(voxelSelection_.Clear());
+        selectionService_.SetDocumentGeneration(
+            selectionService_.DocumentGeneration() + 1U);
+        selectionSystemSmokePassed_ = selectionSystemSmokeToolChanged_ &&
+            selectionService_.Empty();
         UpdateVoxelHighlights();
     }
     return true;
+}
+
+bool EditorWorkspace::SelectionSystemSmokePassed() const noexcept
+{
+    return selectionSystemSmokePassed_;
 }
 
 bool EditorWorkspace::RunEraseVoxelSmokeStep(const std::size_t frame)
@@ -7734,6 +7843,7 @@ void EditorWorkspace::CompleteVoxelEdit() noexcept
     // All successful voxel edits use the same predictable v1 rule: clear both
     // selection and hover after the rebuilt mesh has replaced the old one.
     static_cast<void>(voxelSelection_.Clear());
+    static_cast<void>(selectionService_.Clear());
     UpdateVoxelHighlights();
     voxelSaveState_.MarkModified();
 }
@@ -7764,6 +7874,23 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     };
     std::optional<VoxelCoordinates> hoveredCoordinates =
         coordinates(voxelSelection_.Hovered());
+    std::vector<Asset::Voxel::VoxelPosition> selectedCoordinates;
+    std::optional<VoxelBoxBounds> selectionBounds;
+    if (voxelToolState_.IsSelectionActive())
+    {
+        const auto selected = selectionService_.Voxels();
+        selectedCoordinates.assign(selected.begin(), selected.end());
+        const SelectionBounds& bounds = selectionService_.Bounds();
+        if (bounds.Valid)
+            selectionBounds = VoxelBoxBounds{bounds.Minimum, bounds.Maximum};
+    }
+    else if (const auto& selected = voxelSelection_.Selected())
+    {
+        selectedCoordinates.push_back({
+            static_cast<std::int32_t>(selected->Coordinates.X),
+            static_cast<std::int32_t>(selected->Coordinates.Y),
+            static_cast<std::int32_t>(selected->Coordinates.Z)});
+    }
     std::optional<Asset::Voxel::VoxelPosition> placementPosition;
     std::optional<VoxelBoxBounds> boxPreview;
     std::vector<Asset::Voxel::VoxelPosition> linePreview;
@@ -7868,7 +7995,9 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     }
     viewportRenderer_.ConfigureHighlights(
         hoveredCoordinates,
-        coordinates(voxelSelection_.Selected()),
+        std::move(selectedCoordinates),
+        selectionBounds,
+        voxelToolState_.IsSelectionActive(),
         placementPosition,
         placementStyle,
         boxPreview,
@@ -7892,6 +8021,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     failedDocumentIdentity_.reset();
     failedDocumentRevision_.reset();
     activeVoxelModel_.reset();
+    selectionService_.ClearDocument();
     static_cast<void>(voxelSelection_.Clear());
     voxelToolState_.Reset();
     paletteService_.Clear();
