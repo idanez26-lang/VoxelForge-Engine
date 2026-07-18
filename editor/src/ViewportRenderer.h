@@ -2,6 +2,7 @@
 
 #include "EditorCamera.h"
 #include "Selection/SelectionService.h"
+#include "Transform/TransformPreviewModel.h"
 #include "VoxelSelection/VoxelRaycast.h"
 #include "VoxelTools/VoxelBoxService.h"
 #include "VoxelTools/VoxelSphereService.h"
@@ -66,6 +67,8 @@ public:
         std::span<const Asset::Voxel::VoxelPosition> linePreview,
         std::optional<VoxelSpherePreview> spherePreview,
         Vec3 modelCenter) noexcept;
+    void ConfigureTransformPreview(
+        const TransformPreviewRenderData* preview) noexcept;
     void ClearModel() noexcept;
     [[nodiscard]] bool Render(
         std::uint32_t width,
@@ -84,9 +87,17 @@ public:
     [[nodiscard]] std::size_t ModelUploadCount() const noexcept;
     [[nodiscard]] bool HasModelMesh() const noexcept;
     [[nodiscard]] bool HasHighlightMesh() const noexcept;
+    [[nodiscard]] bool HasTransformPreview() const noexcept;
+    [[nodiscard]] std::size_t TransformPreviewSourcePrimitiveCount()
+        const noexcept;
+    [[nodiscard]] std::size_t TransformPreviewDestinationPrimitiveCount()
+        const noexcept;
+    [[nodiscard]] std::size_t TransformPreviewCollisionPrimitiveCount()
+        const noexcept;
 
 private:
     struct HighlightGeometryCache;
+    struct TransformPreviewSnapshot;
 
     [[nodiscard]] bool EnsurePipeline();
     [[nodiscard]] bool EnsureGuides();
@@ -139,6 +150,7 @@ private:
     std::optional<VoxelBoxBounds> boxPreviewHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
     std::unique_ptr<HighlightGeometryCache> highlightGeometry_;
+    std::unique_ptr<TransformPreviewSnapshot> transformPreview_;
     std::optional<VoxelSpherePreview> spherePreviewHighlight_;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;

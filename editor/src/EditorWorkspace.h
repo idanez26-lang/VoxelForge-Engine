@@ -25,6 +25,7 @@
 #include "Selection/SelectionHandleModel.h"
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
+#include "Transform/TransformPreviewModel.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -308,6 +309,7 @@ private:
     SelectionService selectionService_;
     SelectionVolumeCache selectionVolumeCache_;
     SelectionInteraction selectionInteraction_;
+    TransformPreviewModel transformPreviewModel_;
     bool selectionBoxInteriorHovered_ = false;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
@@ -401,6 +403,14 @@ private:
     bool selectionSystemSmokeStarted_ = false;
     bool selectionSystemSmokeToolChanged_ = false;
     bool selectionSystemSmokePassed_ = false;
+    std::vector<std::pair<Asset::Voxel::VoxelPosition, Asset::Voxel::Voxel>>
+        transformPreviewSmokeDocumentSnapshot_;
+    std::uint64_t transformPreviewSmokeDocumentRevision_ = 0U;
+    std::size_t transformPreviewSmokeUndoCount_ = 0U;
+    std::size_t transformPreviewSmokeRedoCount_ = 0U;
+    std::size_t transformPreviewSmokeHighlightUploadBaseline_ = 0U;
+    bool transformPreviewSmokeDocumentDirty_ = false;
+    bool transformPreviewSmokeRendered_ = false;
     bool voxelEditInProgress_ = false;
     bool viewportFocusRequested_ = false;
     bool viewportFocusApplied_ = false;

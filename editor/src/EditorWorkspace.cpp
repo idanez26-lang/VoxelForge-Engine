@@ -4611,6 +4611,151 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             !selectionService_.EditableBounds().Valid;
         UpdateVoxelHighlights();
     }
+    else if (frame == 22U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        const Asset::Voxel::VoxelSubModel* model =
+            document ? document->GetModel(0U) : nullptr;
+        if (!document || !model) return false;
+        const std::uint64_t generation = voxelDocumentSession_.Generation();
+        selectionService_.SetDocumentGeneration(generation);
+        if (!selectionService_.Select(
+                {0, 1, 1}, SelectionMode::Replace) ||
+            !selectionService_.Select({1, 1, 1}, SelectionMode::Add))
+            return false;
+
+        transformPreviewSmokeDocumentSnapshot_.clear();
+        model->ForEachVoxel(
+            [this](const Asset::Voxel::VoxelPosition position,
+                   const Asset::Voxel::Voxel& voxel)
+            {
+                transformPreviewSmokeDocumentSnapshot_.emplace_back(
+                    position, voxel);
+            });
+        std::sort(transformPreviewSmokeDocumentSnapshot_.begin(),
+            transformPreviewSmokeDocumentSnapshot_.end(),
+            [](const auto& left, const auto& right)
+            {
+                if (left.first.X != right.first.X)
+                    return left.first.X < right.first.X;
+                if (left.first.Y != right.first.Y)
+                    return left.first.Y < right.first.Y;
+                return left.first.Z < right.first.Z;
+            });
+        transformPreviewSmokeDocumentRevision_ = document->GetRevision();
+        transformPreviewSmokeDocumentDirty_ = document->IsDirty();
+        transformPreviewSmokeUndoCount_ = voxelEditHistory_.UndoCount();
+        transformPreviewSmokeRedoCount_ = voxelEditHistory_.RedoCount();
+        transformPreviewSmokeHighlightUploadBaseline_ =
+            viewportRenderer_.HighlightUploadCount();
+        transformPreviewSmokeRendered_ = false;
+
+        if (!transformPreviewModel_.BeginPreview(
+                *document, selectionService_, generation) ||
+            !transformPreviewModel_.SetDelta(
+                *document, selectionService_, generation, {1, 0, 0}))
+            return false;
+        const TransformPreviewRenderData renderData =
+            transformPreviewModel_.RenderData();
+        if (renderData.Voxels.size() != 2U ||
+            renderData.Plan.SourceVoxelCount != 2U ||
+            renderData.Plan.DestinationVoxelCount != 2U ||
+            transformPreviewModel_.CollisionCount() != 1U ||
+            transformPreviewModel_.OutOfBoundsCount() != 0U)
+            return false;
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 23U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (!document || !viewportRenderer_.HasTransformPreview() ||
+            viewportRenderer_.TransformPreviewSourcePrimitiveCount() != 2U ||
+            viewportRenderer_.TransformPreviewDestinationPrimitiveCount() !=
+                2U ||
+            viewportRenderer_.TransformPreviewCollisionPrimitiveCount() != 1U ||
+            viewportRenderer_.HighlightUploadCount() <=
+                transformPreviewSmokeHighlightUploadBaseline_)
+            return false;
+        transformPreviewSmokeRendered_ = true;
+        if (!transformPreviewModel_.SetDelta(
+                *document, selectionService_,
+                voxelDocumentSession_.Generation(), {-1, 0, 0}) ||
+            transformPreviewModel_.CollisionCount() != 0U ||
+            transformPreviewModel_.OutOfBoundsCount() != 1U)
+            return false;
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 24U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (!document ||
+            viewportRenderer_.TransformPreviewCollisionPrimitiveCount() != 1U)
+            return false;
+        const std::uint64_t rebuildCount =
+            transformPreviewModel_.Metrics().RebuildCount;
+        if (transformPreviewModel_.SetDelta(
+                *document, selectionService_,
+                voxelDocumentSession_.Generation(), {-1, 0, 0}) ||
+            transformPreviewModel_.Metrics().RebuildCount != rebuildCount ||
+            !transformPreviewModel_.SetDelta(
+                *document, selectionService_,
+                voxelDocumentSession_.Generation(), {2, 0, 0}) ||
+            transformPreviewModel_.CollisionCount() != 1U ||
+            transformPreviewModel_.OutOfBoundsCount() != 1U)
+            return false;
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 25U)
+    {
+        if (!viewportRenderer_.HasTransformPreview() ||
+            viewportRenderer_.TransformPreviewCollisionPrimitiveCount() != 2U ||
+            !transformPreviewModel_.CancelPreview())
+            return false;
+        UpdateVoxelHighlights();
+    }
+    else if (frame == 26U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        const Asset::Voxel::VoxelSubModel* model =
+            document ? document->GetModel(0U) : nullptr;
+        if (!document || !model) return false;
+        std::vector<std::pair<Asset::Voxel::VoxelPosition,
+            Asset::Voxel::Voxel>> current;
+        model->ForEachVoxel(
+            [&current](const Asset::Voxel::VoxelPosition position,
+                       const Asset::Voxel::Voxel& voxel)
+            {
+                current.emplace_back(position, voxel);
+            });
+        std::sort(current.begin(), current.end(),
+            [](const auto& left, const auto& right)
+            {
+                if (left.first.X != right.first.X)
+                    return left.first.X < right.first.X;
+                if (left.first.Y != right.first.Y)
+                    return left.first.Y < right.first.Y;
+                return left.first.Z < right.first.Z;
+            });
+        selectionSystemSmokePassed_ = selectionSystemSmokePassed_ &&
+            transformPreviewSmokeRendered_ &&
+            !transformPreviewModel_.IsActive() &&
+            !viewportRenderer_.HasTransformPreview() &&
+            document->GetRevision() ==
+                transformPreviewSmokeDocumentRevision_ &&
+            document->IsDirty() == transformPreviewSmokeDocumentDirty_ &&
+            voxelEditHistory_.UndoCount() ==
+                transformPreviewSmokeUndoCount_ &&
+            voxelEditHistory_.RedoCount() ==
+                transformPreviewSmokeRedoCount_ &&
+            transformPreviewSmokeDocumentSnapshot_ == current &&
+            selectionService_.Count() == 2U &&
+            selectionService_.Contains({0, 1, 1}) &&
+            selectionService_.Contains({1, 1, 1});
+    }
     return true;
 }
 
@@ -8692,6 +8837,19 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         linePreview,
         spherePreview,
         voxelModelCenter_);
+    const Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document && transformPreviewModel_.IsValidFor(
+            *document, selectionService_, voxelDocumentSession_.Generation()))
+    {
+        const TransformPreviewRenderData preview =
+            transformPreviewModel_.RenderData();
+        viewportRenderer_.ConfigureTransformPreview(&preview);
+    }
+    else
+    {
+        viewportRenderer_.ConfigureTransformPreview(nullptr);
+    }
 }
 
 void EditorWorkspace::ClearVoxelViewport() noexcept
@@ -8699,6 +8857,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     commandHistory_.Clear();
     voxelEditHistory_.Clear();
     ++voxelModelGeneration_;
+    transformPreviewModel_.Reset();
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();

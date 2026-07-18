@@ -160,6 +160,28 @@ else()
         VoxelForgeEditorVoxelSelection PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorTransformPreview STATIC)
+target_sources(
+    VoxelForgeEditorTransformPreview
+    PRIVATE src/Transform/TransformPreviewModel.cpp
+)
+target_include_directories(
+    VoxelForgeEditorTransformPreview
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorTransformPreview
+    PUBLIC VoxelForgeEditorVoxelSelection VoxelForgeAsset
+)
+target_compile_features(VoxelForgeEditorTransformPreview PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorTransformPreview PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorTransformPreview PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorVoxelDocument STATIC)
 target_sources(
     VoxelForgeEditorVoxelDocument
@@ -479,6 +501,7 @@ target_link_libraries(
         VoxelForgeEditorLayout
         VoxelForgeEditorProjectSession
         VoxelForgeEditorPalette
+        VoxelForgeEditorTransformPreview
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorVoxelDocument
         VoxelForgeEditorVoxelCreation

@@ -380,6 +380,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorSelectionServiceTests>
 )
 add_executable(
+    VoxelForgeEditorTransformPreviewTests
+    Editor/TransformPreviewTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorTransformPreviewTests
+    PRIVATE VoxelForgeEditorTransformPreview
+)
+vf_configure_test(VoxelForgeEditorTransformPreviewTests)
+add_test(
+    NAME VoxelForge.Editor.TransformPreview
+    COMMAND $<TARGET_FILE:VoxelForgeEditorTransformPreviewTests>
+)
+add_executable(
     VoxelForgeEditorDialogTests
     Editor/EditorDialogTests.cpp
 )
@@ -692,6 +705,7 @@ set_tests_properties(
     VoxelForge.Editor.ModernToolbar
     VoxelForge.Editor.KeyboardShortcuts
     VoxelForge.Editor.SelectionService
+    VoxelForge.Editor.TransformPreview
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
@@ -730,6 +744,10 @@ if(TARGET VoxelForgeEditor)
     add_test(
         NAME VoxelForge.Editor.SelectionSystemSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --selection-system-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.TransformPreviewSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --transform-preview-smoke-test
     )
     add_test(
         NAME VoxelForge.Editor.EraseVoxelSmoke
@@ -844,6 +862,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelViewportSmoke
         VoxelForge.Editor.VoxelSelectionSmoke
         VoxelForge.Editor.SelectionSystemSmoke
+        VoxelForge.Editor.TransformPreviewSmoke
         VoxelForge.Editor.EraseVoxelSmoke
         VoxelForge.Editor.PaintVoxelSmoke
         VoxelForge.Editor.QualityOfLifeSmoke

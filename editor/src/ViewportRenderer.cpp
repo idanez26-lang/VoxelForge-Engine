@@ -262,6 +262,18 @@ struct ViewportRenderer::HighlightGeometryCache final
     std::vector<std::uint32_t> Indices;
 };
 
+struct ViewportRenderer::TransformPreviewSnapshot final
+{
+    std::uint64_t Revision = 0U;
+    std::vector<TransformPreviewVoxel> Voxels;
+    std::array<Asset::Voxel::VoxelColor, 256U> Palette{};
+    SelectionBounds SourceBounds{};
+    SelectionBounds PreviewBounds{};
+    SelectionBounds CollisionBounds{};
+    SelectionBounds OutOfBoundsBounds{};
+    TransformPreviewRenderPlan Plan{};
+};
+
 ViewportRenderer::ViewportRenderer() = default;
 
 ViewportRenderer::~ViewportRenderer()
@@ -571,7 +583,46 @@ void ViewportRenderer::ConfigureHighlights(
         editableSelectionBoundsHighlight_.has_value() ||
         placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
-        spherePreviewHighlight_.has_value();
+        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr;
+    if (!highlightsDirty_) ReleaseHighlights();
+}
+
+void ViewportRenderer::ConfigureTransformPreview(
+    const TransformPreviewRenderData* preview) noexcept
+{
+    if (preview == nullptr)
+    {
+        if (!transformPreview_) return;
+        transformPreview_.reset();
+    }
+    else
+    {
+        if (transformPreview_ &&
+            transformPreview_->Revision == preview->Revision)
+            return;
+        if (!transformPreview_)
+            transformPreview_ = std::make_unique<TransformPreviewSnapshot>();
+        TransformPreviewSnapshot& snapshot = *transformPreview_;
+        snapshot.Revision = preview->Revision;
+        snapshot.Voxels.assign(preview->Voxels.begin(), preview->Voxels.end());
+        std::fill(snapshot.Palette.begin(), snapshot.Palette.end(),
+            Asset::Voxel::VoxelColor{});
+        std::copy_n(preview->Palette.begin(),
+            std::min(preview->Palette.size(), snapshot.Palette.size()),
+            snapshot.Palette.begin());
+        snapshot.SourceBounds = preview->SourceBounds;
+        snapshot.PreviewBounds = preview->PreviewBounds;
+        snapshot.CollisionBounds = preview->CollisionBounds;
+        snapshot.OutOfBoundsBounds = preview->OutOfBoundsBounds;
+        snapshot.Plan = preview->Plan;
+    }
+    highlightsDirty_ = hoveredHighlight_.has_value() ||
+        !selectedHighlights_.empty() ||
+        selectionBoundsHighlight_.has_value() ||
+        editableSelectionBoundsHighlight_.has_value() ||
+        placementPreviewHighlight_.has_value() ||
+        boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
+        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr;
     if (!highlightsDirty_) ReleaseHighlights();
 }
 
@@ -592,9 +643,27 @@ bool ViewportRenderer::EnsureHighlights()
         selectedHighlights_.size() +
         static_cast<std::size_t>(selectionBoundsHighlight_.has_value()) +
         static_cast<std::size_t>(editableSelectionBoundsHighlight_.has_value());
+    std::size_t transformOutlineCount = 0U;
+    if (transformPreview_)
+    {
+        transformOutlineCount = 2U;
+        if (transformPreview_->Plan.DrawIndividualVoxels)
+            transformOutlineCount += transformPreview_->Voxels.size() * 2U;
+        else if (transformPreview_->Plan.DrawIndividualCollisions)
+            transformOutlineCount +=
+                transformPreview_->Plan.CollisionVoxelCount +
+                transformPreview_->Plan.OutOfBoundsVoxelCount;
+        else
+            transformOutlineCount +=
+                static_cast<std::size_t>(
+                    transformPreview_->CollisionBounds.Valid) +
+                static_cast<std::size_t>(
+                    transformPreview_->OutOfBoundsBounds.Valid);
+    }
     constexpr std::size_t boxesPerOutline = 12U;
     constexpr std::size_t sphereBoxCount = 3U * 48U;
-    const std::size_t boxCount = outlineCount * boxesPerOutline +
+    const std::size_t boxCount =
+        (outlineCount + transformOutlineCount) * boxesPerOutline +
         (spherePreviewHighlight_ ? sphereBoxCount : 0U);
     vertices.reserve(boxCount * 24U);
     indices.reserve(boxCount * 36U);
@@ -646,6 +715,80 @@ bool ViewportRenderer::EnsureHighlights()
                 : std::array<float, 4>{0.08F, 0.98F, 0.72F, 1.0F},
             moving ? 0.080F : hovered ? 0.072F : 0.065F,
             moving ? 0.085F : hovered ? 0.078F : 0.070F);
+    }
+    if (transformPreview_)
+    {
+        constexpr std::array<float, 4> sourceGhostColor{
+            0.42F, 0.52F, 0.62F, 1.0F};
+        constexpr std::array<float, 4> destinationBoundsColor{
+            0.18F, 0.86F, 1.0F, 1.0F};
+        constexpr std::array<float, 4> collisionColor{
+            1.0F, 0.16F, 0.10F, 1.0F};
+        constexpr std::array<float, 4> outOfBoundsColor{
+            1.0F, 0.56F, 0.08F, 1.0F};
+        const TransformPreviewSnapshot& preview = *transformPreview_;
+        if (preview.SourceBounds.Valid)
+            AppendVoxelBoxOutline(vertices, indices,
+                {preview.SourceBounds.Minimum, preview.SourceBounds.Maximum},
+                modelCenter_, sourceGhostColor, 0.030F, 0.028F);
+        if (preview.PreviewBounds.Valid)
+            AppendVoxelBoxOutline(vertices, indices,
+                {preview.PreviewBounds.Minimum, preview.PreviewBounds.Maximum},
+                modelCenter_, destinationBoundsColor, 0.045F, 0.042F);
+
+        if (preview.Plan.DrawIndividualVoxels)
+        {
+            for (const TransformPreviewVoxel& voxel : preview.Voxels)
+            {
+                AppendVoxelOutline(vertices, indices, voxel.SourcePosition,
+                    modelCenter_, sourceGhostColor);
+                std::array<float, 4> color{};
+                if (voxel.State == TransformPreviewVoxelState::Collision)
+                    color = collisionColor;
+                else if (voxel.State ==
+                    TransformPreviewVoxelState::OutOfBounds)
+                    color = outOfBoundsColor;
+                else
+                {
+                    const Asset::Voxel::VoxelColor paletteColor =
+                        preview.Palette[voxel.Value.PaletteIndex];
+                    constexpr float scale = 1.0F / 255.0F;
+                    color = {
+                        paletteColor.Red * scale,
+                        paletteColor.Green * scale,
+                        paletteColor.Blue * scale,
+                        1.0F};
+                }
+                AppendVoxelOutline(vertices, indices, voxel.PreviewPosition,
+                    modelCenter_, color);
+            }
+        }
+        else if (preview.Plan.DrawIndividualCollisions)
+        {
+            for (const TransformPreviewVoxel& voxel : preview.Voxels)
+            {
+                if (voxel.State == TransformPreviewVoxelState::Collision)
+                    AppendVoxelOutline(vertices, indices,
+                        voxel.PreviewPosition, modelCenter_, collisionColor);
+                else if (voxel.State ==
+                    TransformPreviewVoxelState::OutOfBounds)
+                    AppendVoxelOutline(vertices, indices,
+                        voxel.PreviewPosition, modelCenter_, outOfBoundsColor);
+            }
+        }
+        else
+        {
+            if (preview.CollisionBounds.Valid)
+                AppendVoxelBoxOutline(vertices, indices,
+                    {preview.CollisionBounds.Minimum,
+                     preview.CollisionBounds.Maximum},
+                    modelCenter_, collisionColor, 0.060F, 0.055F);
+            if (preview.OutOfBoundsBounds.Valid)
+                AppendVoxelBoxOutline(vertices, indices,
+                    {preview.OutOfBoundsBounds.Minimum,
+                     preview.OutOfBoundsBounds.Maximum},
+                    modelCenter_, outOfBoundsColor, 0.060F, 0.055F);
+        }
     }
     if (indices.empty())
     {
@@ -931,6 +1074,7 @@ void ViewportRenderer::ClearModel() noexcept
     vertexBuffer_ = nullptr;
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
+    ConfigureTransformPreview(nullptr);
     ConfigureHighlights(
         std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
         std::nullopt, std::nullopt,
@@ -1039,6 +1183,43 @@ bool ViewportRenderer::HasHighlightMesh() const noexcept
 {
     return highlightVertexBuffer_ != nullptr &&
         highlightIndexBuffer_ != nullptr && highlightIndexCount_ > 0U;
+}
+
+bool ViewportRenderer::HasTransformPreview() const noexcept
+{
+    return transformPreview_ != nullptr;
+}
+
+std::size_t ViewportRenderer::TransformPreviewSourcePrimitiveCount()
+    const noexcept
+{
+    if (!transformPreview_) return 0U;
+    return transformPreview_->Plan.DrawIndividualVoxels
+        ? transformPreview_->Voxels.size()
+        : static_cast<std::size_t>(transformPreview_->SourceBounds.Valid);
+}
+
+std::size_t ViewportRenderer::TransformPreviewDestinationPrimitiveCount()
+    const noexcept
+{
+    if (!transformPreview_) return 0U;
+    return transformPreview_->Plan.DrawIndividualVoxels
+        ? transformPreview_->Voxels.size()
+        : static_cast<std::size_t>(transformPreview_->PreviewBounds.Valid);
+}
+
+std::size_t ViewportRenderer::TransformPreviewCollisionPrimitiveCount()
+    const noexcept
+{
+    if (!transformPreview_) return 0U;
+    if (transformPreview_->Plan.DrawIndividualVoxels ||
+        transformPreview_->Plan.DrawIndividualCollisions)
+        return transformPreview_->Plan.CollisionVoxelCount +
+            transformPreview_->Plan.OutOfBoundsVoxelCount;
+    return static_cast<std::size_t>(
+               transformPreview_->CollisionBounds.Valid) +
+        static_cast<std::size_t>(
+               transformPreview_->OutOfBoundsBounds.Valid);
 }
 
 void ViewportRenderer::SetError(std::string message)
