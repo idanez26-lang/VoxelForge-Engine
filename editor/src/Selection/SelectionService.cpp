@@ -79,40 +79,54 @@ bool SelectionService::Apply(
     const std::span<const Asset::Voxel::VoxelPosition> positions,
     const SelectionMode mode)
 {
-    std::vector<Asset::Voxel::VoxelPosition> normalized(
-        positions.begin(), positions.end());
-    Normalize(normalized);
+    normalizationScratch_.assign(positions.begin(), positions.end());
+    Normalize(normalizationScratch_);
+    return ApplySorted(normalizationScratch_, mode);
+}
 
-    std::vector<Asset::Voxel::VoxelPosition> result;
+bool SelectionService::ApplySorted(
+    const std::span<const Asset::Voxel::VoxelPosition> positions,
+    const SelectionMode mode)
+{
+    if (mode == SelectionMode::Replace)
+    {
+        if (std::equal(
+                positions_.begin(), positions_.end(),
+                positions.begin(), positions.end()))
+            return false;
+        positions_.assign(positions.begin(), positions.end());
+        RecalculateBounds();
+        return true;
+    }
+
+    mergeScratch_.clear();
     switch (mode)
     {
-    case SelectionMode::Replace:
-        result = std::move(normalized);
-        break;
     case SelectionMode::Add:
-        result.reserve(positions_.size() + normalized.size());
+        mergeScratch_.reserve(positions_.size() + positions.size());
         std::set_union(
             positions_.begin(), positions_.end(),
-            normalized.begin(), normalized.end(),
-            std::back_inserter(result), PositionLess);
+            positions.begin(), positions.end(),
+            std::back_inserter(mergeScratch_), PositionLess);
         break;
     case SelectionMode::Subtract:
-        result.reserve(positions_.size());
+        mergeScratch_.reserve(positions_.size());
         std::set_difference(
             positions_.begin(), positions_.end(),
-            normalized.begin(), normalized.end(),
-            std::back_inserter(result), PositionLess);
+            positions.begin(), positions.end(),
+            std::back_inserter(mergeScratch_), PositionLess);
         break;
     case SelectionMode::Intersect:
-        result.reserve(std::min(positions_.size(), normalized.size()));
+        mergeScratch_.reserve(std::min(positions_.size(), positions.size()));
         std::set_intersection(
             positions_.begin(), positions_.end(),
-            normalized.begin(), normalized.end(),
-            std::back_inserter(result), PositionLess);
+            positions.begin(), positions.end(),
+            std::back_inserter(mergeScratch_), PositionLess);
         break;
+    case SelectionMode::Replace: break;
     }
-    if (result == positions_) return false;
-    positions_ = std::move(result);
+    if (mergeScratch_ == positions_) return false;
+    positions_.swap(mergeScratch_);
     RecalculateBounds();
     return true;
 }
@@ -132,11 +146,24 @@ bool SelectionService::SelectVolume(
     const SelectionMode mode)
 {
     if (!bounds.Valid) return false;
-    std::vector<Asset::Voxel::VoxelPosition> contained;
-    contained.reserve(existingVoxels.size());
+    volumeScratch_.clear();
+    if (volumeScratch_.capacity() < existingVoxels.size())
+        volumeScratch_.reserve(existingVoxels.size());
     for (const auto position : existingVoxels)
-        if (bounds.Contains(position)) contained.push_back(position);
-    const bool changed = Apply(contained, mode);
+        if (bounds.Contains(position)) volumeScratch_.push_back(position);
+    Normalize(volumeScratch_);
+    const bool changed = ApplySorted(volumeScratch_, mode);
+    editableBounds_ = bounds;
+    return changed;
+}
+
+bool SelectionService::ApplySortedVolume(
+    const std::span<const Asset::Voxel::VoxelPosition> containedVoxels,
+    const SelectionBounds bounds,
+    const SelectionMode mode)
+{
+    if (!bounds.Valid) return false;
+    const bool changed = ApplySorted(containedVoxels, mode);
     editableBounds_ = bounds;
     return changed;
 }

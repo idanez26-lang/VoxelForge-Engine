@@ -23,6 +23,8 @@
 #include "Selection/SelectionService.h"
 #include "Selection/SelectionInteraction.h"
 #include "Selection/SelectionHandleModel.h"
+#include "Selection/SelectionHighlightPolicy.h"
+#include "Selection/SelectionVolumeCache.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -304,6 +306,7 @@ private:
     FirstCreationExperience firstCreationExperience_;
     WorkplaneService workplaneService_;
     SelectionService selectionService_;
+    SelectionVolumeCache selectionVolumeCache_;
     SelectionInteraction selectionInteraction_;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;

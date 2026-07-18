@@ -61,6 +61,10 @@ public:
         std::span<const Asset::Voxel::VoxelPosition> existingVoxels,
         SelectionBounds bounds,
         SelectionMode mode = SelectionMode::Replace);
+    [[nodiscard]] bool ApplySortedVolume(
+        std::span<const Asset::Voxel::VoxelPosition> containedVoxels,
+        SelectionBounds bounds,
+        SelectionMode mode = SelectionMode::Replace);
     [[nodiscard]] bool Clear() noexcept;
     void SetDocumentGeneration(std::uint64_t generation) noexcept;
     void ClearDocument() noexcept;
@@ -79,9 +83,15 @@ public:
 private:
     static void Normalize(
         std::vector<Asset::Voxel::VoxelPosition>& positions);
+    [[nodiscard]] bool ApplySorted(
+        std::span<const Asset::Voxel::VoxelPosition> positions,
+        SelectionMode mode);
     void RecalculateBounds() noexcept;
 
     std::vector<Asset::Voxel::VoxelPosition> positions_;
+    std::vector<Asset::Voxel::VoxelPosition> normalizationScratch_;
+    std::vector<Asset::Voxel::VoxelPosition> volumeScratch_;
+    std::vector<Asset::Voxel::VoxelPosition> mergeScratch_;
     SelectionBounds bounds_{};
     SelectionBounds editableBounds_{};
     std::uint64_t documentGeneration_ = 0U;

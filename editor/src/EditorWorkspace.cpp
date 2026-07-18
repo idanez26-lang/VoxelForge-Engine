@@ -29,6 +29,7 @@
 #include <memory>
 #include <string_view>
 #include <sstream>
+#include <span>
 #include <utility>
 
 namespace VoxelForge::Editor
@@ -1782,9 +1783,11 @@ void EditorWorkspace::DrawScenePanel()
                 selectionInteraction_.PointerUp();
             if (release.WasDrag && release.Bounds)
             {
-                static_cast<void>(ApplySelectionBounds(
-                    *release.Bounds, release.Operation));
-                UpdateVoxelHighlights();
+                if (release.Mode != SelectionInteractionMode::ResizingFace)
+                    static_cast<void>(ApplySelectionBounds(
+                        *release.Bounds, release.Operation));
+                else
+                    UpdateVoxelHighlights();
             }
             else
             {
@@ -7873,15 +7876,26 @@ bool EditorWorkspace::ApplySelectionBounds(
     if (!model || !bounds.Valid) return false;
     const SelectionBounds clamped = bounds.ClampedTo(model->Dimensions());
     if (!clamped.Valid) return false;
-    std::vector<Asset::Voxel::VoxelPosition> existing;
-    existing.reserve(model->VoxelCount());
-    model->ForEachVoxel(
-        [&existing](const Asset::Voxel::VoxelPosition position,
-                    const Asset::Voxel::Voxel&)
-        {
-            existing.push_back(position);
-        });
-    const bool changed = selectionService_.SelectVolume(existing, clamped, mode);
+    const std::uint64_t generation = voxelDocumentSession_.Generation();
+    const std::uint64_t revision = document->GetRevision();
+    if (!selectionVolumeCache_.SourceCurrent(generation, revision))
+    {
+        std::vector<Asset::Voxel::VoxelPosition> existing;
+        existing.reserve(model->VoxelCount());
+        model->ForEachVoxel(
+            [&existing](const Asset::Voxel::VoxelPosition position,
+                        const Asset::Voxel::Voxel&)
+            {
+                existing.push_back(position);
+            });
+        selectionVolumeCache_.UpdateSource(
+            std::move(existing), generation, revision);
+    }
+    const SelectionVolumeEvaluation evaluation =
+        selectionVolumeCache_.Evaluate(clamped);
+    if (!evaluation.Recalculated) return false;
+    const bool changed = selectionService_.ApplySortedVolume(
+        evaluation.Voxels, clamped, mode);
     UpdateVoxelHighlights();
     return changed;
 }
@@ -7895,9 +7909,10 @@ void EditorWorkspace::CancelSelectionInteraction()
     if (mode == SelectionInteractionMode::ResizingFace && restore)
         static_cast<void>(ApplySelectionBounds(
             *restore, SelectionMode::Replace));
+    else
+        UpdateVoxelHighlights();
     voxelSelectionClickCandidate_ = false;
     selectionPointerAnchor_.reset();
-    UpdateVoxelHighlights();
 }
 
 void EditorWorkspace::CancelVoxelBox() noexcept
@@ -8252,13 +8267,18 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     };
     std::optional<VoxelCoordinates> hoveredCoordinates =
         coordinates(voxelSelection_.Hovered());
-    std::vector<Asset::Voxel::VoxelPosition> selectedCoordinates;
+    std::span<const Asset::Voxel::VoxelPosition> selectedCoordinates;
+    std::array<Asset::Voxel::VoxelPosition, 1U> legacySelection{};
     std::optional<VoxelBoxBounds> selectionBounds;
     std::optional<SelectionBounds> editableSelectionBounds;
     if (voxelToolState_.IsSelectionActive())
     {
         const auto selected = selectionService_.Voxels();
-        selectedCoordinates.assign(selected.begin(), selected.end());
+        const SelectionHighlightPlan highlightPlan =
+            SelectionHighlightPolicy::Build(
+                selected.size(), selectionInteraction_.IsActive());
+        if (highlightPlan.DrawIndividualVoxels)
+            selectedCoordinates = selected;
         const SelectionBounds& bounds = selectionService_.Bounds();
         if (bounds.Valid)
             selectionBounds = VoxelBoxBounds{bounds.Minimum, bounds.Maximum};
@@ -8271,10 +8291,11 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     }
     else if (const auto& selected = voxelSelection_.Selected())
     {
-        selectedCoordinates.push_back({
+        legacySelection[0] = {
             static_cast<std::int32_t>(selected->Coordinates.X),
             static_cast<std::int32_t>(selected->Coordinates.Y),
-            static_cast<std::int32_t>(selected->Coordinates.Z)});
+            static_cast<std::int32_t>(selected->Coordinates.Z)};
+        selectedCoordinates = legacySelection;
     }
     std::optional<Asset::Voxel::VoxelPosition> placementPosition;
     std::optional<VoxelBoxBounds> boxPreview;
@@ -8380,14 +8401,14 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     }
     viewportRenderer_.ConfigureHighlights(
         hoveredCoordinates,
-        std::move(selectedCoordinates),
+        selectedCoordinates,
         selectionBounds,
         editableSelectionBounds,
         voxelToolState_.IsSelectionActive(),
         placementPosition,
         placementStyle,
         boxPreview,
-        std::move(linePreview),
+        linePreview,
         spherePreview,
         voxelModelCenter_);
 }
@@ -8408,6 +8429,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     failedDocumentRevision_.reset();
     activeVoxelModel_.reset();
     selectionService_.ClearDocument();
+    selectionVolumeCache_.Clear();
     static_cast<void>(selectionInteraction_.Cancel());
     voxelSelectionClickCandidate_ = false;
     selectionPointerAnchor_.reset();

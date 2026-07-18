@@ -1,5 +1,7 @@
 #include "Selection/SelectionService.h"
 #include "Selection/SelectionInteraction.h"
+#include "Selection/SelectionHighlightPolicy.h"
+#include "Selection/SelectionVolumeCache.h"
 
 #include <algorithm>
 #include <array>
@@ -20,6 +22,8 @@ using VoxelForge::Editor::SelectionInteractionMode;
 using VoxelForge::Editor::SelectionPointerRelease;
 using VoxelForge::Editor::SelectionFace;
 using VoxelForge::Editor::SelectionHandle;
+using VoxelForge::Editor::SelectionHighlightPolicy;
+using VoxelForge::Editor::SelectionVolumeCache;
 
 void Require(const bool condition, const std::string_view message)
 {
@@ -434,6 +438,109 @@ void TestHandlePickingToSelectionRecalculation()
             interaction.Mode() == SelectionInteractionMode::Idle,
         "MouseUp must preserve the recalculated resized bounds.");
 }
+
+std::vector<VoxelPosition> DenseVolume(const std::int32_t extent)
+{
+    std::vector<VoxelPosition> voxels;
+    voxels.reserve(static_cast<std::size_t>(extent) *
+        static_cast<std::size_t>(extent) * static_cast<std::size_t>(extent));
+    for (std::int32_t z = 0; z < extent; ++z)
+        for (std::int32_t y = 0; y < extent; ++y)
+            for (std::int32_t x = 0; x < extent; ++x)
+                voxels.push_back({x, y, z});
+    return voxels;
+}
+
+void TestSelectionVolumeCacheScalesWithExistingVoxels()
+{
+    SelectionVolumeCache cache;
+    std::vector<VoxelPosition> sparse;
+    for (std::int32_t index = 0; index < 4096; ++index)
+        sparse.push_back({index % 64, (index / 64) % 64, index / 4096});
+    cache.UpdateSource(std::move(sparse), 9U, 17U);
+    const SelectionBounds nearlyFull = SelectionBounds::FromCorners(
+        {0, 0, 0}, {62, 63, 63});
+    const auto first = cache.Evaluate(nearlyFull);
+    Require(first.Recalculated && first.Voxels.size() == 4032U,
+        "A large sparse bounds evaluation must remain exact.");
+    Require(cache.Metrics().VisitedVoxelCount == 4096U &&
+            cache.Metrics().BoundsEvaluationCount == 1U,
+        "Volume evaluation must visit existing voxels, not empty AABB cells.");
+
+    const std::size_t capacityGrowths =
+        cache.Metrics().ResultCapacityGrowthCount;
+    const auto unchanged = cache.Evaluate(nearlyFull);
+    Require(!unchanged.Recalculated && unchanged.Voxels.size() == 4032U &&
+            cache.Metrics().BoundsCacheHitCount == 1U &&
+            cache.Metrics().VisitedVoxelCount == 4096U &&
+            cache.Metrics().ResultCapacityGrowthCount == capacityGrowths,
+        "Unchanged voxel bounds must reuse the result without a scan or growth.");
+
+    const auto changed = cache.Evaluate(SelectionBounds::FromCorners(
+        {0, 0, 0}, {61, 63, 63}));
+    Require(changed.Recalculated && changed.Voxels.size() == 3968U &&
+            cache.Metrics().BoundsEvaluationCount == 2U &&
+            cache.Metrics().VisitedVoxelCount == 8192U &&
+            cache.Metrics().ResultCapacityGrowthCount == capacityGrowths,
+        "Changing one voxel coordinate must trigger exactly one reused scan.");
+}
+
+void TestSelectionVolumeCacheDenseAndRevisionInvalidation()
+{
+    SelectionVolumeCache cache;
+    cache.UpdateSource(DenseVolume(64), 31U, 8U);
+    const auto full = cache.Evaluate(SelectionBounds::FromCorners(
+        {0, 0, 0}, {63, 63, 63}));
+    Require(full.Recalculated && full.Voxels.size() == 64U * 64U * 64U,
+        "A selection covering a dense 64-cubed document must remain exact.");
+    const auto medium = cache.Evaluate(SelectionBounds::FromCorners(
+        {16, 16, 16}, {47, 47, 47}));
+    Require(medium.Recalculated && medium.Voxels.size() == 32U * 32U * 32U,
+        "A medium dense selection must contain the exact voxel count.");
+    Require(cache.SourceCurrent(31U, 8U) &&
+            !cache.SourceCurrent(31U, 9U),
+        "Document revision changes must invalidate the source identity.");
+    cache.UpdateSource({{1, 2, 3}}, 31U, 9U);
+    const auto refreshed = cache.Evaluate(SelectionBounds::FromCorners(
+        {0, 0, 0}, {63, 63, 63}));
+    Require(refreshed.Recalculated && refreshed.Voxels.size() == 1U &&
+            cache.Metrics().SourceRefreshCount == 2U,
+        "A revised document must replace stale cached voxel positions.");
+}
+
+void TestCachedVolumeApplicationAndHighlightPolicy()
+{
+    SelectionVolumeCache cache;
+    cache.UpdateSource({{4, 0, 0}, {0, 0, 0}, {2, 0, 0}}, 1U, 1U);
+    const SelectionBounds bounds = SelectionBounds::FromCorners(
+        {0, 0, 0}, {3, 0, 0});
+    const auto evaluated = cache.Evaluate(bounds);
+    SelectionService selection;
+    Require(selection.ApplySortedVolume(
+            evaluated.Voxels, bounds, SelectionMode::Replace) &&
+            selection.Count() == 2U && selection.Contains({0, 0, 0}) &&
+            selection.Contains({2, 0, 0}),
+        "Cached sorted voxels must apply without changing selection semantics.");
+    Require(!selection.ApplySortedVolume(
+            cache.Evaluate(bounds).Voxels, bounds, SelectionMode::Replace),
+        "Reapplying unchanged cached bounds must be a no-op.");
+
+    const auto small = SelectionHighlightPolicy::Build(256U, true);
+    Require(small.DrawIndividualVoxels &&
+            small.IndividualVoxelCount == 256U &&
+            small.EstimatedVertexCount == 256U * 288U,
+        "Small interactive selections must keep individual outlines.");
+    const auto largeInteraction = SelectionHighlightPolicy::Build(257U, true);
+    Require(!largeInteraction.DrawIndividualVoxels &&
+            largeInteraction.IndividualVoxelCount == 0U &&
+            largeInteraction.EstimatedVertexCount == 0U,
+        "Large interactions must use the global box instead of huge geometry.");
+    const auto persistentLimit = SelectionHighlightPolicy::Build(2048U, false);
+    const auto largePersistent = SelectionHighlightPolicy::Build(2049U, false);
+    Require(persistentLimit.DrawIndividualVoxels &&
+            !largePersistent.DrawIndividualVoxels,
+        "Persistent individual outlines must switch at the documented limit.");
+}
 }
 
 int main()
@@ -453,6 +560,9 @@ int main()
         TestFaceResizeRules();
         TestResizePointerLifecycleAndCancel();
         TestHandlePickingToSelectionRecalculation();
+        TestSelectionVolumeCacheScalesWithExistingVoxels();
+        TestSelectionVolumeCacheDenseAndRevisionInvalidation();
+        TestCachedVolumeApplicationAndHighlightPolicy();
         std::cout << "SelectionService tests passed.\n";
         return EXIT_SUCCESS;
     }

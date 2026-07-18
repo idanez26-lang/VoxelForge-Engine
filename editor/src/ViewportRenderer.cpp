@@ -256,6 +256,14 @@ SDL_GPUShader* LoadShader(
 }
 }
 
+struct ViewportRenderer::HighlightGeometryCache final
+{
+    std::vector<GPUVertex> Vertices;
+    std::vector<std::uint32_t> Indices;
+};
+
+ViewportRenderer::ViewportRenderer() = default;
+
 ViewportRenderer::~ViewportRenderer()
 {
     Shutdown();
@@ -504,14 +512,14 @@ void ViewportRenderer::ConfigureGuides(
 
 void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelCoordinates> hovered,
-    std::vector<Asset::Voxel::VoxelPosition> selected,
+    const std::span<const Asset::Voxel::VoxelPosition> selected,
     std::optional<VoxelBoxBounds> selectionBounds,
     std::optional<SelectionBounds> editableSelectionBounds,
     const bool selectionToolStyle,
     std::optional<Asset::Voxel::VoxelPosition> placementPreview,
     const VoxelPlacementPreviewStyle placementPreviewStyle,
     std::optional<VoxelBoxBounds> boxPreview,
-    std::vector<Asset::Voxel::VoxelPosition> linePreview,
+    const std::span<const Asset::Voxel::VoxelPosition> linePreview,
     std::optional<VoxelSpherePreview> spherePreview,
     const Vec3 modelCenter) noexcept
 {
@@ -522,14 +530,21 @@ void ViewportRenderer::ConfigureHighlights(
             selected.end())
             hovered.reset();
     }
-    if (hoveredHighlight_ == hovered && selectedHighlights_ == selected &&
+    const auto equals = [](
+        const std::vector<Asset::Voxel::VoxelPosition>& stored,
+        const std::span<const Asset::Voxel::VoxelPosition> incoming)
+    {
+        return stored.size() == incoming.size() &&
+            std::equal(stored.begin(), stored.end(), incoming.begin());
+    };
+    if (hoveredHighlight_ == hovered && equals(selectedHighlights_, selected) &&
         selectionBoundsHighlight_ == selectionBounds &&
         editableSelectionBoundsHighlight_ == editableSelectionBounds &&
         selectionToolStyle_ == selectionToolStyle &&
         placementPreviewHighlight_ == placementPreview &&
         placementPreviewStyle_ == placementPreviewStyle &&
         boxPreviewHighlight_ == boxPreview &&
-        linePreviewHighlights_ == linePreview &&
+        equals(linePreviewHighlights_, linePreview) &&
         spherePreviewHighlight_ == spherePreview &&
         modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
         modelCenter_.Z == modelCenter.Z)
@@ -537,14 +552,14 @@ void ViewportRenderer::ConfigureHighlights(
         return;
     }
     hoveredHighlight_ = hovered;
-    selectedHighlights_ = std::move(selected);
+    selectedHighlights_.assign(selected.begin(), selected.end());
     selectionBoundsHighlight_ = selectionBounds;
     editableSelectionBoundsHighlight_ = editableSelectionBounds;
     selectionToolStyle_ = selectionToolStyle;
     placementPreviewHighlight_ = placementPreview;
     placementPreviewStyle_ = placementPreviewStyle;
     boxPreviewHighlight_ = boxPreview;
-    linePreviewHighlights_ = std::move(linePreview);
+    linePreviewHighlights_.assign(linePreview.begin(), linePreview.end());
     spherePreviewHighlight_ = spherePreview;
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
@@ -560,10 +575,26 @@ void ViewportRenderer::ConfigureHighlights(
 bool ViewportRenderer::EnsureHighlights()
 {
     if (!highlightsDirty_) return true;
-    std::vector<GPUVertex> vertices;
-    std::vector<std::uint32_t> indices;
-    vertices.reserve(24U * 12U * 3U);
-    indices.reserve(36U * 12U * 3U);
+    if (!highlightGeometry_)
+        highlightGeometry_ = std::make_unique<HighlightGeometryCache>();
+    std::vector<GPUVertex>& vertices = highlightGeometry_->Vertices;
+    std::vector<std::uint32_t>& indices = highlightGeometry_->Indices;
+    vertices.clear();
+    indices.clear();
+    const std::size_t outlineCount =
+        static_cast<std::size_t>(placementPreviewHighlight_.has_value()) +
+        static_cast<std::size_t>(boxPreviewHighlight_.has_value()) +
+        linePreviewHighlights_.size() +
+        static_cast<std::size_t>(hoveredHighlight_.has_value()) +
+        selectedHighlights_.size() +
+        static_cast<std::size_t>(selectionBoundsHighlight_.has_value()) +
+        static_cast<std::size_t>(editableSelectionBoundsHighlight_.has_value());
+    constexpr std::size_t boxesPerOutline = 12U;
+    constexpr std::size_t sphereBoxCount = 3U * 48U;
+    const std::size_t boxCount = outlineCount * boxesPerOutline +
+        (spherePreviewHighlight_ ? sphereBoxCount : 0U);
+    vertices.reserve(boxCount * 24U);
+    indices.reserve(boxCount * 36U);
     if (placementPreviewHighlight_)
         AppendVoxelOutline(
             vertices, indices, *placementPreviewHighlight_, modelCenter_,
@@ -888,9 +919,12 @@ void ViewportRenderer::ClearModel() noexcept
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
     ConfigureHighlights(
-        std::nullopt, {}, std::nullopt, std::nullopt,
+        std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
+        std::nullopt, std::nullopt,
         false, std::nullopt, VoxelPlacementPreviewStyle::PencilInvalid,
-        std::nullopt, {}, std::nullopt, {});
+        std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
+        std::nullopt, {});
+    highlightGeometry_.reset();
 }
 
 void ViewportRenderer::ReleaseHighlights() noexcept

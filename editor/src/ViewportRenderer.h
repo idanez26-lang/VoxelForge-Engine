@@ -16,6 +16,8 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include <memory>
+#include <span>
 #include <vector>
 
 struct SDL_GPUBuffer;
@@ -36,6 +38,7 @@ enum class VoxelPlacementPreviewStyle
 class ViewportRenderer final
 {
 public:
+    ViewportRenderer();
     ~ViewportRenderer();
 
     [[nodiscard]] bool Upload(
@@ -45,14 +48,14 @@ public:
     void ConfigureGuides(float width, float height, float depth) noexcept;
     void ConfigureHighlights(
         std::optional<VoxelCoordinates> hovered,
-        std::vector<Asset::Voxel::VoxelPosition> selected,
+        std::span<const Asset::Voxel::VoxelPosition> selected,
         std::optional<VoxelBoxBounds> selectionBounds,
         std::optional<SelectionBounds> editableSelectionBounds,
         bool selectionToolStyle,
         std::optional<Asset::Voxel::VoxelPosition> placementPreview,
         VoxelPlacementPreviewStyle placementPreviewStyle,
         std::optional<VoxelBoxBounds> boxPreview,
-        std::vector<Asset::Voxel::VoxelPosition> linePreview,
+        std::span<const Asset::Voxel::VoxelPosition> linePreview,
         std::optional<VoxelSpherePreview> spherePreview,
         Vec3 modelCenter) noexcept;
     void ClearModel() noexcept;
@@ -75,6 +78,8 @@ public:
     [[nodiscard]] bool HasHighlightMesh() const noexcept;
 
 private:
+    struct HighlightGeometryCache;
+
     [[nodiscard]] bool EnsurePipeline();
     [[nodiscard]] bool EnsureGuides();
     [[nodiscard]] bool EnsureHighlights();
@@ -123,6 +128,7 @@ private:
         VoxelPlacementPreviewStyle::PencilInvalid;
     std::optional<VoxelBoxBounds> boxPreviewHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
+    std::unique_ptr<HighlightGeometryCache> highlightGeometry_;
     std::optional<VoxelSpherePreview> spherePreviewHighlight_;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;
