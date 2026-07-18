@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorCamera.h"
+#include "Selection/SelectionService.h"
 #include "VoxelSelection/VoxelRaycast.h"
 #include "VoxelTools/VoxelBoxService.h"
 #include "VoxelTools/VoxelSphereService.h"
@@ -46,6 +47,7 @@ public:
         std::optional<VoxelCoordinates> hovered,
         std::vector<Asset::Voxel::VoxelPosition> selected,
         std::optional<VoxelBoxBounds> selectionBounds,
+        std::optional<SelectionBounds> editableSelectionBounds,
         bool selectionToolStyle,
         std::optional<Asset::Voxel::VoxelPosition> placementPreview,
         VoxelPlacementPreviewStyle placementPreviewStyle,
@@ -114,6 +116,7 @@ private:
     std::optional<VoxelCoordinates> hoveredHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> selectedHighlights_;
     std::optional<VoxelBoxBounds> selectionBoundsHighlight_;
+    std::optional<SelectionBounds> editableSelectionBoundsHighlight_;
     bool selectionToolStyle_ = false;
     std::optional<Asset::Voxel::VoxelPosition> placementPreviewHighlight_;
     VoxelPlacementPreviewStyle placementPreviewStyle_ =

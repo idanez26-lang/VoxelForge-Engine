@@ -21,6 +21,7 @@
 #include "Project/QualityOfLifeLogic.h"
 #include "ProjectSession/ProjectSessionService.h"
 #include "Selection/SelectionService.h"
+#include "Selection/SelectionInteraction.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -262,6 +263,11 @@ private:
     [[nodiscard]] bool ApplyVoxelSphere();
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
         CurrentTwoPointToolTarget() const noexcept;
+    [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
+        CurrentSelectionTarget() const noexcept;
+    [[nodiscard]] bool ApplySelectionBounds(
+        SelectionBounds bounds, SelectionMode mode);
+    void CancelSelectionInteraction() noexcept;
     void CancelVoxelBox() noexcept;
     void CancelVoxelLine() noexcept;
     void CancelVoxelSphere() noexcept;
@@ -297,6 +303,7 @@ private:
     FirstCreationExperience firstCreationExperience_;
     WorkplaneService workplaneService_;
     SelectionService selectionService_;
+    SelectionInteraction selectionInteraction_;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
     EditorInputService editorInputService_;
@@ -384,6 +391,8 @@ private:
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
     bool voxelSelectionClickCandidate_ = false;
+    std::optional<Asset::Voxel::VoxelPosition> selectionPointerAnchor_;
+    SelectionMode selectionPointerMode_ = SelectionMode::Replace;
     bool selectionSystemSmokeStarted_ = false;
     bool selectionSystemSmokeToolChanged_ = false;
     bool selectionSystemSmokePassed_ = false;

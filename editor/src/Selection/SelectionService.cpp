@@ -17,6 +17,18 @@ bool PositionLess(
 }
 }
 
+SelectionBounds SelectionBounds::FromCorners(
+    const Asset::Voxel::VoxelPosition first,
+    const Asset::Voxel::VoxelPosition second) noexcept
+{
+    return {
+        {std::min(first.X, second.X), std::min(first.Y, second.Y),
+         std::min(first.Z, second.Z)},
+        {std::max(first.X, second.X), std::max(first.Y, second.Y),
+         std::max(first.Z, second.Z)},
+        true};
+}
+
 Asset::Voxel::VoxelDimensions SelectionBounds::Dimensions() const noexcept
 {
     if (!Valid) return {};
@@ -24,6 +36,43 @@ Asset::Voxel::VoxelDimensions SelectionBounds::Dimensions() const noexcept
         static_cast<std::uint32_t>(Maximum.X - Minimum.X + 1),
         static_cast<std::uint32_t>(Maximum.Y - Minimum.Y + 1),
         static_cast<std::uint32_t>(Maximum.Z - Minimum.Z + 1)};
+}
+
+
+SelectionCenter SelectionBounds::Center() const noexcept
+{
+    if (!Valid) return {};
+    return {
+        (static_cast<float>(Minimum.X) + static_cast<float>(Maximum.X)) * 0.5F,
+        (static_cast<float>(Minimum.Y) + static_cast<float>(Maximum.Y)) * 0.5F,
+        (static_cast<float>(Minimum.Z) + static_cast<float>(Maximum.Z)) * 0.5F};
+}
+
+bool SelectionBounds::Contains(
+    const Asset::Voxel::VoxelPosition position) const noexcept
+{
+    return Valid && position.X >= Minimum.X && position.X <= Maximum.X &&
+        position.Y >= Minimum.Y && position.Y <= Maximum.Y &&
+        position.Z >= Minimum.Z && position.Z <= Maximum.Z;
+}
+
+SelectionBounds SelectionBounds::ClampedTo(
+    const Asset::Voxel::VoxelDimensions dimensions) const noexcept
+{
+    if (!Valid || dimensions.X == 0U || dimensions.Y == 0U ||
+        dimensions.Z == 0U) return {};
+    const auto clampAxis = [](const std::int32_t value, const std::uint32_t size)
+    {
+        return std::clamp(
+            value, 0, static_cast<std::int32_t>(size - 1U));
+    };
+    return FromCorners(
+        {clampAxis(Minimum.X, dimensions.X),
+         clampAxis(Minimum.Y, dimensions.Y),
+         clampAxis(Minimum.Z, dimensions.Z)},
+        {clampAxis(Maximum.X, dimensions.X),
+         clampAxis(Maximum.Y, dimensions.Y),
+         clampAxis(Maximum.Z, dimensions.Z)});
 }
 
 bool SelectionService::Apply(
@@ -72,15 +121,33 @@ bool SelectionService::Select(
     const Asset::Voxel::VoxelPosition position,
     const SelectionMode mode)
 {
-    return Apply(std::span(&position, 1U), mode);
+    const bool changed = Apply(std::span(&position, 1U), mode);
+    editableBounds_ = SelectionBounds::FromCorners(position, position);
+    return changed;
+}
+
+bool SelectionService::SelectVolume(
+    const std::span<const Asset::Voxel::VoxelPosition> existingVoxels,
+    const SelectionBounds bounds,
+    const SelectionMode mode)
+{
+    if (!bounds.Valid) return false;
+    std::vector<Asset::Voxel::VoxelPosition> contained;
+    contained.reserve(existingVoxels.size());
+    for (const auto position : existingVoxels)
+        if (bounds.Contains(position)) contained.push_back(position);
+    const bool changed = Apply(contained, mode);
+    editableBounds_ = bounds;
+    return changed;
 }
 
 bool SelectionService::Clear() noexcept
 {
-    if (positions_.empty()) return false;
+    const bool changed = !positions_.empty() || editableBounds_.Valid;
     positions_.clear();
     bounds_ = {};
-    return true;
+    editableBounds_ = {};
+    return changed;
 }
 
 void SelectionService::SetDocumentGeneration(
@@ -118,16 +185,15 @@ const SelectionBounds& SelectionService::Bounds() const noexcept
     return bounds_;
 }
 
+const SelectionBounds& SelectionService::EditableBounds() const noexcept
+{
+    return editableBounds_;
+}
+
 std::optional<SelectionCenter> SelectionService::Center() const noexcept
 {
-    if (!bounds_.Valid) return std::nullopt;
-    return SelectionCenter{
-        (static_cast<float>(bounds_.Minimum.X) +
-            static_cast<float>(bounds_.Maximum.X)) * 0.5F,
-        (static_cast<float>(bounds_.Minimum.Y) +
-            static_cast<float>(bounds_.Maximum.Y)) * 0.5F,
-        (static_cast<float>(bounds_.Minimum.Z) +
-            static_cast<float>(bounds_.Maximum.Z)) * 0.5F};
+    if (!editableBounds_.Valid && !bounds_.Valid) return std::nullopt;
+    return (editableBounds_.Valid ? editableBounds_ : bounds_).Center();
 }
 
 std::uint64_t SelectionService::DocumentGeneration() const noexcept

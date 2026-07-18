@@ -120,10 +120,10 @@ void AppendVoxelBoxOutline(
     std::vector<std::uint32_t>& indices,
     const VoxelBoxBounds bounds,
     const Vec3 center,
-    const std::array<float, 4>& color)
+    const std::array<float, 4>& color,
+    const float expansion = 0.018F,
+    const float thickness = 0.035F)
 {
-    constexpr float expansion = 0.018F;
-    constexpr float thickness = 0.035F;
     const Vec3 minimum = VoxelGridToViewport(
         {static_cast<float>(bounds.Minimum.X),
          static_cast<float>(bounds.Minimum.Y),
@@ -506,6 +506,7 @@ void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelCoordinates> hovered,
     std::vector<Asset::Voxel::VoxelPosition> selected,
     std::optional<VoxelBoxBounds> selectionBounds,
+    std::optional<SelectionBounds> editableSelectionBounds,
     const bool selectionToolStyle,
     std::optional<Asset::Voxel::VoxelPosition> placementPreview,
     const VoxelPlacementPreviewStyle placementPreviewStyle,
@@ -523,6 +524,7 @@ void ViewportRenderer::ConfigureHighlights(
     }
     if (hoveredHighlight_ == hovered && selectedHighlights_ == selected &&
         selectionBoundsHighlight_ == selectionBounds &&
+        editableSelectionBoundsHighlight_ == editableSelectionBounds &&
         selectionToolStyle_ == selectionToolStyle &&
         placementPreviewHighlight_ == placementPreview &&
         placementPreviewStyle_ == placementPreviewStyle &&
@@ -537,6 +539,7 @@ void ViewportRenderer::ConfigureHighlights(
     hoveredHighlight_ = hovered;
     selectedHighlights_ = std::move(selected);
     selectionBoundsHighlight_ = selectionBounds;
+    editableSelectionBoundsHighlight_ = editableSelectionBounds;
     selectionToolStyle_ = selectionToolStyle;
     placementPreviewHighlight_ = placementPreview;
     placementPreviewStyle_ = placementPreviewStyle;
@@ -547,6 +550,7 @@ void ViewportRenderer::ConfigureHighlights(
     highlightsDirty_ = hoveredHighlight_.has_value() ||
         !selectedHighlights_.empty() ||
         selectionBoundsHighlight_.has_value() ||
+        editableSelectionBoundsHighlight_.has_value() ||
         placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
         spherePreviewHighlight_.has_value();
@@ -592,6 +596,13 @@ bool ViewportRenderer::EnsureHighlights()
     if (selectionBoundsHighlight_ && selectedHighlights_.size() > 1U)
         AppendVoxelBoxOutline(vertices, indices, *selectionBoundsHighlight_,
             modelCenter_, {0.18F, 0.82F, 1.0F, 0.82F});
+    if (editableSelectionBoundsHighlight_)
+    {
+        const SelectionBounds& bounds = *editableSelectionBoundsHighlight_;
+        AppendVoxelBoxOutline(vertices, indices,
+            {bounds.Minimum, bounds.Maximum}, modelCenter_,
+            {0.08F, 0.98F, 0.72F, 1.0F}, 0.065F, 0.070F);
+    }
     if (indices.empty())
     {
         highlightsDirty_ = false;
@@ -877,8 +888,8 @@ void ViewportRenderer::ClearModel() noexcept
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
     ConfigureHighlights(
-        std::nullopt, {}, std::nullopt, false, std::nullopt,
-        VoxelPlacementPreviewStyle::PencilInvalid,
+        std::nullopt, {}, std::nullopt, std::nullopt,
+        false, std::nullopt, VoxelPlacementPreviewStyle::PencilInvalid,
         std::nullopt, {}, std::nullopt, {});
 }
 
