@@ -516,6 +516,7 @@ void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelBoxBounds> selectionBounds,
     std::optional<SelectionBounds> editableSelectionBounds,
     const bool selectionToolStyle,
+    const SelectionBoxVisualState selectionBoxVisualState,
     std::optional<Asset::Voxel::VoxelPosition> placementPreview,
     const VoxelPlacementPreviewStyle placementPreviewStyle,
     std::optional<VoxelBoxBounds> boxPreview,
@@ -541,6 +542,7 @@ void ViewportRenderer::ConfigureHighlights(
         selectionBoundsHighlight_ == selectionBounds &&
         editableSelectionBoundsHighlight_ == editableSelectionBounds &&
         selectionToolStyle_ == selectionToolStyle &&
+        selectionBoxVisualState_ == selectionBoxVisualState &&
         placementPreviewHighlight_ == placementPreview &&
         placementPreviewStyle_ == placementPreviewStyle &&
         boxPreviewHighlight_ == boxPreview &&
@@ -556,6 +558,7 @@ void ViewportRenderer::ConfigureHighlights(
     selectionBoundsHighlight_ = selectionBounds;
     editableSelectionBoundsHighlight_ = editableSelectionBounds;
     selectionToolStyle_ = selectionToolStyle;
+    selectionBoxVisualState_ = selectionBoxVisualState;
     placementPreviewHighlight_ = placementPreview;
     placementPreviewStyle_ = placementPreviewStyle;
     boxPreviewHighlight_ = boxPreview;
@@ -630,9 +633,19 @@ bool ViewportRenderer::EnsureHighlights()
     if (editableSelectionBoundsHighlight_)
     {
         const SelectionBounds& bounds = *editableSelectionBoundsHighlight_;
+        const bool moving = selectionBoxVisualState_ ==
+            SelectionBoxVisualState::Moving;
+        const bool hovered = selectionBoxVisualState_ ==
+            SelectionBoxVisualState::Hovered;
         AppendVoxelBoxOutline(vertices, indices,
             {bounds.Minimum, bounds.Maximum}, modelCenter_,
-            {0.08F, 0.98F, 0.72F, 1.0F}, 0.065F, 0.070F);
+            moving
+                ? std::array<float, 4>{0.22F, 1.0F, 0.84F, 1.0F}
+                : hovered
+                ? std::array<float, 4>{0.12F, 1.0F, 0.78F, 1.0F}
+                : std::array<float, 4>{0.08F, 0.98F, 0.72F, 1.0F},
+            moving ? 0.080F : hovered ? 0.072F : 0.065F,
+            moving ? 0.085F : hovered ? 0.078F : 0.070F);
     }
     if (indices.empty())
     {
@@ -921,7 +934,8 @@ void ViewportRenderer::ClearModel() noexcept
     ConfigureHighlights(
         std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
         std::nullopt, std::nullopt,
-        false, std::nullopt, VoxelPlacementPreviewStyle::PencilInvalid,
+        false, SelectionBoxVisualState::Normal,
+        std::nullopt, VoxelPlacementPreviewStyle::PencilInvalid,
         std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
         std::nullopt, {});
     highlightGeometry_.reset();

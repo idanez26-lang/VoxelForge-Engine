@@ -1,5 +1,6 @@
 #include "Selection/SelectionService.h"
 #include "Selection/SelectionInteraction.h"
+#include "Selection/SelectionBoxMoveModel.h"
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
 
@@ -24,6 +25,7 @@ using VoxelForge::Editor::SelectionFace;
 using VoxelForge::Editor::SelectionHandle;
 using VoxelForge::Editor::SelectionHighlightPolicy;
 using VoxelForge::Editor::SelectionVolumeCache;
+using VoxelForge::Editor::SelectionPointerTarget;
 
 void Require(const bool condition, const std::string_view message)
 {
@@ -541,6 +543,175 @@ void TestCachedVolumeApplicationAndHighlightPolicy()
             !largePersistent.DrawIndividualVoxels,
         "Persistent individual outlines must switch at the documented limit.");
 }
+
+void TestSelectionBoxInteriorPickingAndPriority()
+{
+    const SelectionBounds bounds = SelectionBounds::FromCorners(
+        {2, 2, 2}, {4, 4, 4});
+    const VoxelForge::Editor::VoxelRay ray{
+        {-5.0F, 3.0F, 3.0F}, {1.0F, 0.0F, 0.0F}};
+    const auto hit = VoxelForge::Editor::PickSelectionBoxInterior(
+        bounds, {}, ray);
+    Require(hit && hit->WorldPosition ==
+            VoxelForge::Editor::Vec3{2.0F, 3.0F, 3.0F} &&
+            hit->EntryDistance == 7.0F,
+        "Ray/AABB picking must identify the actual projected box interior.");
+    Require(!VoxelForge::Editor::PickSelectionBoxInterior(
+            bounds, {}, {{-5.0F, 8.0F, 3.0F}, {1.0F, 0.0F, 0.0F}}),
+        "A ray outside the spatial box must not hit a naive screen rectangle.");
+    Require(!VoxelForge::Editor::PickSelectionBoxInterior(
+            bounds, {}, ray, 6.0F) &&
+            VoxelForge::Editor::PickSelectionBoxInterior(
+                bounds, {}, ray, 8.0F).has_value(),
+        "A closer external voxel must occlude the box interior only when needed.");
+    Require(VoxelForge::Editor::ResolveSelectionPointerTarget(true, true) ==
+            SelectionPointerTarget::Handle &&
+            VoxelForge::Editor::ResolveSelectionPointerTarget(false, true) ==
+            SelectionPointerTarget::Interior &&
+            VoxelForge::Editor::ResolveSelectionPointerTarget(false, false) ==
+            SelectionPointerTarget::Exterior,
+        "Interaction priority must be handle, interior, then exterior.");
+
+    const auto plane = VoxelForge::Editor::MakeSelectionMovePlane(
+        hit->WorldPosition, ray.Direction);
+    const auto movedPoint = VoxelForge::Editor::IntersectSelectionMovePlane(
+        {{-5.0F, 4.0F, 4.0F}, {1.0F, 0.0F, 0.0F}}, plane);
+    Require(plane.Valid && movedPoint &&
+            *movedPoint == VoxelForge::Editor::Vec3{2.0F, 4.0F, 4.0F},
+        "The fixed camera-facing drag plane must produce stable world points.");
+}
+
+void TestSelectionBoundsTranslationAndClamping()
+{
+    const SelectionBounds original = SelectionBounds::FromCorners(
+        {2, 3, 4}, {5, 7, 9});
+    const auto dimensions =
+        VoxelForge::Asset::Voxel::VoxelDimensions{12, 12, 12};
+    const auto positiveX = VoxelForge::Editor::TranslateSelectionBounds(
+        original, {3, 0, 0}, dimensions);
+    const auto negativeX = VoxelForge::Editor::TranslateSelectionBounds(
+        original, {-2, 0, 0}, dimensions);
+    const auto positiveY = VoxelForge::Editor::TranslateSelectionBounds(
+        original, {0, 2, 0}, dimensions);
+    const auto negativeZ = VoxelForge::Editor::TranslateSelectionBounds(
+        original, {0, 0, -3}, dimensions);
+    Require(positiveX.Minimum == VoxelPosition{5, 3, 4} &&
+            positiveX.Maximum == VoxelPosition{8, 7, 9} &&
+            negativeX.Minimum == VoxelPosition{0, 3, 4} &&
+            positiveY.Minimum == VoxelPosition{2, 5, 4} &&
+            negativeZ.Minimum == VoxelPosition{2, 3, 1},
+        "Independent positive and negative axis translations failed.");
+
+    const VoxelPosition combinedDelta{3, -2, 1};
+    const auto combined = VoxelForge::Editor::TranslateSelectionBounds(
+        original, combinedDelta, dimensions);
+    Require(combined.Minimum == VoxelPosition{5, 1, 5} &&
+            combined.Maximum == VoxelPosition{8, 5, 10} &&
+            combined.Dimensions() == original.Dimensions(),
+        "Combined translation must preserve every dimension.");
+    const auto originalCenter = original.Center();
+    const auto movedCenter = combined.Center();
+    Require(movedCenter == VoxelForge::Editor::SelectionCenter{
+            originalCenter.X + 3.0F,
+            originalCenter.Y - 2.0F,
+            originalCenter.Z + 1.0F},
+        "The selection center must move by exactly the clamped delta.");
+
+    const auto originalHandles =
+        VoxelForge::Editor::GenerateSelectionHandles(original);
+    const auto movedHandles =
+        VoxelForge::Editor::GenerateSelectionHandles(combined);
+    for (std::size_t index = 0U; index < originalHandles.size(); ++index)
+        Require(movedHandles[index].WorldPosition ==
+                originalHandles[index].WorldPosition +
+                    VoxelForge::Editor::Vec3{3.0F, -2.0F, 1.0F},
+            "Every handle must be regenerated at the translated face center.");
+
+    const auto minimumClamp = VoxelForge::Editor::TranslateSelectionBounds(
+        original, {-99, -99, -99}, dimensions);
+    const auto maximumClamp = VoxelForge::Editor::TranslateSelectionBounds(
+        original, {99, 99, 99}, dimensions);
+    Require(minimumClamp.Minimum == VoxelPosition{0, 0, 0} &&
+            minimumClamp.Maximum == VoxelPosition{3, 4, 5} &&
+            maximumClamp.Minimum == VoxelPosition{8, 7, 6} &&
+            maximumClamp.Maximum == VoxelPosition{11, 11, 11} &&
+            minimumClamp.Dimensions() == original.Dimensions() &&
+            maximumClamp.Dimensions() == original.Dimensions(),
+        "Global document clamping must stop the whole box without deformation.");
+}
+
+void TestMovingBoxInteractionLifecycle()
+{
+    const SelectionBounds original = SelectionBounds::FromCorners(
+        {3, 3, 3}, {5, 6, 7});
+    const auto dimensions =
+        VoxelForge::Asset::Voxel::VoxelDimensions{16, 16, 16};
+    const auto plane = VoxelForge::Editor::MakeSelectionMovePlane(
+        {0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F});
+    SelectionInteraction interaction;
+    Require(interaction.BeginMovingBox(
+            original, 70U, plane, {0.0F, 0.0F, 0.0F}) &&
+            interaction.Mode() == SelectionInteractionMode::MovingBox &&
+            interaction.IsDragRecognized(),
+        "MouseDown inside a persistent box must capture MovingBox.");
+    Require(interaction.MoveBox({2.2F, -1.8F, 3.1F}, dimensions) &&
+            interaction.MoveDelta() == VoxelPosition{2, -2, 3} &&
+            interaction.CurrentBounds().Dimensions() == original.Dimensions(),
+        "MouseMove must snap a combined world delta to the voxel grid.");
+    Require(!interaction.MoveBox({2.2F, -1.8F, 3.1F}, dimensions),
+        "An unchanged snapped delta must not rebuild the selection.");
+    const SelectionBounds moved = interaction.CurrentBounds();
+    const auto release = interaction.PointerUp();
+    Require(release.WasDrag && release.Bounds && *release.Bounds == moved &&
+            release.Mode == SelectionInteractionMode::MovingBox &&
+            interaction.Mode() == SelectionInteractionMode::Idle,
+        "MouseUp must validate the translated box and return to Idle.");
+
+    Require(interaction.BeginMovingBox(
+            original, 70U, plane, {0.0F, 0.0F, 0.0F}) &&
+            interaction.MoveBox({1.0F, 1.0F, 0.0F}, dimensions),
+        "Cancellation setup failed.");
+    const auto restored = interaction.Cancel();
+    Require(restored && *restored == original && !interaction.IsActive(),
+        "Esc must restore the exact original box.");
+    Require(interaction.BeginMovingBox(
+            original, 70U, plane, {0.0F, 0.0F, 0.0F}) &&
+            !interaction.ValidateDocumentGeneration(71U) &&
+            !interaction.IsActive(),
+        "A document generation change must immediately purge MovingBox.");
+}
+
+void TestMovingBoxSelectionRecalculationAndCache()
+{
+    const std::vector<VoxelPosition> existing{
+        {0, 0, 0}, {1, 1, 1}, {4, 0, 0}, {5, 1, 1}, {4, 4, 4}};
+    const std::vector<VoxelPosition> voxelSnapshot = existing;
+    SelectionVolumeCache cache;
+    cache.UpdateSource(existing, 12U, 30U);
+    SelectionService selection;
+    selection.SetDocumentGeneration(12U);
+    const SelectionBounds original = SelectionBounds::FromCorners(
+        {0, 0, 0}, {1, 1, 1});
+    auto evaluation = cache.Evaluate(original);
+    Require(selection.ApplySortedVolume(
+            evaluation.Voxels, original, SelectionMode::Replace) &&
+            selection.Count() == 2U,
+        "The original box must select only its existing voxels.");
+    const SelectionBounds moved = VoxelForge::Editor::TranslateSelectionBounds(
+        original, {4, 0, 0}, {8, 8, 8});
+    evaluation = cache.Evaluate(moved);
+    Require(evaluation.Recalculated && selection.ApplySortedVolume(
+            evaluation.Voxels, moved, SelectionMode::Replace) &&
+            selection.Count() == 2U && selection.Contains({4, 0, 0}) &&
+            selection.Contains({5, 1, 1}) && !selection.Contains({4, 0, 1}),
+        "Moving the box must recalculate exact sparse contents and ignore empties.");
+    const auto evaluations = cache.Metrics().BoundsEvaluationCount;
+    const auto unchanged = cache.Evaluate(moved);
+    Require(!unchanged.Recalculated &&
+            cache.Metrics().BoundsEvaluationCount == evaluations &&
+            existing == voxelSnapshot,
+        "Unchanged movement must hit the cache and must never move document voxels.");
+}
 }
 
 int main()
@@ -563,6 +734,10 @@ int main()
         TestSelectionVolumeCacheScalesWithExistingVoxels();
         TestSelectionVolumeCacheDenseAndRevisionInvalidation();
         TestCachedVolumeApplicationAndHighlightPolicy();
+        TestSelectionBoxInteriorPickingAndPriority();
+        TestSelectionBoundsTranslationAndClamping();
+        TestMovingBoxInteractionLifecycle();
+        TestMovingBoxSelectionRecalculationAndCache();
         std::cout << "SelectionService tests passed.\n";
         return EXIT_SUCCESS;
     }

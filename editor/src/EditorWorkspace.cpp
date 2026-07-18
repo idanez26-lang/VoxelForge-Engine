@@ -1047,6 +1047,8 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
     if (tool != ActiveVoxelTool::Selection && selectionInteraction_.IsActive())
         CancelSelectionInteraction();
+    if (tool != ActiveVoxelTool::Selection)
+        selectionBoxInteriorHovered_ = false;
     if (tool == ActiveVoxelTool::Selection)
         static_cast<void>(voxelSelection_.ClearSelection());
     voxelToolState_.SetActiveTool(tool);
@@ -1459,7 +1461,9 @@ void EditorWorkspace::DrawScenePanel()
         {
             const SelectionBounds& handleBounds =
                 selectionInteraction_.Mode() ==
-                    SelectionInteractionMode::ResizingFace
+                    SelectionInteractionMode::ResizingFace ||
+                selectionInteraction_.Mode() ==
+                    SelectionInteractionMode::MovingBox
                 ? selectionInteraction_.CurrentBounds()
                 : selectionService_.EditableBounds();
             selectionHandles = ProjectSelectionHandles(
@@ -1479,38 +1483,6 @@ void EditorWorkspace::DrawScenePanel()
                     ? std::optional<SelectionFace>(hoveredSelectionHandle->Face)
                     : std::nullopt,
                 selectionInteraction_.ActiveFace());
-        }
-        const char* viewportHelp = "Click a voxel to select it";
-        if (voxelToolState_.IsSelectionActive())
-        {
-            if (selectionInteraction_.Mode() ==
-                SelectionInteractionMode::Creating)
-                viewportHelp = "Drag to size selection box — Release to validate";
-            else if (selectionInteraction_.Mode() ==
-                SelectionInteractionMode::ResizingFace)
-                viewportHelp = "Resize selection box — Release to validate — Esc to cancel";
-            else if (hoveredSelectionHandle)
-                viewportHelp = "Drag to resize this face";
-            else if (selectionService_.EditableBounds().Valid)
-                viewportHelp = "Drag a face handle to resize the selection box";
-            else
-                viewportHelp = "Click-drag to draw a selection box — Click to select one voxel";
-        }
-        DrawTooltip(viewportHelp);
-        if (voxelToolState_.IsSelectionActive())
-        {
-            const ImVec2 textSize = ImGui::CalcTextSize(viewportHelp);
-            const ImVec2 helpMinimum{imageOrigin.x + 10.0F, imageOrigin.y + 10.0F};
-            const ImVec2 helpMaximum{
-                helpMinimum.x + textSize.x + 16.0F,
-                helpMinimum.y + textSize.y + 10.0F};
-            ImGui::GetWindowDrawList()->AddRectFilled(
-                helpMinimum, helpMaximum, IM_COL32(8, 13, 20, 210), 4.0F);
-            ImGui::GetWindowDrawList()->AddRect(
-                helpMinimum, helpMaximum, IM_COL32(55, 220, 190, 230), 4.0F);
-            ImGui::GetWindowDrawList()->AddText(
-                {helpMinimum.x + 8.0F, helpMinimum.y + 5.0F},
-                IM_COL32(225, 245, 242, 255), viewportHelp);
         }
         ImGui::GetWindowDrawList()->AddRect(
             imageOrigin,
@@ -1560,6 +1532,7 @@ void EditorWorkspace::DrawScenePanel()
             voxelDocumentSession_.ActiveDocument();
         const auto previousWorkplaneHit = workplaneHit_;
         workplaneHit_.reset();
+        std::optional<VoxelRay> viewportRay;
         std::optional<VoxelRaycastHit> hoveredHit;
         VoxelPickingInteractionState pickingState =
             VoxelPickingInteractionState::Unavailable;
@@ -1580,11 +1553,12 @@ void EditorWorkspace::DrawScenePanel()
                 viewportCamera_.GetPosition());
             if (ray.Succeeded())
             {
+                viewportRay = ray.Ray;
                 VoxelRaycastOptions options;
                 options.Transform =
                     CenteredVoxelModelTransform(voxelModelCenter_);
                 hoveredHit = RaycastVoxelDocument(
-                    *document, *ray.Ray, options);
+                    *document, *viewportRay, options);
                 if (!hoveredHit &&
                     (voxelToolState_.IsPencilActive() ||
                      voxelToolState_.IsBoxActive() ||
@@ -1593,7 +1567,7 @@ void EditorWorkspace::DrawScenePanel()
                      voxelToolState_.IsSelectionActive()))
                 {
                     workplaneHit_ = workplaneService_.Intersect(
-                        *document, 0U, *ray.Ray, voxelModelCenter_);
+                        *document, 0U, *viewportRay, voxelModelCenter_);
                 }
                 pickingState = hoveredHit
                     ? VoxelPickingInteractionState::Hit
@@ -1615,6 +1589,75 @@ void EditorWorkspace::DrawScenePanel()
             previousWorkplaneHit != workplaneHit_)
         {
             UpdateVoxelHighlights();
+        }
+        std::optional<SelectionBoxRayHit> hoveredSelectionInterior;
+        if (voxelToolState_.IsSelectionActive() &&
+            selectionInteraction_.Mode() == SelectionInteractionMode::Idle &&
+            selectionService_.EditableBounds().Valid &&
+            selectionInputAvailable && viewportRay &&
+            !hoveredSelectionHandle)
+        {
+            std::optional<float> occluderDistance;
+            if (const auto& voxelHit = voxelSelection_.Hovered())
+            {
+                const Asset::Voxel::VoxelPosition hitPosition{
+                    static_cast<std::int32_t>(voxelHit->Coordinates.X),
+                    static_cast<std::int32_t>(voxelHit->Coordinates.Y),
+                    static_cast<std::int32_t>(voxelHit->Coordinates.Z)};
+                if (!selectionService_.EditableBounds().Contains(hitPosition))
+                    occluderDistance = voxelHit->Distance;
+            }
+            hoveredSelectionInterior = PickSelectionBoxInterior(
+                selectionService_.EditableBounds(), voxelModelCenter_,
+                *viewportRay, occluderDistance);
+        }
+        const bool interiorHovered = hoveredSelectionInterior.has_value();
+        if (selectionBoxInteriorHovered_ != interiorHovered)
+        {
+            selectionBoxInteriorHovered_ = interiorHovered;
+            UpdateVoxelHighlights();
+        }
+        if ((interiorHovered || selectionInteraction_.Mode() ==
+                SelectionInteractionMode::MovingBox) &&
+            !hoveredSelectionHandle)
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+
+        const char* viewportHelp = "Click a voxel to select it";
+        if (voxelToolState_.IsSelectionActive())
+        {
+            if (selectionInteraction_.Mode() ==
+                SelectionInteractionMode::Creating)
+                viewportHelp = "Drag to size selection box — Release to validate";
+            else if (selectionInteraction_.Mode() ==
+                SelectionInteractionMode::ResizingFace)
+                viewportHelp = "Resize selection box — Release to validate — Esc to cancel";
+            else if (selectionInteraction_.Mode() ==
+                SelectionInteractionMode::MovingBox)
+                viewportHelp = "Move selection box — Release to validate — Esc to cancel";
+            else if (hoveredSelectionHandle)
+                viewportHelp = "Drag to resize this face";
+            else if (interiorHovered)
+                viewportHelp = "Drag to move the selection box";
+            else if (selectionService_.EditableBounds().Valid)
+                viewportHelp = "Drag a face handle to resize — Drag inside to move the selection box";
+            else
+                viewportHelp = "Click-drag to draw a selection box — Click to select one voxel";
+        }
+        DrawTooltip(viewportHelp);
+        if (voxelToolState_.IsSelectionActive())
+        {
+            const ImVec2 textSize = ImGui::CalcTextSize(viewportHelp);
+            const ImVec2 helpMinimum{imageOrigin.x + 10.0F, imageOrigin.y + 10.0F};
+            const ImVec2 helpMaximum{
+                helpMinimum.x + textSize.x + 16.0F,
+                helpMinimum.y + textSize.y + 10.0F};
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                helpMinimum, helpMaximum, IM_COL32(8, 13, 20, 210), 4.0F);
+            ImGui::GetWindowDrawList()->AddRect(
+                helpMinimum, helpMaximum, IM_COL32(55, 220, 190, 230), 4.0F);
+            ImGui::GetWindowDrawList()->AddText(
+                {helpMinimum.x + 8.0F, helpMinimum.y + 5.0F},
+                IM_COL32(225, 245, 242, 255), viewportHelp);
         }
         if (voxelToolState_.IsBoxActive() && voxelBoxInteraction_.IsActive() &&
             voxelBoxInteraction_.Update(CurrentTwoPointToolTarget()))
@@ -1714,9 +1757,14 @@ void EditorWorkspace::DrawScenePanel()
             }
         }
 
+        const SelectionPointerTarget selectionPointerTarget =
+            ResolveSelectionPointerTarget(
+                hoveredSelectionHandle.has_value(), interiorHovered);
         bool selectionHandleCaptured = false;
         if (voxelToolState_.IsSelectionActive() &&
-            selectionInputAvailable && hoveredSelectionHandle &&
+            selectionInputAvailable &&
+            selectionPointerTarget == SelectionPointerTarget::Handle &&
+            hoveredSelectionHandle &&
             ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         {
             selectionHandleCaptured = selectionInteraction_.BeginResizingFace(
@@ -1732,7 +1780,28 @@ void EditorWorkspace::DrawScenePanel()
                 UpdateVoxelHighlights();
             }
         }
-        if (!selectionHandleCaptured &&
+        bool selectionBoxCaptured = false;
+        if (!selectionHandleCaptured && voxelToolState_.IsSelectionActive() &&
+            selectionInputAvailable &&
+            selectionPointerTarget == SelectionPointerTarget::Interior &&
+            hoveredSelectionInterior && viewportRay &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            const SelectionMovePlane movePlane = MakeSelectionMovePlane(
+                hoveredSelectionInterior->WorldPosition,
+                viewportRay->Direction);
+            selectionBoxCaptured = selectionInteraction_.BeginMovingBox(
+                selectionService_.EditableBounds(),
+                voxelDocumentSession_.Generation(), movePlane,
+                hoveredSelectionInterior->WorldPosition);
+            if (selectionBoxCaptured)
+            {
+                voxelSelectionClickCandidate_ = false;
+                selectionPointerAnchor_.reset();
+                UpdateVoxelHighlights();
+            }
+        }
+        if (!selectionHandleCaptured && !selectionBoxCaptured &&
             (voxelToolState_.IsSelectionActive() ||
              voxelToolState_.ActiveTool() == ActiveVoxelTool::None) &&
             selectionInputAvailable &&
@@ -1761,12 +1830,29 @@ void EditorWorkspace::DrawScenePanel()
         {
             std::optional<Asset::Voxel::VoxelDimensions> dimensions;
             if (document) dimensions = document->GetDimensions(0U);
-            if (selectionInteraction_.PointerMove(
+            bool selectionChanged = false;
+            if (selectionInteraction_.Mode() ==
+                    SelectionInteractionMode::MovingBox &&
+                viewportRay && dimensions)
+            {
+                const auto pointerWorld = IntersectSelectionMovePlane(
+                    *viewportRay, selectionInteraction_.MovePlane());
+                selectionChanged = pointerWorld &&
+                    selectionInteraction_.MoveBox(
+                        *pointerWorld, *dimensions);
+            }
+            else
+            {
+                selectionChanged = selectionInteraction_.PointerMove(
                     io.MousePos.x, io.MousePos.y,
-                    CurrentSelectionTarget(), dimensions))
+                    CurrentSelectionTarget(), dimensions);
+            }
+            if (selectionChanged)
             {
                 if (selectionInteraction_.Mode() ==
-                    SelectionInteractionMode::ResizingFace)
+                        SelectionInteractionMode::ResizingFace ||
+                    selectionInteraction_.Mode() ==
+                        SelectionInteractionMode::MovingBox)
                     static_cast<void>(ApplySelectionBounds(
                         selectionInteraction_.CurrentBounds(),
                         SelectionMode::Replace));
@@ -1783,7 +1869,7 @@ void EditorWorkspace::DrawScenePanel()
                 selectionInteraction_.PointerUp();
             if (release.WasDrag && release.Bounds)
             {
-                if (release.Mode != SelectionInteractionMode::ResizingFace)
+                if (release.Mode == SelectionInteractionMode::Creating)
                     static_cast<void>(ApplySelectionBounds(
                         *release.Bounds, release.Operation));
                 else
@@ -2583,6 +2669,9 @@ void EditorWorkspace::DrawStatusBar()
                 else if (selectionInteraction_.Mode() ==
                     SelectionInteractionMode::ResizingFace)
                     selectionStatus += " Resize";
+                else if (selectionInteraction_.Mode() ==
+                    SelectionInteractionMode::MovingBox)
+                    selectionStatus += " Move";
             }
             else
                 selectionStatus = " | Selection Box: 0 voxels";
@@ -4309,6 +4398,132 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             selectionService_.EditableBounds() == original &&
             !selectionInteraction_.IsActive();
     }
+    else if (frame == 14U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        const Asset::Voxel::VoxelSubModel* model =
+            document ? document->GetModel(0U) : nullptr;
+        if (!document || !model) return false;
+        const auto dimensions = document->GetDimensions(0U);
+        const SelectionBounds original = selectionService_.EditableBounds();
+        if (!dimensions || !original.Valid) return false;
+        Asset::Voxel::VoxelPosition requestedDelta{};
+        if (original.Maximum.X + 1 <
+            static_cast<std::int32_t>(dimensions->X))
+            requestedDelta.X = 1;
+        else if (original.Minimum.X > 0)
+            requestedDelta.X = -1;
+        else if (original.Maximum.Z + 1 <
+            static_cast<std::int32_t>(dimensions->Z))
+            requestedDelta.Z = 1;
+        else if (original.Minimum.Z > 0)
+            requestedDelta.Z = -1;
+        const SelectionBounds translated = TranslateSelectionBounds(
+            original, requestedDelta, *dimensions);
+        if (translated == original) return false;
+
+        const Vec3 spatialCenter{
+            (static_cast<float>(original.Minimum.X) +
+             static_cast<float>(original.Maximum.X) + 1.0F) * 0.5F,
+            (static_cast<float>(original.Minimum.Y) +
+             static_cast<float>(original.Maximum.Y) + 1.0F) * 0.5F,
+            (static_cast<float>(original.Minimum.Z) +
+             static_cast<float>(original.Maximum.Z) + 1.0F) * 0.5F};
+        const VoxelRay interiorRay{
+            {static_cast<float>(original.Minimum.X) - voxelModelCenter_.X - 4.0F,
+             spatialCenter.Y - voxelModelCenter_.Y,
+             spatialCenter.Z - voxelModelCenter_.Z},
+            {1.0F, 0.0F, 0.0F}};
+        const auto interior = PickSelectionBoxInterior(
+            original, voxelModelCenter_, interiorRay);
+        if (!interior || ResolveSelectionPointerTarget(true, true) !=
+                SelectionPointerTarget::Handle ||
+            ResolveSelectionPointerTarget(false, true) !=
+                SelectionPointerTarget::Interior)
+            return false;
+
+        std::vector<std::pair<Asset::Voxel::VoxelPosition, std::uint8_t>>
+            voxelSnapshot;
+        const auto sortVoxels = [](auto& voxels)
+        {
+            std::sort(voxels.begin(), voxels.end(),
+                [](const auto& left, const auto& right)
+                {
+                    if (left.first.X != right.first.X)
+                        return left.first.X < right.first.X;
+                    if (left.first.Y != right.first.Y)
+                        return left.first.Y < right.first.Y;
+                    if (left.first.Z != right.first.Z)
+                        return left.first.Z < right.first.Z;
+                    return left.second < right.second;
+                });
+        };
+        model->ForEachVoxel(
+            [&voxelSnapshot](const Asset::Voxel::VoxelPosition position,
+                             const Asset::Voxel::Voxel& voxel)
+            {
+                voxelSnapshot.emplace_back(position, voxel.PaletteIndex);
+            });
+        sortVoxels(voxelSnapshot);
+        const std::uint64_t revision = document->GetRevision();
+        const std::size_t undoCount = voxelEditHistory_.UndoCount();
+        const std::size_t redoCount = voxelEditHistory_.RedoCount();
+        const SelectionMovePlane plane = MakeSelectionMovePlane(
+            interior->WorldPosition, interiorRay.Direction);
+        if (!selectionInteraction_.BeginMovingBox(
+                original, voxelDocumentSession_.Generation(), plane,
+                interior->WorldPosition) ||
+            !selectionInteraction_.MoveBox(
+                interior->WorldPosition + Vec3{
+                    static_cast<float>(requestedDelta.X),
+                    static_cast<float>(requestedDelta.Y),
+                    static_cast<float>(requestedDelta.Z)},
+                *dimensions))
+            return false;
+        static_cast<void>(ApplySelectionBounds(
+            selectionInteraction_.CurrentBounds(), SelectionMode::Replace));
+        const SelectionHandles movedHandles = GenerateSelectionHandles(
+            selectionInteraction_.CurrentBounds(), voxelModelCenter_);
+        const SelectionPointerRelease moved = selectionInteraction_.PointerUp();
+
+        std::vector<std::pair<Asset::Voxel::VoxelPosition, std::uint8_t>>
+            voxelsAfter;
+        model->ForEachVoxel(
+            [&voxelsAfter](const Asset::Voxel::VoxelPosition position,
+                           const Asset::Voxel::Voxel& voxel)
+            {
+                voxelsAfter.emplace_back(position, voxel.PaletteIndex);
+            });
+        sortVoxels(voxelsAfter);
+        std::size_t expectedCount = 0U;
+        for (const auto& [position, palette] : voxelsAfter)
+        {
+            static_cast<void>(palette);
+            if (translated.Contains(position)) ++expectedCount;
+        }
+        const SelectionHandles expectedHandles = GenerateSelectionHandles(
+            translated, voxelModelCenter_);
+        const bool handlesMatch = std::equal(
+            movedHandles.begin(), movedHandles.end(), expectedHandles.begin(),
+            [](const SelectionHandle& left, const SelectionHandle& right)
+            {
+                return left.Face == right.Face &&
+                    left.WorldPosition == right.WorldPosition;
+            });
+        selectionSystemSmokeToolChanged_ =
+            selectionSystemSmokeToolChanged_ && moved.WasDrag &&
+            moved.Mode == SelectionInteractionMode::MovingBox &&
+            moved.Bounds && *moved.Bounds == translated &&
+            translated.Dimensions() == original.Dimensions() &&
+            handlesMatch &&
+            selectionService_.EditableBounds() == translated &&
+            selectionService_.Count() == expectedCount &&
+            document->GetRevision() == revision &&
+            voxelEditHistory_.UndoCount() == undoCount &&
+            voxelEditHistory_.RedoCount() == redoCount &&
+            voxelSnapshot == voxelsAfter && !selectionInteraction_.IsActive();
+    }
     else if (frame == 15U)
     {
         const SelectionBounds persistent = selectionService_.EditableBounds();
@@ -4325,6 +4540,66 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             !selectionInteraction_.IsActive() &&
             selectionService_.EditableBounds() == persistent;
         UpdateVoxelHighlights();
+    }
+    else if (frame == 16U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (!document) return false;
+        const auto dimensions = document->GetDimensions(0U);
+        const SelectionBounds original = selectionService_.EditableBounds();
+        if (!dimensions || !original.Valid) return false;
+        Asset::Voxel::VoxelPosition cancellationDelta{};
+        if (original.Maximum.X + 1 <
+            static_cast<std::int32_t>(dimensions->X))
+            cancellationDelta.X = 1;
+        else if (original.Minimum.X > 0)
+            cancellationDelta.X = -1;
+        else if (original.Maximum.Y + 1 <
+            static_cast<std::int32_t>(dimensions->Y))
+            cancellationDelta.Y = 1;
+        else if (original.Minimum.Y > 0)
+            cancellationDelta.Y = -1;
+        else if (original.Maximum.Z + 1 <
+            static_cast<std::int32_t>(dimensions->Z))
+            cancellationDelta.Z = 1;
+        else if (original.Minimum.Z > 0)
+            cancellationDelta.Z = -1;
+        if (cancellationDelta == Asset::Voxel::VoxelPosition{}) return false;
+        const auto plane = MakeSelectionMovePlane(
+            {0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F});
+        if (!selectionInteraction_.BeginMovingBox(
+                original, voxelDocumentSession_.Generation(), plane, {}) ||
+            !selectionInteraction_.MoveBox(
+                {static_cast<float>(cancellationDelta.X),
+                 static_cast<float>(cancellationDelta.Y),
+                 static_cast<float>(cancellationDelta.Z)},
+                *dimensions))
+            return false;
+        static_cast<void>(ApplySelectionBounds(
+            selectionInteraction_.CurrentBounds(), SelectionMode::Replace));
+        const auto restored = selectionInteraction_.Cancel();
+        if (!restored) return false;
+        static_cast<void>(ApplySelectionBounds(
+            *restored, SelectionMode::Replace));
+        selectionSystemSmokeToolChanged_ =
+            selectionSystemSmokeToolChanged_ && *restored == original &&
+            selectionService_.EditableBounds() == original &&
+            !selectionInteraction_.IsActive();
+    }
+    else if (frame == 18U)
+    {
+        const SelectionBounds original = selectionService_.EditableBounds();
+        const auto plane = MakeSelectionMovePlane(
+            {0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F});
+        if (!selectionInteraction_.BeginMovingBox(
+                original, voxelDocumentSession_.Generation(), plane, {}))
+            return false;
+        selectionSystemSmokeToolChanged_ =
+            selectionSystemSmokeToolChanged_ &&
+            !selectionInteraction_.ValidateDocumentGeneration(
+                voxelDocumentSession_.Generation() + 1U) &&
+            !selectionInteraction_.IsActive();
     }
     else if (frame == 20U)
     {
@@ -7906,7 +8181,8 @@ void EditorWorkspace::CancelSelectionInteraction()
     const SelectionInteractionMode mode = selectionInteraction_.Mode();
     const std::optional<SelectionBounds> restore =
         selectionInteraction_.Cancel();
-    if (mode == SelectionInteractionMode::ResizingFace && restore)
+    if ((mode == SelectionInteractionMode::ResizingFace ||
+         mode == SelectionInteractionMode::MovingBox) && restore)
         static_cast<void>(ApplySelectionBounds(
             *restore, SelectionMode::Replace));
     else
@@ -8405,6 +8681,11 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         selectionBounds,
         editableSelectionBounds,
         voxelToolState_.IsSelectionActive(),
+        selectionInteraction_.Mode() == SelectionInteractionMode::MovingBox
+            ? SelectionBoxVisualState::Moving
+            : selectionBoxInteriorHovered_
+            ? SelectionBoxVisualState::Hovered
+            : SelectionBoxVisualState::Normal,
         placementPosition,
         placementStyle,
         boxPreview,
@@ -8430,6 +8711,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     activeVoxelModel_.reset();
     selectionService_.ClearDocument();
     selectionVolumeCache_.Clear();
+    selectionBoxInteriorHovered_ = false;
     static_cast<void>(selectionInteraction_.Cancel());
     voxelSelectionClickCandidate_ = false;
     selectionPointerAnchor_.reset();

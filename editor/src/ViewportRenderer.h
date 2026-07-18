@@ -35,6 +35,13 @@ enum class VoxelPlacementPreviewStyle
     Eraser
 };
 
+enum class SelectionBoxVisualState : std::uint8_t
+{
+    Normal,
+    Hovered,
+    Moving
+};
+
 class ViewportRenderer final
 {
 public:
@@ -52,6 +59,7 @@ public:
         std::optional<VoxelBoxBounds> selectionBounds,
         std::optional<SelectionBounds> editableSelectionBounds,
         bool selectionToolStyle,
+        SelectionBoxVisualState selectionBoxVisualState,
         std::optional<Asset::Voxel::VoxelPosition> placementPreview,
         VoxelPlacementPreviewStyle placementPreviewStyle,
         std::optional<VoxelBoxBounds> boxPreview,
@@ -123,6 +131,8 @@ private:
     std::optional<VoxelBoxBounds> selectionBoundsHighlight_;
     std::optional<SelectionBounds> editableSelectionBoundsHighlight_;
     bool selectionToolStyle_ = false;
+    SelectionBoxVisualState selectionBoxVisualState_ =
+        SelectionBoxVisualState::Normal;
     std::optional<Asset::Voxel::VoxelPosition> placementPreviewHighlight_;
     VoxelPlacementPreviewStyle placementPreviewStyle_ =
         VoxelPlacementPreviewStyle::PencilInvalid;

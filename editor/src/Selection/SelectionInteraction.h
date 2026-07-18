@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SelectionBoxMoveModel.h"
 #include "SelectionHandleModel.h"
 #include "SelectionService.h"
 
@@ -13,7 +14,8 @@ enum class SelectionInteractionMode : std::uint8_t
 {
     Idle,
     Creating,
-    ResizingFace
+    ResizingFace,
+    MovingBox
 };
 
 struct SelectionPointerRelease final
@@ -51,6 +53,14 @@ public:
         float screenX,
         float screenY,
         Vec2 screenAxisPerVoxel) noexcept;
+    [[nodiscard]] bool BeginMovingBox(
+        SelectionBounds originalBounds,
+        std::uint64_t documentGeneration,
+        SelectionMovePlane movePlane,
+        Vec3 pointerWorldPosition) noexcept;
+    [[nodiscard]] bool MoveBox(
+        Vec3 pointerWorldPosition,
+        Asset::Voxel::VoxelDimensions dimensions) noexcept;
     [[nodiscard]] SelectionPointerRelease PointerUp() noexcept;
     [[nodiscard]] std::optional<SelectionBounds> Cancel() noexcept;
     [[nodiscard]] bool ValidateDocumentGeneration(
@@ -62,6 +72,8 @@ public:
     [[nodiscard]] const SelectionBounds& CurrentBounds() const noexcept;
     [[nodiscard]] const SelectionBounds& OriginalBounds() const noexcept;
     [[nodiscard]] SelectionFace ActiveFace() const noexcept;
+    [[nodiscard]] const SelectionMovePlane& MovePlane() const noexcept;
+    [[nodiscard]] Asset::Voxel::VoxelPosition MoveDelta() const noexcept;
     [[nodiscard]] std::uint64_t DocumentGeneration() const noexcept;
 
 private:
@@ -83,6 +95,9 @@ private:
     Asset::Voxel::VoxelPosition anchor_{};
     SelectionFace activeFace_ = SelectionFace::None;
     Vec2 screenAxisPerVoxel_{};
+    SelectionMovePlane movePlane_{};
+    Vec3 moveAnchorWorld_{};
+    Asset::Voxel::VoxelPosition moveDelta_{};
     std::uint64_t documentGeneration_ = 0U;
     bool dragRecognized_ = false;
     float pointerStartX_ = 0.0F;

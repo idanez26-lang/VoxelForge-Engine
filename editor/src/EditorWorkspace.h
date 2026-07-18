@@ -308,6 +308,7 @@ private:
     SelectionService selectionService_;
     SelectionVolumeCache selectionVolumeCache_;
     SelectionInteraction selectionInteraction_;
+    bool selectionBoxInteriorHovered_ = false;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
     EditorInputService editorInputService_;

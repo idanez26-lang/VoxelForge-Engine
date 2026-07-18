@@ -1,6 +1,10 @@
 #include "SelectionInteraction.h"
 
+#include "EditorMatrix.h"
+
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace VoxelForge::Editor
 {
@@ -97,6 +101,58 @@ bool SelectionInteraction::BeginResizingFace(
     return true;
 }
 
+bool SelectionInteraction::BeginMovingBox(
+    const SelectionBounds originalBounds,
+    const std::uint64_t documentGeneration,
+    const SelectionMovePlane movePlane,
+    const Vec3 pointerWorldPosition) noexcept
+{
+    if (IsActive() || !originalBounds.Valid || documentGeneration == 0U ||
+        !movePlane.Valid || !IsFinite(movePlane.Point) ||
+        !IsFinite(movePlane.Normal) || !IsFinite(pointerWorldPosition))
+        return false;
+    mode_ = SelectionInteractionMode::MovingBox;
+    operation_ = SelectionMode::Replace;
+    originalBounds_ = originalBounds;
+    currentBounds_ = originalBounds;
+    documentGeneration_ = documentGeneration;
+    dragRecognized_ = true;
+    movePlane_ = movePlane;
+    moveAnchorWorld_ = pointerWorldPosition;
+    moveDelta_ = {};
+    return true;
+}
+
+bool SelectionInteraction::MoveBox(
+    const Vec3 pointerWorldPosition,
+    const Asset::Voxel::VoxelDimensions dimensions) noexcept
+{
+    if (mode_ != SelectionInteractionMode::MovingBox ||
+        !IsFinite(pointerWorldPosition))
+        return false;
+    const Vec3 worldDelta = pointerWorldPosition - moveAnchorWorld_;
+    if (!IsFinite(worldDelta)) return false;
+    const auto snap = [](const float value) noexcept
+    {
+        const double bounded = std::clamp(
+            static_cast<double>(value),
+            static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+            static_cast<double>(std::numeric_limits<std::int32_t>::max()));
+        return static_cast<std::int32_t>(std::llround(bounded));
+    };
+    const Asset::Voxel::VoxelPosition requested{
+        snap(worldDelta.X), snap(worldDelta.Y), snap(worldDelta.Z)};
+    const SelectionBounds translated = TranslateSelectionBounds(
+        originalBounds_, requested, dimensions);
+    if (translated == currentBounds_) return false;
+    currentBounds_ = translated;
+    moveDelta_ = {
+        currentBounds_.Minimum.X - originalBounds_.Minimum.X,
+        currentBounds_.Minimum.Y - originalBounds_.Minimum.Y,
+        currentBounds_.Minimum.Z - originalBounds_.Minimum.Z};
+    return true;
+}
+
 SelectionPointerRelease SelectionInteraction::PointerUp() noexcept
 {
     SelectionPointerRelease release;
@@ -104,7 +160,8 @@ SelectionPointerRelease SelectionInteraction::PointerUp() noexcept
     release.Mode = mode_;
     release.Face = activeFace_;
     release.WasDrag =
-        mode_ == SelectionInteractionMode::ResizingFace || dragRecognized_;
+        mode_ == SelectionInteractionMode::ResizingFace ||
+        mode_ == SelectionInteractionMode::MovingBox || dragRecognized_;
     release.Operation = operation_;
     release.Bounds = release.WasDrag ? Commit() : Cancel();
     return release;
@@ -164,7 +221,8 @@ std::optional<SelectionBounds> SelectionInteraction::Cancel() noexcept
 {
     if (!IsActive()) return std::nullopt;
     const std::optional<SelectionBounds> restore =
-        mode_ == SelectionInteractionMode::ResizingFace
+        mode_ == SelectionInteractionMode::ResizingFace ||
+        mode_ == SelectionInteractionMode::MovingBox
         ? std::optional<SelectionBounds>(originalBounds_)
         : std::nullopt;
     Reset();
@@ -191,6 +249,8 @@ SelectionInteractionMode SelectionInteraction::Mode() const noexcept { return mo
 const SelectionBounds& SelectionInteraction::CurrentBounds() const noexcept { return currentBounds_; }
 const SelectionBounds& SelectionInteraction::OriginalBounds() const noexcept { return originalBounds_; }
 SelectionFace SelectionInteraction::ActiveFace() const noexcept { return activeFace_; }
+const SelectionMovePlane& SelectionInteraction::MovePlane() const noexcept { return movePlane_; }
+Asset::Voxel::VoxelPosition SelectionInteraction::MoveDelta() const noexcept { return moveDelta_; }
 std::uint64_t SelectionInteraction::DocumentGeneration() const noexcept { return documentGeneration_; }
 
 void SelectionInteraction::Reset() noexcept
@@ -202,6 +262,9 @@ void SelectionInteraction::Reset() noexcept
     anchor_ = {};
     activeFace_ = SelectionFace::None;
     screenAxisPerVoxel_ = {};
+    movePlane_ = {};
+    moveAnchorWorld_ = {};
+    moveDelta_ = {};
     documentGeneration_ = 0U;
     dragRecognized_ = false;
     pointerStartX_ = 0.0F;

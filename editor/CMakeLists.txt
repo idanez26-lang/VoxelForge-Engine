@@ -141,6 +141,7 @@ target_sources(
         src/Selection/SelectionService.cpp
         src/Selection/SelectionInteraction.cpp
         src/Selection/SelectionHandleModel.cpp
+        src/Selection/SelectionBoxMoveModel.cpp
         src/Selection/SelectionVolumeCache.cpp
         src/Selection/SelectionHighlightPolicy.cpp
 )
