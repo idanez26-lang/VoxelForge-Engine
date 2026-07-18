@@ -37,6 +37,28 @@ bool SelectionInteraction::PointerMove(
     const std::optional<Asset::Voxel::VoxelDimensions> dimensions) noexcept
 {
     if (!IsActive()) return false;
+    if (mode_ == SelectionInteractionMode::ResizingFace)
+    {
+        if (!dimensions) return false;
+        const float axisLengthSquared =
+            screenAxisPerVoxel_.X * screenAxisPerVoxel_.X +
+            screenAxisPerVoxel_.Y * screenAxisPerVoxel_.Y;
+        if (!std::isfinite(axisLengthSquared) || axisLengthSquared <= 1.0e-6F)
+            return false;
+        const float deltaX = screenX - pointerStartX_;
+        const float deltaY = screenY - pointerStartY_;
+        const float projectedDelta =
+            (deltaX * screenAxisPerVoxel_.X +
+             deltaY * screenAxisPerVoxel_.Y) / axisLengthSquared;
+        if (!std::isfinite(projectedDelta)) return false;
+        const std::int32_t gridDelta =
+            static_cast<std::int32_t>(std::lround(projectedDelta));
+        const SelectionBounds resized = ResizeSelectionBounds(
+            originalBounds_, activeFace_, gridDelta, *dimensions);
+        if (resized == currentBounds_) return false;
+        currentBounds_ = resized;
+        return true;
+    }
     const bool wasRecognized = dragRecognized_;
     if (!RecognizeDrag(screenX - pointerStartX_, screenY - pointerStartY_))
         return false;
@@ -46,13 +68,45 @@ bool SelectionInteraction::PointerMove(
     return changed;
 }
 
+bool SelectionInteraction::BeginResizingFace(
+    const SelectionFace face,
+    const SelectionBounds originalBounds,
+    const std::uint64_t documentGeneration,
+    const float screenX,
+    const float screenY,
+    const Vec2 screenAxisPerVoxel) noexcept
+{
+    const float axisLengthSquared =
+        screenAxisPerVoxel.X * screenAxisPerVoxel.X +
+        screenAxisPerVoxel.Y * screenAxisPerVoxel.Y;
+    if (IsActive() || face == SelectionFace::None || !originalBounds.Valid ||
+        documentGeneration == 0U || !std::isfinite(screenX) ||
+        !std::isfinite(screenY) || !std::isfinite(axisLengthSquared) ||
+        axisLengthSquared <= 1.0e-6F)
+        return false;
+    mode_ = SelectionInteractionMode::ResizingFace;
+    operation_ = SelectionMode::Replace;
+    activeFace_ = face;
+    originalBounds_ = originalBounds;
+    currentBounds_ = originalBounds;
+    documentGeneration_ = documentGeneration;
+    dragRecognized_ = true;
+    pointerStartX_ = screenX;
+    pointerStartY_ = screenY;
+    screenAxisPerVoxel_ = screenAxisPerVoxel;
+    return true;
+}
+
 SelectionPointerRelease SelectionInteraction::PointerUp() noexcept
 {
     SelectionPointerRelease release;
     if (!IsActive()) return release;
-    release.WasDrag = dragRecognized_;
+    release.Mode = mode_;
+    release.Face = activeFace_;
+    release.WasDrag =
+        mode_ == SelectionInteractionMode::ResizingFace || dragRecognized_;
     release.Operation = operation_;
-    release.Bounds = dragRecognized_ ? Commit() : Cancel();
+    release.Bounds = release.WasDrag ? Commit() : Cancel();
     return release;
 }
 
@@ -66,6 +120,8 @@ bool SelectionInteraction::BeginCreating(
     operation_ = mode;
     anchor_ = anchor;
     currentBounds_ = SelectionBounds::FromCorners(anchor, anchor);
+    originalBounds_ = {};
+    activeFace_ = SelectionFace::None;
     documentGeneration_ = documentGeneration;
     return true;
 }
@@ -107,8 +163,12 @@ std::optional<SelectionBounds> SelectionInteraction::Commit() noexcept
 std::optional<SelectionBounds> SelectionInteraction::Cancel() noexcept
 {
     if (!IsActive()) return std::nullopt;
+    const std::optional<SelectionBounds> restore =
+        mode_ == SelectionInteractionMode::ResizingFace
+        ? std::optional<SelectionBounds>(originalBounds_)
+        : std::nullopt;
     Reset();
-    return std::nullopt;
+    return restore;
 }
 
 bool SelectionInteraction::ValidateDocumentGeneration(
@@ -129,6 +189,8 @@ bool SelectionInteraction::IsDragRecognized() const noexcept
 }
 SelectionInteractionMode SelectionInteraction::Mode() const noexcept { return mode_; }
 const SelectionBounds& SelectionInteraction::CurrentBounds() const noexcept { return currentBounds_; }
+const SelectionBounds& SelectionInteraction::OriginalBounds() const noexcept { return originalBounds_; }
+SelectionFace SelectionInteraction::ActiveFace() const noexcept { return activeFace_; }
 std::uint64_t SelectionInteraction::DocumentGeneration() const noexcept { return documentGeneration_; }
 
 void SelectionInteraction::Reset() noexcept
@@ -136,7 +198,10 @@ void SelectionInteraction::Reset() noexcept
     mode_ = SelectionInteractionMode::Idle;
     operation_ = SelectionMode::Replace;
     currentBounds_ = {};
+    originalBounds_ = {};
     anchor_ = {};
+    activeFace_ = SelectionFace::None;
+    screenAxisPerVoxel_ = {};
     documentGeneration_ = 0U;
     dragRecognized_ = false;
     pointerStartX_ = 0.0F;

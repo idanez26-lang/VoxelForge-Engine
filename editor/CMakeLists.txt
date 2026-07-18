@@ -140,6 +140,7 @@ target_sources(
         src/VoxelSelection/VoxelSelectionState.cpp
         src/Selection/SelectionService.cpp
         src/Selection/SelectionInteraction.cpp
+        src/Selection/SelectionHandleModel.cpp
 )
 target_include_directories(
     VoxelForgeEditorVoxelSelection

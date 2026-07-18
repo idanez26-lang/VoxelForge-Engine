@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SelectionHandleModel.h"
 #include "SelectionService.h"
 
 #include <cstdint>
@@ -11,7 +12,8 @@ namespace VoxelForge::Editor
 enum class SelectionInteractionMode : std::uint8_t
 {
     Idle,
-    Creating
+    Creating,
+    ResizingFace
 };
 
 struct SelectionPointerRelease final
@@ -19,6 +21,8 @@ struct SelectionPointerRelease final
     bool WasDrag = false;
     std::optional<SelectionBounds> Bounds;
     SelectionMode Operation = SelectionMode::Replace;
+    SelectionInteractionMode Mode = SelectionInteractionMode::Idle;
+    SelectionFace Face = SelectionFace::None;
 };
 
 class SelectionInteraction final
@@ -40,6 +44,13 @@ public:
         std::optional<Asset::Voxel::VoxelPosition> target,
         std::optional<Asset::Voxel::VoxelDimensions> dimensions =
             std::nullopt) noexcept;
+    [[nodiscard]] bool BeginResizingFace(
+        SelectionFace face,
+        SelectionBounds originalBounds,
+        std::uint64_t documentGeneration,
+        float screenX,
+        float screenY,
+        Vec2 screenAxisPerVoxel) noexcept;
     [[nodiscard]] SelectionPointerRelease PointerUp() noexcept;
     [[nodiscard]] std::optional<SelectionBounds> Cancel() noexcept;
     [[nodiscard]] bool ValidateDocumentGeneration(
@@ -49,6 +60,8 @@ public:
     [[nodiscard]] bool IsDragRecognized() const noexcept;
     [[nodiscard]] SelectionInteractionMode Mode() const noexcept;
     [[nodiscard]] const SelectionBounds& CurrentBounds() const noexcept;
+    [[nodiscard]] const SelectionBounds& OriginalBounds() const noexcept;
+    [[nodiscard]] SelectionFace ActiveFace() const noexcept;
     [[nodiscard]] std::uint64_t DocumentGeneration() const noexcept;
 
 private:
@@ -66,7 +79,10 @@ private:
     SelectionInteractionMode mode_ = SelectionInteractionMode::Idle;
     SelectionMode operation_ = SelectionMode::Replace;
     SelectionBounds currentBounds_{};
+    SelectionBounds originalBounds_{};
     Asset::Voxel::VoxelPosition anchor_{};
+    SelectionFace activeFace_ = SelectionFace::None;
+    Vec2 screenAxisPerVoxel_{};
     std::uint64_t documentGeneration_ = 0U;
     bool dragRecognized_ = false;
     float pointerStartX_ = 0.0F;

@@ -254,7 +254,8 @@ void EditorLayer::OnImGuiRender()
     if (requireVoxelViewportRender_ && renderedFrameCount_ == 15U)
         workspace_.SetVoxelViewportView(EditorCameraView::Top);
     if (voxelSelectionSmokeTest_ ||
-        (voxelSelectionVisualTest_ && renderedFrameCount_ == 0U))
+        (voxelSelectionVisualTest_ &&
+         (renderedFrameCount_ == 0U || renderedFrameCount_ == 10U)))
     {
         voxelSelectionRayHit_ |=
             workspace_.RunVoxelSelectionSmokeStep(renderedFrameCount_);

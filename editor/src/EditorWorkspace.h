@@ -22,6 +22,7 @@
 #include "ProjectSession/ProjectSessionService.h"
 #include "Selection/SelectionService.h"
 #include "Selection/SelectionInteraction.h"
+#include "Selection/SelectionHandleModel.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -177,7 +178,7 @@ private:
     void HandleCommandShortcuts();
     void ExecuteInputCommand(EditorInputCommand command);
     void SelectVoxelTool(ActiveVoxelTool tool);
-    void CancelActiveInteraction() noexcept;
+    void CancelActiveInteraction();
     [[nodiscard]] EditorCommandAvailability CurrentCommandAvailability() const;
     void UndoCommand();
     void RedoCommand();
@@ -267,7 +268,7 @@ private:
         CurrentSelectionTarget() const noexcept;
     [[nodiscard]] bool ApplySelectionBounds(
         SelectionBounds bounds, SelectionMode mode);
-    void CancelSelectionInteraction() noexcept;
+    void CancelSelectionInteraction();
     void CancelVoxelBox() noexcept;
     void CancelVoxelLine() noexcept;
     void CancelVoxelSphere() noexcept;

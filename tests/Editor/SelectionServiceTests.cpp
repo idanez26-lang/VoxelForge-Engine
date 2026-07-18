@@ -2,6 +2,7 @@
 #include "Selection/SelectionInteraction.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -17,6 +18,8 @@ using VoxelForge::Editor::SelectionBounds;
 using VoxelForge::Editor::SelectionInteraction;
 using VoxelForge::Editor::SelectionInteractionMode;
 using VoxelForge::Editor::SelectionPointerRelease;
+using VoxelForge::Editor::SelectionFace;
+using VoxelForge::Editor::SelectionHandle;
 
 void Require(const bool condition, const std::string_view message)
 {
@@ -203,6 +206,234 @@ void TestInteractionLifecycle()
     Require(!interaction.ValidateDocumentGeneration(14U) && !interaction.IsActive(),
         "A document generation change must purge the interaction.");
 }
+
+void TestSelectionHandleGenerationProjectionAndPicking()
+{
+    const SelectionBounds bounds = SelectionBounds::FromCorners(
+        {2, 4, 6}, {8, 10, 14});
+    const auto handles = VoxelForge::Editor::GenerateSelectionHandles(bounds);
+    Require(handles.size() == 6U &&
+            handles[0].Face == SelectionFace::XMinimum &&
+            handles[1].Face == SelectionFace::XMaximum &&
+            handles[2].Face == SelectionFace::YMinimum &&
+            handles[3].Face == SelectionFace::YMaximum &&
+            handles[4].Face == SelectionFace::ZMinimum &&
+            handles[5].Face == SelectionFace::ZMaximum,
+        "Selection bounds must generate exactly the six face handles.");
+    Require(handles[0].WorldPosition == VoxelForge::Editor::Vec3{2.0F, 7.5F, 10.5F} &&
+            handles[1].WorldPosition == VoxelForge::Editor::Vec3{9.0F, 7.5F, 10.5F} &&
+            handles[2].WorldPosition == VoxelForge::Editor::Vec3{5.5F, 4.0F, 10.5F} &&
+            handles[3].WorldPosition == VoxelForge::Editor::Vec3{5.5F, 11.0F, 10.5F} &&
+            handles[4].WorldPosition == VoxelForge::Editor::Vec3{5.5F, 7.5F, 6.0F} &&
+            handles[5].WorldPosition == VoxelForge::Editor::Vec3{5.5F, 7.5F, 15.0F},
+        "Each handle must be centered on exactly one bounds face.");
+
+    VoxelForge::Editor::Matrix4 projection =
+        VoxelForge::Editor::IdentityMatrix();
+    projection[10] = 0.1F;
+    projection[11] = 0.5F;
+    const auto projected = VoxelForge::Editor::ProjectSelectionHandles(
+        SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0}), {},
+        {0.0F, 0.0F, 100.0F, 100.0F}, projection);
+    Require(std::all_of(projected.begin(), projected.end(),
+            [](const SelectionHandle& handle) { return handle.Visible; }),
+        "All six handles of a visible box must produce screen primitives.");
+    const auto picked = VoxelForge::Editor::PickSelectionHandle(
+        projected, projected[1].ScreenPosition, 8.0F);
+    Require(picked && picked->Face == SelectionFace::XMaximum,
+        "Screen-space picking must identify the hovered face handle.");
+    Require(!VoxelForge::Editor::PickSelectionHandle(
+            projected, {-100.0F, -100.0F}, 8.0F),
+        "Picking outside every handle must return no face.");
+}
+
+void TestSelectionHandleSpatialBarycentres()
+{
+    const auto thin = VoxelForge::Editor::GenerateSelectionHandles(
+        SelectionBounds::FromCorners({2, 4, 6}, {2, 4, 13}),
+        {10.0F, 20.0F, 30.0F});
+    const std::array<VoxelForge::Editor::Vec3, 6U> expectedThin{{
+        {-8.0F, -15.5F, -20.0F},
+        {-7.0F, -15.5F, -20.0F},
+        {-7.5F, -16.0F, -20.0F},
+        {-7.5F, -15.0F, -20.0F},
+        {-7.5F, -15.5F, -24.0F},
+        {-7.5F, -15.5F, -16.0F}}};
+    for (std::size_t index = 0U; index < thin.size(); ++index)
+        Require(thin[index].WorldPosition == expectedThin[index],
+            "Long thin selection handles must use world-space face barycentres.");
+
+    const auto wide = VoxelForge::Editor::GenerateSelectionHandles(
+        SelectionBounds::FromCorners({1, 2, 3}, {5, 6, 5}));
+    const std::array<VoxelForge::Editor::Vec3, 6U> expectedWide{{
+        {1.0F, 4.5F, 4.5F},
+        {6.0F, 4.5F, 4.5F},
+        {3.5F, 2.0F, 4.5F},
+        {3.5F, 7.0F, 4.5F},
+        {3.5F, 4.5F, 3.0F},
+        {3.5F, 4.5F, 6.0F}}};
+    for (std::size_t index = 0U; index < wide.size(); ++index)
+        Require(wide[index].WorldPosition == expectedWide[index],
+            "Wide odd-sized selection handles must remain centered per face.");
+}
+
+void TestHandleBarycentresAfterSuccessiveAxisResizes()
+{
+    const auto dimensions =
+        VoxelForge::Asset::Voxel::VoxelDimensions{12, 12, 12};
+    SelectionBounds bounds = SelectionBounds::FromCorners(
+        {1, 1, 1}, {2, 2, 2});
+    bounds = VoxelForge::Editor::ResizeSelectionBounds(
+        bounds, SelectionFace::XMaximum, 2, dimensions);
+    bounds = VoxelForge::Editor::ResizeSelectionBounds(
+        bounds, SelectionFace::YMinimum, -1, dimensions);
+    bounds = VoxelForge::Editor::ResizeSelectionBounds(
+        bounds, SelectionFace::ZMaximum, 3, dimensions);
+    Require(bounds.Minimum == VoxelPosition{1, 0, 1} &&
+            bounds.Maximum == VoxelPosition{4, 2, 5},
+        "Successive X, Y and Z resizes must produce the expected current bounds.");
+
+    const auto handles = VoxelForge::Editor::GenerateSelectionHandles(bounds);
+    const std::array<VoxelForge::Editor::Vec3, 6U> expected{{
+        {1.0F, 1.5F, 3.5F},
+        {5.0F, 1.5F, 3.5F},
+        {3.0F, 0.0F, 3.5F},
+        {3.0F, 3.0F, 3.5F},
+        {3.0F, 1.5F, 1.0F},
+        {3.0F, 1.5F, 6.0F}}};
+    for (std::size_t index = 0U; index < handles.size(); ++index)
+        Require(handles[index].WorldPosition == expected[index],
+            "Every frame must derive handle barycentres from current resized bounds.");
+
+    VoxelForge::Editor::Matrix4 projection =
+        VoxelForge::Editor::IdentityMatrix();
+    projection[0] = 0.1F;
+    projection[5] = 0.1F;
+    projection[10] = 0.1F;
+    projection[11] = 0.5F;
+    const auto projected = VoxelForge::Editor::ProjectSelectionHandles(
+        bounds, {}, {0.0F, 0.0F, 200.0F, 200.0F}, projection);
+    for (std::size_t index = 0U; index < projected.size(); ++index)
+        Require(projected[index].WorldPosition == handles[index].WorldPosition,
+            "Rendering and picking must consume the same recalculated handle list.");
+}
+
+void TestFaceResizeRules()
+{
+    const SelectionBounds original = SelectionBounds::FromCorners(
+        {2, 3, 4}, {7, 8, 9});
+    const auto dimensions =
+        VoxelForge::Asset::Voxel::VoxelDimensions{12, 12, 12};
+    const auto xMaximum = VoxelForge::Editor::ResizeSelectionBounds(
+        original, SelectionFace::XMaximum, 3, dimensions);
+    Require(xMaximum.Minimum == original.Minimum &&
+            xMaximum.Maximum == VoxelPosition{10, 8, 9},
+        "X maximum resize must leave the opposite face fixed.");
+    const auto xMinimum = VoxelForge::Editor::ResizeSelectionBounds(
+        original, SelectionFace::XMinimum, -8, dimensions);
+    Require(xMinimum.Minimum == VoxelPosition{0, 3, 4} &&
+            xMinimum.Maximum == original.Maximum,
+        "X minimum resize must clip to the document and keep X maximum fixed.");
+    const auto yMinimum = VoxelForge::Editor::ResizeSelectionBounds(
+        original, SelectionFace::YMinimum, 99, dimensions);
+    const auto zMaximum = VoxelForge::Editor::ResizeSelectionBounds(
+        original, SelectionFace::ZMaximum, -99, dimensions);
+    Require(yMinimum.Minimum.Y == yMinimum.Maximum.Y &&
+            zMaximum.Maximum.Z == zMaximum.Minimum.Z,
+        "A face must stop at its opposite face with a one-voxel minimum.");
+    Require(yMinimum.Minimum.X == original.Minimum.X &&
+            yMinimum.Maximum.X == original.Maximum.X &&
+            zMaximum.Minimum.Y == original.Minimum.Y &&
+            zMaximum.Maximum.Y == original.Maximum.Y,
+        "Resizing one axis must not alter either other axis.");
+}
+
+void TestResizePointerLifecycleAndCancel()
+{
+    SelectionInteraction interaction;
+    const SelectionBounds original = SelectionBounds::FromCorners(
+        {2, 2, 2}, {6, 6, 6});
+    Require(interaction.BeginResizingFace(
+            SelectionFace::XMaximum, original, 21U,
+            100.0F, 80.0F, {10.0F, 0.0F}),
+        "MouseDown on a handle must enter ResizingFace.");
+    Require(interaction.Mode() == SelectionInteractionMode::ResizingFace &&
+            interaction.ActiveFace() == SelectionFace::XMaximum &&
+            interaction.IsDragRecognized(),
+        "The active face resize state must be explicit and captured.");
+    Require(interaction.PointerMove(
+            130.0F, 80.0F, std::nullopt,
+            VoxelForge::Asset::Voxel::VoxelDimensions{16, 16, 16}) &&
+            interaction.CurrentBounds().Maximum.X == 9 &&
+            interaction.CurrentBounds().Minimum == original.Minimum,
+        "MouseMove must resize one face by snapped voxel increments.");
+    const SelectionPointerRelease release = interaction.PointerUp();
+    Require(release.WasDrag && release.Bounds &&
+            release.Mode == SelectionInteractionMode::ResizingFace &&
+            release.Face == SelectionFace::XMaximum &&
+            release.Bounds->Maximum.X == 9 && !interaction.IsActive(),
+        "MouseUp must validate resized bounds and return to Idle.");
+
+    Require(interaction.BeginResizingFace(
+            SelectionFace::YMinimum, original, 21U,
+            50.0F, 50.0F, {0.0F, -10.0F}),
+        "A second resize must begin from Idle.");
+    static_cast<void>(interaction.PointerMove(
+        50.0F, 30.0F, std::nullopt,
+        VoxelForge::Asset::Voxel::VoxelDimensions{16, 16, 16}));
+    const auto restored = interaction.Cancel();
+    Require(restored && *restored == original && !interaction.IsActive(),
+        "Esc cancellation must restore the exact original bounds.");
+
+    Require(interaction.BeginResizingFace(
+            SelectionFace::ZMaximum, original, 30U,
+            10.0F, 10.0F, {5.0F, 0.0F}),
+        "Generation cancellation setup failed.");
+    Require(!interaction.ValidateDocumentGeneration(31U) &&
+            !interaction.IsActive(),
+        "Changing document generation must cancel an active resize.");
+}
+
+void TestHandlePickingToSelectionRecalculation()
+{
+    const SelectionBounds original = SelectionBounds::FromCorners(
+        {0, 0, 0}, {1, 1, 1});
+    VoxelForge::Editor::SelectionHandles handles =
+        VoxelForge::Editor::GenerateSelectionHandles(original);
+    handles[1].Visible = true;
+    handles[1].ScreenPosition = {60.0F, 40.0F};
+    handles[1].ScreenAxisPerVoxel = {12.0F, 0.0F};
+    const auto hovered = VoxelForge::Editor::PickSelectionHandle(
+        handles, {60.0F, 40.0F});
+    Require(hovered && hovered->Face == SelectionFace::XMaximum,
+        "The input cycle must begin from an actually picked handle.");
+
+    SelectionInteraction interaction;
+    Require(interaction.BeginResizingFace(
+            hovered->Face, original, 44U,
+            hovered->ScreenPosition.X, hovered->ScreenPosition.Y,
+            hovered->ScreenAxisPerVoxel),
+        "Picked handle MouseDown must capture the resize interaction.");
+    Require(interaction.PointerMove(
+            84.0F, 40.0F, std::nullopt,
+            VoxelForge::Asset::Voxel::VoxelDimensions{8, 8, 8}),
+        "Held MouseMove must update the picked face.");
+
+    SelectionService selection;
+    selection.SetDocumentGeneration(44U);
+    const std::vector<VoxelPosition> existing{
+        {0, 0, 0}, {1, 1, 1}, {2, 0, 0}, {3, 1, 1}, {4, 0, 0}};
+    static_cast<void>(selection.SelectVolume(
+        existing, interaction.CurrentBounds(), SelectionMode::Replace));
+    Require(selection.EditableBounds() == interaction.CurrentBounds() &&
+            selection.Count() == 4U && !selection.Contains({4, 0, 0}),
+        "Live resize must recalculate existing contained voxels and ignore empties.");
+
+    const SelectionPointerRelease release = interaction.PointerUp();
+    Require(release.Bounds && *release.Bounds == selection.EditableBounds() &&
+            interaction.Mode() == SelectionInteractionMode::Idle,
+        "MouseUp must preserve the recalculated resized bounds.");
+}
 }
 
 int main()
@@ -216,6 +447,12 @@ int main()
         TestSpatialBounds();
         TestVolumeModesIgnoreEmptyCells();
         TestInteractionLifecycle();
+        TestSelectionHandleGenerationProjectionAndPicking();
+        TestSelectionHandleSpatialBarycentres();
+        TestHandleBarycentresAfterSuccessiveAxisResizes();
+        TestFaceResizeRules();
+        TestResizePointerLifecycleAndCancel();
+        TestHandlePickingToSelectionRecalculation();
         std::cout << "SelectionService tests passed.\n";
         return EXIT_SUCCESS;
     }
