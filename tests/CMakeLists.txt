@@ -445,6 +445,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelDuplicateTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelRotateTests
+    Editor/VoxelRotateTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelRotateTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorVoxelRotateTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelRotate
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelRotateTests>
+)
+add_executable(
     VoxelForgeEditorQualityOfLifeTests
     Editor/QualityOfLifeTests.cpp
 )
@@ -732,6 +745,7 @@ set_tests_properties(
     VoxelForge.Editor.KeyboardShortcuts
     VoxelForge.Editor.SelectionService
     VoxelForge.Editor.TransformPreview
+    VoxelForge.Editor.VoxelRotate
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
@@ -891,6 +905,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelDuplicateSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-duplicate-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelRotateSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-rotate-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -926,6 +944,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.ModernDialogsSmoke
         VoxelForge.Editor.VoxelMoveSmoke
         VoxelForge.Editor.VoxelDuplicateSmoke
+        VoxelForge.Editor.VoxelRotateSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

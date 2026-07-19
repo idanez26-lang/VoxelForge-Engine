@@ -14,7 +14,7 @@ constexpr std::size_t Index(const EditorInputKey key) noexcept
 bool IsToolCommand(const EditorInputCommand command) noexcept
 {
     return command >= EditorInputCommand::ToolPencil &&
-        command <= EditorInputCommand::ToolDuplicate;
+        command <= EditorInputCommand::ToolRotate;
 }
 
 bool SameChord(
@@ -71,6 +71,13 @@ bool EditorInputService::IsAvailable(
         return availability.HasDocument && availability.CanMoveSelection;
     if (command == EditorInputCommand::ToolDuplicate)
         return availability.HasDocument && availability.CanDuplicateSelection;
+    if (command == EditorInputCommand::ToolRotate)
+        return availability.HasDocument && availability.CanRotateSelection;
+    if (command == EditorInputCommand::RotateLeft ||
+        command == EditorInputCommand::RotateRight)
+        return availability.CanAdjustRotation;
+    if (command == EditorInputCommand::RotateApply)
+        return availability.CanApplyRotation;
     if (IsToolCommand(command)) return availability.HasDocument;
     switch (command)
     {
@@ -111,6 +118,10 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ToolSelection: return "Tool.Selection";
     case EditorInputCommand::ToolMove: return "Tool.Move";
     case EditorInputCommand::ToolDuplicate: return "Tool.Duplicate";
+    case EditorInputCommand::ToolRotate: return "Tool.Rotate";
+    case EditorInputCommand::RotateLeft: return "Rotate.Left90";
+    case EditorInputCommand::RotateRight: return "Rotate.Right90";
+    case EditorInputCommand::RotateApply: return "Rotate.Apply";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";
     case EditorInputCommand::EditRedo: return "Edit.Redo";

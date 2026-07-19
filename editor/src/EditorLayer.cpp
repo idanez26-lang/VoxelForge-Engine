@@ -59,6 +59,7 @@ EditorLayer::EditorLayer(
     const bool keyboardShortcutsSmokeTest,
     const bool voxelMoveSmokeTest,
     const bool voxelDuplicateSmokeTest,
+    const bool voxelRotateSmokeTest,
     std::filesystem::path imguiIniPathOverride)
     : Layer("VoxelForge Editor Layer"),
       layoutPersistence_(std::move(imguiIniPathOverride)),
@@ -76,7 +77,7 @@ EditorLayer::EditorLayer(
               voxelFillSmokeTest || voxelBoxSmokeTest || voxelLineSmokeTest ||
               voxelSphereSmokeTest || modernToolbarSmokeTest ||
               keyboardShortcutsSmokeTest || voxelMoveSmokeTest ||
-              voxelDuplicateSmokeTest
+              voxelDuplicateSmokeTest || voxelRotateSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -92,7 +93,7 @@ EditorLayer::EditorLayer(
               voxelFillSmokeTest || voxelBoxSmokeTest || voxelLineSmokeTest ||
               voxelSphereSmokeTest || modernToolbarSmokeTest ||
               keyboardShortcutsSmokeTest || voxelMoveSmokeTest ||
-              voxelDuplicateSmokeTest),
+              voxelDuplicateSmokeTest || voxelRotateSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -131,7 +132,8 @@ EditorLayer::EditorLayer(
       modernToolbarSmokeTest_(modernToolbarSmokeTest),
       keyboardShortcutsSmokeTest_(keyboardShortcutsSmokeTest),
       voxelMoveSmokeTest_(voxelMoveSmokeTest),
-      voxelDuplicateSmokeTest_(voxelDuplicateSmokeTest)
+      voxelDuplicateSmokeTest_(voxelDuplicateSmokeTest),
+      voxelRotateSmokeTest_(voxelRotateSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -248,7 +250,7 @@ void EditorLayer::OnImGuiRender()
         !voxelFillSmokeTest_ && !voxelBoxSmokeTest_ && !voxelLineSmokeTest_ &&
         !voxelSphereSmokeTest_ && !modernToolbarSmokeTest_ &&
         !keyboardShortcutsSmokeTest_ && !voxelMoveSmokeTest_ &&
-        !voxelDuplicateSmokeTest_)
+        !voxelDuplicateSmokeTest_ && !voxelRotateSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -374,6 +376,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunVoxelDuplicateSmokeStep(
             renderedFrameCount_));
     }
+    if (voxelRotateSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunVoxelRotateSmokeStep(
+            renderedFrameCount_));
+    }
     workspace_.Draw();
     if (voxelRayPickingSmokeTest_)
     {
@@ -440,7 +447,8 @@ void EditorLayer::OnImGuiRender()
         (keyboardShortcutsSmokeTest_ &&
          workspace_.KeyboardShortcutsSmokePassed()) ||
         (voxelMoveSmokeTest_ && workspace_.VoxelMoveSmokePassed()) ||
-        (voxelDuplicateSmokeTest_ && workspace_.VoxelDuplicateSmokePassed());
+        (voxelDuplicateSmokeTest_ && workspace_.VoxelDuplicateSmokePassed()) ||
+        (voxelRotateSmokeTest_ && workspace_.VoxelRotateSmokePassed());
     if (requireVoxelViewportRender_ &&
         (workspace_.HasVoxelViewportRenderError() ||
          (smokeTestComplete && !workspace_.HasRenderedVoxelViewport() &&
@@ -617,6 +625,11 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Voxel Duplicate smoke test did not complete.");
+    }
+    if (voxelRotateSmokeTest_ && smokeTestComplete &&
+        !workspace_.VoxelRotateSmokePassed())
+    {
+        throw std::runtime_error("Voxel Rotate smoke test did not complete.");
     }
 
     if (workspace_.ConsumeExitRequest() || smokeTestComplete)

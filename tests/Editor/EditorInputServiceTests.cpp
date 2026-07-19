@@ -33,7 +33,7 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 13U,
+    Require(service.Bindings().size() == 17U,
         "The expected command bindings are incomplete.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
@@ -48,6 +48,10 @@ void TestCommandsAndBindings()
         service.ShortcutLabel(EditorInputCommand::ToolSelection) == "V" &&
         service.ShortcutLabel(EditorInputCommand::ToolMove) == "M" &&
         service.ShortcutLabel(EditorInputCommand::ToolDuplicate) == "D" &&
+        service.ShortcutLabel(EditorInputCommand::ToolRotate) == "R" &&
+        service.ShortcutLabel(EditorInputCommand::RotateLeft) == "Q" &&
+        service.ShortcutLabel(EditorInputCommand::RotateRight) == "Shift+Q" &&
+        service.ShortcutLabel(EditorInputCommand::RotateApply) == "Enter" &&
         service.ShortcutLabel(EditorInputCommand::FileSave) == "Ctrl+S",
         "Shortcut labels do not reflect the real bindings.");
 }
@@ -56,7 +60,7 @@ void TestToolSelection()
 {
     const EditorInputService service;
     const EditorCommandAvailability available{
-        true, true, true, true, true, true, true};
+        true, true, true, true, true, true, true, true, true, true};
     Require(Resolve(service, EditorInputKey::P, available) ==
             EditorInputCommand::ToolPencil &&
         Resolve(service, EditorInputKey::E, available) ==
@@ -74,7 +78,15 @@ void TestToolSelection()
         Resolve(service, EditorInputKey::M, available) ==
             EditorInputCommand::ToolMove &&
         Resolve(service, EditorInputKey::D, available) ==
-            EditorInputCommand::ToolDuplicate,
+            EditorInputCommand::ToolDuplicate &&
+        Resolve(service, EditorInputKey::R, available) ==
+            EditorInputCommand::ToolRotate &&
+        Resolve(service, EditorInputKey::Q, available) ==
+            EditorInputCommand::RotateLeft &&
+        Resolve(service, EditorInputKey::Q, available, false, true) ==
+            EditorInputCommand::RotateRight &&
+        Resolve(service, EditorInputKey::Enter, available) ==
+            EditorInputCommand::RotateApply,
         "A tool shortcut resolves to the wrong command.");
     Require(Resolve(service, EditorInputKey::S, available, true) ==
             EditorInputCommand::FileSave,
@@ -138,13 +150,29 @@ void TestAvailabilityAndUnknownCommands()
         "Command availability ignores editor state.");
     partial.CanMoveSelection = true;
     partial.CanDuplicateSelection = true;
+    partial.CanRotateSelection = true;
+    partial.CanAdjustRotation = true;
     Require(service.IsAvailable(EditorInputCommand::ToolMove, partial) &&
         Resolve(service, EditorInputKey::M, partial) ==
             EditorInputCommand::ToolMove &&
         service.IsAvailable(EditorInputCommand::ToolDuplicate, partial) &&
         Resolve(service, EditorInputKey::D, partial) ==
-            EditorInputCommand::ToolDuplicate,
-        "Transform tool availability does not require a current selection.");
+            EditorInputCommand::ToolDuplicate &&
+        service.IsAvailable(EditorInputCommand::ToolRotate, partial) &&
+        Resolve(service, EditorInputKey::R, partial) ==
+            EditorInputCommand::ToolRotate &&
+        Resolve(service, EditorInputKey::Q, partial) ==
+            EditorInputCommand::RotateLeft &&
+        Resolve(service, EditorInputKey::Q, partial, false, true) ==
+            EditorInputCommand::RotateRight &&
+        Resolve(service, EditorInputKey::Enter, partial) ==
+            EditorInputCommand::None,
+        "Rotate preview commands require selection but Apply requires preview.");
+    partial.CanApplyRotation = true;
+    Require(
+        Resolve(service, EditorInputKey::Enter, partial) ==
+            EditorInputCommand::RotateApply,
+        "Rotate Apply stayed unavailable for a valid preview.");
 }
 }
 

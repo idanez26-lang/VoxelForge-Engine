@@ -269,6 +269,45 @@ void TestDuplicateCollisionPolicyIncludesSource()
         "Duplicate policy must flag source overlap and suppress Move ghosting.");
 }
 
+void TestExplicitDestinationsForRotation()
+{
+    DocumentFixture fixture({8U, 8U, 8U},
+        {{{1U, 1U, 1U, 3U}}, {{2U, 1U, 1U, 4U}},
+         {{6U, 1U, 1U, 9U}}});
+    SelectionService selection = MakeSelection(
+        15U, {{1, 1, 1}, {2, 1, 1}});
+    TransformPreviewModel preview;
+    const std::array<VoxelPosition, 2U> rotated{
+        VoxelPosition{1, 1, 2}, VoxelPosition{1, 1, 1}};
+    const auto revision = fixture.Document().GetRevision();
+    Require(preview.BeginPreview(fixture.Document(), selection, 15U) &&
+            preview.SetExplicitDestinations(
+                fixture.Document(), selection, 15U, rotated) &&
+            preview.HasExplicitDestinations() &&
+            preview.Voxels()[0].PreviewPosition == rotated[0] &&
+            preview.Voxels()[1].PreviewPosition == rotated[1] &&
+            preview.PreviewBounds() ==
+                SelectionBounds::FromCorners({1, 1, 1}, {1, 1, 2}) &&
+            !preview.HasCollisions() && preview.RenderData().DrawSourceGhost &&
+            fixture.Document().GetRevision() == revision,
+        "Explicit Rotate destinations were not prepared without mutation.");
+    const auto metrics = preview.Metrics();
+    Require(!preview.SetExplicitDestinations(
+                fixture.Document(), selection, 15U, rotated) &&
+            preview.Metrics().RebuildCount == metrics.RebuildCount &&
+            preview.Metrics().ExplicitDestinationCapacity ==
+                metrics.ExplicitDestinationCapacity,
+        "Unchanged explicit destinations rebuilt or reallocated preview data.");
+
+    const std::array<VoxelPosition, 2U> collision{
+        VoxelPosition{6, 1, 1}, VoxelPosition{1, 1, 1}};
+    Require(preview.SetExplicitDestinations(
+                fixture.Document(), selection, 15U, collision) &&
+            preview.CollisionCount() == 1U &&
+            preview.CollisionPositions()[0] == VoxelPosition{6, 1, 1},
+        "Explicit destinations did not preserve Move collision semantics.");
+}
+
 void TestValidityCancelResetAndNoMutation()
 {
     DocumentFixture fixture({8U, 8U, 8U}, {{{1U, 1U, 1U, 7U}}});
@@ -347,6 +386,7 @@ int main()
         TestDeltasBoundsAndBufferReuse();
         TestCollisionsInternalOverlapAndOutOfBounds();
         TestDuplicateCollisionPolicyIncludesSource();
+        TestExplicitDestinationsForRotation();
         TestValidityCancelResetAndNoMutation();
         TestLargeSelectionAndAdaptiveRenderPolicy();
         std::cout << "TransformPreview tests passed.\n";

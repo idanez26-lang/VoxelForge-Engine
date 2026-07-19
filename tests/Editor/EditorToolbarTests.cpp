@@ -30,9 +30,10 @@ void TestOrderGroupsAndTooltips()
         EditorToolbarAction::Sphere,
         EditorToolbarAction::Selection,
         EditorToolbarAction::Move,
-        EditorToolbarAction::Duplicate};
+        EditorToolbarAction::Duplicate,
+        EditorToolbarAction::Rotate};
     Require(buttons.size() == std::size(expected),
-        "Toolbar does not expose exactly ten actions.");
+        "Toolbar does not expose exactly eleven actions.");
     for (std::size_t index = 0U; index < buttons.size(); ++index)
     {
         Require(buttons[index].Action == expected[index],
@@ -50,7 +51,8 @@ void TestOrderGroupsAndTooltips()
         buttons[6].Group == EditorToolbarGroup::Construction &&
         buttons[7].Group == EditorToolbarGroup::Manipulation &&
         buttons[8].Group == EditorToolbarGroup::Manipulation &&
-        buttons[9].Group == EditorToolbarGroup::Manipulation,
+        buttons[9].Group == EditorToolbarGroup::Manipulation &&
+        buttons[10].Group == EditorToolbarGroup::Manipulation,
         "Toolbar visual groups are incorrect.");
     Require(inputService.ShortcutLabel(buttons[0].Command) == "Ctrl+S" &&
         inputService.ShortcutLabel(buttons[1].Command) == "P" &&
@@ -61,7 +63,8 @@ void TestOrderGroupsAndTooltips()
         inputService.ShortcutLabel(buttons[6].Command) == "S" &&
         inputService.ShortcutLabel(buttons[7].Command) == "V" &&
         inputService.ShortcutLabel(buttons[8].Command) == "M" &&
-        inputService.ShortcutLabel(buttons[9].Command) == "D",
+        inputService.ShortcutLabel(buttons[9].Command) == "D" &&
+        inputService.ShortcutLabel(buttons[10].Command) == "R",
         "Toolbar does not use the centralized shortcut bindings.");
 }
 
@@ -79,11 +82,12 @@ void TestAvailabilityAndSingleActiveTool()
     EditorToolbarState cleanDocument{true, false, ActiveVoxelTool::Pencil};
     Require(!EditorToolbarModel::IsEnabled(buttons[0], cleanDocument),
         "Save is enabled for a clean document.");
-    for (std::size_t index = 1U; index + 2U < buttons.size(); ++index)
+    for (std::size_t index = 1U; index + 3U < buttons.size(); ++index)
         Require(EditorToolbarModel::IsEnabled(buttons[index], cleanDocument),
             "A voxel tool is disabled with an active document.");
     Require(!EditorToolbarModel::IsEnabled(buttons[8], cleanDocument) &&
-        !EditorToolbarModel::IsEnabled(buttons[9], cleanDocument),
+        !EditorToolbarModel::IsEnabled(buttons[9], cleanDocument) &&
+        !EditorToolbarModel::IsEnabled(buttons[10], cleanDocument),
         "A transform tool is enabled without a valid selection.");
     const auto activeCount = std::count_if(buttons.begin(), buttons.end(),
         [&cleanDocument](const EditorToolbarButton& button)
@@ -98,8 +102,10 @@ void TestAvailabilityAndSingleActiveTool()
         "Save is disabled for a saveable dirty document.");
     cleanDocument.CanMoveSelection = true;
     cleanDocument.CanDuplicateSelection = true;
+    cleanDocument.CanRotateSelection = true;
     Require(EditorToolbarModel::IsEnabled(buttons[8], cleanDocument) &&
-        EditorToolbarModel::IsEnabled(buttons[9], cleanDocument),
+        EditorToolbarModel::IsEnabled(buttons[9], cleanDocument) &&
+        EditorToolbarModel::IsEnabled(buttons[10], cleanDocument),
         "A transform tool is disabled with a valid selection.");
 }
 
@@ -114,6 +120,7 @@ void TestVoxelToolStatePipeline()
             (button.Tool == ActiveVoxelTool::Selection ||
              button.Tool == ActiveVoxelTool::Move
              || button.Tool == ActiveVoxelTool::Duplicate
+             || button.Tool == ActiveVoxelTool::Rotate
                 ? !state.IsEditingToolActive()
                 : state.IsEditingToolActive()),
             "Toolbar tool selection bypasses or conflicts with VoxelToolState.");

@@ -185,6 +185,24 @@ void DrawDuplicateIcon(ImDrawList& drawList, const ImVec2 minimum,
         {maximum.x - offset, maximum.y}, color, 1.5F, 0, thickness);
 }
 
+void DrawRotateIcon(ImDrawList& drawList, const ImVec2 minimum,
+    const ImVec2 maximum, const ImU32 color, const float thickness)
+{
+    const ImVec2 center{
+        (minimum.x + maximum.x) * 0.5F,
+        (minimum.y + maximum.y) * 0.5F};
+    const float radius = (maximum.x - minimum.x) * 0.42F;
+    drawList.PathArcTo(center, radius, -2.45F, 2.05F, 20);
+    drawList.PathStroke(color, 0, thickness);
+    const ImVec2 tip{
+        center.x + radius * -0.46F, center.y + radius * -0.89F};
+    const float head = radius * 0.48F;
+    drawList.AddTriangleFilled(
+        tip,
+        {tip.x + head, tip.y + head * 0.08F},
+        {tip.x + head * 0.12F, tip.y + head}, color);
+}
+
 bool DrawIcon(
     ImDrawList& drawList,
     const EditorToolbarAction action,
@@ -217,6 +235,9 @@ bool DrawIcon(
     case EditorToolbarAction::Duplicate:
         DrawDuplicateIcon(drawList, minimum, maximum, color, thickness);
         return true;
+    case EditorToolbarAction::Rotate:
+        DrawRotateIcon(drawList, minimum, maximum, color, thickness);
+        return true;
     }
     return false;
 }
@@ -242,6 +263,8 @@ void DrawTooltip(
             ? "Select one or more voxels to use Move."
             : button.Action == EditorToolbarAction::Duplicate
             ? "Select one or more voxels to use Duplicate."
+            : button.Action == EditorToolbarAction::Rotate
+            ? "Select one or more voxels to use Rotate."
             : "Open a voxel model to use this tool.");
     ImGui::EndTooltip();
 }

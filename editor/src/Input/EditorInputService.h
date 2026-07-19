@@ -20,6 +20,10 @@ enum class EditorInputCommand : std::uint8_t
     ToolSelection,
     ToolMove,
     ToolDuplicate,
+    ToolRotate,
+    RotateLeft,
+    RotateRight,
+    RotateApply,
     FileSave,
     EditUndo,
     EditRedo,
@@ -38,6 +42,9 @@ enum class EditorInputKey : std::uint8_t
     V,
     M,
     D,
+    Q,
+    R,
+    Enter,
     Z,
     Y,
     Escape,
@@ -80,12 +87,15 @@ struct EditorCommandAvailability final
     bool CanCancelInteraction = false;
     bool CanMoveSelection = false;
     bool CanDuplicateSelection = false;
+    bool CanRotateSelection = false;
+    bool CanAdjustRotation = false;
+    bool CanApplyRotation = false;
 };
 
 class EditorInputService final
 {
 public:
-    static constexpr std::size_t BindingCount = 13U;
+    static constexpr std::size_t BindingCount = 17U;
 
     [[nodiscard]] EditorInputCommand Resolve(
         const EditorInputFrame& frame,
@@ -128,7 +138,15 @@ private:
         {EditorInputCommand::ToolMove, EditorInputKey::M,
          false, false, false, "M"},
         {EditorInputCommand::ToolDuplicate, EditorInputKey::D,
-         false, false, false, "D"}
+         false, false, false, "D"},
+        {EditorInputCommand::ToolRotate, EditorInputKey::R,
+         false, false, false, "R"},
+        {EditorInputCommand::RotateLeft, EditorInputKey::Q,
+         false, false, false, "Q"},
+        {EditorInputCommand::RotateRight, EditorInputKey::Q,
+         false, true, false, "Shift+Q"},
+        {EditorInputCommand::RotateApply, EditorInputKey::Enter,
+         false, false, false, "Enter"}
     }};
 };
 

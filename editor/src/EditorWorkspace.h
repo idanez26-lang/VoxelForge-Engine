@@ -28,6 +28,7 @@
 #include "Transform/TransformPreviewModel.h"
 #include "Transform/MoveVoxelSelectionOperation.h"
 #include "Transform/DuplicateVoxelSelectionOperation.h"
+#include "Transform/RotateVoxelSelectionOperation.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -175,6 +176,8 @@ public:
     [[nodiscard]] bool VoxelMoveSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelDuplicateSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelDuplicateSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelRotateSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelRotateSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -191,6 +194,7 @@ private:
     [[nodiscard]] EditorCommandAvailability CurrentCommandAvailability() const;
     [[nodiscard]] bool CanMoveSelection() const noexcept;
     [[nodiscard]] bool CanDuplicateSelection() const noexcept;
+    [[nodiscard]] bool CanRotateSelection() const noexcept;
     void ApplyVoxelHistorySelection(const VoxelEditHistoryResult& result);
     void UndoCommand();
     void RedoCommand();
@@ -276,6 +280,10 @@ private:
     [[nodiscard]] bool ApplyVoxelSphere();
     [[nodiscard]] bool ApplyVoxelMove();
     [[nodiscard]] bool ApplyVoxelDuplicate();
+    [[nodiscard]] bool BeginVoxelRotatePreview(
+        VoxelRotationDirection direction);
+    [[nodiscard]] bool ApplyVoxelRotate();
+    void CancelVoxelRotate() noexcept;
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
         CurrentTwoPointToolTarget() const noexcept;
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
@@ -341,6 +349,9 @@ private:
     std::optional<VoxelSphereResult> lastVoxelSphereResult_;
     std::string voxelMoveStatusMessage_;
     std::string voxelDuplicateStatusMessage_;
+    VoxelRotationDirection voxelRotateDirection_ =
+        VoxelRotationDirection::Clockwise;
+    std::string voxelRotateStatusMessage_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -559,6 +570,14 @@ private:
     bool voxelDuplicateSmokeSaved_ = false;
     bool voxelDuplicateSmokeReopened_ = false;
     bool voxelDuplicateSmokeCleaned_ = false;
+    std::filesystem::path voxelRotateSmokePath_;
+    bool voxelRotateSmokePrepared_ = false;
+    bool voxelRotateSmokeApplied_ = false;
+    bool voxelRotateSmokeUndoRedo_ = false;
+    bool voxelRotateSmokeCycled_ = false;
+    bool voxelRotateSmokeSaved_ = false;
+    bool voxelRotateSmokeReopened_ = false;
+    bool voxelRotateSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

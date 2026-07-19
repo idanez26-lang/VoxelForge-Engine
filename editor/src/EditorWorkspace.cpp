@@ -878,6 +878,30 @@ void EditorWorkspace::DrawMainMenuBar()
                 voxelToolState_.IsDuplicateActive(),
                 CanDuplicateSelection()))
             ExecuteInputCommand(EditorInputCommand::ToolDuplicate);
+        if (ImGui::MenuItem(
+                "Rotate", shortcut(EditorInputCommand::ToolRotate),
+                voxelToolState_.IsRotateActive(), CanRotateSelection()))
+            ExecuteInputCommand(EditorInputCommand::ToolRotate);
+        if (voxelToolState_.IsRotateActive())
+        {
+            ImGui::Separator();
+            if (ImGui::MenuItem(
+                    "Rotate Left 90", shortcut(EditorInputCommand::RotateLeft),
+                    false, transformPreviewModel_.IsActive()))
+                ExecuteInputCommand(EditorInputCommand::RotateLeft);
+            if (ImGui::MenuItem(
+                    "Rotate Right 90", shortcut(EditorInputCommand::RotateRight),
+                    false, transformPreviewModel_.IsActive()))
+                ExecuteInputCommand(EditorInputCommand::RotateRight);
+            if (ImGui::MenuItem(
+                    "Apply Rotation", shortcut(EditorInputCommand::RotateApply),
+                    false, transformPreviewModel_.IsActive() &&
+                        !transformPreviewModel_.HasCollisions() &&
+                        !transformPreviewModel_.HasOutOfBounds()))
+                ExecuteInputCommand(EditorInputCommand::RotateApply);
+            if (ImGui::MenuItem("Cancel Rotation", "Esc"))
+                ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        }
         ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
@@ -950,6 +974,12 @@ void EditorWorkspace::HandleCommandShortcuts()
     inputFrame.SetPressed(
         EditorInputKey::D, ImGui::IsKeyPressed(ImGuiKey_D, false));
     inputFrame.SetPressed(
+        EditorInputKey::Q, ImGui::IsKeyPressed(ImGuiKey_Q, false));
+    inputFrame.SetPressed(
+        EditorInputKey::R, ImGui::IsKeyPressed(ImGuiKey_R, false));
+    inputFrame.SetPressed(
+        EditorInputKey::Enter, ImGui::IsKeyPressed(ImGuiKey_Enter, false));
+    inputFrame.SetPressed(
         EditorInputKey::Z, ImGui::IsKeyPressed(ImGuiKey_Z, false));
     inputFrame.SetPressed(
         EditorInputKey::Y, ImGui::IsKeyPressed(ImGuiKey_Y, false));
@@ -1019,7 +1049,12 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
             selectionService_.EditableBounds().Valid ||
             voxelSelection_.Selected().has_value(),
         CanMoveSelection(),
-        CanDuplicateSelection()};
+        CanDuplicateSelection(),
+        CanRotateSelection(),
+        voxelToolState_.IsRotateActive() && CanRotateSelection(),
+        voxelToolState_.IsRotateActive() && transformPreviewModel_.IsActive() &&
+            !transformPreviewModel_.HasCollisions() &&
+            !transformPreviewModel_.HasOutOfBounds()};
 }
 
 bool EditorWorkspace::CanMoveSelection() const noexcept
@@ -1033,6 +1068,11 @@ bool EditorWorkspace::CanMoveSelection() const noexcept
 }
 
 bool EditorWorkspace::CanDuplicateSelection() const noexcept
+{
+    return CanMoveSelection() && !selectionInteraction_.IsActive();
+}
+
+bool EditorWorkspace::CanRotateSelection() const noexcept
 {
     return CanMoveSelection() && !selectionInteraction_.IsActive();
 }
@@ -1059,6 +1099,16 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         SelectVoxelTool(ActiveVoxelTool::Move); break;
     case EditorInputCommand::ToolDuplicate:
         SelectVoxelTool(ActiveVoxelTool::Duplicate); break;
+    case EditorInputCommand::ToolRotate:
+        SelectVoxelTool(ActiveVoxelTool::Rotate); break;
+    case EditorInputCommand::RotateLeft:
+        static_cast<void>(BeginVoxelRotatePreview(
+            VoxelRotationDirection::CounterClockwise)); break;
+    case EditorInputCommand::RotateRight:
+        static_cast<void>(BeginVoxelRotatePreview(
+            VoxelRotationDirection::Clockwise)); break;
+    case EditorInputCommand::RotateApply:
+        static_cast<void>(ApplyVoxelRotate()); break;
     case EditorInputCommand::FileSave:
         if (voxelDocumentSession_.HasActiveDocument())
             static_cast<void>(SaveVoxelModel());
@@ -1078,6 +1128,7 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
 {
     if (tool == ActiveVoxelTool::Move && !CanMoveSelection()) return;
     if (tool == ActiveVoxelTool::Duplicate && !CanDuplicateSelection()) return;
+    if (tool == ActiveVoxelTool::Rotate && !CanRotateSelection()) return;
     if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
     if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
@@ -1096,16 +1147,19 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
             CancelSelectionInteraction();
     }
     if (tool != ActiveVoxelTool::Selection && tool != ActiveVoxelTool::Move &&
-        tool != ActiveVoxelTool::Duplicate)
+        tool != ActiveVoxelTool::Duplicate && tool != ActiveVoxelTool::Rotate)
         selectionBoxInteriorHovered_ = false;
     if (tool == ActiveVoxelTool::Selection)
         static_cast<void>(voxelSelection_.ClearSelection());
-    if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Duplicate)
+    if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Duplicate &&
+        tool != ActiveVoxelTool::Rotate)
     {
         static_cast<void>(transformPreviewModel_.CancelPreview());
         voxelMoveStatusMessage_.clear();
         voxelDuplicateStatusMessage_.clear();
+        voxelRotateStatusMessage_.clear();
     }
+    if (tool != ActiveVoxelTool::Rotate) CancelVoxelRotate();
     voxelToolState_.SetActiveTool(tool);
     voxelToolInput_.Reset();
     UpdateVoxelHighlights();
@@ -1116,6 +1170,13 @@ void EditorWorkspace::CancelActiveInteraction()
     if (voxelBoxInteraction_.IsActive()) CancelVoxelBox();
     if (voxelLineInteraction_.IsActive()) CancelVoxelLine();
     if (voxelSphereInteraction_.IsActive()) CancelVoxelSphere();
+    if (voxelToolState_.IsRotateActive())
+    {
+        CancelVoxelRotate();
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Selection);
+        UpdateVoxelHighlights();
+        return;
+    }
     if (selectionInteraction_.IsActive())
     {
         CancelSelectionInteraction();
@@ -1131,6 +1192,9 @@ void EditorWorkspace::UndoCommand()
     if (voxelDocumentSession_.HasActiveDocument())
     {
         if (voxelEditInProgress_ || voxelEditHistory_.IsBusy()) return;
+        const bool resumeRotatePreview = voxelToolState_.IsRotateActive() &&
+            transformPreviewModel_.IsActive();
+        if (resumeRotatePreview) CancelVoxelRotate();
         voxelEditInProgress_ = true;
         const VoxelEditHistoryResult result = voxelEditHistory_.Undo(*this);
         voxelEditInProgress_ = false;
@@ -1139,6 +1203,9 @@ void EditorWorkspace::UndoCommand()
             ApplyVoxelHistorySelection(result);
             AddConsoleMessage("[Edit] Undo: " + result.Label);
             firstCreationExperience_.OnUndo();
+            if (resumeRotatePreview)
+                static_cast<void>(BeginVoxelRotatePreview(
+                    voxelRotateDirection_));
         }
         else if (result.Code != VoxelEditHistoryResultCode::NothingToUndo)
             AddConsoleMessage("[Edit] Undo failed: " + result.Message);
@@ -1156,6 +1223,9 @@ void EditorWorkspace::RedoCommand()
     if (voxelDocumentSession_.HasActiveDocument())
     {
         if (voxelEditInProgress_ || voxelEditHistory_.IsBusy()) return;
+        const bool resumeRotatePreview = voxelToolState_.IsRotateActive() &&
+            transformPreviewModel_.IsActive();
+        if (resumeRotatePreview) CancelVoxelRotate();
         voxelEditInProgress_ = true;
         const VoxelEditHistoryResult result = voxelEditHistory_.Redo(*this);
         voxelEditInProgress_ = false;
@@ -1164,6 +1234,9 @@ void EditorWorkspace::RedoCommand()
             ApplyVoxelHistorySelection(result);
             AddConsoleMessage("[Edit] Redo: " + result.Label);
             firstCreationExperience_.OnRedo();
+            if (resumeRotatePreview)
+                static_cast<void>(BeginVoxelRotatePreview(
+                    voxelRotateDirection_));
         }
         else if (result.Code != VoxelEditHistoryResultCode::NothingToRedo)
             AddConsoleMessage("[Edit] Redo failed: " + result.Message);
@@ -1438,13 +1511,37 @@ void EditorWorkspace::DrawScenePanel()
         activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
     EditorToolbar::Draw(
         {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
-         CanMoveSelection(), CanDuplicateSelection()},
+         CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection()},
         editorInputService_,
         {[this](const EditorInputCommand command)
          {
              ExecuteInputCommand(command);
          }});
     ImGui::SameLine();
+    if (voxelToolState_.IsRotateActive())
+    {
+        if (ImGui::Button("Left 90"))
+            ExecuteInputCommand(EditorInputCommand::RotateLeft);
+        DrawTooltip("Rotate the preview left by 90 degrees (Q)");
+        ImGui::SameLine();
+        if (ImGui::Button("Right 90"))
+            ExecuteInputCommand(EditorInputCommand::RotateRight);
+        DrawTooltip("Rotate the preview right by 90 degrees (Shift+Q)");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(
+            !transformPreviewModel_.IsActive() ||
+            transformPreviewModel_.HasCollisions() ||
+            transformPreviewModel_.HasOutOfBounds());
+        if (ImGui::Button("Apply"))
+            ExecuteInputCommand(EditorInputCommand::RotateApply);
+        ImGui::EndDisabled();
+        DrawTooltip("Apply the current 90-degree rotation (Enter)");
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+            ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        DrawTooltip("Cancel Rotate without changing the document (Esc)");
+        ImGui::SameLine();
+    }
     ImGui::BeginDisabled(
         !voxelEditHistory_.CanUndo() || voxelEditInProgress_);
     if (ImGui::Button("Undo"))
@@ -1534,11 +1631,16 @@ void EditorWorkspace::DrawScenePanel()
         std::optional<SelectionHandle> hoveredSelectionHandle;
         if ((voxelToolState_.IsSelectionActive() ||
              voxelToolState_.IsMoveActive() ||
-             voxelToolState_.IsDuplicateActive()) &&
+             voxelToolState_.IsDuplicateActive() ||
+             voxelToolState_.IsRotateActive()) &&
             selectionService_.EditableBounds().Valid &&
             selectionInteraction_.Mode() != SelectionInteractionMode::Creating)
         {
             const SelectionBounds& handleBounds =
+                voxelToolState_.IsRotateActive() &&
+                    transformPreviewModel_.IsActive()
+                ? transformPreviewModel_.PreviewBounds()
+                :
                 selectionInteraction_.Mode() ==
                     SelectionInteractionMode::ResizingFace ||
                 selectionInteraction_.Mode() ==
@@ -1773,10 +1875,25 @@ void EditorWorkspace::DrawScenePanel()
                     : "Select voxels before using Duplicate";
             }
         }
+        else if (voxelToolState_.IsRotateActive())
+        {
+            viewportHelp = !voxelRotateStatusMessage_.empty()
+                ? voxelRotateStatusMessage_.c_str()
+                : !transformPreviewModel_.IsActive()
+                ? "Rotate ready — Q left — Shift+Q right — Esc to exit"
+                : transformPreviewModel_.HasCollisions()
+                ? "Rotate blocked: destination is occupied"
+                : transformPreviewModel_.HasOutOfBounds()
+                ? "Rotate blocked: destination is outside the model"
+                : voxelRotateDirection_ == VoxelRotationDirection::Clockwise
+                ? "Rotate Y: +90° — Enter to apply — Esc to cancel"
+                : "Rotate Y: -90° — Enter to apply — Esc to cancel";
+        }
         DrawTooltip(viewportHelp);
         if (voxelToolState_.IsSelectionActive() ||
             voxelToolState_.IsMoveActive() ||
-            voxelToolState_.IsDuplicateActive())
+            voxelToolState_.IsDuplicateActive() ||
+            voxelToolState_.IsRotateActive())
         {
             const ImVec2 textSize = ImGui::CalcTextSize(viewportHelp);
             const ImVec2 helpMinimum{imageOrigin.x + 10.0F, imageOrigin.y + 10.0F};
@@ -7974,6 +8091,195 @@ bool EditorWorkspace::VoxelDuplicateSmokePassed() const noexcept
         voxelDuplicateSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunVoxelRotateSmokeStep(const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const std::vector<Asset::Voxel::VoxelPosition> source{
+        {2, 1, 2}, {2, 1, 3}, {2, 1, 4}, {3, 1, 2}};
+    const SelectionBounds sourceBounds =
+        SelectionBounds::FromCorners({2, 1, 2}, {3, 1, 4});
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"RotateSmoke", {16U, 16U, 16U}});
+        voxelRotateSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+
+        const std::vector<VoxelChange> seed{
+            {0U, source[0], false, 0U, true, 3U},
+            {0U, source[1], false, 0U, true, 5U},
+            {0U, source[2], false, 0U, true, 7U},
+            {0U, source[3], false, 0U, true, 11U}};
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Rotate Smoke", seed});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace);
+        EditorInputFrame shortcut;
+        shortcut.SetPressed(EditorInputKey::R);
+        const bool inputReady = editorInputService_.Resolve(
+            shortcut, CurrentCommandAvailability()) ==
+            EditorInputCommand::ToolRotate;
+        const auto rotateButton = std::find_if(
+            EditorToolbarModel::Buttons().begin(),
+            EditorToolbarModel::Buttons().end(),
+            [](const EditorToolbarButton& button)
+            {
+                return button.Action == EditorToolbarAction::Rotate;
+            });
+        const bool toolbarReady =
+            rotateButton != EditorToolbarModel::Buttons().end() &&
+            EditorToolbarModel::IsEnabled(*rotateButton,
+                {true, document->IsDirty(), voxelToolState_.ActiveTool(),
+                 CanMoveSelection(), CanDuplicateSelection(),
+                 CanRotateSelection()});
+        const std::uint64_t revision = document->GetRevision();
+        ExecuteInputCommand(EditorInputCommand::ToolRotate);
+        EditorInputFrame leftShortcut;
+        leftShortcut.SetPressed(EditorInputKey::Q);
+        EditorInputFrame rightShortcut;
+        rightShortcut.Shift = true;
+        rightShortcut.SetPressed(EditorInputKey::Q);
+        EditorInputFrame applyShortcut;
+        applyShortcut.SetPressed(EditorInputKey::Enter);
+        const EditorCommandAvailability rotateAvailability =
+            CurrentCommandAvailability();
+        voxelRotateSmokePrepared_ = seeded && selected && inputReady &&
+            toolbarReady && voxelToolState_.IsRotateActive() &&
+            !transformPreviewModel_.IsActive() &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            editorInputService_.Resolve(leftShortcut, rotateAvailability) ==
+                EditorInputCommand::RotateLeft &&
+            editorInputService_.Resolve(rightShortcut, rotateAvailability) ==
+                EditorInputCommand::RotateRight &&
+            editorInputService_.Resolve(applyShortcut, rotateAvailability) ==
+                EditorInputCommand::None &&
+            document->GetRevision() == revision &&
+            voxelEditHistory_.UndoCount() == 1U;
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelRotateSmokePrepared_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        ExecuteInputCommand(EditorInputCommand::RotateLeft);
+        std::vector<Asset::Voxel::VoxelPosition> leftDestinations;
+        leftDestinations.reserve(transformPreviewModel_.VoxelCount());
+        for (const TransformPreviewVoxel& voxel :
+            transformPreviewModel_.Voxels())
+            leftDestinations.push_back(voxel.PreviewPosition);
+        const bool leftReady = voxelRotateDirection_ ==
+            VoxelRotationDirection::CounterClockwise &&
+            transformPreviewModel_.IsActive() &&
+            !transformPreviewModel_.HasCollisions();
+        ExecuteInputCommand(EditorInputCommand::RotateRight);
+        std::vector<Asset::Voxel::VoxelPosition> rightDestinations;
+        rightDestinations.reserve(transformPreviewModel_.VoxelCount());
+        for (const TransformPreviewVoxel& voxel :
+            transformPreviewModel_.Voxels())
+            rightDestinations.push_back(voxel.PreviewPosition);
+        const bool rightReady = voxelRotateDirection_ ==
+            VoxelRotationDirection::Clockwise &&
+            transformPreviewModel_.IsActive() &&
+            leftDestinations != rightDestinations;
+        voxelRotateSmokeApplied_ = leftReady && rightReady &&
+            ApplyVoxelRotate() &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 4U &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({2, 1, 2}, {4, 1, 3}) &&
+            voxelToolState_.IsRotateActive() &&
+            !transformPreviewModel_.IsActive();
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelRotateSmokeApplied_) return false;
+        UndoCommand();
+        const bool undone = selectionService_.EditableBounds() == sourceBounds &&
+            document->GetVoxel(source[0])->PaletteIndex == 3U &&
+            document->GetVoxel(source[3])->PaletteIndex == 11U;
+        RedoCommand();
+        voxelRotateSmokeUndoRedo_ = undone &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({2, 1, 2}, {4, 1, 3}) &&
+            !transformPreviewModel_.IsActive();
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !voxelRotateSmokeUndoRedo_) return false;
+        bool turns = true;
+        for (int turn = 0; turn < 3; ++turn)
+            turns = turns && BeginVoxelRotatePreview(
+                VoxelRotationDirection::Clockwise) && ApplyVoxelRotate();
+        voxelRotateSmokeCycled_ = turns && document->GetVoxelCount() == 4U &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            document->GetVoxel(source[0])->PaletteIndex == 3U &&
+            document->GetVoxel(source[1])->PaletteIndex == 5U &&
+            document->GetVoxel(source[2])->PaletteIndex == 7U &&
+            document->GetVoxel(source[3])->PaletteIndex == 11U;
+    }
+    else if (frame == 4U)
+    {
+        voxelRotateSmokeSaved_ = voxelRotateSmokeCycled_ && SaveVoxelModel() &&
+            document && !document->IsDirty() &&
+            std::filesystem::is_regular_file(voxelRotateSmokePath_);
+        if (!voxelRotateSmokeSaved_) return false;
+        ClearVoxelViewport();
+        voxelRotateSmokeReopened_ =
+            OpenVoxInViewportNow(voxelRotateSmokePath_);
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelRotateSmokeReopened_ = voxelRotateSmokeReopened_ && document &&
+            document->GetVoxelCount() == 4U &&
+            document->GetVoxel(source[0])->PaletteIndex == 3U &&
+            document->GetVoxel(source[3])->PaletteIndex == 11U;
+    }
+    else if (frame == 5U)
+    {
+        if (!document || !voxelRotateSmokeReopened_) return false;
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace));
+        const std::uint64_t revision = document->GetRevision();
+        SelectVoxelTool(ActiveVoxelTool::Rotate);
+        const bool activationStable = !transformPreviewModel_.IsActive() &&
+            selectionService_.EditableBounds() == sourceBounds;
+        const bool previewReady = BeginVoxelRotatePreview(
+            VoxelRotationDirection::CounterClockwise) &&
+            transformPreviewModel_.IsActive();
+        ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        const bool cancelled = activationStable && previewReady &&
+            voxelToolState_.IsSelectionActive() &&
+            !transformPreviewModel_.IsActive() &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            document->GetRevision() == revision;
+        CloseProject();
+        voxelRotateSmokeCleaned_ = cancelled &&
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !transformPreviewModel_.IsActive() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelRotateSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelRotateSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelRotateSmokePassed();
+}
+
+bool EditorWorkspace::VoxelRotateSmokePassed() const noexcept
+{
+    return voxelRotateSmokePrepared_ && voxelRotateSmokeApplied_ &&
+        voxelRotateSmokeUndoRedo_ && voxelRotateSmokeCycled_ &&
+        voxelRotateSmokeSaved_ && voxelRotateSmokeReopened_ &&
+        voxelRotateSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
 {
     const auto toolbarState = [this]()
@@ -7985,7 +8291,7 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
             document != nullptr && document->IsDirty() &&
                 !voxelDocumentSaveService_.IsBusy(),
             voxelToolState_.ActiveTool(), CanMoveSelection(),
-            CanDuplicateSelection()};
+            CanDuplicateSelection(), CanRotateSelection()};
     };
     const auto activeToolCount = [](const EditorToolbarState state)
     {
@@ -8026,7 +8332,8 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
                 [state = toolbarState()](const EditorToolbarButton& button)
                 {
                     return button.Action == EditorToolbarAction::Move ||
-                        button.Action == EditorToolbarAction::Duplicate
+                        button.Action == EditorToolbarAction::Duplicate ||
+                        button.Action == EditorToolbarAction::Rotate
                         ? !EditorToolbarModel::IsEnabled(button, state)
                         : EditorToolbarModel::IsEnabled(button, state);
                 });
@@ -9041,6 +9348,105 @@ bool EditorWorkspace::ApplyVoxelDuplicate()
     return true;
 }
 
+bool EditorWorkspace::BeginVoxelRotatePreview(
+    const VoxelRotationDirection direction)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || !CanRotateSelection())
+    {
+        voxelRotateStatusMessage_ = "Select voxels before using Rotate";
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    const std::uint64_t generation = voxelDocumentSession_.Generation();
+    if (voxelToolState_.IsRotateActive() &&
+        voxelRotateDirection_ == direction &&
+        transformPreviewModel_.IsValidFor(
+            *document, selectionService_, generation) &&
+        transformPreviewModel_.HasExplicitDestinations())
+        return true;
+    if (!transformPreviewModel_.BeginPreview(
+            *document, selectionService_, generation, 0U,
+            TransformPreviewCollisionPolicy::IgnoreSource))
+    {
+        voxelRotateStatusMessage_ = "Rotate preview could not capture selection";
+        UpdateVoxelHighlights();
+        return false;
+    }
+    const VoxelRotationGeometry geometry =
+        RotateVoxelSelectionOperation::BuildGeometry(
+            selectionService_.Voxels(), selectionService_.EditableBounds(),
+            direction);
+    if (!geometry.Valid() ||
+        !transformPreviewModel_.SetExplicitDestinations(
+            *document, selectionService_, generation, geometry.Destinations))
+    {
+        voxelRotateStatusMessage_ = geometry.Message.empty()
+            ? "Rotate preview could not be built" : geometry.Message;
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+    voxelRotateDirection_ = direction;
+    voxelRotateStatusMessage_.clear();
+    voxelMoveStatusMessage_.clear();
+    voxelDuplicateStatusMessage_.clear();
+    UpdateVoxelHighlights();
+    return true;
+}
+
+bool EditorWorkspace::ApplyVoxelRotate()
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || voxelEditInProgress_ || voxelEditHistory_.IsBusy())
+    {
+        CancelVoxelRotate();
+        return false;
+    }
+
+    RotateVoxelSelectionResult prepared =
+        RotateVoxelSelectionOperation::Build(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            transformPreviewModel_, voxelRotateDirection_);
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    if (!prepared.Ready())
+    {
+        voxelRotateStatusMessage_ = prepared.Message;
+        if (!prepared.Message.empty())
+            AddConsoleMessage("[Edit] " + prepared.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    voxelEditInProgress_ = true;
+    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
+        *this, std::move(prepared.Operation));
+    voxelEditInProgress_ = false;
+    if (!result)
+    {
+        voxelRotateStatusMessage_ = result.Message;
+        AddConsoleMessage("[Edit] Rotate failed: " + result.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+    ApplyVoxelHistorySelection(result);
+    voxelRotateStatusMessage_.clear();
+    AddConsoleMessage("[Edit] Rotated " +
+        std::to_string(selectionService_.Count()) + " voxel(s).");
+    UpdateVoxelHighlights();
+    return true;
+}
+
+void EditorWorkspace::CancelVoxelRotate() noexcept
+{
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    voxelRotateStatusMessage_.clear();
+}
+
 void EditorWorkspace::CancelSelectionInteraction()
 {
     if (!selectionInteraction_.IsActive()) return;
@@ -9422,7 +9828,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<SelectionBounds> editableSelectionBounds;
     const bool selectionVisualActive =
         voxelToolState_.IsSelectionActive() || voxelToolState_.IsMoveActive() ||
-        voxelToolState_.IsDuplicateActive();
+        voxelToolState_.IsDuplicateActive() || voxelToolState_.IsRotateActive();
     if (selectionVisualActive)
     {
         const auto selected = selectionService_.Voxels();
@@ -9435,6 +9841,10 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         if (bounds.Valid)
             selectionBounds = VoxelBoxBounds{bounds.Minimum, bounds.Maximum};
         const SelectionBounds& editable =
+            voxelToolState_.IsRotateActive() &&
+                transformPreviewModel_.IsActive()
+            ? transformPreviewModel_.PreviewBounds()
+            :
             selectionInteraction_.IsActive() &&
             selectionInteraction_.IsDragRecognized()
             ? selectionInteraction_.CurrentBounds()
@@ -9594,6 +10004,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     transformPreviewModel_.Reset();
     voxelMoveStatusMessage_.clear();
     voxelDuplicateStatusMessage_.clear();
+    voxelRotateStatusMessage_.clear();
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();

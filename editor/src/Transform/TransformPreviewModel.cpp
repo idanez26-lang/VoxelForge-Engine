@@ -102,6 +102,7 @@ bool TransformPreviewModel::BeginPreview(
     // rejects the whole preview instead of silently moving only a subset.
     voxels_.reserve(selected.size());
     sourcePositions_.reserve(selected.size());
+    explicitDestinations_.reserve(selected.size());
     collisionPositions_.reserve(selected.size());
     outOfBoundsPositions_.reserve(selected.size());
     for (const auto position : selected)
@@ -142,7 +143,26 @@ bool TransformPreviewModel::SetDelta(
     if (!IsValidFor(document, selection, documentGeneration) ||
         delta == delta_)
         return false;
+    explicitDestinations_.clear();
     delta_ = delta;
+    return Rebuild(document);
+}
+
+bool TransformPreviewModel::SetExplicitDestinations(
+    const Asset::Voxel::VoxelDocument& document,
+    const SelectionService& selection,
+    const std::uint64_t documentGeneration,
+    const std::span<const Asset::Voxel::VoxelPosition> destinations)
+{
+    if (!IsValidFor(document, selection, documentGeneration) ||
+        destinations.size() != voxels_.size() || destinations.empty())
+        return false;
+    if (explicitDestinations_.size() == destinations.size() &&
+        std::equal(explicitDestinations_.begin(),
+            explicitDestinations_.end(), destinations.begin()))
+        return false;
+    explicitDestinations_.assign(destinations.begin(), destinations.end());
+    delta_ = {};
     return Rebuild(document);
 }
 
@@ -194,8 +214,10 @@ bool TransformPreviewModel::Rebuild(
     for (std::size_t index = 0U; index < voxels_.size(); ++index)
     {
         bool representable = true;
-        const Asset::Voxel::VoxelPosition destination = AddSafely(
-            sourcePositions_[index], delta_, representable);
+        const Asset::Voxel::VoxelPosition destination =
+            explicitDestinations_.empty()
+            ? AddSafely(sourcePositions_[index], delta_, representable)
+            : explicitDestinations_[index];
         TransformPreviewVoxel& voxel = voxels_[index];
         voxel.PreviewPosition = destination;
         if (!representable || !InBounds(destination, dimensions_))
@@ -254,6 +276,7 @@ void TransformPreviewModel::ClearState() noexcept
         !outOfBoundsPositions_.empty();
     voxels_.clear();
     sourcePositions_.clear();
+    explicitDestinations_.clear();
     collisionPositions_.clear();
     outOfBoundsPositions_.clear();
     sourceBounds_ = {};
@@ -307,6 +330,10 @@ std::size_t TransformPreviewModel::ModelIndex() const noexcept
 Asset::Voxel::VoxelPosition TransformPreviewModel::Delta() const noexcept
 {
     return delta_;
+}
+bool TransformPreviewModel::HasExplicitDestinations() const noexcept
+{
+    return !explicitDestinations_.empty();
 }
 const SelectionBounds& TransformPreviewModel::SourceBounds() const noexcept
 {
@@ -362,6 +389,7 @@ TransformPreviewBufferMetrics TransformPreviewModel::Metrics() const noexcept
 {
     return {
         voxels_.capacity(), sourcePositions_.capacity(),
+        explicitDestinations_.capacity(),
         collisionPositions_.capacity(), outOfBoundsPositions_.capacity(),
         rebuildCount_};
 }

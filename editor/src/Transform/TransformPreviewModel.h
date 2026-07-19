@@ -64,6 +64,7 @@ struct TransformPreviewBufferMetrics final
 {
     std::size_t CapturedCapacity = 0U;
     std::size_t SourcePositionCapacity = 0U;
+    std::size_t ExplicitDestinationCapacity = 0U;
     std::size_t CollisionCapacity = 0U;
     std::size_t OutOfBoundsCapacity = 0U;
     std::uint64_t RebuildCount = 0U;
@@ -113,6 +114,11 @@ public:
         const SelectionService& selection,
         std::uint64_t documentGeneration,
         Asset::Voxel::VoxelPosition delta);
+    [[nodiscard]] bool SetExplicitDestinations(
+        const Asset::Voxel::VoxelDocument& document,
+        const SelectionService& selection,
+        std::uint64_t documentGeneration,
+        std::span<const Asset::Voxel::VoxelPosition> destinations);
     [[nodiscard]] bool IsValidFor(
         const Asset::Voxel::VoxelDocument& document,
         const SelectionService& selection,
@@ -130,6 +136,7 @@ public:
     [[nodiscard]] std::uint64_t DocumentRevision() const noexcept;
     [[nodiscard]] std::size_t ModelIndex() const noexcept;
     [[nodiscard]] Asset::Voxel::VoxelPosition Delta() const noexcept;
+    [[nodiscard]] bool HasExplicitDestinations() const noexcept;
     [[nodiscard]] const SelectionBounds& SourceBounds() const noexcept;
     [[nodiscard]] const SelectionBounds& PreviewBounds() const noexcept;
     [[nodiscard]] std::span<const TransformPreviewVoxel> Voxels() const noexcept;
@@ -150,6 +157,7 @@ private:
 
     std::vector<TransformPreviewVoxel> voxels_;
     std::vector<Asset::Voxel::VoxelPosition> sourcePositions_;
+    std::vector<Asset::Voxel::VoxelPosition> explicitDestinations_;
     std::vector<Asset::Voxel::VoxelPosition> collisionPositions_;
     std::vector<Asset::Voxel::VoxelPosition> outOfBoundsPositions_;
     std::array<Asset::Voxel::VoxelColor, 256U> palette_{};

@@ -21,7 +21,8 @@ enum class EditorToolbarAction : std::uint8_t
     Sphere,
     Selection,
     Move,
-    Duplicate
+    Duplicate,
+    Rotate
 };
 
 enum class EditorToolbarGroup : std::uint8_t
@@ -49,6 +50,7 @@ struct EditorToolbarState final
     ActiveVoxelTool ActiveTool = ActiveVoxelTool::None;
     bool CanMoveSelection = false;
     bool CanDuplicateSelection = false;
+    bool CanRotateSelection = false;
 };
 
 struct EditorToolbarLayout final
@@ -62,7 +64,7 @@ struct EditorToolbarLayout final
 class EditorToolbarModel final
 {
 public:
-    static constexpr std::size_t ButtonCount = 10U;
+    static constexpr std::size_t ButtonCount = 11U;
 
     [[nodiscard]] static const std::array<EditorToolbarButton, ButtonCount>&
         Buttons() noexcept;

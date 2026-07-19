@@ -234,6 +234,7 @@ target_sources(
         src/Commands/Voxel/VoxelEditTransaction.cpp
         src/Transform/DuplicateVoxelSelectionOperation.cpp
         src/Transform/MoveVoxelSelectionOperation.cpp
+        src/Transform/RotateVoxelSelectionOperation.cpp
         src/VoxelHistory/VoxelEditHistory.cpp
         src/VoxelHistory/VoxelEditOperation.cpp
         src/VoxelHistory/VoxelHistoryInput.cpp
