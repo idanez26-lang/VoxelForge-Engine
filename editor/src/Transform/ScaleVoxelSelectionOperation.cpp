@@ -1,9 +1,8 @@
 #include "ScaleVoxelSelectionOperation.h"
+#include "TransformOperationFramework.h"
 
 #include <algorithm>
-#include <exception>
 #include <limits>
-#include <memory>
 #include <utility>
 #include <vector>
 
@@ -12,24 +11,12 @@ namespace VoxelForge::Editor
 namespace
 {
 using Position = Asset::Voxel::VoxelPosition;
-using Voxel = Asset::Voxel::Voxel;
-
 [[nodiscard]] bool PositionLess(
     const Position left, const Position right) noexcept
 {
     if (left.X != right.X) return left.X < right.X;
     if (left.Y != right.Y) return left.Y < right.Y;
     return left.Z < right.Z;
-}
-
-[[nodiscard]] bool InBounds(
-    const Position position,
-    const Asset::Voxel::VoxelDimensions dimensions) noexcept
-{
-    return position.X >= 0 && position.Y >= 0 && position.Z >= 0 &&
-        position.X < static_cast<std::int32_t>(dimensions.X) &&
-        position.Y < static_cast<std::int32_t>(dimensions.Y) &&
-        position.Z < static_cast<std::int32_t>(dimensions.Z);
 }
 
 [[nodiscard]] bool ScaleCoordinate(
@@ -67,6 +54,45 @@ ScaleVoxelSelectionResult Refused(
     std::string message)
 {
     return {code, {}, std::move(message)};
+}
+
+ScaleVoxelSelectionResult FromCommon(
+    TransformOperationBuildResult common)
+{
+    switch (common.Code)
+    {
+    case TransformOperationBuildCode::Ready:
+        return {ScaleVoxelSelectionResultCode::Ready,
+            std::move(common.Operation), {}};
+    case TransformOperationBuildCode::NoChange:
+        return Refused(ScaleVoxelSelectionResultCode::InvalidGeometry,
+            "Scale produced no voxel changes.");
+    case TransformOperationBuildCode::InvalidDestinations:
+        return Refused(ScaleVoxelSelectionResultCode::InvalidGeometry,
+            std::move(common.Message));
+    case TransformOperationBuildCode::InvalidPreview:
+        return Refused(ScaleVoxelSelectionResultCode::InvalidPreview,
+            std::move(common.Message));
+    case TransformOperationBuildCode::ModelChanged:
+        return Refused(ScaleVoxelSelectionResultCode::ModelChanged,
+            std::move(common.Message));
+    case TransformOperationBuildCode::SelectionChanged:
+        return Refused(ScaleVoxelSelectionResultCode::SelectionChanged,
+            "Scale cancelled: model changed");
+    case TransformOperationBuildCode::Collision:
+        return Refused(ScaleVoxelSelectionResultCode::Collision,
+            std::move(common.Message));
+    case TransformOperationBuildCode::OutOfBounds:
+        return Refused(ScaleVoxelSelectionResultCode::OutOfBounds,
+            std::move(common.Message));
+    case TransformOperationBuildCode::Failed:
+        return Refused(ScaleVoxelSelectionResultCode::Failed,
+            common.Message.empty()
+                ? "Unable to prepare atomic Scale."
+                : "Unable to prepare atomic Scale: " + common.Message);
+    }
+    return Refused(ScaleVoxelSelectionResultCode::Failed,
+        "Unable to prepare atomic Scale.");
 }
 
 [[nodiscard]] std::size_t Multiplier(const VoxelScaleMode mode) noexcept
@@ -217,28 +243,17 @@ ScaleVoxelSelectionResult ScaleVoxelSelectionOperation::Build(
     if (!preview.IsActive() || !preview.HasExpandedDestinations())
         return Refused(ScaleVoxelSelectionResultCode::InvalidPreview,
             "Scale preview is inactive.");
-    if (preview.DocumentGeneration() != documentGeneration ||
-        preview.DocumentRevision() != document.GetRevision())
-        return Refused(ScaleVoxelSelectionResultCode::ModelChanged,
-            "Scale cancelled: model changed");
-    if (selection.DocumentGeneration() != documentGeneration ||
-        !preview.IsValidFor(document, selection, documentGeneration))
-        return Refused(ScaleVoxelSelectionResultCode::SelectionChanged,
-            "Scale cancelled: model changed");
-    if (preview.HasOutOfBounds())
-        return Refused(ScaleVoxelSelectionResultCode::OutOfBounds,
-            "Scale blocked: destination is outside the model");
-    if (preview.HasCollisions())
-        return Refused(ScaleVoxelSelectionResultCode::Collision,
-            "Scale blocked: destination is occupied");
-
+    TransformOperationBuildResult common = TransformOperationBuilder::Build(
+        document, selection, documentGeneration, preview,
+        {"Scale", std::string("Scale Voxels ") +
+            VoxelScaleModeName(mode) + " x2",
+         {TransformSourcePolicy::RemoveSource,
+          TransformCollisionPolicy::AllowSourceOverlap},
+         preview.PreviewBounds()});
+    if (common.Code != TransformOperationBuildCode::Ready &&
+        common.Code != TransformOperationBuildCode::NoChange)
+        return FromCommon(std::move(common));
     const TransformPreviewOperationData data = preview.OperationData();
-    const auto dimensions = document.GetDimensions(data.ModelIndex);
-    if (!dimensions || data.SourceVoxels.empty() ||
-        data.SourceVoxels.size() != data.SourcePositions.size() ||
-        data.Voxels.empty())
-        return Refused(ScaleVoxelSelectionResultCode::InvalidPreview,
-            "Scale preview data is incomplete.");
     const VoxelScaleGeometry geometry = BuildGeometry(
         data.SourceVoxels, data.SourceBounds, mode);
     if (!geometry.Valid() ||
@@ -246,121 +261,21 @@ ScaleVoxelSelectionResult ScaleVoxelSelectionOperation::Build(
         return Refused(ScaleVoxelSelectionResultCode::InvalidGeometry,
             geometry.Message.empty()
                 ? "Scale geometry is invalid." : geometry.Message);
-
-    try
+    for (std::size_t index = 0U; index < data.Voxels.size(); ++index)
     {
-        for (std::size_t index = 0U; index < data.SourceVoxels.size(); ++index)
-        {
-            const TransformPreviewVoxel& captured = data.SourceVoxels[index];
-            const auto source = document.GetVoxel(
-                captured.SourcePosition, data.ModelIndex);
-            if (!source || *source != captured.Value ||
-                captured.SourcePosition != data.SourcePositions[index])
-                return Refused(ScaleVoxelSelectionResultCode::ModelChanged,
-                    "Scale cancelled: model changed");
-        }
-
-        std::vector<std::pair<Position, Voxel>> destinations;
-        std::vector<Position> affected;
-        destinations.reserve(data.Voxels.size());
-        affected.reserve(data.SourcePositions.size() + data.Voxels.size());
-        affected.insert(affected.end(),
-            data.SourcePositions.begin(), data.SourcePositions.end());
-        for (std::size_t index = 0U; index < data.Voxels.size(); ++index)
-        {
-            const TransformPreviewVoxel& voxel = data.Voxels[index];
-            const TransformPreviewDestinationVoxel& expected =
-                geometry.Destinations[index];
-            if (voxel.SourcePosition != expected.SourcePosition ||
-                voxel.PreviewPosition != expected.DestinationPosition ||
-                voxel.Value != expected.Value)
-                return Refused(ScaleVoxelSelectionResultCode::InvalidPreview,
-                    "Scale preview does not match its geometry.");
-            if (!InBounds(voxel.PreviewPosition, *dimensions))
-                return Refused(ScaleVoxelSelectionResultCode::OutOfBounds,
-                    "Scale blocked: destination is outside the model");
-            const bool internal = std::binary_search(
-                data.SourcePositions.begin(), data.SourcePositions.end(),
-                voxel.PreviewPosition, PositionLess);
-            if (!internal && document.HasVoxel(
-                    voxel.PreviewPosition, data.ModelIndex))
-                return Refused(ScaleVoxelSelectionResultCode::Collision,
-                    "Scale blocked: destination is occupied");
-            destinations.emplace_back(voxel.PreviewPosition, voxel.Value);
-            affected.push_back(voxel.PreviewPosition);
-        }
-        std::sort(destinations.begin(), destinations.end(),
-            [](const auto& left, const auto& right)
-            {
-                return PositionLess(left.first, right.first);
-            });
-        if (std::adjacent_find(destinations.begin(), destinations.end(),
-                [](const auto& left, const auto& right)
-                {
-                    return left.first == right.first;
-                }) != destinations.end())
-            return Refused(ScaleVoxelSelectionResultCode::InvalidGeometry,
-                "Scale destinations are not unique.");
-        std::sort(affected.begin(), affected.end(), PositionLess);
-        affected.erase(std::unique(affected.begin(), affected.end()),
-            affected.end());
-
-        VoxelEditOperation operation;
-        operation.Label = std::string("Scale Voxels ") +
-            VoxelScaleModeName(mode) + " x2";
-        operation.Changes.reserve(affected.size());
-        for (const Position position : affected)
-        {
-            const auto before = document.GetVoxel(position, data.ModelIndex);
-            const auto destination = std::lower_bound(
-                destinations.begin(), destinations.end(), position,
-                [](const auto& item, const Position candidate)
-                {
-                    return PositionLess(item.first, candidate);
-                });
-            const bool hasAfter = destination != destinations.end() &&
-                destination->first == position;
-            const Voxel after = hasAfter ? destination->second : Voxel{};
-            if (before.has_value() == hasAfter &&
-                (!before || *before == after))
-                continue;
-            operation.Changes.push_back({
-                data.ModelIndex, position,
-                before.has_value(), before ? before->PaletteIndex : 0U,
-                hasAfter, hasAfter ? after.PaletteIndex : 0U});
-        }
-        if (operation.Changes.empty())
-            return Refused(ScaleVoxelSelectionResultCode::InvalidGeometry,
-                "Scale produced no voxel changes.");
-
-        std::vector<Position> destinationPositions;
-        destinationPositions.reserve(destinations.size());
-        for (const auto& destination : destinations)
-            destinationPositions.push_back(destination.first);
-        auto transition = std::make_shared<VoxelEditSelectionTransition>();
-        transition->Before = {
-            documentGeneration,
-            std::vector<Position>(data.SourcePositions.begin(),
-                data.SourcePositions.end()),
-            data.SourceBounds};
-        transition->After = {
-            documentGeneration, std::move(destinationPositions),
-            geometry.Bounds};
-        operation.SelectionTransition = std::move(transition);
-        return {ScaleVoxelSelectionResultCode::Ready,
-            std::move(operation), {}};
+        const TransformPreviewVoxel& voxel = data.Voxels[index];
+        const TransformPreviewDestinationVoxel& expected =
+            geometry.Destinations[index];
+        if (voxel.SourcePosition != expected.SourcePosition ||
+            voxel.PreviewPosition != expected.DestinationPosition ||
+            voxel.Value != expected.Value)
+            return Refused(ScaleVoxelSelectionResultCode::InvalidPreview,
+                "Scale preview does not match its geometry.");
     }
-    catch (const std::exception& exception)
-    {
-        return Refused(ScaleVoxelSelectionResultCode::Failed,
-            std::string("Unable to prepare atomic Scale: ") +
-                exception.what());
-    }
-    catch (...)
-    {
-        return Refused(ScaleVoxelSelectionResultCode::Failed,
-            "Unable to prepare atomic Scale.");
-    }
+    if (geometry.Bounds != preview.PreviewBounds())
+        return Refused(ScaleVoxelSelectionResultCode::InvalidGeometry,
+            "Scale destination bounds do not match the preview.");
+    return FromCommon(std::move(common));
 }
 
 const char* VoxelScaleModeName(const VoxelScaleMode mode) noexcept

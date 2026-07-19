@@ -1,9 +1,8 @@
 #include "RotateVoxelSelectionOperation.h"
+#include "TransformOperationFramework.h"
 
 #include <algorithm>
-#include <exception>
 #include <limits>
-#include <memory>
 #include <utility>
 #include <vector>
 
@@ -12,24 +11,12 @@ namespace VoxelForge::Editor
 namespace
 {
 using Position = Asset::Voxel::VoxelPosition;
-using Voxel = Asset::Voxel::Voxel;
-
 [[nodiscard]] bool PositionLess(
     const Position left, const Position right) noexcept
 {
     if (left.X != right.X) return left.X < right.X;
     if (left.Y != right.Y) return left.Y < right.Y;
     return left.Z < right.Z;
-}
-
-[[nodiscard]] bool InBounds(
-    const Position position,
-    const Asset::Voxel::VoxelDimensions dimensions) noexcept
-{
-    return position.X >= 0 && position.Y >= 0 && position.Z >= 0 &&
-        position.X < static_cast<std::int32_t>(dimensions.X) &&
-        position.Y < static_cast<std::int32_t>(dimensions.Y) &&
-        position.Z < static_cast<std::int32_t>(dimensions.Z);
 }
 
 [[nodiscard]] bool ToInt32(
@@ -47,6 +34,45 @@ RotateVoxelSelectionResult Refused(
     std::string message)
 {
     return {code, {}, std::move(message)};
+}
+
+RotateVoxelSelectionResult FromCommon(
+    TransformOperationBuildResult common)
+{
+    switch (common.Code)
+    {
+    case TransformOperationBuildCode::Ready:
+        return {RotateVoxelSelectionResultCode::Ready,
+            std::move(common.Operation), {}};
+    case TransformOperationBuildCode::NoChange:
+        return Refused(RotateVoxelSelectionResultCode::NoChange,
+            "Rotate does not change any voxel.");
+    case TransformOperationBuildCode::InvalidDestinations:
+        return Refused(RotateVoxelSelectionResultCode::InvalidGeometry,
+            std::move(common.Message));
+    case TransformOperationBuildCode::InvalidPreview:
+        return Refused(RotateVoxelSelectionResultCode::InvalidPreview,
+            std::move(common.Message));
+    case TransformOperationBuildCode::ModelChanged:
+        return Refused(RotateVoxelSelectionResultCode::ModelChanged,
+            std::move(common.Message));
+    case TransformOperationBuildCode::SelectionChanged:
+        return Refused(RotateVoxelSelectionResultCode::SelectionChanged,
+            std::move(common.Message));
+    case TransformOperationBuildCode::Collision:
+        return Refused(RotateVoxelSelectionResultCode::Collision,
+            std::move(common.Message));
+    case TransformOperationBuildCode::OutOfBounds:
+        return Refused(RotateVoxelSelectionResultCode::OutOfBounds,
+            std::move(common.Message));
+    case TransformOperationBuildCode::Failed:
+        return Refused(RotateVoxelSelectionResultCode::Failed,
+            common.Message.empty()
+                ? "Unable to prepare atomic Rotate."
+                : "Unable to prepare atomic Rotate: " + common.Message);
+    }
+    return Refused(RotateVoxelSelectionResultCode::Failed,
+        "Unable to prepare atomic Rotate.");
 }
 }
 
@@ -165,27 +191,16 @@ RotateVoxelSelectionResult RotateVoxelSelectionOperation::Build(
     if (!preview.IsActive() || !preview.HasExplicitDestinations())
         return Refused(RotateVoxelSelectionResultCode::InvalidPreview,
             "Rotate preview is inactive.");
-    if (preview.DocumentGeneration() != documentGeneration ||
-        preview.DocumentRevision() != document.GetRevision())
-        return Refused(RotateVoxelSelectionResultCode::ModelChanged,
-            "Rotate cancelled: model changed");
-    if (selection.DocumentGeneration() != documentGeneration ||
-        !preview.IsValidFor(document, selection, documentGeneration))
-        return Refused(RotateVoxelSelectionResultCode::SelectionChanged,
-            "Rotate cancelled: selection changed");
-    if (preview.HasOutOfBounds())
-        return Refused(RotateVoxelSelectionResultCode::OutOfBounds,
-            "Rotate blocked: destination is outside the model");
-    if (preview.HasCollisions())
-        return Refused(RotateVoxelSelectionResultCode::Collision,
-            "Rotate blocked: destination is occupied");
-
+    TransformOperationBuildResult common = TransformOperationBuilder::Build(
+        document, selection, documentGeneration, preview,
+        {"Rotate", "Rotate Voxels",
+         {TransformSourcePolicy::RemoveSource,
+          TransformCollisionPolicy::AllowSourceOverlap},
+         preview.PreviewBounds()});
+    if (common.Code != TransformOperationBuildCode::Ready &&
+        common.Code != TransformOperationBuildCode::NoChange)
+        return FromCommon(std::move(common));
     const TransformPreviewOperationData data = preview.OperationData();
-    const auto dimensions = document.GetDimensions(data.ModelIndex);
-    if (!dimensions || data.Voxels.empty() ||
-        data.SourcePositions.size() != data.Voxels.size())
-        return Refused(RotateVoxelSelectionResultCode::InvalidPreview,
-            "Rotate preview data is incomplete.");
     const VoxelRotationGeometry geometry = BuildGeometry(
         data.SourcePositions, data.SourceBounds, direction);
     if (!geometry.Valid() ||
@@ -193,109 +208,17 @@ RotateVoxelSelectionResult RotateVoxelSelectionOperation::Build(
         return Refused(RotateVoxelSelectionResultCode::InvalidGeometry,
             geometry.Message.empty()
                 ? "Rotate geometry is invalid." : geometry.Message);
-
-    try
+    for (std::size_t index = 0U; index < data.Voxels.size(); ++index)
     {
-        std::vector<std::pair<Position, Voxel>> destinations;
-        std::vector<Position> affected;
-        destinations.reserve(data.Voxels.size());
-        affected.reserve(data.Voxels.size() * 2U);
-        for (std::size_t index = 0U; index < data.Voxels.size(); ++index)
-        {
-            const TransformPreviewVoxel& voxel = data.Voxels[index];
-            const Position expected = geometry.Destinations[index];
-            if (voxel.PreviewPosition != expected)
-                return Refused(RotateVoxelSelectionResultCode::InvalidPreview,
-                    "Rotate preview does not match its geometry.");
-            const auto source = document.GetVoxel(
-                voxel.SourcePosition, data.ModelIndex);
-            if (!source || *source != voxel.Value)
-                return Refused(RotateVoxelSelectionResultCode::ModelChanged,
-                    "Rotate cancelled: model changed");
-            if (!InBounds(expected, *dimensions))
-                return Refused(RotateVoxelSelectionResultCode::OutOfBounds,
-                    "Rotate blocked: destination is outside the model");
-            const bool internal = std::binary_search(
-                data.SourcePositions.begin(), data.SourcePositions.end(),
-                expected, PositionLess);
-            if (!internal && document.HasVoxel(expected, data.ModelIndex))
-                return Refused(RotateVoxelSelectionResultCode::Collision,
-                    "Rotate blocked: destination is occupied");
-            destinations.emplace_back(expected, voxel.Value);
-            affected.push_back(voxel.SourcePosition);
-            affected.push_back(expected);
-        }
-        std::sort(destinations.begin(), destinations.end(),
-            [](const auto& left, const auto& right)
-            {
-                return PositionLess(left.first, right.first);
-            });
-        if (std::adjacent_find(destinations.begin(), destinations.end(),
-                [](const auto& left, const auto& right)
-                {
-                    return left.first == right.first;
-                }) != destinations.end())
-            return Refused(RotateVoxelSelectionResultCode::InvalidGeometry,
-                "Rotate destinations are not unique.");
-        std::sort(affected.begin(), affected.end(), PositionLess);
-        affected.erase(std::unique(affected.begin(), affected.end()),
-            affected.end());
-
-        VoxelEditOperation operation;
-        operation.Label = "Rotate Voxels";
-        operation.Changes.reserve(affected.size());
-        for (const Position position : affected)
-        {
-            const auto before = document.GetVoxel(position, data.ModelIndex);
-            const auto destination = std::lower_bound(
-                destinations.begin(), destinations.end(), position,
-                [](const auto& item, const Position candidate)
-                {
-                    return PositionLess(item.first, candidate);
-                });
-            const bool hasAfter = destination != destinations.end() &&
-                destination->first == position;
-            const Voxel after = hasAfter ? destination->second : Voxel{};
-            if (before.has_value() == hasAfter &&
-                (!before || *before == after))
-                continue;
-            operation.Changes.push_back({
-                data.ModelIndex, position,
-                before.has_value(), before ? before->PaletteIndex : 0U,
-                hasAfter, hasAfter ? after.PaletteIndex : 0U});
-        }
-        if (operation.Changes.empty())
-            return Refused(RotateVoxelSelectionResultCode::NoChange,
-                "Rotate does not change any voxel.");
-
-        std::vector<Position> destinationPositions;
-        destinationPositions.reserve(destinations.size());
-        for (const auto& destination : destinations)
-            destinationPositions.push_back(destination.first);
-        auto transition = std::make_shared<VoxelEditSelectionTransition>();
-        transition->Before = {
-            documentGeneration,
-            std::vector<Position>(data.SourcePositions.begin(),
-                data.SourcePositions.end()),
-            data.SourceBounds};
-        transition->After = {
-            documentGeneration, std::move(destinationPositions),
-            geometry.Bounds};
-        operation.SelectionTransition = std::move(transition);
-        return {RotateVoxelSelectionResultCode::Ready,
-            std::move(operation), {}};
+        if (data.Voxels[index].PreviewPosition !=
+            geometry.Destinations[index])
+            return Refused(RotateVoxelSelectionResultCode::InvalidPreview,
+                "Rotate preview does not match its geometry.");
     }
-    catch (const std::exception& exception)
-    {
-        return Refused(RotateVoxelSelectionResultCode::Failed,
-            std::string("Unable to prepare atomic Rotate: ") +
-                exception.what());
-    }
-    catch (...)
-    {
-        return Refused(RotateVoxelSelectionResultCode::Failed,
-            "Unable to prepare atomic Rotate.");
-    }
+    if (geometry.Bounds != preview.PreviewBounds())
+        return Refused(RotateVoxelSelectionResultCode::InvalidGeometry,
+            "Rotate destination bounds do not match the preview.");
+    return FromCommon(std::move(common));
 }
 
 const char* VoxelRotationDirectionName(

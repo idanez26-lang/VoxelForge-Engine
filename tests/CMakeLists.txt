@@ -408,6 +408,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorTransformPreviewTests>
 )
 add_executable(
+    VoxelForgeEditorTransformOperationFrameworkTests
+    Editor/TransformOperationFrameworkTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorTransformOperationFrameworkTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorTransformOperationFrameworkTests)
+add_test(
+    NAME VoxelForge.Editor.TransformOperationFramework
+    COMMAND $<TARGET_FILE:VoxelForgeEditorTransformOperationFrameworkTests>
+)
+add_executable(
     VoxelForgeEditorDialogTests
     Editor/EditorDialogTests.cpp
 )
