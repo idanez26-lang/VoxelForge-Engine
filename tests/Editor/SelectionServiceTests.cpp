@@ -712,6 +712,36 @@ void TestMovingBoxSelectionRecalculationAndCache()
             existing == voxelSnapshot,
         "Unchanged movement must hit the cache and must never move document voxels.");
 }
+
+void TestMovingContentInteractionDoesNotClampOrMutateSelection()
+{
+    const SelectionBounds original = SelectionBounds::FromCorners(
+        {1, 2, 3}, {4, 5, 6});
+    const auto plane = VoxelForge::Editor::MakeSelectionMovePlane(
+        {0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F});
+    SelectionInteraction interaction;
+    Require(interaction.BeginMovingContent(
+            original, 91U, plane, {0.0F, 0.0F, 0.0F}) &&
+            interaction.Mode() == SelectionInteractionMode::MovingContent,
+        "Move Tool MouseDown did not enter MovingContent.");
+    Require(interaction.MoveContent({-3.2F, 7.7F, 2.1F}) &&
+            interaction.MoveDelta() == VoxelPosition{-3, 8, 2} &&
+            interaction.CurrentBounds() ==
+                SelectionBounds::FromCorners({-2, 10, 5}, {1, 13, 8}) &&
+            interaction.CurrentBounds().Dimensions() == original.Dimensions(),
+        "Move Tool must expose the faithful unclamped integer destination.");
+    Require(!interaction.MoveContent({-3.2F, 7.7F, 2.1F}),
+        "An unchanged Move Tool delta rebuilt its interaction state.");
+    const auto restored = interaction.Cancel();
+    Require(restored && *restored == original && !interaction.IsActive(),
+        "Esc did not restore the source box after MovingContent.");
+
+    Require(interaction.BeginMovingContent(
+            original, 91U, plane, {0.0F, 0.0F, 0.0F}) &&
+            !interaction.ValidateDocumentGeneration(92U) &&
+            !interaction.IsActive(),
+        "Changing document did not purge MovingContent.");
+}
 }
 
 int main()
@@ -738,6 +768,7 @@ int main()
         TestSelectionBoundsTranslationAndClamping();
         TestMovingBoxInteractionLifecycle();
         TestMovingBoxSelectionRecalculationAndCache();
+        TestMovingContentInteractionDoesNotClampOrMutateSelection();
         std::cout << "SelectionService tests passed.\n";
         return EXIT_SUCCESS;
     }

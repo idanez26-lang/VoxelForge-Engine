@@ -68,6 +68,7 @@ public:
         bool voxelSphereSmokeTest = false,
         bool modernToolbarSmokeTest = false,
         bool keyboardShortcutsSmokeTest = false,
+        bool voxelMoveSmokeTest = false,
         std::filesystem::path imguiIniPathOverride = {});
 
     void OnAttach() override;
@@ -143,6 +144,7 @@ private:
     bool voxelSphereSmokeTest_ = false;
     bool modernToolbarSmokeTest_ = false;
     bool keyboardShortcutsSmokeTest_ = false;
+    bool voxelMoveSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

@@ -232,6 +232,7 @@ target_sources(
         src/Commands/Voxel/EraseVoxelCommand.cpp
         src/Commands/Voxel/PaintVoxelCommand.cpp
         src/Commands/Voxel/VoxelEditTransaction.cpp
+        src/Transform/MoveVoxelSelectionOperation.cpp
         src/VoxelHistory/VoxelEditHistory.cpp
         src/VoxelHistory/VoxelEditOperation.cpp
         src/VoxelHistory/VoxelHistoryInput.cpp
@@ -255,7 +256,8 @@ target_link_libraries(
     PUBLIC
         VoxelForgeVoxel
         VoxelForgeAsset
-        VoxelForgeEditorVoxelSelection)
+        VoxelForgeEditorVoxelSelection
+        VoxelForgeEditorTransformPreview)
 if(MSVC)
     target_compile_options(VoxelForgeEditorCommands PRIVATE /W4 /permissive-)
 else()

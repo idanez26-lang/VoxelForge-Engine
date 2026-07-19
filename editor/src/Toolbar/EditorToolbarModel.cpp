@@ -33,7 +33,10 @@ constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
          ActiveVoxelTool::Sphere},
         {EditorToolbarAction::Selection, EditorToolbarGroup::Manipulation,
          "Selection", "Select voxels", EditorInputCommand::ToolSelection,
-         ActiveVoxelTool::Selection}
+         ActiveVoxelTool::Selection},
+        {EditorToolbarAction::Move, EditorToolbarGroup::Manipulation,
+         "Move", "Move the selected voxels", EditorInputCommand::ToolMove,
+         ActiveVoxelTool::Move}
     }};
 }
 
@@ -47,8 +50,10 @@ bool EditorToolbarModel::IsEnabled(
     const EditorToolbarButton& button,
     const EditorToolbarState& state) noexcept
 {
-    return button.Action == EditorToolbarAction::Save
-        ? state.CanSave : state.HasDocument;
+    if (button.Action == EditorToolbarAction::Save) return state.CanSave;
+    if (button.Action == EditorToolbarAction::Move)
+        return state.HasDocument && state.CanMoveSelection;
+    return state.HasDocument;
 }
 
 bool EditorToolbarModel::IsActive(
@@ -72,7 +77,8 @@ EditorToolbarLayout EditorToolbarModel::CalculateLayout(
     const float groupSpacing = std::clamp(
         std::floor(safeFontSize * 0.75F), 10.0F, 16.0F);
     const float singleRowWidth = preferredButton * ButtonCount +
-        regularSpacing * 10.0F + groupSpacing * 3.0F;
+        regularSpacing * static_cast<float>(ButtonCount - 1U) +
+        groupSpacing * 3.0F;
     if (singleRowWidth <= safeWidth)
         return {preferredButton, regularSpacing, groupSpacing, false};
 

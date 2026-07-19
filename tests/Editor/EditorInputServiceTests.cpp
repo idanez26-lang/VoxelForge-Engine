@@ -33,7 +33,7 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 11U,
+    Require(service.Bindings().size() == 12U,
         "The expected command bindings are incomplete.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
@@ -46,6 +46,7 @@ void TestCommandsAndBindings()
         service.ShortcutLabel(EditorInputCommand::ToolLine) == "L" &&
         service.ShortcutLabel(EditorInputCommand::ToolSphere) == "S" &&
         service.ShortcutLabel(EditorInputCommand::ToolSelection) == "V" &&
+        service.ShortcutLabel(EditorInputCommand::ToolMove) == "M" &&
         service.ShortcutLabel(EditorInputCommand::FileSave) == "Ctrl+S",
         "Shortcut labels do not reflect the real bindings.");
 }
@@ -53,7 +54,8 @@ void TestCommandsAndBindings()
 void TestToolSelection()
 {
     const EditorInputService service;
-    const EditorCommandAvailability available{true, true, true, true, true};
+    const EditorCommandAvailability available{
+        true, true, true, true, true, true};
     Require(Resolve(service, EditorInputKey::P, available) ==
             EditorInputCommand::ToolPencil &&
         Resolve(service, EditorInputKey::E, available) ==
@@ -67,7 +69,9 @@ void TestToolSelection()
         Resolve(service, EditorInputKey::S, available) ==
             EditorInputCommand::ToolSphere &&
         Resolve(service, EditorInputKey::V, available) ==
-            EditorInputCommand::ToolSelection,
+            EditorInputCommand::ToolSelection &&
+        Resolve(service, EditorInputKey::M, available) ==
+            EditorInputCommand::ToolMove,
         "A tool shortcut resolves to the wrong command.");
     Require(Resolve(service, EditorInputKey::S, available, true) ==
             EditorInputCommand::FileSave,
@@ -122,11 +126,17 @@ void TestAvailabilityAndUnknownCommands()
     EditorCommandAvailability partial;
     partial.HasDocument = true;
     Require(service.IsAvailable(EditorInputCommand::ToolPencil, partial) &&
+        !service.IsAvailable(EditorInputCommand::ToolMove, partial) &&
         !service.IsAvailable(EditorInputCommand::FileSave, partial) &&
         !service.IsAvailable(EditorInputCommand::EditUndo, partial) &&
         !service.IsAvailable(EditorInputCommand::EditRedo, partial) &&
         !service.IsAvailable(EditorInputCommand::InteractionCancel, partial),
         "Command availability ignores editor state.");
+    partial.CanMoveSelection = true;
+    Require(service.IsAvailable(EditorInputCommand::ToolMove, partial) &&
+        Resolve(service, EditorInputKey::M, partial) ==
+            EditorInputCommand::ToolMove,
+        "Move availability does not require a current non-empty selection.");
 }
 }
 

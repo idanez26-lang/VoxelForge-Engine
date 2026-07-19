@@ -16,9 +16,13 @@ VoxelEditHistoryResult Result(
     const VoxelEditHistoryResultCode code,
     const bool changed,
     std::string label,
-    std::string message = {})
+    std::string message = {},
+    std::shared_ptr<const VoxelEditSelectionTransition> selection = {},
+    const VoxelEditSelectionState selectionState =
+        VoxelEditSelectionState::None)
 {
-    return {code, changed, std::move(label), std::move(message)};
+    return {code, changed, std::move(label), std::move(message),
+        std::move(selection), selectionState};
 }
 
 class BusyGuard final
@@ -104,7 +108,9 @@ VoxelEditHistoryResult VoxelEditHistory::Execute(
     if (document != nullptr) SynchronizeDirty(session, *document);
     const std::string label = pending.Operation.Label;
     EnforceLimits();
-    return Result(VoxelEditHistoryResultCode::Applied, true, label);
+    return Result(VoxelEditHistoryResultCode::Applied, true, label, {},
+        pending.Operation.SelectionTransition,
+        VoxelEditSelectionState::After);
 }
 
 VoxelEditHistoryResult VoxelEditHistory::Undo(VoxelEditSession& session)
@@ -133,7 +139,9 @@ VoxelEditHistoryResult VoxelEditHistory::Undo(VoxelEditSession& session)
         redoStack_.end(), undoStack_, std::prev(undoStack_.end()));
     if (Asset::Voxel::VoxelDocument* document = session.ActiveVoxelDocument())
         SynchronizeDirty(session, *document);
-    return Result(VoxelEditHistoryResultCode::Applied, true, label);
+    return Result(VoxelEditHistoryResultCode::Applied, true, label, {},
+        operation.Operation.SelectionTransition,
+        VoxelEditSelectionState::Before);
 }
 
 VoxelEditHistoryResult VoxelEditHistory::Redo(VoxelEditSession& session)
@@ -162,7 +170,9 @@ VoxelEditHistoryResult VoxelEditHistory::Redo(VoxelEditSession& session)
         undoStack_.end(), redoStack_, std::prev(redoStack_.end()));
     if (Asset::Voxel::VoxelDocument* document = session.ActiveVoxelDocument())
         SynchronizeDirty(session, *document);
-    return Result(VoxelEditHistoryResultCode::Applied, true, label);
+    return Result(VoxelEditHistoryResultCode::Applied, true, label, {},
+        operation.Operation.SelectionTransition,
+        VoxelEditSelectionState::After);
 }
 
 void VoxelEditHistory::MarkSavedState(

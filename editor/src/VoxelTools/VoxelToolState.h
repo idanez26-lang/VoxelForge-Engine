@@ -14,7 +14,8 @@ enum class ActiveVoxelTool : std::uint8_t
     Box,
     Line,
     Sphere,
-    Selection
+    Selection,
+    Move
 };
 
 [[nodiscard]] const char* ActiveVoxelToolName(
@@ -34,6 +35,7 @@ public:
     [[nodiscard]] bool IsLineActive() const noexcept;
     [[nodiscard]] bool IsSphereActive() const noexcept;
     [[nodiscard]] bool IsSelectionActive() const noexcept;
+    [[nodiscard]] bool IsMoveActive() const noexcept;
     [[nodiscard]] bool IsEditingToolActive() const noexcept;
 
 private:

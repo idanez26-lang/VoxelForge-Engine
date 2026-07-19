@@ -26,6 +26,7 @@
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
 #include "Transform/TransformPreviewModel.h"
+#include "Transform/MoveVoxelSelectionOperation.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -169,6 +170,8 @@ public:
     [[nodiscard]] bool ModernToolbarSmokePassed() const noexcept;
     [[nodiscard]] bool RunKeyboardShortcutsSmokeStep(std::size_t frame);
     [[nodiscard]] bool KeyboardShortcutsSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelMoveSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelMoveSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -183,6 +186,8 @@ private:
     void SelectVoxelTool(ActiveVoxelTool tool);
     void CancelActiveInteraction();
     [[nodiscard]] EditorCommandAvailability CurrentCommandAvailability() const;
+    [[nodiscard]] bool CanMoveSelection() const noexcept;
+    void ApplyVoxelHistorySelection(const VoxelEditHistoryResult& result);
     void UndoCommand();
     void RedoCommand();
     void DrawDockSpace(ImGuiID dockspaceId);
@@ -265,6 +270,7 @@ private:
     [[nodiscard]] bool ApplyVoxelBox();
     [[nodiscard]] bool ApplyVoxelLine();
     [[nodiscard]] bool ApplyVoxelSphere();
+    [[nodiscard]] bool ApplyVoxelMove();
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
         CurrentTwoPointToolTarget() const noexcept;
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
@@ -328,6 +334,7 @@ private:
     std::optional<VoxelBoxResult> lastVoxelBoxResult_;
     std::optional<VoxelLineResult> lastVoxelLineResult_;
     std::optional<VoxelSphereResult> lastVoxelSphereResult_;
+    std::string voxelMoveStatusMessage_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -527,6 +534,15 @@ private:
     bool keyboardShortcutsSmokeRedone_ = false;
     bool keyboardShortcutsSmokeCancelled_ = false;
     bool keyboardShortcutsSmokeCleaned_ = false;
+    std::filesystem::path voxelMoveSmokePath_;
+    bool voxelMoveSmokePrepared_ = false;
+    bool voxelMoveSmokeApplied_ = false;
+    bool voxelMoveSmokeUndone_ = false;
+    bool voxelMoveSmokeRedone_ = false;
+    bool voxelMoveSmokeRejected_ = false;
+    bool voxelMoveSmokeSaved_ = false;
+    bool voxelMoveSmokeReopened_ = false;
+    bool voxelMoveSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

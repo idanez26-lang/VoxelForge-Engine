@@ -15,7 +15,8 @@ enum class SelectionInteractionMode : std::uint8_t
     Idle,
     Creating,
     ResizingFace,
-    MovingBox
+    MovingBox,
+    MovingContent
 };
 
 struct SelectionPointerRelease final
@@ -61,6 +62,12 @@ public:
     [[nodiscard]] bool MoveBox(
         Vec3 pointerWorldPosition,
         Asset::Voxel::VoxelDimensions dimensions) noexcept;
+    [[nodiscard]] bool BeginMovingContent(
+        SelectionBounds originalBounds,
+        std::uint64_t documentGeneration,
+        SelectionMovePlane movePlane,
+        Vec3 pointerWorldPosition) noexcept;
+    [[nodiscard]] bool MoveContent(Vec3 pointerWorldPosition) noexcept;
     [[nodiscard]] SelectionPointerRelease PointerUp() noexcept;
     [[nodiscard]] std::optional<SelectionBounds> Cancel() noexcept;
     [[nodiscard]] bool ValidateDocumentGeneration(

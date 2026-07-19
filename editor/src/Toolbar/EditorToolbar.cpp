@@ -143,6 +143,36 @@ void DrawSelectionIcon(ImDrawList& drawList, const ImVec2 minimum,
     drawList.AddLine({maximum.x, maximum.y - arm}, maximum, color, thickness);
 }
 
+void DrawMoveIcon(ImDrawList& drawList, const ImVec2 minimum,
+    const ImVec2 maximum, const ImU32 color, const float thickness)
+{
+    const ImVec2 center{
+        (minimum.x + maximum.x) * 0.5F,
+        (minimum.y + maximum.y) * 0.5F};
+    const float inset = (maximum.x - minimum.x) * 0.08F;
+    const float head = (maximum.x - minimum.x) * 0.22F;
+    drawList.AddLine({minimum.x + inset, center.y},
+        {maximum.x - inset, center.y}, color, thickness);
+    drawList.AddLine({center.x, minimum.y + inset},
+        {center.x, maximum.y - inset}, color, thickness);
+    drawList.AddTriangleFilled(
+        {minimum.x + inset, center.y},
+        {minimum.x + inset + head, center.y - head * 0.55F},
+        {minimum.x + inset + head, center.y + head * 0.55F}, color);
+    drawList.AddTriangleFilled(
+        {maximum.x - inset, center.y},
+        {maximum.x - inset - head, center.y - head * 0.55F},
+        {maximum.x - inset - head, center.y + head * 0.55F}, color);
+    drawList.AddTriangleFilled(
+        {center.x, minimum.y + inset},
+        {center.x - head * 0.55F, minimum.y + inset + head},
+        {center.x + head * 0.55F, minimum.y + inset + head}, color);
+    drawList.AddTriangleFilled(
+        {center.x, maximum.y - inset},
+        {center.x - head * 0.55F, maximum.y - inset - head},
+        {center.x + head * 0.55F, maximum.y - inset - head}, color);
+}
+
 bool DrawIcon(
     ImDrawList& drawList,
     const EditorToolbarAction action,
@@ -170,6 +200,8 @@ bool DrawIcon(
     case EditorToolbarAction::Selection:
         DrawSelectionIcon(drawList, minimum, maximum, color, thickness);
         return true;
+    case EditorToolbarAction::Move:
+        DrawMoveIcon(drawList, minimum, maximum, color, thickness); return true;
     }
     return false;
 }
@@ -190,7 +222,10 @@ void DrawTooltip(
             static_cast<int>(shortcut.size()), shortcut.data());
     if (!enabled)
         ImGui::TextDisabled(button.Action == EditorToolbarAction::Save
-            ? "No unsaved voxel model to save." : "Open a voxel model to use this tool.");
+            ? "No unsaved voxel model to save."
+            : button.Action == EditorToolbarAction::Move
+            ? "Select one or more voxels to use Move."
+            : "Open a voxel model to use this tool.");
     ImGui::EndTooltip();
 }
 

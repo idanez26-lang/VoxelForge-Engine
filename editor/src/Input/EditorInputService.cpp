@@ -67,6 +67,8 @@ bool EditorInputService::IsAvailable(
     const EditorInputCommand command,
     const EditorCommandAvailability& availability) const noexcept
 {
+    if (command == EditorInputCommand::ToolMove)
+        return availability.HasDocument && availability.CanMoveSelection;
     if (IsToolCommand(command)) return availability.HasDocument;
     switch (command)
     {
@@ -105,6 +107,7 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ToolLine: return "Tool.Line";
     case EditorInputCommand::ToolSphere: return "Tool.Sphere";
     case EditorInputCommand::ToolSelection: return "Tool.Selection";
+    case EditorInputCommand::ToolMove: return "Tool.Move";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";
     case EditorInputCommand::EditRedo: return "Edit.Redo";

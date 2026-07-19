@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -29,12 +30,21 @@ enum class VoxelEditHistoryResultCode
     Failed
 };
 
+enum class VoxelEditSelectionState : std::uint8_t
+{
+    None,
+    Before,
+    After
+};
+
 struct VoxelEditHistoryResult final
 {
     VoxelEditHistoryResultCode Code = VoxelEditHistoryResultCode::Failed;
     bool Changed = false;
     std::string Label;
     std::string Message;
+    std::shared_ptr<const VoxelEditSelectionTransition> SelectionTransition;
+    VoxelEditSelectionState SelectionState = VoxelEditSelectionState::None;
 
     [[nodiscard]] explicit operator bool() const noexcept
     {

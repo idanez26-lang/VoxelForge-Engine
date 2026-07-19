@@ -419,6 +419,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelEditHistoryTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelMoveTests
+    Editor/VoxelMoveTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelMoveTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorVoxelMoveTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelMove
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelMoveTests>
+)
+add_executable(
     VoxelForgeEditorQualityOfLifeTests
     Editor/QualityOfLifeTests.cpp
 )
@@ -857,6 +870,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.ModernDialogsSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --modern-dialogs-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelMoveSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-move-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -890,6 +907,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.ModernToolbarSmoke
         VoxelForge.Editor.KeyboardShortcutsSmoke
         VoxelForge.Editor.ModernDialogsSmoke
+        VoxelForge.Editor.VoxelMoveSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

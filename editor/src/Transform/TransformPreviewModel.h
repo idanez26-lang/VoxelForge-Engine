@@ -83,6 +83,8 @@ struct TransformPreviewOperationData final
     std::uint64_t DocumentRevision = 0U;
     std::size_t ModelIndex = 0U;
     Asset::Voxel::VoxelPosition Delta{};
+    SelectionBounds SourceBounds{};
+    SelectionBounds PreviewBounds{};
     std::span<const TransformPreviewVoxel> Voxels;
     std::span<const Asset::Voxel::VoxelPosition> SourcePositions;
     std::span<const Asset::Voxel::VoxelPosition> CollisionPositions;

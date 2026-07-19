@@ -18,6 +18,7 @@ enum class EditorInputCommand : std::uint8_t
     ToolLine,
     ToolSphere,
     ToolSelection,
+    ToolMove,
     FileSave,
     EditUndo,
     EditRedo,
@@ -34,6 +35,7 @@ enum class EditorInputKey : std::uint8_t
     L,
     S,
     V,
+    M,
     Z,
     Y,
     Escape,
@@ -74,12 +76,13 @@ struct EditorCommandAvailability final
     bool CanUndo = false;
     bool CanRedo = false;
     bool CanCancelInteraction = false;
+    bool CanMoveSelection = false;
 };
 
 class EditorInputService final
 {
 public:
-    static constexpr std::size_t BindingCount = 11U;
+    static constexpr std::size_t BindingCount = 12U;
 
     [[nodiscard]] EditorInputCommand Resolve(
         const EditorInputFrame& frame,
@@ -118,7 +121,9 @@ private:
         {EditorInputCommand::ToolSphere, EditorInputKey::S,
          false, false, false, "S"},
         {EditorInputCommand::ToolSelection, EditorInputKey::V,
-         false, false, false, "V"}
+         false, false, false, "V"},
+        {EditorInputCommand::ToolMove, EditorInputKey::M,
+         false, false, false, "M"}
     }};
 };
 

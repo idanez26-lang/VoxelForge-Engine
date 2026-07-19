@@ -153,6 +153,61 @@ bool SelectionInteraction::MoveBox(
     return true;
 }
 
+bool SelectionInteraction::BeginMovingContent(
+    const SelectionBounds originalBounds,
+    const std::uint64_t documentGeneration,
+    const SelectionMovePlane movePlane,
+    const Vec3 pointerWorldPosition) noexcept
+{
+    if (!BeginMovingBox(originalBounds, documentGeneration, movePlane,
+            pointerWorldPosition))
+        return false;
+    mode_ = SelectionInteractionMode::MovingContent;
+    return true;
+}
+
+bool SelectionInteraction::MoveContent(
+    const Vec3 pointerWorldPosition) noexcept
+{
+    if (mode_ != SelectionInteractionMode::MovingContent ||
+        !IsFinite(pointerWorldPosition))
+        return false;
+    const Vec3 worldDelta = pointerWorldPosition - moveAnchorWorld_;
+    if (!IsFinite(worldDelta)) return false;
+    const auto snap = [](const float value) noexcept
+    {
+        const double bounded = std::clamp(
+            static_cast<double>(value),
+            static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+            static_cast<double>(std::numeric_limits<std::int32_t>::max()));
+        return static_cast<std::int32_t>(std::llround(bounded));
+    };
+    const auto add = [](const std::int32_t value,
+                        const std::int32_t delta) noexcept
+    {
+        const std::int64_t result = static_cast<std::int64_t>(value) + delta;
+        return static_cast<std::int32_t>(std::clamp(
+            result,
+            static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max())));
+    };
+    const Asset::Voxel::VoxelPosition requested{
+        snap(worldDelta.X), snap(worldDelta.Y), snap(worldDelta.Z)};
+    SelectionBounds translated = originalBounds_;
+    translated.Minimum = {
+        add(originalBounds_.Minimum.X, requested.X),
+        add(originalBounds_.Minimum.Y, requested.Y),
+        add(originalBounds_.Minimum.Z, requested.Z)};
+    translated.Maximum = {
+        add(originalBounds_.Maximum.X, requested.X),
+        add(originalBounds_.Maximum.Y, requested.Y),
+        add(originalBounds_.Maximum.Z, requested.Z)};
+    if (translated == currentBounds_) return false;
+    currentBounds_ = translated;
+    moveDelta_ = requested;
+    return true;
+}
+
 SelectionPointerRelease SelectionInteraction::PointerUp() noexcept
 {
     SelectionPointerRelease release;
@@ -161,7 +216,8 @@ SelectionPointerRelease SelectionInteraction::PointerUp() noexcept
     release.Face = activeFace_;
     release.WasDrag =
         mode_ == SelectionInteractionMode::ResizingFace ||
-        mode_ == SelectionInteractionMode::MovingBox || dragRecognized_;
+        mode_ == SelectionInteractionMode::MovingBox ||
+        mode_ == SelectionInteractionMode::MovingContent || dragRecognized_;
     release.Operation = operation_;
     release.Bounds = release.WasDrag ? Commit() : Cancel();
     return release;
@@ -222,7 +278,8 @@ std::optional<SelectionBounds> SelectionInteraction::Cancel() noexcept
     if (!IsActive()) return std::nullopt;
     const std::optional<SelectionBounds> restore =
         mode_ == SelectionInteractionMode::ResizingFace ||
-        mode_ == SelectionInteractionMode::MovingBox
+        mode_ == SelectionInteractionMode::MovingBox ||
+        mode_ == SelectionInteractionMode::MovingContent
         ? std::optional<SelectionBounds>(originalBounds_)
         : std::nullopt;
     Reset();

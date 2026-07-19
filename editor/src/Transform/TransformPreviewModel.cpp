@@ -347,8 +347,9 @@ TransformPreviewOperationData TransformPreviewModel::OperationData()
     const noexcept
 {
     return {
-        documentGeneration_, documentRevision_, modelIndex_, delta_, voxels_,
-        sourcePositions_, collisionPositions_, outOfBoundsPositions_};
+        documentGeneration_, documentRevision_, modelIndex_, delta_,
+        sourceBounds_, previewBounds_, voxels_, sourcePositions_,
+        collisionPositions_, outOfBoundsPositions_};
 }
 
 TransformPreviewBufferMetrics TransformPreviewModel::Metrics() const noexcept

@@ -51,6 +51,7 @@ constexpr std::size_t VoxelLineSmokeTestFrameCount = 6;
 constexpr std::size_t VoxelSphereSmokeTestFrameCount = 6;
 constexpr std::size_t ModernToolbarSmokeTestFrameCount = 5;
 constexpr std::size_t KeyboardShortcutsSmokeTestFrameCount = 7;
+constexpr std::size_t VoxelMoveSmokeTestFrameCount = 8;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
 struct CommandLine final
@@ -88,6 +89,7 @@ struct CommandLine final
     bool VoxelSphereSmokeTest = false;
     bool ModernToolbarSmokeTest = false;
     bool KeyboardShortcutsSmokeTest = false;
+    bool VoxelMoveSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
 
@@ -157,6 +159,7 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.ModernToolbarSmokeTest |= argument == "--modern-toolbar-smoke-test";
         result.KeyboardShortcutsSmokeTest |=
             argument == "--keyboard-shortcuts-smoke-test";
+        result.VoxelMoveSmokeTest |= argument == "--voxel-move-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
     }
@@ -390,6 +393,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelSphereSmokeTest ||
             commandLine.ModernToolbarSmokeTest ||
             commandLine.KeyboardShortcutsSmokeTest ||
+            commandLine.VoxelMoveSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         const bool isolatedTest = commandLine.SmokeTest || viewportTest;
         if (isolatedTest && !viewportFixture.Prepare())
@@ -412,8 +416,9 @@ int main(const int argumentCount, char* arguments[])
              commandLine.VoxelBoxSmokeTest ||
              commandLine.VoxelLineSmokeTest ||
              commandLine.VoxelSphereSmokeTest ||
-             commandLine.ModernToolbarSmokeTest ||
-             commandLine.KeyboardShortcutsSmokeTest
+              commandLine.ModernToolbarSmokeTest ||
+              commandLine.KeyboardShortcutsSmokeTest ||
+              commandLine.VoxelMoveSmokeTest
                 ? viewportFixture.CreateEmptyProject(projectManager)
                 : viewportFixture.Create(
                     projectManager,
@@ -500,8 +505,10 @@ int main(const int argumentCount, char* arguments[])
                     ? VoxelSphereSmokeTestFrameCount
                     : commandLine.ModernToolbarSmokeTest
                     ? ModernToolbarSmokeTestFrameCount
-                    : commandLine.KeyboardShortcutsSmokeTest
-                    ? KeyboardShortcutsSmokeTestFrameCount
+                     : commandLine.KeyboardShortcutsSmokeTest
+                     ? KeyboardShortcutsSmokeTestFrameCount
+                     : commandLine.VoxelMoveSmokeTest
+                     ? VoxelMoveSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
                     ? QualityOfLifeSmokeTestFrameCount
                     : commandLine.VoxelSelectionSmokeTest
@@ -537,8 +544,9 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.VoxelBoxSmokeTest ||
                     commandLine.VoxelLineSmokeTest ||
                     commandLine.VoxelSphereSmokeTest ||
-                    commandLine.ModernToolbarSmokeTest ||
-                    commandLine.KeyboardShortcutsSmokeTest,
+                     commandLine.ModernToolbarSmokeTest ||
+                     commandLine.KeyboardShortcutsSmokeTest ||
+                     commandLine.VoxelMoveSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
                 commandLine.EraseVoxelSmokeTest,
@@ -573,9 +581,10 @@ int main(const int argumentCount, char* arguments[])
                 commandLine.VoxelBoxSmokeTest,
                 commandLine.VoxelLineSmokeTest,
                 commandLine.VoxelSphereSmokeTest,
-                commandLine.ModernToolbarSmokeTest,
-                commandLine.KeyboardShortcutsSmokeTest,
-                isolatedTest ? viewportFixture.ImGuiIniPath()
+                 commandLine.ModernToolbarSmokeTest,
+                 commandLine.KeyboardShortcutsSmokeTest,
+                 commandLine.VoxelMoveSmokeTest,
+                 isolatedTest ? viewportFixture.ImGuiIniPath()
                              : std::filesystem::path{});
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
