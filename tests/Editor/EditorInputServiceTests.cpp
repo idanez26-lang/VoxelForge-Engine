@@ -33,7 +33,7 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 20U,
+    Require(service.Bindings().size() == 25U,
         "The expected command bindings are incomplete.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
@@ -50,10 +50,15 @@ void TestCommandsAndBindings()
         service.ShortcutLabel(EditorInputCommand::ToolDuplicate) == "D" &&
         service.ShortcutLabel(EditorInputCommand::ToolRotate) == "R" &&
         service.ShortcutLabel(EditorInputCommand::ToolMirror) == "H" &&
+        service.ShortcutLabel(EditorInputCommand::ToolScale) == "K" &&
         service.ShortcutLabel(EditorInputCommand::RotateLeft) == "Q" &&
         service.ShortcutLabel(EditorInputCommand::RotateRight) == "Shift+Q" &&
         service.ShortcutLabel(EditorInputCommand::MirrorX) == "X" &&
         service.ShortcutLabel(EditorInputCommand::MirrorZ) == "Z" &&
+        service.ShortcutLabel(EditorInputCommand::ScaleX) == "X" &&
+        service.ShortcutLabel(EditorInputCommand::ScaleY) == "Y" &&
+        service.ShortcutLabel(EditorInputCommand::ScaleZ) == "Z" &&
+        service.ShortcutLabel(EditorInputCommand::ScaleUniform) == "U" &&
         service.ShortcutLabel(EditorInputCommand::TransformApply) == "Enter" &&
         service.ShortcutLabel(EditorInputCommand::FileSave) == "Ctrl+S",
         "Shortcut labels do not reflect the real bindings.");
@@ -62,9 +67,20 @@ void TestCommandsAndBindings()
 void TestToolSelection()
 {
     const EditorInputService service;
-    const EditorCommandAvailability available{
-        true, true, true, true, true, true, true, true, true, true,
-        true, true};
+    EditorCommandAvailability available;
+    available.HasDocument = true;
+    available.CanSave = true;
+    available.CanUndo = true;
+    available.CanRedo = true;
+    available.CanCancelInteraction = true;
+    available.CanMoveSelection = true;
+    available.CanDuplicateSelection = true;
+    available.CanRotateSelection = true;
+    available.CanAdjustRotation = true;
+    available.CanMirrorSelection = true;
+    available.CanAdjustMirror = true;
+    available.CanScaleSelection = true;
+    available.CanApplyTransform = true;
     Require(Resolve(service, EditorInputKey::P, available) ==
             EditorInputCommand::ToolPencil &&
         Resolve(service, EditorInputKey::E, available) ==
@@ -87,6 +103,8 @@ void TestToolSelection()
             EditorInputCommand::ToolRotate &&
         Resolve(service, EditorInputKey::H, available) ==
             EditorInputCommand::ToolMirror &&
+        Resolve(service, EditorInputKey::K, available) ==
+            EditorInputCommand::ToolScale &&
         Resolve(service, EditorInputKey::Q, available) ==
             EditorInputCommand::RotateLeft &&
         Resolve(service, EditorInputKey::Q, available, false, true) ==
@@ -98,6 +116,17 @@ void TestToolSelection()
         Resolve(service, EditorInputKey::Enter, available) ==
             EditorInputCommand::TransformApply,
         "A tool shortcut resolves to the wrong command.");
+    available.CanAdjustMirror = false;
+    available.CanAdjustScale = true;
+    Require(Resolve(service, EditorInputKey::X, available) ==
+            EditorInputCommand::ScaleX &&
+        Resolve(service, EditorInputKey::Y, available) ==
+            EditorInputCommand::ScaleY &&
+        Resolve(service, EditorInputKey::Z, available) ==
+            EditorInputCommand::ScaleZ &&
+        Resolve(service, EditorInputKey::U, available) ==
+            EditorInputCommand::ScaleUniform,
+        "Contextual Scale bindings do not resolve to Scale commands.");
     Require(Resolve(service, EditorInputKey::S, available, true) ==
             EditorInputCommand::FileSave,
         "Ctrl+S conflicts with the Sphere shortcut.");
@@ -164,6 +193,7 @@ void TestAvailabilityAndUnknownCommands()
     partial.CanAdjustRotation = true;
     partial.CanMirrorSelection = true;
     partial.CanAdjustMirror = true;
+    partial.CanScaleSelection = true;
     Require(service.IsAvailable(EditorInputCommand::ToolMove, partial) &&
         Resolve(service, EditorInputKey::M, partial) ==
             EditorInputCommand::ToolMove &&
@@ -184,9 +214,23 @@ void TestAvailabilityAndUnknownCommands()
             EditorInputCommand::MirrorX &&
         Resolve(service, EditorInputKey::Z, partial) ==
             EditorInputCommand::MirrorZ &&
+        service.IsAvailable(EditorInputCommand::ToolScale, partial) &&
+        Resolve(service, EditorInputKey::K, partial) ==
+            EditorInputCommand::ToolScale &&
         Resolve(service, EditorInputKey::Enter, partial) ==
             EditorInputCommand::None,
         "Transform preview commands require selection but Apply requires preview.");
+    partial.CanAdjustMirror = false;
+    partial.CanAdjustScale = true;
+    Require(Resolve(service, EditorInputKey::X, partial) ==
+            EditorInputCommand::ScaleX &&
+        Resolve(service, EditorInputKey::Y, partial) ==
+            EditorInputCommand::ScaleY &&
+        Resolve(service, EditorInputKey::Z, partial) ==
+            EditorInputCommand::ScaleZ &&
+        Resolve(service, EditorInputKey::U, partial) ==
+            EditorInputCommand::ScaleUniform,
+        "Scale mode commands are not gated by Scale context.");
     partial.CanApplyTransform = true;
     Require(
         Resolve(service, EditorInputKey::Enter, partial) ==

@@ -71,15 +71,16 @@ namespace
 }
 
 TransformPreviewRenderPlan TransformPreviewRenderPolicy::Build(
-    const std::size_t voxelCount,
+    const std::size_t sourceVoxelCount,
+    const std::size_t destinationVoxelCount,
     const std::size_t collisionCount,
     const std::size_t outOfBoundsCount) noexcept
 {
     return {
-        voxelCount <= IndividualVoxelLimit,
+        destinationVoxelCount <= IndividualVoxelLimit,
         collisionCount + outOfBoundsCount <= IndividualCollisionLimit,
-        voxelCount,
-        voxelCount,
+        sourceVoxelCount,
+        destinationVoxelCount,
         collisionCount,
         outOfBoundsCount};
 }
@@ -101,6 +102,7 @@ bool TransformPreviewModel::BeginPreview(
     // Capturing is intentionally atomic: one stale/missing selected voxel
     // rejects the whole preview instead of silently moving only a subset.
     voxels_.reserve(selected.size());
+    sourceVoxels_.reserve(selected.size());
     sourcePositions_.reserve(selected.size());
     explicitDestinations_.reserve(selected.size());
     collisionPositions_.reserve(selected.size());
@@ -114,8 +116,10 @@ bool TransformPreviewModel::BeginPreview(
             return false;
         }
         sourcePositions_.push_back(position);
-        voxels_.push_back({position, position, *voxel,
-            TransformPreviewVoxelState::Valid});
+        const TransformPreviewVoxel captured{
+            position, position, *voxel, TransformPreviewVoxelState::Valid};
+        sourceVoxels_.push_back(captured);
+        voxels_.push_back(captured);
     }
     if (voxels_.empty()) return false;
 
@@ -141,8 +145,10 @@ bool TransformPreviewModel::SetDelta(
     const Asset::Voxel::VoxelPosition delta)
 {
     if (!IsValidFor(document, selection, documentGeneration) ||
-        delta == delta_)
+        (!expandedDestinations_ && explicitDestinations_.empty() &&
+         delta == delta_))
         return false;
+    expandedDestinations_ = false;
     explicitDestinations_.clear();
     delta_ = delta;
     return Rebuild(document);
@@ -155,13 +161,65 @@ bool TransformPreviewModel::SetExplicitDestinations(
     const std::span<const Asset::Voxel::VoxelPosition> destinations)
 {
     if (!IsValidFor(document, selection, documentGeneration) ||
-        destinations.size() != voxels_.size() || destinations.empty())
+        destinations.size() != sourceVoxels_.size() || destinations.empty())
         return false;
-    if (explicitDestinations_.size() == destinations.size() &&
+    if (!expandedDestinations_ &&
+        explicitDestinations_.size() == destinations.size() &&
         std::equal(explicitDestinations_.begin(),
             explicitDestinations_.end(), destinations.begin()))
         return false;
+    expandedDestinations_ = false;
     explicitDestinations_.assign(destinations.begin(), destinations.end());
+    delta_ = {};
+    return Rebuild(document);
+}
+
+bool TransformPreviewModel::SetExplicitVoxelDestinations(
+    const Asset::Voxel::VoxelDocument& document,
+    const SelectionService& selection,
+    const std::uint64_t documentGeneration,
+    const std::span<const TransformPreviewDestinationVoxel> destinations)
+{
+    if (!IsValidFor(document, selection, documentGeneration) ||
+        destinations.empty())
+        return false;
+    if (expandedDestinations_ && voxels_.size() == destinations.size() &&
+        std::equal(voxels_.begin(), voxels_.end(), destinations.begin(),
+            [](const TransformPreviewVoxel& current,
+               const TransformPreviewDestinationVoxel& candidate)
+            {
+                return current.SourcePosition == candidate.SourcePosition &&
+                    current.PreviewPosition == candidate.DestinationPosition &&
+                    current.Value == candidate.Value;
+            }))
+        return false;
+
+    for (const TransformPreviewDestinationVoxel& destination : destinations)
+    {
+        const auto source = std::lower_bound(
+            sourcePositions_.begin(), sourcePositions_.end(),
+            destination.SourcePosition, PositionLess);
+        if (source == sourcePositions_.end() ||
+            *source != destination.SourcePosition)
+            return false;
+        const std::size_t sourceIndex = static_cast<std::size_t>(
+            std::distance(sourcePositions_.begin(), source));
+        if (sourceVoxels_[sourceIndex].Value != destination.Value)
+            return false;
+    }
+
+    voxels_.clear();
+    voxels_.reserve(destinations.size());
+    for (const TransformPreviewDestinationVoxel& destination : destinations)
+    {
+        voxels_.push_back({
+            destination.SourcePosition,
+            destination.DestinationPosition,
+            destination.Value,
+            TransformPreviewVoxelState::Valid});
+    }
+    expandedDestinations_ = true;
+    explicitDestinations_.clear();
     delta_ = {};
     return Rebuild(document);
 }
@@ -185,11 +243,12 @@ bool TransformPreviewModel::IsValidFor(
         !std::equal(selectionPositions.begin(), selectionPositions.end(),
             sourcePositions_.begin()))
         return false;
-    for (std::size_t index = 0U; index < voxels_.size(); ++index)
+    if (sourceVoxels_.size() != sourcePositions_.size()) return false;
+    for (std::size_t index = 0U; index < sourceVoxels_.size(); ++index)
     {
         const auto voxel = document.GetVoxel(
             sourcePositions_[index], modelIndex_);
-        if (!voxel || *voxel != voxels_[index].Value) return false;
+        if (!voxel || *voxel != sourceVoxels_[index].Value) return false;
     }
     return true;
 }
@@ -211,11 +270,15 @@ bool TransformPreviewModel::Rebuild(
 {
     collisionPositions_.clear();
     outOfBoundsPositions_.clear();
+    if (!expandedDestinations_)
+        voxels_.assign(sourceVoxels_.begin(), sourceVoxels_.end());
     for (std::size_t index = 0U; index < voxels_.size(); ++index)
     {
         bool representable = true;
         const Asset::Voxel::VoxelPosition destination =
-            explicitDestinations_.empty()
+            expandedDestinations_
+            ? voxels_[index].PreviewPosition
+            : explicitDestinations_.empty()
             ? AddSafely(sourcePositions_[index], delta_, representable)
             : explicitDestinations_[index];
         TransformPreviewVoxel& voxel = voxels_[index];
@@ -272,9 +335,11 @@ bool TransformPreviewModel::Rebuild(
 void TransformPreviewModel::ClearState() noexcept
 {
     const bool hadState = active_ || !voxels_.empty() ||
-        !sourcePositions_.empty() || !collisionPositions_.empty() ||
+        !sourceVoxels_.empty() || !sourcePositions_.empty() ||
+        !collisionPositions_.empty() ||
         !outOfBoundsPositions_.empty();
     voxels_.clear();
+    sourceVoxels_.clear();
     sourcePositions_.clear();
     explicitDestinations_.clear();
     collisionPositions_.clear();
@@ -290,6 +355,7 @@ void TransformPreviewModel::ClearState() noexcept
     documentRevision_ = 0U;
     modelIndex_ = 0U;
     collisionPolicy_ = TransformPreviewCollisionPolicy::IgnoreSource;
+    expandedDestinations_ = false;
     active_ = false;
     if (hadState) ++renderRevision_;
 }
@@ -333,7 +399,11 @@ Asset::Voxel::VoxelPosition TransformPreviewModel::Delta() const noexcept
 }
 bool TransformPreviewModel::HasExplicitDestinations() const noexcept
 {
-    return !explicitDestinations_.empty();
+    return expandedDestinations_ || !explicitDestinations_.empty();
+}
+bool TransformPreviewModel::HasExpandedDestinations() const noexcept
+{
+    return expandedDestinations_;
 }
 const SelectionBounds& TransformPreviewModel::SourceBounds() const noexcept
 {
@@ -347,6 +417,11 @@ std::span<const TransformPreviewVoxel>
 TransformPreviewModel::Voxels() const noexcept
 {
     return voxels_;
+}
+std::span<const TransformPreviewVoxel>
+TransformPreviewModel::SourceVoxels() const noexcept
+{
+    return sourceVoxels_;
 }
 std::span<const Asset::Voxel::VoxelPosition>
 TransformPreviewModel::SourcePositions() const noexcept
@@ -369,10 +444,10 @@ TransformPreviewRenderData TransformPreviewModel::RenderData() const noexcept
     return {
         renderRevision_,
         collisionPolicy_ == TransformPreviewCollisionPolicy::IgnoreSource,
-        voxels_, palette_, sourceBounds_, previewBounds_,
+        voxels_, sourcePositions_, palette_, sourceBounds_, previewBounds_,
         collisionBounds_, outOfBoundsBounds_,
         TransformPreviewRenderPolicy::Build(
-            voxels_.size(), collisionPositions_.size(),
+            sourcePositions_.size(), voxels_.size(), collisionPositions_.size(),
             outOfBoundsPositions_.size())};
 }
 
@@ -381,14 +456,14 @@ TransformPreviewOperationData TransformPreviewModel::OperationData()
 {
     return {
         documentGeneration_, documentRevision_, modelIndex_, delta_,
-        sourceBounds_, previewBounds_, voxels_, sourcePositions_,
+        sourceBounds_, previewBounds_, voxels_, sourceVoxels_, sourcePositions_,
         collisionPositions_, outOfBoundsPositions_};
 }
 
 TransformPreviewBufferMetrics TransformPreviewModel::Metrics() const noexcept
 {
     return {
-        voxels_.capacity(), sourcePositions_.capacity(),
+        sourceVoxels_.capacity(), sourcePositions_.capacity(),
         explicitDestinations_.capacity(),
         collisionPositions_.capacity(), outOfBoundsPositions_.capacity(),
         rebuildCount_};

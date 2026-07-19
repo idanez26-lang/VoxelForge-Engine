@@ -26,6 +26,7 @@ using VoxelForge::Editor::SelectionMode;
 using VoxelForge::Editor::SelectionService;
 using VoxelForge::Editor::TransformPreviewModel;
 using VoxelForge::Editor::TransformPreviewCollisionPolicy;
+using VoxelForge::Editor::TransformPreviewDestinationVoxel;
 using VoxelForge::Editor::TransformPreviewRenderPolicy;
 using VoxelForge::Editor::TransformPreviewVoxelState;
 
@@ -308,6 +309,62 @@ void TestExplicitDestinationsForRotation()
         "Explicit destinations did not preserve Move collision semantics.");
 }
 
+void TestExpandedExplicitVoxelDestinations()
+{
+    DocumentFixture fixture({8U, 8U, 8U},
+        {{{1U, 1U, 1U, 3U}}, {{2U, 1U, 1U, 4U}},
+         {{6U, 1U, 1U, 9U}}});
+    SelectionService selection = MakeSelection(
+        16U, {{1, 1, 1}, {2, 1, 1}});
+    TransformPreviewModel preview;
+    Require(preview.BeginPreview(fixture.Document(), selection, 16U),
+        "Expanded preview capture failed.");
+    const auto source = preview.SourceVoxels();
+    const std::array<TransformPreviewDestinationVoxel, 4U> expanded{{
+        {source[0].SourcePosition, {1, 1, 1}, source[0].Value},
+        {source[0].SourcePosition, {2, 1, 1}, source[0].Value},
+        {source[1].SourcePosition, {3, 1, 1}, source[1].Value},
+        {source[1].SourcePosition, {4, 1, 1}, source[1].Value}}};
+    const auto revision = fixture.Document().GetRevision();
+    Require(preview.SetExplicitVoxelDestinations(
+                fixture.Document(), selection, 16U, expanded) &&
+            preview.HasExplicitDestinations() &&
+            preview.HasExpandedDestinations() &&
+            preview.SourceVoxels().size() == 2U &&
+            preview.SourcePositions().size() == 2U &&
+            preview.VoxelCount() == 4U &&
+            preview.RenderData().Plan.SourceVoxelCount == 2U &&
+            preview.RenderData().Plan.DestinationVoxelCount == 4U &&
+            preview.PreviewBounds() ==
+                SelectionBounds::FromCorners({1, 1, 1}, {4, 1, 1}) &&
+            !preview.HasCollisions() &&
+            fixture.Document().GetRevision() == revision,
+        "One-to-many preview lost source, destinations, bounds, or isolation.");
+
+    const auto metrics = preview.Metrics();
+    Require(!preview.SetExplicitVoxelDestinations(
+                fixture.Document(), selection, 16U, expanded) &&
+            preview.Metrics().RebuildCount == metrics.RebuildCount,
+        "Unchanged expanded destinations rebuilt the preview.");
+
+    const std::array<TransformPreviewDestinationVoxel, 4U> collision{{
+        expanded[0], expanded[1], expanded[2],
+        {source[1].SourcePosition, {6, 1, 1}, source[1].Value}}};
+    Require(preview.SetExplicitVoxelDestinations(
+                fixture.Document(), selection, 16U, collision) &&
+            preview.CollisionCount() == 1U &&
+            preview.CollisionPositions().front() == VoxelPosition{6, 1, 1},
+        "Expanded destinations did not detect an external collision.");
+
+    const std::array<VoxelPosition, 2U> oneToOne{
+        VoxelPosition{1, 1, 2}, VoxelPosition{2, 1, 2}};
+    Require(preview.SetExplicitDestinations(
+                fixture.Document(), selection, 16U, oneToOne) &&
+            !preview.HasExpandedDestinations() &&
+            preview.VoxelCount() == 2U && !preview.HasCollisions(),
+        "Expanded preview did not return cleanly to one-to-one mode.");
+}
+
 void TestValidityCancelResetAndNoMutation()
 {
     DocumentFixture fixture({8U, 8U, 8U}, {{{1U, 1U, 1U, 7U}}});
@@ -387,6 +444,7 @@ int main()
         TestCollisionsInternalOverlapAndOutOfBounds();
         TestDuplicateCollisionPolicyIncludesSource();
         TestExplicitDestinationsForRotation();
+        TestExpandedExplicitVoxelDestinations();
         TestValidityCancelResetAndNoMutation();
         TestLargeSelectionAndAdaptiveRenderPolicy();
         std::cout << "TransformPreview tests passed.\n";

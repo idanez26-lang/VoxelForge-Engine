@@ -31,6 +31,7 @@
 #include "Transform/DuplicateVoxelSelectionOperation.h"
 #include "Transform/MirrorVoxelSelectionOperation.h"
 #include "Transform/RotateVoxelSelectionOperation.h"
+#include "Transform/ScaleVoxelSelectionOperation.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -182,6 +183,8 @@ public:
     [[nodiscard]] bool VoxelRotateSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelMirrorSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelMirrorSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelScaleSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelScaleSmokePassed() const noexcept;
     [[nodiscard]] bool RunSaveOnExitSmokeStep(std::size_t frame);
     [[nodiscard]] bool SaveOnExitSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
@@ -202,6 +205,7 @@ private:
     [[nodiscard]] bool CanDuplicateSelection() const noexcept;
     [[nodiscard]] bool CanRotateSelection() const noexcept;
     [[nodiscard]] bool CanMirrorSelection() const noexcept;
+    [[nodiscard]] bool CanScaleSelection() const noexcept;
     void ApplyVoxelHistorySelection(const VoxelEditHistoryResult& result);
     void UndoCommand();
     void RedoCommand();
@@ -297,6 +301,9 @@ private:
     [[nodiscard]] bool BeginVoxelMirrorPreview(VoxelMirrorAxis axis);
     [[nodiscard]] bool ApplyVoxelMirror();
     void CancelVoxelMirror() noexcept;
+    [[nodiscard]] bool BeginVoxelScalePreview(VoxelScaleMode mode);
+    [[nodiscard]] bool ApplyVoxelScale();
+    void CancelVoxelScale() noexcept;
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
         CurrentTwoPointToolTarget() const noexcept;
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
@@ -367,6 +374,8 @@ private:
     std::string voxelRotateStatusMessage_;
     VoxelMirrorAxis voxelMirrorAxis_ = VoxelMirrorAxis::X;
     std::string voxelMirrorStatusMessage_;
+    VoxelScaleMode voxelScaleMode_ = VoxelScaleMode::X;
+    std::string voxelScaleStatusMessage_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -607,6 +616,15 @@ private:
     bool voxelMirrorSmokeSaved_ = false;
     bool voxelMirrorSmokeReopened_ = false;
     bool voxelMirrorSmokeCleaned_ = false;
+    std::filesystem::path voxelScaleSmokePath_;
+    bool voxelScaleSmokePrepared_ = false;
+    bool voxelScaleSmokePreviewed_ = false;
+    bool voxelScaleSmokeApplied_ = false;
+    bool voxelScaleSmokeUndoRedo_ = false;
+    bool voxelScaleSmokeRejected_ = false;
+    bool voxelScaleSmokeSaved_ = false;
+    bool voxelScaleSmokeReopened_ = false;
+    bool voxelScaleSmokeCleaned_ = false;
     std::filesystem::path saveOnExitSmokePath_;
     bool saveOnExitSmokeRequested_ = false;
     bool saveOnExitSmokeCallbackDeferred_ = false;

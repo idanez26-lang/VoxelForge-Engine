@@ -236,6 +236,7 @@ target_sources(
         src/Transform/MoveVoxelSelectionOperation.cpp
         src/Transform/MirrorVoxelSelectionOperation.cpp
         src/Transform/RotateVoxelSelectionOperation.cpp
+        src/Transform/ScaleVoxelSelectionOperation.cpp
         src/VoxelHistory/VoxelEditHistory.cpp
         src/VoxelHistory/VoxelEditOperation.cpp
         src/VoxelHistory/VoxelHistoryInput.cpp

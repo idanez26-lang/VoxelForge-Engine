@@ -267,6 +267,7 @@ struct ViewportRenderer::TransformPreviewSnapshot final
     std::uint64_t Revision = 0U;
     bool DrawSourceGhost = true;
     std::vector<TransformPreviewVoxel> Voxels;
+    std::vector<Asset::Voxel::VoxelPosition> SourcePositions;
     std::array<Asset::Voxel::VoxelColor, 256U> Palette{};
     SelectionBounds SourceBounds{};
     SelectionBounds PreviewBounds{};
@@ -607,6 +608,8 @@ void ViewportRenderer::ConfigureTransformPreview(
         snapshot.Revision = preview->Revision;
         snapshot.DrawSourceGhost = preview->DrawSourceGhost;
         snapshot.Voxels.assign(preview->Voxels.begin(), preview->Voxels.end());
+        snapshot.SourcePositions.assign(
+            preview->SourcePositions.begin(), preview->SourcePositions.end());
         std::fill(snapshot.Palette.begin(), snapshot.Palette.end(),
             Asset::Voxel::VoxelColor{});
         std::copy_n(preview->Palette.begin(),
@@ -650,7 +653,8 @@ bool ViewportRenderer::EnsureHighlights()
     {
         transformOutlineCount = 2U;
         if (transformPreview_->Plan.DrawIndividualVoxels)
-            transformOutlineCount += transformPreview_->Voxels.size() * 2U;
+            transformOutlineCount += transformPreview_->SourcePositions.size() +
+                transformPreview_->Voxels.size();
         else if (transformPreview_->Plan.DrawIndividualCollisions)
             transformOutlineCount +=
                 transformPreview_->Plan.CollisionVoxelCount +
@@ -740,11 +744,13 @@ bool ViewportRenderer::EnsureHighlights()
 
         if (preview.Plan.DrawIndividualVoxels)
         {
+            if (preview.DrawSourceGhost)
+                for (const Asset::Voxel::VoxelPosition position :
+                     preview.SourcePositions)
+                    AppendVoxelOutline(vertices, indices, position,
+                        modelCenter_, sourceGhostColor);
             for (const TransformPreviewVoxel& voxel : preview.Voxels)
             {
-                if (preview.DrawSourceGhost)
-                    AppendVoxelOutline(vertices, indices, voxel.SourcePosition,
-                        modelCenter_, sourceGhostColor);
                 std::array<float, 4> color{};
                 if (voxel.State == TransformPreviewVoxelState::Collision)
                     color = collisionColor;
@@ -1199,7 +1205,7 @@ std::size_t ViewportRenderer::TransformPreviewSourcePrimitiveCount()
     if (!transformPreview_) return 0U;
     if (!transformPreview_->DrawSourceGhost) return 0U;
     return transformPreview_->Plan.DrawIndividualVoxels
-        ? transformPreview_->Voxels.size()
+        ? transformPreview_->SourcePositions.size()
         : static_cast<std::size_t>(transformPreview_->SourceBounds.Valid);
 }
 

@@ -224,6 +224,32 @@ void DrawMirrorIcon(ImDrawList& drawList, const ImVec2 minimum,
         ImDrawFlags_Closed, thickness);
 }
 
+void DrawScaleIcon(ImDrawList& drawList, const ImVec2 minimum,
+    const ImVec2 maximum, const ImU32 color, const float thickness)
+{
+    const float inset = (maximum.x - minimum.x) * 0.12F;
+    const float corner = (maximum.x - minimum.x) * 0.30F;
+    drawList.AddRect(
+        {minimum.x + corner, minimum.y + corner},
+        {maximum.x - corner, maximum.y - corner}, color, 1.0F, 0, thickness);
+    drawList.AddLine({minimum.x + inset, minimum.y + corner},
+        {minimum.x + inset, minimum.y + inset}, color, thickness);
+    drawList.AddLine({minimum.x + inset, minimum.y + inset},
+        {minimum.x + corner, minimum.y + inset}, color, thickness);
+    drawList.AddLine({maximum.x - corner, minimum.y + inset},
+        {maximum.x - inset, minimum.y + inset}, color, thickness);
+    drawList.AddLine({maximum.x - inset, minimum.y + inset},
+        {maximum.x - inset, minimum.y + corner}, color, thickness);
+    drawList.AddLine({minimum.x + inset, maximum.y - corner},
+        {minimum.x + inset, maximum.y - inset}, color, thickness);
+    drawList.AddLine({minimum.x + inset, maximum.y - inset},
+        {minimum.x + corner, maximum.y - inset}, color, thickness);
+    drawList.AddLine({maximum.x - corner, maximum.y - inset},
+        {maximum.x - inset, maximum.y - inset}, color, thickness);
+    drawList.AddLine({maximum.x - inset, maximum.y - inset},
+        {maximum.x - inset, maximum.y - corner}, color, thickness);
+}
+
 bool DrawIcon(
     ImDrawList& drawList,
     const EditorToolbarAction action,
@@ -262,6 +288,9 @@ bool DrawIcon(
     case EditorToolbarAction::Mirror:
         DrawMirrorIcon(drawList, minimum, maximum, color, thickness);
         return true;
+    case EditorToolbarAction::Scale:
+        DrawScaleIcon(drawList, minimum, maximum, color, thickness);
+        return true;
     }
     return false;
 }
@@ -291,6 +320,8 @@ void DrawTooltip(
             ? "Select one or more voxels to use Rotate."
             : button.Action == EditorToolbarAction::Mirror
             ? "Select one or more voxels to use Mirror."
+            : button.Action == EditorToolbarAction::Scale
+            ? "Select one or more voxels to use Scale."
             : "Open a voxel model to use this tool.");
     ImGui::EndTooltip();
 }

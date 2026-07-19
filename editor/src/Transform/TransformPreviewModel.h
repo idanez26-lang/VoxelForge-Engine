@@ -38,6 +38,16 @@ struct TransformPreviewVoxel final
         const TransformPreviewVoxel&) const noexcept = default;
 };
 
+struct TransformPreviewDestinationVoxel final
+{
+    Asset::Voxel::VoxelPosition SourcePosition{};
+    Asset::Voxel::VoxelPosition DestinationPosition{};
+    Asset::Voxel::Voxel Value{};
+
+    [[nodiscard]] bool operator==(
+        const TransformPreviewDestinationVoxel&) const noexcept = default;
+};
+
 struct TransformPreviewRenderPlan final
 {
     bool DrawIndividualVoxels = false;
@@ -55,7 +65,8 @@ public:
     static constexpr std::size_t IndividualCollisionLimit = 256U;
 
     [[nodiscard]] static TransformPreviewRenderPlan Build(
-        std::size_t voxelCount,
+        std::size_t sourceVoxelCount,
+        std::size_t destinationVoxelCount,
         std::size_t collisionCount,
         std::size_t outOfBoundsCount) noexcept;
 };
@@ -75,6 +86,7 @@ struct TransformPreviewRenderData final
     std::uint64_t Revision = 0U;
     bool DrawSourceGhost = true;
     std::span<const TransformPreviewVoxel> Voxels;
+    std::span<const Asset::Voxel::VoxelPosition> SourcePositions;
     std::span<const Asset::Voxel::VoxelColor> Palette;
     SelectionBounds SourceBounds{};
     SelectionBounds PreviewBounds{};
@@ -94,6 +106,7 @@ struct TransformPreviewOperationData final
     SelectionBounds SourceBounds{};
     SelectionBounds PreviewBounds{};
     std::span<const TransformPreviewVoxel> Voxels;
+    std::span<const TransformPreviewVoxel> SourceVoxels;
     std::span<const Asset::Voxel::VoxelPosition> SourcePositions;
     std::span<const Asset::Voxel::VoxelPosition> CollisionPositions;
     std::span<const Asset::Voxel::VoxelPosition> OutOfBoundsPositions;
@@ -119,6 +132,11 @@ public:
         const SelectionService& selection,
         std::uint64_t documentGeneration,
         std::span<const Asset::Voxel::VoxelPosition> destinations);
+    [[nodiscard]] bool SetExplicitVoxelDestinations(
+        const Asset::Voxel::VoxelDocument& document,
+        const SelectionService& selection,
+        std::uint64_t documentGeneration,
+        std::span<const TransformPreviewDestinationVoxel> destinations);
     [[nodiscard]] bool IsValidFor(
         const Asset::Voxel::VoxelDocument& document,
         const SelectionService& selection,
@@ -137,9 +155,12 @@ public:
     [[nodiscard]] std::size_t ModelIndex() const noexcept;
     [[nodiscard]] Asset::Voxel::VoxelPosition Delta() const noexcept;
     [[nodiscard]] bool HasExplicitDestinations() const noexcept;
+    [[nodiscard]] bool HasExpandedDestinations() const noexcept;
     [[nodiscard]] const SelectionBounds& SourceBounds() const noexcept;
     [[nodiscard]] const SelectionBounds& PreviewBounds() const noexcept;
     [[nodiscard]] std::span<const TransformPreviewVoxel> Voxels() const noexcept;
+    [[nodiscard]] std::span<const TransformPreviewVoxel>
+        SourceVoxels() const noexcept;
     [[nodiscard]] std::span<const Asset::Voxel::VoxelPosition>
         SourcePositions() const noexcept;
     [[nodiscard]] std::span<const Asset::Voxel::VoxelPosition>
@@ -156,6 +177,7 @@ private:
     void ClearState() noexcept;
 
     std::vector<TransformPreviewVoxel> voxels_;
+    std::vector<TransformPreviewVoxel> sourceVoxels_;
     std::vector<Asset::Voxel::VoxelPosition> sourcePositions_;
     std::vector<Asset::Voxel::VoxelPosition> explicitDestinations_;
     std::vector<Asset::Voxel::VoxelPosition> collisionPositions_;
@@ -175,6 +197,7 @@ private:
     std::size_t modelIndex_ = 0U;
     TransformPreviewCollisionPolicy collisionPolicy_ =
         TransformPreviewCollisionPolicy::IgnoreSource;
+    bool expandedDestinations_ = false;
     bool active_ = false;
 };
 

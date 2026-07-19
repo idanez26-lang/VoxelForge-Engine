@@ -45,7 +45,10 @@ constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
          EditorInputCommand::ToolRotate, ActiveVoxelTool::Rotate},
         {EditorToolbarAction::Mirror, EditorToolbarGroup::Manipulation,
          "Mirror", "Mirror the selected voxels on X or Z",
-         EditorInputCommand::ToolMirror, ActiveVoxelTool::Mirror}
+         EditorInputCommand::ToolMirror, ActiveVoxelTool::Mirror},
+        {EditorToolbarAction::Scale, EditorToolbarGroup::Manipulation,
+         "Scale", "Scale the selected voxels by 2",
+         EditorInputCommand::ToolScale, ActiveVoxelTool::Scale}
     }};
 }
 
@@ -68,6 +71,8 @@ bool EditorToolbarModel::IsEnabled(
         return state.HasDocument && state.CanRotateSelection;
     if (button.Action == EditorToolbarAction::Mirror)
         return state.HasDocument && state.CanMirrorSelection;
+    if (button.Action == EditorToolbarAction::Scale)
+        return state.HasDocument && state.CanScaleSelection;
     return state.HasDocument;
 }
 

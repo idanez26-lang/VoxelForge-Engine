@@ -14,7 +14,7 @@ constexpr std::size_t Index(const EditorInputKey key) noexcept
 bool IsToolCommand(const EditorInputCommand command) noexcept
 {
     return command >= EditorInputCommand::ToolPencil &&
-        command <= EditorInputCommand::ToolMirror;
+        command <= EditorInputCommand::ToolScale;
 }
 
 bool SameChord(
@@ -23,6 +23,20 @@ bool SameChord(
 {
     return left.Key == right.Key && left.Control == right.Control &&
         left.Shift == right.Shift && left.Alt == right.Alt;
+}
+
+bool ContextuallyExclusive(
+    const EditorInputCommand left,
+    const EditorInputCommand right) noexcept
+{
+    return (left == EditorInputCommand::MirrorX &&
+               right == EditorInputCommand::ScaleX) ||
+        (left == EditorInputCommand::ScaleX &&
+            right == EditorInputCommand::MirrorX) ||
+        (left == EditorInputCommand::MirrorZ &&
+            right == EditorInputCommand::ScaleZ) ||
+        (left == EditorInputCommand::ScaleZ &&
+            right == EditorInputCommand::MirrorZ);
 }
 }
 
@@ -75,12 +89,19 @@ bool EditorInputService::IsAvailable(
         return availability.HasDocument && availability.CanRotateSelection;
     if (command == EditorInputCommand::ToolMirror)
         return availability.HasDocument && availability.CanMirrorSelection;
+    if (command == EditorInputCommand::ToolScale)
+        return availability.HasDocument && availability.CanScaleSelection;
     if (command == EditorInputCommand::RotateLeft ||
         command == EditorInputCommand::RotateRight)
         return availability.CanAdjustRotation;
     if (command == EditorInputCommand::MirrorX ||
         command == EditorInputCommand::MirrorZ)
         return availability.CanAdjustMirror;
+    if (command == EditorInputCommand::ScaleX ||
+        command == EditorInputCommand::ScaleY ||
+        command == EditorInputCommand::ScaleZ ||
+        command == EditorInputCommand::ScaleUniform)
+        return availability.CanAdjustScale;
     if (command == EditorInputCommand::TransformApply)
         return availability.CanApplyTransform;
     if (IsToolCommand(command)) return availability.HasDocument;
@@ -125,10 +146,15 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ToolDuplicate: return "Tool.Duplicate";
     case EditorInputCommand::ToolRotate: return "Tool.Rotate";
     case EditorInputCommand::ToolMirror: return "Tool.Mirror";
+    case EditorInputCommand::ToolScale: return "Tool.Scale";
     case EditorInputCommand::RotateLeft: return "Rotate.Left90";
     case EditorInputCommand::RotateRight: return "Rotate.Right90";
     case EditorInputCommand::MirrorX: return "Mirror.X";
     case EditorInputCommand::MirrorZ: return "Mirror.Z";
+    case EditorInputCommand::ScaleX: return "Scale.X2";
+    case EditorInputCommand::ScaleY: return "Scale.Y2";
+    case EditorInputCommand::ScaleZ: return "Scale.Z2";
+    case EditorInputCommand::ScaleUniform: return "Scale.Uniform2";
     case EditorInputCommand::TransformApply: return "Transform.Apply";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";
@@ -144,7 +170,10 @@ bool EditorInputService::HasBindingConflicts() const noexcept
 {
     for (std::size_t left = 0U; left < bindings_.size(); ++left)
         for (std::size_t right = left + 1U; right < bindings_.size(); ++right)
-            if (SameChord(bindings_[left], bindings_[right])) return true;
+            if (SameChord(bindings_[left], bindings_[right]) &&
+                !ContextuallyExclusive(
+                    bindings_[left].Command, bindings_[right].Command))
+                return true;
     return false;
 }
 

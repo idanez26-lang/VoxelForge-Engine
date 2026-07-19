@@ -933,6 +933,34 @@ void EditorWorkspace::DrawMainMenuBar()
             if (ImGui::MenuItem("Cancel Mirror", "Esc"))
                 ExecuteInputCommand(EditorInputCommand::InteractionCancel);
         }
+        if (ImGui::MenuItem(
+                "Scale", shortcut(EditorInputCommand::ToolScale),
+                voxelToolState_.IsScaleActive(), CanScaleSelection()))
+            ExecuteInputCommand(EditorInputCommand::ToolScale);
+        if (voxelToolState_.IsScaleActive())
+        {
+            ImGui::Separator();
+            if (ImGui::MenuItem("Scale X x2",
+                    shortcut(EditorInputCommand::ScaleX)))
+                ExecuteInputCommand(EditorInputCommand::ScaleX);
+            if (ImGui::MenuItem("Scale Y x2",
+                    shortcut(EditorInputCommand::ScaleY)))
+                ExecuteInputCommand(EditorInputCommand::ScaleY);
+            if (ImGui::MenuItem("Scale Z x2",
+                    shortcut(EditorInputCommand::ScaleZ)))
+                ExecuteInputCommand(EditorInputCommand::ScaleZ);
+            if (ImGui::MenuItem("Scale Uniform x2",
+                    shortcut(EditorInputCommand::ScaleUniform)))
+                ExecuteInputCommand(EditorInputCommand::ScaleUniform);
+            if (ImGui::MenuItem("Apply Scale",
+                    shortcut(EditorInputCommand::TransformApply), false,
+                    transformPreviewModel_.IsActive() &&
+                        !transformPreviewModel_.HasCollisions() &&
+                        !transformPreviewModel_.HasOutOfBounds()))
+                ExecuteInputCommand(EditorInputCommand::TransformApply);
+            if (ImGui::MenuItem("Cancel Scale", "Esc"))
+                ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        }
         ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
@@ -1006,6 +1034,10 @@ void EditorWorkspace::HandleCommandShortcuts()
         EditorInputKey::D, ImGui::IsKeyPressed(ImGuiKey_D, false));
     inputFrame.SetPressed(
         EditorInputKey::H, ImGui::IsKeyPressed(ImGuiKey_H, false));
+    inputFrame.SetPressed(
+        EditorInputKey::K, ImGui::IsKeyPressed(ImGuiKey_K, false));
+    inputFrame.SetPressed(
+        EditorInputKey::U, ImGui::IsKeyPressed(ImGuiKey_U, false));
     inputFrame.SetPressed(
         EditorInputKey::X, ImGui::IsKeyPressed(ImGuiKey_X, false));
     inputFrame.SetPressed(
@@ -1089,8 +1121,11 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
         voxelToolState_.IsRotateActive() && CanRotateSelection(),
         CanMirrorSelection(),
         voxelToolState_.IsMirrorActive() && CanMirrorSelection(),
+        CanScaleSelection(),
+        voxelToolState_.IsScaleActive() && CanScaleSelection(),
         (voxelToolState_.IsRotateActive() ||
-         voxelToolState_.IsMirrorActive()) &&
+         voxelToolState_.IsMirrorActive() ||
+         voxelToolState_.IsScaleActive()) &&
             transformPreviewModel_.IsActive() &&
             !transformPreviewModel_.HasCollisions() &&
             !transformPreviewModel_.HasOutOfBounds()};
@@ -1121,6 +1156,11 @@ bool EditorWorkspace::CanMirrorSelection() const noexcept
     return CanMoveSelection() && !selectionInteraction_.IsActive();
 }
 
+bool EditorWorkspace::CanScaleSelection() const noexcept
+{
+    return CanMoveSelection() && !selectionInteraction_.IsActive();
+}
+
 void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
 {
     switch (command)
@@ -1147,6 +1187,8 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         SelectVoxelTool(ActiveVoxelTool::Rotate); break;
     case EditorInputCommand::ToolMirror:
         SelectVoxelTool(ActiveVoxelTool::Mirror); break;
+    case EditorInputCommand::ToolScale:
+        SelectVoxelTool(ActiveVoxelTool::Scale); break;
     case EditorInputCommand::RotateLeft:
         static_cast<void>(BeginVoxelRotatePreview(
             VoxelRotationDirection::CounterClockwise)); break;
@@ -1157,11 +1199,22 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         static_cast<void>(BeginVoxelMirrorPreview(VoxelMirrorAxis::X)); break;
     case EditorInputCommand::MirrorZ:
         static_cast<void>(BeginVoxelMirrorPreview(VoxelMirrorAxis::Z)); break;
+    case EditorInputCommand::ScaleX:
+        static_cast<void>(BeginVoxelScalePreview(VoxelScaleMode::X)); break;
+    case EditorInputCommand::ScaleY:
+        static_cast<void>(BeginVoxelScalePreview(VoxelScaleMode::Y)); break;
+    case EditorInputCommand::ScaleZ:
+        static_cast<void>(BeginVoxelScalePreview(VoxelScaleMode::Z)); break;
+    case EditorInputCommand::ScaleUniform:
+        static_cast<void>(BeginVoxelScalePreview(VoxelScaleMode::Uniform));
+        break;
     case EditorInputCommand::TransformApply:
         if (voxelToolState_.IsRotateActive())
             static_cast<void>(ApplyVoxelRotate());
         else if (voxelToolState_.IsMirrorActive())
             static_cast<void>(ApplyVoxelMirror());
+        else if (voxelToolState_.IsScaleActive())
+            static_cast<void>(ApplyVoxelScale());
         break;
     case EditorInputCommand::FileSave:
         if (voxelDocumentSession_.HasActiveDocument())
@@ -1184,6 +1237,7 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool == ActiveVoxelTool::Duplicate && !CanDuplicateSelection()) return;
     if (tool == ActiveVoxelTool::Rotate && !CanRotateSelection()) return;
     if (tool == ActiveVoxelTool::Mirror && !CanMirrorSelection()) return;
+    if (tool == ActiveVoxelTool::Scale && !CanScaleSelection()) return;
     if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
     if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
@@ -1203,21 +1257,24 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     }
     if (tool != ActiveVoxelTool::Selection && tool != ActiveVoxelTool::Move &&
         tool != ActiveVoxelTool::Duplicate && tool != ActiveVoxelTool::Rotate &&
-        tool != ActiveVoxelTool::Mirror)
+        tool != ActiveVoxelTool::Mirror && tool != ActiveVoxelTool::Scale)
         selectionBoxInteriorHovered_ = false;
     if (tool == ActiveVoxelTool::Selection)
         static_cast<void>(voxelSelection_.ClearSelection());
     if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Duplicate &&
-        tool != ActiveVoxelTool::Rotate && tool != ActiveVoxelTool::Mirror)
+        tool != ActiveVoxelTool::Rotate && tool != ActiveVoxelTool::Mirror &&
+        tool != ActiveVoxelTool::Scale)
     {
         static_cast<void>(transformPreviewModel_.CancelPreview());
         voxelMoveStatusMessage_.clear();
         voxelDuplicateStatusMessage_.clear();
         voxelRotateStatusMessage_.clear();
         voxelMirrorStatusMessage_.clear();
+        voxelScaleStatusMessage_.clear();
     }
     if (tool != ActiveVoxelTool::Rotate) CancelVoxelRotate();
     if (tool != ActiveVoxelTool::Mirror) CancelVoxelMirror();
+    if (tool != ActiveVoxelTool::Scale) CancelVoxelScale();
     voxelToolState_.SetActiveTool(tool);
     voxelToolInput_.Reset();
     UpdateVoxelHighlights();
@@ -1242,6 +1299,13 @@ void EditorWorkspace::CancelActiveInteraction()
         UpdateVoxelHighlights();
         return;
     }
+    if (voxelToolState_.IsScaleActive())
+    {
+        CancelVoxelScale();
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Selection);
+        UpdateVoxelHighlights();
+        return;
+    }
     if (selectionInteraction_.IsActive())
     {
         CancelSelectionInteraction();
@@ -1260,6 +1324,9 @@ void EditorWorkspace::UndoCommand()
         const bool resumeRotatePreview = voxelToolState_.IsRotateActive() &&
             transformPreviewModel_.IsActive();
         if (resumeRotatePreview) CancelVoxelRotate();
+        if (voxelToolState_.IsScaleActive() &&
+            transformPreviewModel_.IsActive())
+            CancelVoxelScale();
         voxelEditInProgress_ = true;
         const VoxelEditHistoryResult result = voxelEditHistory_.Undo(*this);
         voxelEditInProgress_ = false;
@@ -1291,6 +1358,9 @@ void EditorWorkspace::RedoCommand()
         const bool resumeRotatePreview = voxelToolState_.IsRotateActive() &&
             transformPreviewModel_.IsActive();
         if (resumeRotatePreview) CancelVoxelRotate();
+        if (voxelToolState_.IsScaleActive() &&
+            transformPreviewModel_.IsActive())
+            CancelVoxelScale();
         voxelEditInProgress_ = true;
         const VoxelEditHistoryResult result = voxelEditHistory_.Redo(*this);
         voxelEditInProgress_ = false;
@@ -1577,7 +1647,7 @@ void EditorWorkspace::DrawScenePanel()
     EditorToolbar::Draw(
         {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
          CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection(),
-         CanMirrorSelection()},
+         CanMirrorSelection(), CanScaleSelection()},
         editorInputService_,
         {[this](const EditorInputCommand command)
          {
@@ -1606,6 +1676,38 @@ void EditorWorkspace::DrawScenePanel()
         if (ImGui::Button("Cancel"))
             ExecuteInputCommand(EditorInputCommand::InteractionCancel);
         DrawTooltip("Cancel Rotate without changing the document (Esc)");
+        ImGui::SameLine();
+    }
+    if (voxelToolState_.IsScaleActive())
+    {
+        if (ImGui::Button("X x2"))
+            ExecuteInputCommand(EditorInputCommand::ScaleX);
+        DrawTooltip("Preview Scale X by 2 (X)");
+        ImGui::SameLine();
+        if (ImGui::Button("Y x2"))
+            ExecuteInputCommand(EditorInputCommand::ScaleY);
+        DrawTooltip("Preview Scale Y by 2 (Y)");
+        ImGui::SameLine();
+        if (ImGui::Button("Z x2"))
+            ExecuteInputCommand(EditorInputCommand::ScaleZ);
+        DrawTooltip("Preview Scale Z by 2 (Z)");
+        ImGui::SameLine();
+        if (ImGui::Button("Uniform x2"))
+            ExecuteInputCommand(EditorInputCommand::ScaleUniform);
+        DrawTooltip("Preview uniform Scale by 2 (U)");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(
+            !transformPreviewModel_.IsActive() ||
+            transformPreviewModel_.HasCollisions() ||
+            transformPreviewModel_.HasOutOfBounds());
+        if (ImGui::Button("Apply"))
+            ExecuteInputCommand(EditorInputCommand::TransformApply);
+        ImGui::EndDisabled();
+        DrawTooltip("Apply the current Scale (Enter)");
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+            ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        DrawTooltip("Cancel Scale without changing the document (Esc)");
         ImGui::SameLine();
     }
     if (voxelToolState_.IsMirrorActive())
@@ -1723,13 +1825,15 @@ void EditorWorkspace::DrawScenePanel()
              voxelToolState_.IsMoveActive() ||
              voxelToolState_.IsDuplicateActive() ||
              voxelToolState_.IsRotateActive() ||
-             voxelToolState_.IsMirrorActive()) &&
+             voxelToolState_.IsMirrorActive() ||
+             voxelToolState_.IsScaleActive()) &&
             selectionService_.EditableBounds().Valid &&
             selectionInteraction_.Mode() != SelectionInteractionMode::Creating)
         {
             const SelectionBounds& handleBounds =
                 (voxelToolState_.IsRotateActive() ||
-                 voxelToolState_.IsMirrorActive()) &&
+                 voxelToolState_.IsMirrorActive() ||
+                 voxelToolState_.IsScaleActive()) &&
                     transformPreviewModel_.IsActive()
                 ? transformPreviewModel_.PreviewBounds()
                 :
@@ -1995,12 +2099,31 @@ void EditorWorkspace::DrawScenePanel()
                 ? "Mirror X — Enter to apply — Esc to cancel"
                 : "Mirror Z — Enter to apply — Esc to cancel";
         }
+        else if (voxelToolState_.IsScaleActive())
+        {
+            viewportHelp = !voxelScaleStatusMessage_.empty()
+                ? voxelScaleStatusMessage_.c_str()
+                : !transformPreviewModel_.IsActive()
+                ? "Choose X, Y, Z or U to preview Scale x2"
+                : transformPreviewModel_.HasCollisions()
+                ? "Scale blocked: destination is occupied"
+                : transformPreviewModel_.HasOutOfBounds()
+                ? "Scale blocked: destination is outside the model"
+                : voxelScaleMode_ == VoxelScaleMode::Uniform
+                ? "Scale Uniform x2 - Enter to apply - Esc to cancel"
+                : voxelScaleMode_ == VoxelScaleMode::X
+                ? "Scale X x2 - Enter to apply - Esc to cancel"
+                : voxelScaleMode_ == VoxelScaleMode::Y
+                ? "Scale Y x2 - Enter to apply - Esc to cancel"
+                : "Scale Z x2 - Enter to apply - Esc to cancel";
+        }
         DrawTooltip(viewportHelp);
         if (voxelToolState_.IsSelectionActive() ||
             voxelToolState_.IsMoveActive() ||
             voxelToolState_.IsDuplicateActive() ||
             voxelToolState_.IsRotateActive() ||
-            voxelToolState_.IsMirrorActive())
+            voxelToolState_.IsMirrorActive() ||
+            voxelToolState_.IsScaleActive())
         {
             const ImVec2 textSize = ImGui::CalcTextSize(viewportHelp);
             const ImVec2 helpMinimum{imageOrigin.x + 10.0F, imageOrigin.y + 10.0F};
@@ -4183,6 +4306,7 @@ void EditorWorkspace::PrepareForApplicationClose()
     voxelDuplicateStatusMessage_.clear();
     voxelRotateStatusMessage_.clear();
     voxelMirrorStatusMessage_.clear();
+    voxelScaleStatusMessage_.clear();
     voxelSelectionClickCandidate_ = false;
     selectionPointerAnchor_.reset();
     dragDropImport_.Reset();
@@ -8676,6 +8800,235 @@ bool EditorWorkspace::VoxelMirrorSmokePassed() const noexcept
         voxelMirrorSmokeReopened_ && voxelMirrorSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunVoxelScaleSmokeStep(const std::size_t frame)
+{
+    using Asset::Voxel::VoxelPosition;
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const std::vector<VoxelPosition> source{{2, 1, 2}, {3, 1, 2}};
+    const SelectionBounds sourceBounds =
+        SelectionBounds::FromCorners({2, 1, 2}, {3, 1, 2});
+    const auto scaledPositions = []()
+    {
+        std::vector<VoxelPosition> result;
+        result.reserve(16U);
+        for (std::int32_t z = 2; z <= 3; ++z)
+            for (std::int32_t y = 1; y <= 2; ++y)
+                for (std::int32_t x = 2; x <= 5; ++x)
+                    result.push_back({x, y, z});
+        std::sort(result.begin(), result.end(),
+            [](const VoxelPosition left, const VoxelPosition right)
+            {
+                if (left.X != right.X) return left.X < right.X;
+                if (left.Y != right.Y) return left.Y < right.Y;
+                return left.Z < right.Z;
+            });
+        return result;
+    };
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"ScaleSmoke", {64U, 64U, 64U}});
+        voxelScaleSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+        const std::vector<VoxelChange> seed{
+            {0U, source[0], false, 0U, true, 3U},
+            {0U, source[1], false, 0U, true, 11U}};
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Scale Smoke", seed});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace);
+        EditorInputFrame shortcut;
+        shortcut.SetPressed(EditorInputKey::K);
+        const bool inputReady = editorInputService_.Resolve(
+            shortcut, CurrentCommandAvailability()) ==
+            EditorInputCommand::ToolScale;
+        const auto scaleButton = std::find_if(
+            EditorToolbarModel::Buttons().begin(),
+            EditorToolbarModel::Buttons().end(),
+            [](const EditorToolbarButton& button)
+            {
+                return button.Action == EditorToolbarAction::Scale;
+            });
+        const bool toolbarReady =
+            scaleButton != EditorToolbarModel::Buttons().end() &&
+            EditorToolbarModel::IsEnabled(*scaleButton,
+                {true, document->IsDirty(), voxelToolState_.ActiveTool(),
+                 CanMoveSelection(), CanDuplicateSelection(),
+                 CanRotateSelection(), CanMirrorSelection(),
+                 CanScaleSelection()});
+        const std::uint64_t revision = document->GetRevision();
+        ExecuteInputCommand(EditorInputCommand::ToolScale);
+        EditorInputFrame apply;
+        apply.SetPressed(EditorInputKey::Enter);
+        voxelScaleSmokePrepared_ = seeded && selected && inputReady &&
+            toolbarReady && voxelToolState_.IsScaleActive() &&
+            !transformPreviewModel_.IsActive() &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            editorInputService_.Resolve(
+                apply, CurrentCommandAvailability()) ==
+                EditorInputCommand::None &&
+            document->GetRevision() == revision &&
+            voxelEditHistory_.UndoCount() == 1U;
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelScaleSmokePrepared_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        const auto preview = [this, document](
+            const EditorInputCommand command,
+            const VoxelScaleMode mode,
+            const Asset::Voxel::VoxelDimensions dimensions,
+            const std::size_t count)
+        {
+            ExecuteInputCommand(command);
+            return voxelScaleMode_ == mode &&
+                transformPreviewModel_.IsActive() &&
+                transformPreviewModel_.HasExpandedDestinations() &&
+                transformPreviewModel_.SourceVoxels().size() == 2U &&
+                transformPreviewModel_.VoxelCount() == count &&
+                transformPreviewModel_.PreviewBounds().Dimensions() ==
+                    dimensions &&
+                !transformPreviewModel_.HasCollisions() &&
+                !transformPreviewModel_.HasOutOfBounds() &&
+                document->GetVoxelCount() == 2U;
+        };
+        EditorInputFrame x;
+        x.SetPressed(EditorInputKey::X);
+        const bool contextualInput = editorInputService_.Resolve(
+            x, CurrentCommandAvailability()) == EditorInputCommand::ScaleX;
+        voxelScaleSmokePreviewed_ = contextualInput &&
+            preview(EditorInputCommand::ScaleX, VoxelScaleMode::X,
+                {4U, 1U, 1U}, 4U) &&
+            preview(EditorInputCommand::ScaleY, VoxelScaleMode::Y,
+                {2U, 2U, 1U}, 4U) &&
+            preview(EditorInputCommand::ScaleZ, VoxelScaleMode::Z,
+                {2U, 1U, 2U}, 4U) &&
+            preview(EditorInputCommand::ScaleUniform,
+                VoxelScaleMode::Uniform, {4U, 2U, 2U}, 16U) &&
+            document->GetRevision() == revision &&
+            selectionService_.EditableBounds() == sourceBounds;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelScaleSmokePreviewed_) return false;
+        const bool rendered = viewportRenderer_.HasTransformPreview() &&
+            viewportRenderer_.TransformPreviewSourcePrimitiveCount() == 2U &&
+            viewportRenderer_.TransformPreviewDestinationPrimitiveCount() ==
+                16U;
+        const std::uint64_t revision = document->GetRevision();
+        voxelScaleSmokeApplied_ = rendered && ApplyVoxelScale() &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 16U &&
+            selectionService_.Count() == 16U &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({2, 1, 2}, {5, 2, 3}) &&
+            document->GetVoxel({2, 2, 3})->PaletteIndex == 3U &&
+            document->GetVoxel({5, 2, 3})->PaletteIndex == 11U &&
+            voxelToolState_.IsScaleActive() &&
+            !transformPreviewModel_.IsActive() &&
+            voxelEditHistory_.UndoCount() == 2U;
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !voxelScaleSmokeApplied_) return false;
+        UndoCommand();
+        const bool undone = document->GetVoxelCount() == 2U &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            document->GetVoxel(source[0])->PaletteIndex == 3U &&
+            document->GetVoxel(source[1])->PaletteIndex == 11U;
+        RedoCommand();
+        voxelScaleSmokeUndoRedo_ = undone &&
+            document->GetVoxelCount() == 16U &&
+            selectionService_.Count() == 16U &&
+            voxelToolState_.IsScaleActive() &&
+            !transformPreviewModel_.IsActive();
+    }
+    else if (frame == 4U)
+    {
+        if (!document || !voxelScaleSmokeUndoRedo_) return false;
+        const auto collisionVoxel = document->SetVoxel({9, 1, 2}, 19U);
+        const bool collisionPreview =
+            BeginVoxelScalePreview(VoxelScaleMode::X);
+        const bool collisionRejected = collisionVoxel.Changed &&
+            collisionPreview && transformPreviewModel_.HasCollisions() &&
+            !ApplyVoxelScale() && document->HasVoxel({9, 1, 2}) &&
+            document->RemoveVoxel({9, 1, 2}).Changed;
+
+        const auto edgeA = document->SetVoxel({62, 1, 1}, 5U);
+        const auto edgeB = document->SetVoxel({63, 1, 1}, 7U);
+        const std::array<VoxelPosition, 2U> edge{{{62, 1, 1}, {63, 1, 1}}};
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            edge, SelectionBounds::FromCorners(edge[0], edge[1]),
+            SelectionMode::Replace));
+        const bool outsidePreview =
+            BeginVoxelScalePreview(VoxelScaleMode::X);
+        const bool outsideRejected = edgeA.Changed && edgeB.Changed &&
+            outsidePreview && transformPreviewModel_.HasOutOfBounds() &&
+            !ApplyVoxelScale() && document->RemoveVoxel(edge[0]).Changed &&
+            document->RemoveVoxel(edge[1]).Changed;
+        const std::vector<VoxelPosition> restored = scaledPositions();
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            restored, SelectionBounds::FromCorners({2, 1, 2}, {5, 2, 3}),
+            SelectionMode::Replace));
+        voxelScaleSmokeRejected_ = collisionRejected && outsideRejected &&
+            document->GetVoxelCount() == 16U;
+    }
+    else if (frame == 5U)
+    {
+        voxelScaleSmokeSaved_ = document && voxelScaleSmokeRejected_ &&
+            SaveVoxelModel() && !document->IsDirty() &&
+            std::filesystem::is_regular_file(voxelScaleSmokePath_);
+        if (!voxelScaleSmokeSaved_) return false;
+        ClearVoxelViewport();
+        voxelScaleSmokeReopened_ = OpenVoxInViewportNow(voxelScaleSmokePath_);
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelScaleSmokeReopened_ = voxelScaleSmokeReopened_ && document &&
+            document->GetVoxelCount() == 16U &&
+            document->GetVoxel({2, 2, 3})->PaletteIndex == 3U &&
+            document->GetVoxel({5, 2, 3})->PaletteIndex == 11U;
+    }
+    else if (frame == 6U)
+    {
+        if (!document || !voxelScaleSmokeReopened_) return false;
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const std::vector<VoxelPosition> selected = scaledPositions();
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            selected, SelectionBounds::FromCorners({2, 1, 2}, {5, 2, 3}),
+            SelectionMode::Replace));
+        SelectVoxelTool(ActiveVoxelTool::Scale);
+        const bool preview = BeginVoxelScalePreview(VoxelScaleMode::Uniform);
+        PrepareForApplicationClose();
+        const bool closeSafe = preview && !transformPreviewModel_.IsActive();
+        CloseProject();
+        voxelScaleSmokeCleaned_ = closeSafe &&
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !transformPreviewModel_.IsActive() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelScaleSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelScaleSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelScaleSmokePassed();
+}
+
+bool EditorWorkspace::VoxelScaleSmokePassed() const noexcept
+{
+    return voxelScaleSmokePrepared_ && voxelScaleSmokePreviewed_ &&
+        voxelScaleSmokeApplied_ && voxelScaleSmokeUndoRedo_ &&
+        voxelScaleSmokeRejected_ && voxelScaleSmokeSaved_ &&
+        voxelScaleSmokeReopened_ && voxelScaleSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunSaveOnExitSmokeStep(const std::size_t frame)
 {
     using Asset::Voxel::VoxelPosition;
@@ -8700,9 +9053,9 @@ bool EditorWorkspace::RunSaveOnExitSmokeStep(const std::size_t frame)
         const std::array<VoxelPosition, 1U> selectedVoxels{savedVoxel};
         const bool selected = selectionService_.ApplySortedVolume(
             selectedVoxels, bounds, SelectionMode::Replace);
-        SelectVoxelTool(ActiveVoxelTool::Rotate);
-        const bool previewStarted = BeginVoxelRotatePreview(
-            VoxelRotationDirection::Clockwise);
+        SelectVoxelTool(ActiveVoxelTool::Scale);
+        const bool previewStarted = BeginVoxelScalePreview(
+            VoxelScaleMode::Uniform);
         RequestExit();
         saveOnExitSmokeRequested_ = edited && selected && previewStarted &&
             document->IsDirty() &&
@@ -8763,7 +9116,8 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
             document != nullptr && document->IsDirty() &&
                 !voxelDocumentSaveService_.IsBusy(),
             voxelToolState_.ActiveTool(), CanMoveSelection(),
-            CanDuplicateSelection(), CanRotateSelection()};
+            CanDuplicateSelection(), CanRotateSelection(),
+            CanMirrorSelection(), CanScaleSelection()};
     };
     const auto activeToolCount = [](const EditorToolbarState state)
     {
@@ -8806,7 +9160,8 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
                     return button.Action == EditorToolbarAction::Move ||
                         button.Action == EditorToolbarAction::Duplicate ||
                         button.Action == EditorToolbarAction::Rotate ||
-                        button.Action == EditorToolbarAction::Mirror
+                        button.Action == EditorToolbarAction::Mirror ||
+                        button.Action == EditorToolbarAction::Scale
                         ? !EditorToolbarModel::IsEnabled(button, state)
                         : EditorToolbarModel::IsEnabled(button, state);
                 });
@@ -10027,6 +10382,106 @@ void EditorWorkspace::CancelVoxelMirror() noexcept
     voxelMirrorStatusMessage_.clear();
 }
 
+bool EditorWorkspace::BeginVoxelScalePreview(const VoxelScaleMode mode)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || !CanScaleSelection())
+    {
+        voxelScaleStatusMessage_ = "Select voxels before using Scale";
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    const std::uint64_t generation = voxelDocumentSession_.Generation();
+    if (voxelToolState_.IsScaleActive() && voxelScaleMode_ == mode &&
+        transformPreviewModel_.IsValidFor(
+            *document, selectionService_, generation) &&
+        transformPreviewModel_.HasExpandedDestinations())
+        return true;
+    if (!transformPreviewModel_.BeginPreview(
+            *document, selectionService_, generation, 0U,
+            TransformPreviewCollisionPolicy::IgnoreSource))
+    {
+        voxelScaleStatusMessage_ = "Scale preview could not capture selection";
+        UpdateVoxelHighlights();
+        return false;
+    }
+    const VoxelScaleGeometry geometry =
+        ScaleVoxelSelectionOperation::BuildGeometry(
+            transformPreviewModel_.SourceVoxels(),
+            selectionService_.EditableBounds(), mode);
+    if (!geometry.Valid() ||
+        !transformPreviewModel_.SetExplicitVoxelDestinations(
+            *document, selectionService_, generation, geometry.Destinations))
+    {
+        voxelScaleStatusMessage_ = geometry.Message.empty()
+            ? "Scale preview could not be built" : geometry.Message;
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+    voxelScaleMode_ = mode;
+    voxelScaleStatusMessage_.clear();
+    voxelMoveStatusMessage_.clear();
+    voxelDuplicateStatusMessage_.clear();
+    voxelRotateStatusMessage_.clear();
+    voxelMirrorStatusMessage_.clear();
+    UpdateVoxelHighlights();
+    return true;
+}
+
+bool EditorWorkspace::ApplyVoxelScale()
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || voxelEditInProgress_ || voxelEditHistory_.IsBusy())
+    {
+        CancelVoxelScale();
+        return false;
+    }
+
+    ScaleVoxelSelectionResult prepared =
+        ScaleVoxelSelectionOperation::Build(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            transformPreviewModel_, voxelScaleMode_);
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    if (!prepared.Ready())
+    {
+        voxelScaleStatusMessage_ = prepared.Message;
+        if (!prepared.Message.empty())
+            AddConsoleMessage("[Edit] " + prepared.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    voxelEditInProgress_ = true;
+    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
+        *this, std::move(prepared.Operation));
+    voxelEditInProgress_ = false;
+    if (!result)
+    {
+        voxelScaleStatusMessage_ = result.Message;
+        AddConsoleMessage("[Edit] Scale failed: " + result.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+    ApplyVoxelHistorySelection(result);
+    voxelScaleStatusMessage_.clear();
+    AddConsoleMessage("[Edit] Scaled selection " +
+        std::string(VoxelScaleModeName(voxelScaleMode_)) + " x2 to " +
+        std::to_string(selectionService_.Count()) + " voxel(s).");
+    UpdateVoxelHighlights();
+    return true;
+}
+
+void EditorWorkspace::CancelVoxelScale() noexcept
+{
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    voxelScaleStatusMessage_.clear();
+}
+
 void EditorWorkspace::CancelSelectionInteraction()
 {
     if (!selectionInteraction_.IsActive()) return;
@@ -10409,7 +10864,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     const bool selectionVisualActive =
         voxelToolState_.IsSelectionActive() || voxelToolState_.IsMoveActive() ||
         voxelToolState_.IsDuplicateActive() || voxelToolState_.IsRotateActive() ||
-        voxelToolState_.IsMirrorActive();
+        voxelToolState_.IsMirrorActive() || voxelToolState_.IsScaleActive();
     if (selectionVisualActive)
     {
         const auto selected = selectionService_.Voxels();
@@ -10423,7 +10878,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             selectionBounds = VoxelBoxBounds{bounds.Minimum, bounds.Maximum};
         const SelectionBounds& editable =
             (voxelToolState_.IsRotateActive() ||
-             voxelToolState_.IsMirrorActive()) &&
+             voxelToolState_.IsMirrorActive() ||
+             voxelToolState_.IsScaleActive()) &&
                 transformPreviewModel_.IsActive()
             ? transformPreviewModel_.PreviewBounds()
             :
@@ -10588,6 +11044,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     voxelDuplicateStatusMessage_.clear();
     voxelRotateStatusMessage_.clear();
     voxelMirrorStatusMessage_.clear();
+    voxelScaleStatusMessage_.clear();
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();

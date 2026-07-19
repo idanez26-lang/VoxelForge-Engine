@@ -22,10 +22,15 @@ enum class EditorInputCommand : std::uint8_t
     ToolDuplicate,
     ToolRotate,
     ToolMirror,
+    ToolScale,
     RotateLeft,
     RotateRight,
     MirrorX,
     MirrorZ,
+    ScaleX,
+    ScaleY,
+    ScaleZ,
+    ScaleUniform,
     TransformApply,
     FileSave,
     EditUndo,
@@ -46,6 +51,8 @@ enum class EditorInputKey : std::uint8_t
     M,
     D,
     H,
+    K,
+    U,
     X,
     Q,
     R,
@@ -96,13 +103,15 @@ struct EditorCommandAvailability final
     bool CanAdjustRotation = false;
     bool CanMirrorSelection = false;
     bool CanAdjustMirror = false;
+    bool CanScaleSelection = false;
+    bool CanAdjustScale = false;
     bool CanApplyTransform = false;
 };
 
 class EditorInputService final
 {
 public:
-    static constexpr std::size_t BindingCount = 20U;
+    static constexpr std::size_t BindingCount = 25U;
 
     [[nodiscard]] EditorInputCommand Resolve(
         const EditorInputFrame& frame,
@@ -150,6 +159,8 @@ private:
          false, false, false, "R"},
         {EditorInputCommand::ToolMirror, EditorInputKey::H,
          false, false, false, "H"},
+        {EditorInputCommand::ToolScale, EditorInputKey::K,
+         false, false, false, "K"},
         {EditorInputCommand::RotateLeft, EditorInputKey::Q,
          false, false, false, "Q"},
         {EditorInputCommand::RotateRight, EditorInputKey::Q,
@@ -158,6 +169,14 @@ private:
          false, false, false, "X"},
         {EditorInputCommand::MirrorZ, EditorInputKey::Z,
          false, false, false, "Z"},
+        {EditorInputCommand::ScaleX, EditorInputKey::X,
+         false, false, false, "X"},
+        {EditorInputCommand::ScaleY, EditorInputKey::Y,
+         false, false, false, "Y"},
+        {EditorInputCommand::ScaleZ, EditorInputKey::Z,
+         false, false, false, "Z"},
+        {EditorInputCommand::ScaleUniform, EditorInputKey::U,
+         false, false, false, "U"},
         {EditorInputCommand::TransformApply, EditorInputKey::Enter,
          false, false, false, "Enter"}
     }};
