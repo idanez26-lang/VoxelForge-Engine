@@ -21,6 +21,12 @@ enum class TransformPreviewVoxelState : std::uint8_t
     OutOfBounds
 };
 
+enum class TransformPreviewCollisionPolicy : std::uint8_t
+{
+    IgnoreSource,
+    IncludeSource
+};
+
 struct TransformPreviewVoxel final
 {
     Asset::Voxel::VoxelPosition SourcePosition{};
@@ -66,6 +72,7 @@ struct TransformPreviewBufferMetrics final
 struct TransformPreviewRenderData final
 {
     std::uint64_t Revision = 0U;
+    bool DrawSourceGhost = true;
     std::span<const TransformPreviewVoxel> Voxels;
     std::span<const Asset::Voxel::VoxelColor> Palette;
     SelectionBounds SourceBounds{};
@@ -98,7 +105,9 @@ public:
         const Asset::Voxel::VoxelDocument& document,
         const SelectionService& selection,
         std::uint64_t documentGeneration,
-        std::size_t modelIndex = 0U);
+        std::size_t modelIndex = 0U,
+        TransformPreviewCollisionPolicy collisionPolicy =
+            TransformPreviewCollisionPolicy::IgnoreSource);
     [[nodiscard]] bool SetDelta(
         const Asset::Voxel::VoxelDocument& document,
         const SelectionService& selection,
@@ -156,6 +165,8 @@ private:
     std::uint64_t renderRevision_ = 0U;
     std::uint64_t rebuildCount_ = 0U;
     std::size_t modelIndex_ = 0U;
+    TransformPreviewCollisionPolicy collisionPolicy_ =
+        TransformPreviewCollisionPolicy::IgnoreSource;
     bool active_ = false;
 };
 

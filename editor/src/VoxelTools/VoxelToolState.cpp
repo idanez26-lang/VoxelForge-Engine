@@ -16,6 +16,7 @@ const char* ActiveVoxelToolName(const ActiveVoxelTool tool) noexcept
     case ActiveVoxelTool::Sphere: return "Sphere";
     case ActiveVoxelTool::Selection: return "Selection";
     case ActiveVoxelTool::Move: return "Move";
+    case ActiveVoxelTool::Duplicate: return "Duplicate";
     }
     return "None";
 }
@@ -73,6 +74,11 @@ bool VoxelToolState::IsSelectionActive() const noexcept
 bool VoxelToolState::IsMoveActive() const noexcept
 {
     return activeTool_ == ActiveVoxelTool::Move;
+}
+
+bool VoxelToolState::IsDuplicateActive() const noexcept
+{
+    return activeTool_ == ActiveVoxelTool::Duplicate;
 }
 
 bool VoxelToolState::IsEditingToolActive() const noexcept

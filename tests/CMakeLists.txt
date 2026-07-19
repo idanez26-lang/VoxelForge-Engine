@@ -432,6 +432,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelMoveTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelDuplicateTests
+    Editor/VoxelDuplicateTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelDuplicateTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorVoxelDuplicateTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelDuplicate
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelDuplicateTests>
+)
+add_executable(
     VoxelForgeEditorQualityOfLifeTests
     Editor/QualityOfLifeTests.cpp
 )
@@ -874,6 +887,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelMoveSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-move-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.VoxelDuplicateSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-duplicate-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -908,6 +925,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.KeyboardShortcutsSmoke
         VoxelForge.Editor.ModernDialogsSmoke
         VoxelForge.Editor.VoxelMoveSmoke
+        VoxelForge.Editor.VoxelDuplicateSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

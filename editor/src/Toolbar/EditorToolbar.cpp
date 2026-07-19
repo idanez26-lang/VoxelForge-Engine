@@ -173,6 +173,18 @@ void DrawMoveIcon(ImDrawList& drawList, const ImVec2 minimum,
         {center.x + head * 0.55F, maximum.y - inset - head}, color);
 }
 
+void DrawDuplicateIcon(ImDrawList& drawList, const ImVec2 minimum,
+    const ImVec2 maximum, const ImU32 color, const float thickness)
+{
+    const float offset = (maximum.x - minimum.x) * 0.22F;
+    drawList.AddRect(
+        {minimum.x + offset, minimum.y},
+        {maximum.x, maximum.y - offset}, color, 1.5F, 0, thickness);
+    drawList.AddRect(
+        {minimum.x, minimum.y + offset},
+        {maximum.x - offset, maximum.y}, color, 1.5F, 0, thickness);
+}
+
 bool DrawIcon(
     ImDrawList& drawList,
     const EditorToolbarAction action,
@@ -202,6 +214,9 @@ bool DrawIcon(
         return true;
     case EditorToolbarAction::Move:
         DrawMoveIcon(drawList, minimum, maximum, color, thickness); return true;
+    case EditorToolbarAction::Duplicate:
+        DrawDuplicateIcon(drawList, minimum, maximum, color, thickness);
+        return true;
     }
     return false;
 }
@@ -225,6 +240,8 @@ void DrawTooltip(
             ? "No unsaved voxel model to save."
             : button.Action == EditorToolbarAction::Move
             ? "Select one or more voxels to use Move."
+            : button.Action == EditorToolbarAction::Duplicate
+            ? "Select one or more voxels to use Duplicate."
             : "Open a voxel model to use this tool.");
     ImGui::EndTooltip();
 }

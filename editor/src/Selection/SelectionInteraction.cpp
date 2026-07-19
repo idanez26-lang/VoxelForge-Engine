@@ -166,10 +166,24 @@ bool SelectionInteraction::BeginMovingContent(
     return true;
 }
 
+bool SelectionInteraction::BeginDuplicatingContent(
+    const SelectionBounds originalBounds,
+    const std::uint64_t documentGeneration,
+    const SelectionMovePlane movePlane,
+    const Vec3 pointerWorldPosition) noexcept
+{
+    if (!BeginMovingBox(originalBounds, documentGeneration, movePlane,
+            pointerWorldPosition))
+        return false;
+    mode_ = SelectionInteractionMode::DuplicatingContent;
+    return true;
+}
+
 bool SelectionInteraction::MoveContent(
     const Vec3 pointerWorldPosition) noexcept
 {
-    if (mode_ != SelectionInteractionMode::MovingContent ||
+    if ((mode_ != SelectionInteractionMode::MovingContent &&
+         mode_ != SelectionInteractionMode::DuplicatingContent) ||
         !IsFinite(pointerWorldPosition))
         return false;
     const Vec3 worldDelta = pointerWorldPosition - moveAnchorWorld_;
@@ -217,7 +231,9 @@ SelectionPointerRelease SelectionInteraction::PointerUp() noexcept
     release.WasDrag =
         mode_ == SelectionInteractionMode::ResizingFace ||
         mode_ == SelectionInteractionMode::MovingBox ||
-        mode_ == SelectionInteractionMode::MovingContent || dragRecognized_;
+        mode_ == SelectionInteractionMode::MovingContent ||
+        mode_ == SelectionInteractionMode::DuplicatingContent ||
+        dragRecognized_;
     release.Operation = operation_;
     release.Bounds = release.WasDrag ? Commit() : Cancel();
     return release;
@@ -279,7 +295,8 @@ std::optional<SelectionBounds> SelectionInteraction::Cancel() noexcept
     const std::optional<SelectionBounds> restore =
         mode_ == SelectionInteractionMode::ResizingFace ||
         mode_ == SelectionInteractionMode::MovingBox ||
-        mode_ == SelectionInteractionMode::MovingContent
+        mode_ == SelectionInteractionMode::MovingContent ||
+        mode_ == SelectionInteractionMode::DuplicatingContent
         ? std::optional<SelectionBounds>(originalBounds_)
         : std::nullopt;
     Reset();

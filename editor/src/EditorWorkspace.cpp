@@ -873,6 +873,11 @@ void EditorWorkspace::DrawMainMenuBar()
                 "Move", shortcut(EditorInputCommand::ToolMove),
                 voxelToolState_.IsMoveActive(), CanMoveSelection()))
             ExecuteInputCommand(EditorInputCommand::ToolMove);
+        if (ImGui::MenuItem(
+                "Duplicate", shortcut(EditorInputCommand::ToolDuplicate),
+                voxelToolState_.IsDuplicateActive(),
+                CanDuplicateSelection()))
+            ExecuteInputCommand(EditorInputCommand::ToolDuplicate);
         ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
@@ -943,6 +948,8 @@ void EditorWorkspace::HandleCommandShortcuts()
     inputFrame.SetPressed(
         EditorInputKey::M, ImGui::IsKeyPressed(ImGuiKey_M, false));
     inputFrame.SetPressed(
+        EditorInputKey::D, ImGui::IsKeyPressed(ImGuiKey_D, false));
+    inputFrame.SetPressed(
         EditorInputKey::Z, ImGui::IsKeyPressed(ImGuiKey_Z, false));
     inputFrame.SetPressed(
         EditorInputKey::Y, ImGui::IsKeyPressed(ImGuiKey_Y, false));
@@ -1011,7 +1018,8 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
             selectionInteraction_.IsActive() ||
             selectionService_.EditableBounds().Valid ||
             voxelSelection_.Selected().has_value(),
-        CanMoveSelection()};
+        CanMoveSelection(),
+        CanDuplicateSelection()};
 }
 
 bool EditorWorkspace::CanMoveSelection() const noexcept
@@ -1022,6 +1030,11 @@ bool EditorWorkspace::CanMoveSelection() const noexcept
         selectionService_.EditableBounds().Valid &&
         selectionService_.DocumentGeneration() ==
             voxelDocumentSession_.Generation();
+}
+
+bool EditorWorkspace::CanDuplicateSelection() const noexcept
+{
+    return CanMoveSelection() && !selectionInteraction_.IsActive();
 }
 
 void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
@@ -1044,6 +1057,8 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         SelectVoxelTool(ActiveVoxelTool::Selection); break;
     case EditorInputCommand::ToolMove:
         SelectVoxelTool(ActiveVoxelTool::Move); break;
+    case EditorInputCommand::ToolDuplicate:
+        SelectVoxelTool(ActiveVoxelTool::Duplicate); break;
     case EditorInputCommand::FileSave:
         if (voxelDocumentSession_.HasActiveDocument())
             static_cast<void>(SaveVoxelModel());
@@ -1062,25 +1077,34 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
 void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
 {
     if (tool == ActiveVoxelTool::Move && !CanMoveSelection()) return;
+    if (tool == ActiveVoxelTool::Duplicate && !CanDuplicateSelection()) return;
     if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
     if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
     if (selectionInteraction_.IsActive())
     {
-        const bool movingContent = selectionInteraction_.Mode() ==
+        const SelectionInteractionMode interactionMode =
+            selectionInteraction_.Mode();
+        const bool movingContent = interactionMode ==
             SelectionInteractionMode::MovingContent;
+        const bool duplicatingContent = interactionMode ==
+            SelectionInteractionMode::DuplicatingContent;
         if ((movingContent && tool != ActiveVoxelTool::Move) ||
-            (!movingContent && tool != ActiveVoxelTool::Selection))
+            (duplicatingContent && tool != ActiveVoxelTool::Duplicate) ||
+            (!movingContent && !duplicatingContent &&
+             tool != ActiveVoxelTool::Selection))
             CancelSelectionInteraction();
     }
-    if (tool != ActiveVoxelTool::Selection && tool != ActiveVoxelTool::Move)
+    if (tool != ActiveVoxelTool::Selection && tool != ActiveVoxelTool::Move &&
+        tool != ActiveVoxelTool::Duplicate)
         selectionBoxInteriorHovered_ = false;
     if (tool == ActiveVoxelTool::Selection)
         static_cast<void>(voxelSelection_.ClearSelection());
-    if (tool != ActiveVoxelTool::Move)
+    if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Duplicate)
     {
         static_cast<void>(transformPreviewModel_.CancelPreview());
         voxelMoveStatusMessage_.clear();
+        voxelDuplicateStatusMessage_.clear();
     }
     voxelToolState_.SetActiveTool(tool);
     voxelToolInput_.Reset();
@@ -1414,7 +1438,7 @@ void EditorWorkspace::DrawScenePanel()
         activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
     EditorToolbar::Draw(
         {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
-         CanMoveSelection()},
+         CanMoveSelection(), CanDuplicateSelection()},
         editorInputService_,
         {[this](const EditorInputCommand command)
          {
@@ -1509,7 +1533,8 @@ void EditorWorkspace::DrawScenePanel()
         SelectionHandles selectionHandles{};
         std::optional<SelectionHandle> hoveredSelectionHandle;
         if ((voxelToolState_.IsSelectionActive() ||
-             voxelToolState_.IsMoveActive()) &&
+             voxelToolState_.IsMoveActive() ||
+             voxelToolState_.IsDuplicateActive()) &&
             selectionService_.EditableBounds().Valid &&
             selectionInteraction_.Mode() != SelectionInteractionMode::Creating)
         {
@@ -1519,7 +1544,9 @@ void EditorWorkspace::DrawScenePanel()
                 selectionInteraction_.Mode() ==
                     SelectionInteractionMode::MovingBox ||
                 selectionInteraction_.Mode() ==
-                    SelectionInteractionMode::MovingContent
+                    SelectionInteractionMode::MovingContent ||
+                selectionInteraction_.Mode() ==
+                    SelectionInteractionMode::DuplicatingContent
                 ? selectionInteraction_.CurrentBounds()
                 : selectionService_.EditableBounds();
             selectionHandles = ProjectSelectionHandles(
@@ -1649,7 +1676,8 @@ void EditorWorkspace::DrawScenePanel()
         }
         std::optional<SelectionBoxRayHit> hoveredSelectionInterior;
         if ((voxelToolState_.IsSelectionActive() ||
-             voxelToolState_.IsMoveActive()) &&
+             voxelToolState_.IsMoveActive() ||
+             voxelToolState_.IsDuplicateActive()) &&
             selectionInteraction_.Mode() == SelectionInteractionMode::Idle &&
             selectionService_.EditableBounds().Valid &&
             selectionInputAvailable && viewportRay &&
@@ -1678,7 +1706,9 @@ void EditorWorkspace::DrawScenePanel()
         if ((interiorHovered || selectionInteraction_.Mode() ==
                 SelectionInteractionMode::MovingBox ||
              selectionInteraction_.Mode() ==
-                SelectionInteractionMode::MovingContent) &&
+                SelectionInteractionMode::MovingContent ||
+             selectionInteraction_.Mode() ==
+                SelectionInteractionMode::DuplicatingContent) &&
             !hoveredSelectionHandle)
             ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 
@@ -1723,9 +1753,30 @@ void EditorWorkspace::DrawScenePanel()
                     : "Select voxels before using Move";
             }
         }
+        else if (voxelToolState_.IsDuplicateActive())
+        {
+            if (selectionInteraction_.Mode() ==
+                    SelectionInteractionMode::DuplicatingContent)
+            {
+                viewportHelp = transformPreviewModel_.HasCollisions()
+                    ? "Duplicate blocked: destination is occupied"
+                    : transformPreviewModel_.HasOutOfBounds()
+                    ? "Duplicate blocked: destination is outside the model"
+                    : "Duplicate voxels — Release to validate — Esc to cancel";
+            }
+            else
+            {
+                viewportHelp = !voxelDuplicateStatusMessage_.empty()
+                    ? voxelDuplicateStatusMessage_.c_str()
+                    : CanDuplicateSelection()
+                    ? "Drag inside the selection to duplicate its voxels"
+                    : "Select voxels before using Duplicate";
+            }
+        }
         DrawTooltip(viewportHelp);
         if (voxelToolState_.IsSelectionActive() ||
-            voxelToolState_.IsMoveActive())
+            voxelToolState_.IsMoveActive() ||
+            voxelToolState_.IsDuplicateActive())
         {
             const ImVec2 textSize = ImGui::CalcTextSize(viewportHelp);
             const ImVec2 helpMinimum{imageOrigin.x + 10.0F, imageOrigin.y + 10.0F};
@@ -1910,8 +1961,39 @@ void EditorWorkspace::DrawScenePanel()
                 UpdateVoxelHighlights();
             }
         }
+        bool voxelDuplicateCaptured = false;
         if (!selectionHandleCaptured && !selectionBoxCaptured &&
-            !voxelMoveCaptured &&
+            !voxelMoveCaptured && voxelToolState_.IsDuplicateActive() &&
+            selectionInputAvailable &&
+            selectionPointerTarget == SelectionPointerTarget::Interior &&
+            hoveredSelectionInterior && viewportRay && document &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            const SelectionMovePlane movePlane = MakeSelectionMovePlane(
+                hoveredSelectionInterior->WorldPosition,
+                viewportRay->Direction);
+            voxelDuplicateCaptured =
+                selectionInteraction_.BeginDuplicatingContent(
+                    selectionService_.EditableBounds(),
+                    voxelDocumentSession_.Generation(), movePlane,
+                    hoveredSelectionInterior->WorldPosition) &&
+                transformPreviewModel_.BeginPreview(
+                    *document, selectionService_,
+                    voxelDocumentSession_.Generation(), 0U,
+                    TransformPreviewCollisionPolicy::IncludeSource);
+            if (!voxelDuplicateCaptured)
+            {
+                static_cast<void>(selectionInteraction_.Cancel());
+                static_cast<void>(transformPreviewModel_.CancelPreview());
+            }
+            else
+            {
+                voxelDuplicateStatusMessage_.clear();
+                UpdateVoxelHighlights();
+            }
+        }
+        if (!selectionHandleCaptured && !selectionBoxCaptured &&
+            !voxelMoveCaptured && !voxelDuplicateCaptured &&
             (voxelToolState_.IsSelectionActive() ||
              voxelToolState_.ActiveTool() == ActiveVoxelTool::None) &&
             selectionInputAvailable &&
@@ -1951,8 +2033,10 @@ void EditorWorkspace::DrawScenePanel()
                     selectionInteraction_.MoveBox(
                         *pointerWorld, *dimensions);
             }
-            else if (selectionInteraction_.Mode() ==
-                         SelectionInteractionMode::MovingContent &&
+            else if ((selectionInteraction_.Mode() ==
+                          SelectionInteractionMode::MovingContent ||
+                      selectionInteraction_.Mode() ==
+                          SelectionInteractionMode::DuplicatingContent) &&
                      viewportRay && document)
             {
                 const auto pointerWorld = IntersectSelectionMovePlane(
@@ -2001,6 +2085,9 @@ void EditorWorkspace::DrawScenePanel()
                 else if (release.Mode ==
                          SelectionInteractionMode::MovingContent)
                     static_cast<void>(ApplyVoxelMove());
+                else if (release.Mode ==
+                         SelectionInteractionMode::DuplicatingContent)
+                    static_cast<void>(ApplyVoxelDuplicate());
                 else
                     UpdateVoxelHighlights();
             }
@@ -7662,6 +7749,231 @@ bool EditorWorkspace::VoxelMoveSmokePassed() const noexcept
         voxelMoveSmokeReopened_ && voxelMoveSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunVoxelDuplicateSmokeStep(const std::size_t frame)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const SelectionMovePlane plane = MakeSelectionMovePlane(
+        {}, {0.0F, 0.0F, 1.0F});
+    const auto beginPreview = [this, &plane, &document](
+        const Asset::Voxel::VoxelPosition delta)
+    {
+        if (document == nullptr ||
+            !selectionInteraction_.BeginDuplicatingContent(
+                selectionService_.EditableBounds(),
+                voxelDocumentSession_.Generation(), plane, {}) ||
+            !transformPreviewModel_.BeginPreview(
+                *document, selectionService_,
+                voxelDocumentSession_.Generation(), 0U,
+                TransformPreviewCollisionPolicy::IncludeSource))
+            return false;
+        const Vec3 pointer{
+            static_cast<float>(delta.X), static_cast<float>(delta.Y),
+            static_cast<float>(delta.Z)};
+        return selectionInteraction_.MoveContent(pointer) &&
+            transformPreviewModel_.SetDelta(
+                *document, selectionService_,
+                voxelDocumentSession_.Generation(), delta);
+    };
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"DuplicateSmoke", {64U, 64U, 64U}});
+        voxelDuplicateSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || document == nullptr) return false;
+
+        std::vector<VoxelChange> seed;
+        std::vector<Asset::Voxel::VoxelPosition> selected;
+        seed.reserve(513U);
+        selected.reserve(512U);
+        for (std::int32_t z = 1; z <= 8; ++z)
+        {
+            for (std::int32_t y = 1; y <= 8; ++y)
+            {
+                for (std::int32_t x = 1; x <= 8; ++x)
+                {
+                    const Asset::Voxel::VoxelPosition position{x, y, z};
+                    const std::uint8_t palette = static_cast<std::uint8_t>(
+                        1 + ((x + y + z) % 15));
+                    seed.push_back({0U, position, false, 0U, true, palette});
+                    selected.push_back(position);
+                }
+            }
+        }
+        seed.push_back({0U, {50, 1, 1}, false, 0U, true, 31U});
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Duplicate Smoke", seed});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const SelectionBounds sourceBounds = SelectionBounds::FromCorners(
+            {1, 1, 1}, {8, 8, 8});
+        const bool selectedVolume = selectionService_.ApplySortedVolume(
+            selected, sourceBounds, SelectionMode::Replace);
+
+        EditorInputFrame shortcut;
+        shortcut.SetPressed(EditorInputKey::D);
+        const bool inputReady = editorInputService_.Resolve(
+            shortcut, CurrentCommandAvailability()) ==
+            EditorInputCommand::ToolDuplicate;
+        const auto duplicateButton = std::find_if(
+            EditorToolbarModel::Buttons().begin(),
+            EditorToolbarModel::Buttons().end(),
+            [](const EditorToolbarButton& button)
+            {
+                return button.Action == EditorToolbarAction::Duplicate;
+            });
+        const bool toolbarReady =
+            duplicateButton != EditorToolbarModel::Buttons().end() &&
+            EditorToolbarModel::IsEnabled(*duplicateButton,
+                {true, document->IsDirty(), voxelToolState_.ActiveTool(),
+                 CanMoveSelection(), CanDuplicateSelection()});
+        ExecuteInputCommand(EditorInputCommand::ToolDuplicate);
+        const std::uint64_t revision = document->GetRevision();
+        voxelDuplicateSmokePrepared_ = seeded && selectedVolume && inputReady &&
+            toolbarReady && voxelToolState_.IsDuplicateActive() &&
+            beginPreview({16, 0, 0}) &&
+            transformPreviewModel_.RenderData().Plan.SourceVoxelCount == 512U &&
+            transformPreviewModel_.RenderData().Plan.DestinationVoxelCount ==
+                512U &&
+            !transformPreviewModel_.RenderData().DrawSourceGhost &&
+            !transformPreviewModel_.HasCollisions() &&
+            !transformPreviewModel_.HasOutOfBounds() &&
+            document->GetVoxelCount() == 513U &&
+            document->GetRevision() == revision;
+        if (!voxelDuplicateSmokePrepared_) return false;
+
+        const auto release = selectionInteraction_.PointerUp();
+        voxelDuplicateSmokeApplied_ =
+            release.Mode == SelectionInteractionMode::DuplicatingContent &&
+            ApplyVoxelDuplicate() && document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 1025U &&
+            document->GetVoxel({1, 1, 1})->PaletteIndex == 4U &&
+            document->GetVoxel({17, 1, 1})->PaletteIndex == 4U &&
+            document->GetVoxel({24, 8, 8}).has_value() &&
+            selectionService_.Count() == 512U &&
+            selectionService_.Contains({17, 1, 1}) &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({17, 1, 1}, {24, 8, 8}) &&
+            voxelToolState_.IsDuplicateActive() &&
+            !transformPreviewModel_.IsActive();
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelDuplicateSmokeApplied_) return false;
+        UndoCommand();
+        voxelDuplicateSmokeUndone_ = document->GetVoxelCount() == 513U &&
+            document->HasVoxel({1, 1, 1}) &&
+            !document->HasVoxel({17, 1, 1}) &&
+            selectionService_.Contains({1, 1, 1}) &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({1, 1, 1}, {8, 8, 8});
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelDuplicateSmokeUndone_) return false;
+        RedoCommand();
+        voxelDuplicateSmokeRedone_ = document->GetVoxelCount() == 1025U &&
+            document->HasVoxel({1, 1, 1}) &&
+            document->GetVoxel({17, 1, 1})->PaletteIndex == 4U &&
+            selectionService_.Contains({17, 1, 1});
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !voxelDuplicateSmokeRedone_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        voxelDuplicateSmokeRepeated_ = beginPreview({16, 0, 0});
+        if (!voxelDuplicateSmokeRepeated_) return false;
+        const auto release = selectionInteraction_.PointerUp();
+        voxelDuplicateSmokeRepeated_ =
+            release.Mode == SelectionInteractionMode::DuplicatingContent &&
+            ApplyVoxelDuplicate() && document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 1537U &&
+            document->HasVoxel({1, 1, 1}) &&
+            document->HasVoxel({17, 1, 1}) &&
+            document->GetVoxel({33, 1, 1})->PaletteIndex == 4U &&
+            selectionService_.Contains({33, 1, 1}) &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({33, 1, 1}, {40, 8, 8});
+    }
+    else if (frame == 4U)
+    {
+        if (!document || !voxelDuplicateSmokeRepeated_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        const std::size_t undoCount = voxelEditHistory_.UndoCount();
+        const SelectionBounds source = selectionService_.EditableBounds();
+        const auto rejected = [this, &beginPreview](
+            const Asset::Voxel::VoxelPosition delta)
+        {
+            if (!beginPreview(delta)) return false;
+            static_cast<void>(selectionInteraction_.PointerUp());
+            return !ApplyVoxelDuplicate();
+        };
+        const bool sourceOverlap = rejected({1, 0, 0});
+        const bool externalCollision = rejected({10, 0, 0});
+        const bool outside = rejected({32, 0, 0});
+        const bool beganCancel = beginPreview({-8, 0, 0});
+        if (beganCancel) CancelSelectionInteraction();
+        voxelDuplicateSmokeRejected_ = sourceOverlap && externalCollision &&
+            outside && beganCancel && document->GetRevision() == revision &&
+            voxelEditHistory_.UndoCount() == undoCount &&
+            document->GetVoxelCount() == 1537U &&
+            selectionService_.EditableBounds() == source &&
+            !transformPreviewModel_.IsActive() &&
+            !selectionInteraction_.IsActive();
+    }
+    else if (frame == 5U)
+    {
+        voxelDuplicateSmokeSaved_ = voxelDuplicateSmokeRejected_ &&
+            SaveVoxelModel() && document && !document->IsDirty() &&
+            std::filesystem::is_regular_file(voxelDuplicateSmokePath_);
+    }
+    else if (frame == 6U)
+    {
+        if (!voxelDuplicateSmokeSaved_) return false;
+        const bool previewBeforeDocumentChange = beginPreview({-8, 0, 0});
+        ClearVoxelViewport();
+        voxelDuplicateSmokeReopened_ = previewBeforeDocumentChange &&
+            !transformPreviewModel_.IsActive() &&
+            !selectionInteraction_.IsActive() &&
+            OpenVoxInViewportNow(voxelDuplicateSmokePath_);
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelDuplicateSmokeReopened_ = voxelDuplicateSmokeReopened_ &&
+            document && document->GetVoxelCount() == 1537U &&
+            document->HasVoxel({1, 1, 1}) &&
+            document->HasVoxel({17, 1, 1}) &&
+            document->HasVoxel({33, 1, 1}) &&
+            document->GetVoxel({50, 1, 1})->PaletteIndex == 31U;
+    }
+    else if (frame == 7U)
+    {
+        if (!voxelDuplicateSmokeReopened_) return false;
+        CloseProject();
+        voxelDuplicateSmokeCleaned_ = !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !selectionInteraction_.IsActive() &&
+            !transformPreviewModel_.IsActive() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelDuplicateSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelDuplicateSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelDuplicateSmokePassed();
+}
+
+bool EditorWorkspace::VoxelDuplicateSmokePassed() const noexcept
+{
+    return voxelDuplicateSmokePrepared_ && voxelDuplicateSmokeApplied_ &&
+        voxelDuplicateSmokeUndone_ && voxelDuplicateSmokeRedone_ &&
+        voxelDuplicateSmokeRepeated_ && voxelDuplicateSmokeRejected_ &&
+        voxelDuplicateSmokeSaved_ && voxelDuplicateSmokeReopened_ &&
+        voxelDuplicateSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
 {
     const auto toolbarState = [this]()
@@ -7672,7 +7984,8 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
             document != nullptr,
             document != nullptr && document->IsDirty() &&
                 !voxelDocumentSaveService_.IsBusy(),
-            voxelToolState_.ActiveTool(), CanMoveSelection()};
+            voxelToolState_.ActiveTool(), CanMoveSelection(),
+            CanDuplicateSelection()};
     };
     const auto activeToolCount = [](const EditorToolbarState state)
     {
@@ -7691,7 +8004,7 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
         modernToolbarSmokeDisabled_ = !state.HasDocument &&
             std::none_of(
                 EditorToolbarModel::Buttons().begin(),
-                EditorToolbarModel::Buttons().end() - 1,
+                EditorToolbarModel::Buttons().end(),
                 [state](const EditorToolbarButton& button)
                 {
                     return EditorToolbarModel::IsEnabled(button, state) ||
@@ -7712,7 +8025,8 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
                 EditorToolbarModel::Buttons().end(),
                 [state = toolbarState()](const EditorToolbarButton& button)
                 {
-                    return button.Action == EditorToolbarAction::Move
+                    return button.Action == EditorToolbarAction::Move ||
+                        button.Action == EditorToolbarAction::Duplicate
                         ? !EditorToolbarModel::IsEnabled(button, state)
                         : EditorToolbarModel::IsEnabled(button, state);
                 });
@@ -8683,16 +8997,62 @@ bool EditorWorkspace::ApplyVoxelMove()
     return true;
 }
 
+bool EditorWorkspace::ApplyVoxelDuplicate()
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document == nullptr || voxelEditInProgress_ ||
+        voxelEditHistory_.IsBusy())
+    {
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    DuplicateVoxelSelectionResult prepared =
+        DuplicateVoxelSelectionOperation::Build(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            transformPreviewModel_);
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    if (!prepared.Ready())
+    {
+        voxelDuplicateStatusMessage_ = prepared.Message;
+        if (!prepared.Message.empty())
+            AddConsoleMessage("[Edit] " + prepared.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    voxelEditInProgress_ = true;
+    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
+        *this, std::move(prepared.Operation));
+    voxelEditInProgress_ = false;
+    if (!result)
+    {
+        voxelDuplicateStatusMessage_ = result.Message;
+        AddConsoleMessage("[Edit] Duplicate failed: " + result.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+    ApplyVoxelHistorySelection(result);
+    voxelDuplicateStatusMessage_.clear();
+    AddConsoleMessage("[Edit] Duplicated " +
+        std::to_string(selectionService_.Count()) + " voxel(s).");
+    return true;
+}
+
 void EditorWorkspace::CancelSelectionInteraction()
 {
     if (!selectionInteraction_.IsActive()) return;
     const SelectionInteractionMode mode = selectionInteraction_.Mode();
     const std::optional<SelectionBounds> restore =
         selectionInteraction_.Cancel();
-    if (mode == SelectionInteractionMode::MovingContent)
+    if (mode == SelectionInteractionMode::MovingContent ||
+        mode == SelectionInteractionMode::DuplicatingContent)
     {
         static_cast<void>(transformPreviewModel_.CancelPreview());
         voxelMoveStatusMessage_.clear();
+        voxelDuplicateStatusMessage_.clear();
     }
     if ((mode == SelectionInteractionMode::ResizingFace ||
          mode == SelectionInteractionMode::MovingBox) && restore)
@@ -9061,7 +9421,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<VoxelBoxBounds> selectionBounds;
     std::optional<SelectionBounds> editableSelectionBounds;
     const bool selectionVisualActive =
-        voxelToolState_.IsSelectionActive() || voxelToolState_.IsMoveActive();
+        voxelToolState_.IsSelectionActive() || voxelToolState_.IsMoveActive() ||
+        voxelToolState_.IsDuplicateActive();
     if (selectionVisualActive)
     {
         const auto selected = selectionService_.Voxels();
@@ -9197,7 +9558,9 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         editableSelectionBounds,
         selectionVisualActive,
         (selectionInteraction_.Mode() == SelectionInteractionMode::MovingBox ||
-         selectionInteraction_.Mode() == SelectionInteractionMode::MovingContent)
+         selectionInteraction_.Mode() == SelectionInteractionMode::MovingContent ||
+         selectionInteraction_.Mode() ==
+             SelectionInteractionMode::DuplicatingContent)
             ? SelectionBoxVisualState::Moving
             : selectionBoxInteriorHovered_
             ? SelectionBoxVisualState::Hovered
@@ -9230,6 +9593,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     ++voxelModelGeneration_;
     transformPreviewModel_.Reset();
     voxelMoveStatusMessage_.clear();
+    voxelDuplicateStatusMessage_.clear();
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();

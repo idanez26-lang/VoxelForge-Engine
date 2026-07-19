@@ -14,7 +14,7 @@ constexpr std::size_t Index(const EditorInputKey key) noexcept
 bool IsToolCommand(const EditorInputCommand command) noexcept
 {
     return command >= EditorInputCommand::ToolPencil &&
-        command <= EditorInputCommand::ToolSelection;
+        command <= EditorInputCommand::ToolDuplicate;
 }
 
 bool SameChord(
@@ -69,6 +69,8 @@ bool EditorInputService::IsAvailable(
 {
     if (command == EditorInputCommand::ToolMove)
         return availability.HasDocument && availability.CanMoveSelection;
+    if (command == EditorInputCommand::ToolDuplicate)
+        return availability.HasDocument && availability.CanDuplicateSelection;
     if (IsToolCommand(command)) return availability.HasDocument;
     switch (command)
     {
@@ -108,6 +110,7 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ToolSphere: return "Tool.Sphere";
     case EditorInputCommand::ToolSelection: return "Tool.Selection";
     case EditorInputCommand::ToolMove: return "Tool.Move";
+    case EditorInputCommand::ToolDuplicate: return "Tool.Duplicate";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";
     case EditorInputCommand::EditRedo: return "Edit.Redo";

@@ -36,7 +36,10 @@ constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
          ActiveVoxelTool::Selection},
         {EditorToolbarAction::Move, EditorToolbarGroup::Manipulation,
          "Move", "Move the selected voxels", EditorInputCommand::ToolMove,
-         ActiveVoxelTool::Move}
+         ActiveVoxelTool::Move},
+        {EditorToolbarAction::Duplicate, EditorToolbarGroup::Manipulation,
+         "Duplicate", "Duplicate the selected voxels",
+         EditorInputCommand::ToolDuplicate, ActiveVoxelTool::Duplicate}
     }};
 }
 
@@ -53,6 +56,8 @@ bool EditorToolbarModel::IsEnabled(
     if (button.Action == EditorToolbarAction::Save) return state.CanSave;
     if (button.Action == EditorToolbarAction::Move)
         return state.HasDocument && state.CanMoveSelection;
+    if (button.Action == EditorToolbarAction::Duplicate)
+        return state.HasDocument && state.CanDuplicateSelection;
     return state.HasDocument;
 }
 

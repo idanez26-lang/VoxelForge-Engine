@@ -25,6 +25,7 @@ using VoxelForge::Editor::SelectionBounds;
 using VoxelForge::Editor::SelectionMode;
 using VoxelForge::Editor::SelectionService;
 using VoxelForge::Editor::TransformPreviewModel;
+using VoxelForge::Editor::TransformPreviewCollisionPolicy;
 using VoxelForge::Editor::TransformPreviewRenderPolicy;
 using VoxelForge::Editor::TransformPreviewVoxelState;
 
@@ -252,6 +253,22 @@ void TestCollisionsInternalOverlapAndOutOfBounds()
         "Maximum out-of-bounds positions must remain explicit.");
 }
 
+void TestDuplicateCollisionPolicyIncludesSource()
+{
+    DocumentFixture fixture({8U, 8U, 8U},
+        {{{2U, 2U, 2U, 3U}}, {{3U, 2U, 2U, 4U}},
+         {{4U, 2U, 2U, 5U}}});
+    SelectionService selection = MakeSelection(
+        14U, {{2, 2, 2}, {3, 2, 2}, {4, 2, 2}});
+    TransformPreviewModel preview;
+    Require(preview.BeginPreview(fixture.Document(), selection, 14U, 0U,
+                TransformPreviewCollisionPolicy::IncludeSource) &&
+            preview.SetDelta(fixture.Document(), selection, 14U, {1, 0, 0}) &&
+            preview.CollisionCount() == 2U &&
+            !preview.RenderData().DrawSourceGhost,
+        "Duplicate policy must flag source overlap and suppress Move ghosting.");
+}
+
 void TestValidityCancelResetAndNoMutation()
 {
     DocumentFixture fixture({8U, 8U, 8U}, {{{1U, 1U, 1U, 7U}}});
@@ -329,6 +346,7 @@ int main()
         TestDeterministicCaptureColorsBoundsAndNoDuplicates();
         TestDeltasBoundsAndBufferReuse();
         TestCollisionsInternalOverlapAndOutOfBounds();
+        TestDuplicateCollisionPolicyIncludesSource();
         TestValidityCancelResetAndNoMutation();
         TestLargeSelectionAndAdaptiveRenderPolicy();
         std::cout << "TransformPreview tests passed.\n";

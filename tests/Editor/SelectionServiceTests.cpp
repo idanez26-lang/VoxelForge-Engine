@@ -742,6 +742,26 @@ void TestMovingContentInteractionDoesNotClampOrMutateSelection()
             !interaction.IsActive(),
         "Changing document did not purge MovingContent.");
 }
+
+void TestDuplicatingContentUsesMoveGestureAndCancels()
+{
+    const SelectionBounds original = SelectionBounds::FromCorners(
+        {2, 3, 4}, {5, 6, 7});
+    const auto plane = VoxelForge::Editor::MakeSelectionMovePlane(
+        {0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F});
+    SelectionInteraction interaction;
+    Require(interaction.BeginDuplicatingContent(
+            original, 95U, plane, {0.0F, 0.0F, 0.0F}) &&
+        interaction.Mode() == SelectionInteractionMode::DuplicatingContent &&
+        interaction.MoveContent({4.2F, -2.1F, 1.0F}) &&
+        interaction.MoveDelta() == VoxelPosition{4, -2, 1} &&
+        interaction.CurrentBounds() ==
+            SelectionBounds::FromCorners({6, 1, 5}, {9, 4, 8}),
+        "Duplicate must share Move's snapped, unclamped drag gesture.");
+    const auto restored = interaction.Cancel();
+    Require(restored && *restored == original && !interaction.IsActive(),
+        "Esc did not restore Duplicate's source selection box.");
+}
 }
 
 int main()
@@ -769,6 +789,7 @@ int main()
         TestMovingBoxInteractionLifecycle();
         TestMovingBoxSelectionRecalculationAndCache();
         TestMovingContentInteractionDoesNotClampOrMutateSelection();
+        TestDuplicatingContentUsesMoveGestureAndCancels();
         std::cout << "SelectionService tests passed.\n";
         return EXIT_SUCCESS;
     }

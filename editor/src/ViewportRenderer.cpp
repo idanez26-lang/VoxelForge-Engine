@@ -265,6 +265,7 @@ struct ViewportRenderer::HighlightGeometryCache final
 struct ViewportRenderer::TransformPreviewSnapshot final
 {
     std::uint64_t Revision = 0U;
+    bool DrawSourceGhost = true;
     std::vector<TransformPreviewVoxel> Voxels;
     std::array<Asset::Voxel::VoxelColor, 256U> Palette{};
     SelectionBounds SourceBounds{};
@@ -604,6 +605,7 @@ void ViewportRenderer::ConfigureTransformPreview(
             transformPreview_ = std::make_unique<TransformPreviewSnapshot>();
         TransformPreviewSnapshot& snapshot = *transformPreview_;
         snapshot.Revision = preview->Revision;
+        snapshot.DrawSourceGhost = preview->DrawSourceGhost;
         snapshot.Voxels.assign(preview->Voxels.begin(), preview->Voxels.end());
         std::fill(snapshot.Palette.begin(), snapshot.Palette.end(),
             Asset::Voxel::VoxelColor{});
@@ -727,7 +729,7 @@ bool ViewportRenderer::EnsureHighlights()
         constexpr std::array<float, 4> outOfBoundsColor{
             1.0F, 0.56F, 0.08F, 1.0F};
         const TransformPreviewSnapshot& preview = *transformPreview_;
-        if (preview.SourceBounds.Valid)
+        if (preview.DrawSourceGhost && preview.SourceBounds.Valid)
             AppendVoxelBoxOutline(vertices, indices,
                 {preview.SourceBounds.Minimum, preview.SourceBounds.Maximum},
                 modelCenter_, sourceGhostColor, 0.030F, 0.028F);
@@ -740,8 +742,9 @@ bool ViewportRenderer::EnsureHighlights()
         {
             for (const TransformPreviewVoxel& voxel : preview.Voxels)
             {
-                AppendVoxelOutline(vertices, indices, voxel.SourcePosition,
-                    modelCenter_, sourceGhostColor);
+                if (preview.DrawSourceGhost)
+                    AppendVoxelOutline(vertices, indices, voxel.SourcePosition,
+                        modelCenter_, sourceGhostColor);
                 std::array<float, 4> color{};
                 if (voxel.State == TransformPreviewVoxelState::Collision)
                     color = collisionColor;
@@ -1194,6 +1197,7 @@ std::size_t ViewportRenderer::TransformPreviewSourcePrimitiveCount()
     const noexcept
 {
     if (!transformPreview_) return 0U;
+    if (!transformPreview_->DrawSourceGhost) return 0U;
     return transformPreview_->Plan.DrawIndividualVoxels
         ? transformPreview_->Voxels.size()
         : static_cast<std::size_t>(transformPreview_->SourceBounds.Valid);

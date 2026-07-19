@@ -27,6 +27,7 @@
 #include "Selection/SelectionVolumeCache.h"
 #include "Transform/TransformPreviewModel.h"
 #include "Transform/MoveVoxelSelectionOperation.h"
+#include "Transform/DuplicateVoxelSelectionOperation.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
@@ -172,6 +173,8 @@ public:
     [[nodiscard]] bool KeyboardShortcutsSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelMoveSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelMoveSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelDuplicateSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelDuplicateSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -187,6 +190,7 @@ private:
     void CancelActiveInteraction();
     [[nodiscard]] EditorCommandAvailability CurrentCommandAvailability() const;
     [[nodiscard]] bool CanMoveSelection() const noexcept;
+    [[nodiscard]] bool CanDuplicateSelection() const noexcept;
     void ApplyVoxelHistorySelection(const VoxelEditHistoryResult& result);
     void UndoCommand();
     void RedoCommand();
@@ -271,6 +275,7 @@ private:
     [[nodiscard]] bool ApplyVoxelLine();
     [[nodiscard]] bool ApplyVoxelSphere();
     [[nodiscard]] bool ApplyVoxelMove();
+    [[nodiscard]] bool ApplyVoxelDuplicate();
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
         CurrentTwoPointToolTarget() const noexcept;
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
@@ -335,6 +340,7 @@ private:
     std::optional<VoxelLineResult> lastVoxelLineResult_;
     std::optional<VoxelSphereResult> lastVoxelSphereResult_;
     std::string voxelMoveStatusMessage_;
+    std::string voxelDuplicateStatusMessage_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -543,6 +549,16 @@ private:
     bool voxelMoveSmokeSaved_ = false;
     bool voxelMoveSmokeReopened_ = false;
     bool voxelMoveSmokeCleaned_ = false;
+    std::filesystem::path voxelDuplicateSmokePath_;
+    bool voxelDuplicateSmokePrepared_ = false;
+    bool voxelDuplicateSmokeApplied_ = false;
+    bool voxelDuplicateSmokeUndone_ = false;
+    bool voxelDuplicateSmokeRedone_ = false;
+    bool voxelDuplicateSmokeRepeated_ = false;
+    bool voxelDuplicateSmokeRejected_ = false;
+    bool voxelDuplicateSmokeSaved_ = false;
+    bool voxelDuplicateSmokeReopened_ = false;
+    bool voxelDuplicateSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

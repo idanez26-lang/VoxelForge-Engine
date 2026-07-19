@@ -88,7 +88,8 @@ bool TransformPreviewModel::BeginPreview(
     const Asset::Voxel::VoxelDocument& document,
     const SelectionService& selection,
     const std::uint64_t documentGeneration,
-    const std::size_t modelIndex)
+    const std::size_t modelIndex,
+    const TransformPreviewCollisionPolicy collisionPolicy)
 {
     ClearState();
     const auto dimensions = document.GetDimensions(modelIndex);
@@ -125,6 +126,7 @@ bool TransformPreviewModel::BeginPreview(
     documentGeneration_ = documentGeneration;
     documentRevision_ = document.GetRevision();
     modelIndex_ = modelIndex;
+    collisionPolicy_ = collisionPolicy;
     active_ = true;
     ++renderRevision_;
     ++rebuildCount_;
@@ -205,7 +207,8 @@ bool TransformPreviewModel::Rebuild(
         const bool belongsToSource = std::binary_search(
             sourcePositions_.begin(), sourcePositions_.end(),
             destination, PositionLess);
-        if (!belongsToSource && document.HasVoxel(destination, modelIndex_))
+        if ((collisionPolicy_ == TransformPreviewCollisionPolicy::IncludeSource ||
+             !belongsToSource) && document.HasVoxel(destination, modelIndex_))
         {
             voxel.State = TransformPreviewVoxelState::Collision;
             collisionPositions_.push_back(destination);
@@ -263,6 +266,7 @@ void TransformPreviewModel::ClearState() noexcept
     documentGeneration_ = 0U;
     documentRevision_ = 0U;
     modelIndex_ = 0U;
+    collisionPolicy_ = TransformPreviewCollisionPolicy::IgnoreSource;
     active_ = false;
     if (hadState) ++renderRevision_;
 }
@@ -336,7 +340,9 @@ TransformPreviewModel::OutOfBoundsPositions() const noexcept
 TransformPreviewRenderData TransformPreviewModel::RenderData() const noexcept
 {
     return {
-        renderRevision_, voxels_, palette_, sourceBounds_, previewBounds_,
+        renderRevision_,
+        collisionPolicy_ == TransformPreviewCollisionPolicy::IgnoreSource,
+        voxels_, palette_, sourceBounds_, previewBounds_,
         collisionBounds_, outOfBoundsBounds_,
         TransformPreviewRenderPolicy::Build(
             voxels_.size(), collisionPositions_.size(),
