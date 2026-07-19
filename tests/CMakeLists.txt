@@ -40,6 +40,21 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorSaveOnExitTests
+    Editor/SaveOnExitTests.cpp
+)
+target_include_directories(
+    VoxelForgeEditorSaveOnExitTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/src
+)
+vf_configure_test(VoxelForgeEditorSaveOnExitTests)
+add_test(
+    NAME VoxelForge.Editor.SaveOnExit
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSaveOnExitTests>
+)
+
+add_executable(
     VoxelForgeEditorWindowTitleTests
     Editor/EditorWindowTitleTests.cpp
 )
@@ -720,6 +735,7 @@ set_tests_properties(
     VoxelForge.Core.Events
     VoxelForge.Core.Layers
     VoxelForge.Editor.ExitRequest
+    VoxelForge.Editor.SaveOnExit
     VoxelForge.Editor.WindowTitle
     VoxelForge.Editor.AssetBrowser
     VoxelForge.Editor.ModelImport
@@ -909,6 +925,10 @@ if(TARGET VoxelForgeEditor)
         NAME VoxelForge.Editor.VoxelRotateSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-rotate-smoke-test
     )
+    add_test(
+        NAME VoxelForge.Editor.SaveOnExitSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --save-on-exit-smoke-test
+    )
     set_tests_properties(
         VoxelForge.Editor.Smoke
         VoxelForge.Editor.VoxelViewportSmoke
@@ -945,6 +965,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelMoveSmoke
         VoxelForge.Editor.VoxelDuplicateSmoke
         VoxelForge.Editor.VoxelRotateSmoke
+        VoxelForge.Editor.SaveOnExitSmoke
         PROPERTIES
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

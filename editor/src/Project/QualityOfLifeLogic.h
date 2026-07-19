@@ -72,6 +72,11 @@ public:
 
     void Cancel() noexcept { pending_.reset(); }
     [[nodiscard]] bool IsPending() const noexcept { return pending_.has_value(); }
+    [[nodiscard]] std::optional<DestructiveAction> PendingAction()
+        const noexcept
+    {
+        return pending_;
+    }
 
 private:
     std::optional<DestructiveAction> pending_;

@@ -11,6 +11,7 @@
 #include "VoxelForge/Project/ProjectManager.h"
 #include "VoxelForge/Renderer/Renderer.h"
 #include "VoxelForge/Asset/Vox/VoxImporter.h"
+#include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 #include "VoxelForge/Mesh/VoxelMeshBuilder.h"
 #include "VoxelForge/Voxel/VoxModelConverter.h"
 #include "VoxelForge/Voxel/VoxelModelSerializer.h"
@@ -483,6 +484,13 @@ void EditorWorkspace::CompleteFileDrop(const float x, const float y)
 
 void EditorWorkspace::Draw()
 {
+    if (closeRequest_.IsClosing())
+    {
+        if (closeRequest_.ConsumeCloseRequest()) exitRequest_.RequestExit();
+        return;
+    }
+
+    ProcessDeferredDirtyActionAtFrameStart();
     ConsumeFileDialogResult();
     if (!SynchronizeVoxelDocumentRendering())
         voxelViewportRenderFailed_ = true;
@@ -548,6 +556,7 @@ void EditorWorkspace::Draw()
     DrawFirstCreationOverlay();
     if (layoutRebuilt && ImGui::GetIO().IniFilename != nullptr)
         ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
+    CompleteDeferredCloseAfterFrame();
 }
 
 bool EditorWorkspace::ConsumeExitRequest() noexcept
@@ -3278,6 +3287,9 @@ void EditorWorkspace::DrawDirtyConfirmationDialog()
     if (EditorDialogStyle::ActionButton("Cancel", false) ||
         shortcut == EditorDialogShortcut::Cancel)
     {
+        if (dirtyActionConfirmation_.PendingAction() ==
+            DestructiveAction::ExitApplication)
+            static_cast<void>(closeRequest_.Cancel());
         dirtyActionConfirmation_.Cancel();
         pendingProjectPath_.clear();
         pendingVoxelPath_.clear();
@@ -3292,19 +3304,22 @@ void EditorWorkspace::DrawDirtyConfirmationDialog()
     {
         const auto action = dirtyActionConfirmation_.Discard();
         ImGui::CloseCurrentPopup();
-        if (action) ExecutePendingDirtyAction(*action);
+        if (action == DestructiveAction::ExitApplication)
+            static_cast<void>(closeRequest_.Discard());
+        else if (action)
+            deferredDirtyAction_ = *action;
     }
     ImGui::SameLine();
     if (EditorDialogStyle::ActionButton("Save", true, canSave) ||
         shortcut == EditorDialogShortcut::Confirm)
     {
-        if (SaveVoxelModel())
+        if (dirtyActionConfirmation_.PendingAction() ==
+            DestructiveAction::ExitApplication)
         {
-            const auto action =
-                dirtyActionConfirmation_.ContinueAfterSuccessfulSave();
-            ImGui::CloseCurrentPopup();
-            if (action) ExecutePendingDirtyAction(*action);
+            static_cast<void>(closeRequest_.ScheduleSave());
         }
+        deferredDirtySaveRequested_ = true;
+        ImGui::CloseCurrentPopup();
     }
     EditorDialogStyle::EndPopup();
 }
@@ -3925,13 +3940,17 @@ bool EditorWorkspace::HasUnsavedVoxelChanges() const noexcept
 
 void EditorWorkspace::RequestExit()
 {
-    if (dirtyActionConfirmation_.Request(
-            DestructiveAction::ExitApplication, HasUnsavedVoxelChanges()))
+    if (closeRequest_.State() != EditorCloseRequestState::None ||
+        dirtyActionConfirmation_.IsPending())
+        return;
+    const bool hasUnsavedChanges = HasUnsavedVoxelChanges();
+    if (!closeRequest_.Request(hasUnsavedChanges)) return;
+    if (!hasUnsavedChanges)
     {
-        static_cast<void>(SaveActiveProjectSession());
-        exitRequest_.RequestExit();
         return;
     }
+    static_cast<void>(dirtyActionConfirmation_.Request(
+        DestructiveAction::ExitApplication, true));
     showDirtyConfirmationPopup_ = true;
 }
 
@@ -4005,6 +4024,76 @@ void EditorWorkspace::ExecutePendingDirtyAction(const DestructiveAction action)
         pendingVoxelPath_.clear();
         break;
     }
+}
+
+void EditorWorkspace::ProcessDeferredDirtyActionAtFrameStart()
+{
+    if (deferredDirtyAction_)
+    {
+        const DestructiveAction action = *deferredDirtyAction_;
+        deferredDirtyAction_.reset();
+        ExecutePendingDirtyAction(action);
+    }
+
+    if (!deferredDirtySaveRequested_) return;
+    deferredDirtySaveRequested_ = false;
+    const bool closingAfterSave =
+        dirtyActionConfirmation_.PendingAction() ==
+        DestructiveAction::ExitApplication;
+    if (!SaveVoxelModel())
+    {
+        if (closingAfterSave)
+            static_cast<void>(closeRequest_.CompleteSave(false));
+        showDirtyConfirmationPopup_ = true;
+        return;
+    }
+
+    const auto action =
+        dirtyActionConfirmation_.ContinueAfterSuccessfulSave();
+    if (!action)
+    {
+        if (closingAfterSave)
+            static_cast<void>(closeRequest_.CompleteSave(false));
+        AddConsoleMessage(
+            "[Close] Saved the model, but no pending action was available.");
+        return;
+    }
+    if (*action == DestructiveAction::ExitApplication)
+    {
+        static_cast<void>(closeRequest_.CompleteSave(true));
+        return;
+    }
+    ExecutePendingDirtyAction(*action);
+}
+
+void EditorWorkspace::CompleteDeferredCloseAfterFrame()
+{
+    if (closeRequest_.State() != EditorCloseRequestState::ReadyToClose) return;
+    static_cast<void>(SaveActiveProjectSession());
+    PrepareForApplicationClose();
+    static_cast<void>(closeRequest_.CompleteRenderedFrame());
+}
+
+void EditorWorkspace::PrepareForApplicationClose()
+{
+    voxelBoxInteraction_.Cancel();
+    voxelLineInteraction_.Cancel();
+    voxelSphereInteraction_.Cancel();
+    static_cast<void>(selectionInteraction_.Cancel());
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    voxelMoveStatusMessage_.clear();
+    voxelDuplicateStatusMessage_.clear();
+    voxelRotateStatusMessage_.clear();
+    voxelSelectionClickCandidate_ = false;
+    selectionPointerAnchor_.reset();
+    dragDropImport_.Reset();
+    pendingDropImportTarget_ = DragDropImportTarget::None;
+    selectedImportPaths_.clear();
+    pendingImportPaths_.clear();
+    pendingImportCollision_.reset();
+    showImportConfirmationPopup_ = false;
+    showImportCollisionPopup_ = false;
+    showOpenImportedModelPopup_ = false;
 }
 
 void EditorWorkspace::OpenProjectFolder()
@@ -8278,6 +8367,82 @@ bool EditorWorkspace::VoxelRotateSmokePassed() const noexcept
         voxelRotateSmokeUndoRedo_ && voxelRotateSmokeCycled_ &&
         voxelRotateSmokeSaved_ && voxelRotateSmokeReopened_ &&
         voxelRotateSmokeCleaned_;
+}
+
+bool EditorWorkspace::RunSaveOnExitSmokeStep(const std::size_t frame)
+{
+    using Asset::Voxel::VoxelPosition;
+    constexpr VoxelPosition savedVoxel{3, 2, 4};
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"SaveOnExitSmoke", {16U, 16U, 16U}});
+        saveOnExitSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+        const VoxelEditHistoryResult edited = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Save On Exit Smoke",
+                {{0U, savedVoxel, false, 0U, true, 9U}}});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const SelectionBounds bounds =
+            SelectionBounds::FromCorners(savedVoxel, savedVoxel);
+        const std::array<VoxelPosition, 1U> selectedVoxels{savedVoxel};
+        const bool selected = selectionService_.ApplySortedVolume(
+            selectedVoxels, bounds, SelectionMode::Replace);
+        SelectVoxelTool(ActiveVoxelTool::Rotate);
+        const bool previewStarted = BeginVoxelRotatePreview(
+            VoxelRotationDirection::Clockwise);
+        RequestExit();
+        saveOnExitSmokeRequested_ = edited && selected && previewStarted &&
+            document->IsDirty() &&
+            transformPreviewModel_.IsActive() &&
+            dirtyActionConfirmation_.PendingAction() ==
+                DestructiveAction::ExitApplication &&
+            closeRequest_.State() ==
+                EditorCloseRequestState::WaitingForUser;
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !saveOnExitSmokeRequested_) return false;
+        const bool scheduled = closeRequest_.ScheduleSave();
+        deferredDirtySaveRequested_ = scheduled;
+        saveOnExitSmokeCallbackDeferred_ = scheduled && document->IsDirty() &&
+            voxelDocumentSession_.HasActiveDocument() &&
+            transformPreviewModel_.IsActive() &&
+            closeRequest_.State() ==
+                EditorCloseRequestState::SavingBeforeClose;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !saveOnExitSmokeCallbackDeferred_) return false;
+        const Asset::Voxel::VoxDocumentLoadResult loaded =
+            Asset::Voxel::VoxDocumentLoader{}.Load(
+                saveOnExitSmokePath_, document->AssetId());
+        saveOnExitSmokePassed_ =
+            closeRequest_.State() == EditorCloseRequestState::Closing &&
+            voxelDocumentSession_.HasActiveDocument() && !document->IsDirty() &&
+            !transformPreviewModel_.IsActive() &&
+            !selectionInteraction_.IsActive() &&
+            dragDropImport_.State() == DragDropImportState::Idle &&
+            loaded.Succeeded() && loaded.Document &&
+            loaded.Document->HasVoxel(savedVoxel) &&
+            loaded.Document->GetVoxel(savedVoxel)->PaletteIndex == 9U &&
+            !std::filesystem::exists(
+                saveOnExitSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                saveOnExitSmokePath_.string() + ".vfsave.bak");
+    }
+    return SaveOnExitSmokePassed();
+}
+
+bool EditorWorkspace::SaveOnExitSmokePassed() const noexcept
+{
+    return saveOnExitSmokeRequested_ && saveOnExitSmokeCallbackDeferred_ &&
+        saveOnExitSmokePassed_;
 }
 
 bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)

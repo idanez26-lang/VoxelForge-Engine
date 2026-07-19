@@ -9,6 +9,7 @@
 #include "Commands/Voxel/PaintPaletteSelection.h"
 #include "Commands/Voxel/PaintVoxelCommand.h"
 #include "EditorCamera.h"
+#include "EditorCloseRequest.h"
 #include "EditorExitRequest.h"
 #include "Input/EditorInputService.h"
 #include "DragDropImport/DragDropImportController.h"
@@ -178,6 +179,8 @@ public:
     [[nodiscard]] bool VoxelDuplicateSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelRotateSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelRotateSmokePassed() const noexcept;
+    [[nodiscard]] bool RunSaveOnExitSmokeStep(std::size_t frame);
+    [[nodiscard]] bool SaveOnExitSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
@@ -241,6 +244,9 @@ private:
         bool recentProject);
     void RequestReplaceVoxelModel(std::filesystem::path filePath);
     void ExecutePendingDirtyAction(DestructiveAction action);
+    void ProcessDeferredDirtyActionAtFrameStart();
+    void CompleteDeferredCloseAfterFrame();
+    void PrepareForApplicationClose();
 
     void CreateProject();
     void CreateProjectNow();
@@ -360,12 +366,15 @@ private:
     std::uint64_t voxelModelGeneration_ = 0U;
     Vec3 voxelModelCenter_{};
     std::vector<std::string> consoleMessages_;
+    EditorCloseRequest closeRequest_{};
     EditorExitRequest exitRequest_{};
     std::unique_ptr<FileDialogService> fileDialogService_;
     std::unique_ptr<ProjectFolderOpener> projectFolderOpener_;
     ProjectDialogPreferences projectDialogPreferences_;
     ProjectSessionService projectSessionService_;
     DirtyActionConfirmation dirtyActionConfirmation_;
+    std::optional<DestructiveAction> deferredDirtyAction_;
+    bool deferredDirtySaveRequested_ = false;
     std::filesystem::path pendingProjectPath_;
     std::filesystem::path pendingVoxelPath_;
     VoxelModelCreationRequest pendingVoxelModelCreation_{};
@@ -578,6 +587,10 @@ private:
     bool voxelRotateSmokeSaved_ = false;
     bool voxelRotateSmokeReopened_ = false;
     bool voxelRotateSmokeCleaned_ = false;
+    std::filesystem::path saveOnExitSmokePath_;
+    bool saveOnExitSmokeRequested_ = false;
+    bool saveOnExitSmokeCallbackDeferred_ = false;
+    bool saveOnExitSmokePassed_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;
