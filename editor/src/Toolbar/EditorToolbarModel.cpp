@@ -42,7 +42,10 @@ constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
          EditorInputCommand::ToolDuplicate, ActiveVoxelTool::Duplicate},
         {EditorToolbarAction::Rotate, EditorToolbarGroup::Manipulation,
          "Rotate", "Rotate the selected voxels by 90 degrees",
-         EditorInputCommand::ToolRotate, ActiveVoxelTool::Rotate}
+         EditorInputCommand::ToolRotate, ActiveVoxelTool::Rotate},
+        {EditorToolbarAction::Mirror, EditorToolbarGroup::Manipulation,
+         "Mirror", "Mirror the selected voxels on X or Z",
+         EditorInputCommand::ToolMirror, ActiveVoxelTool::Mirror}
     }};
 }
 
@@ -63,6 +66,8 @@ bool EditorToolbarModel::IsEnabled(
         return state.HasDocument && state.CanDuplicateSelection;
     if (button.Action == EditorToolbarAction::Rotate)
         return state.HasDocument && state.CanRotateSelection;
+    if (button.Action == EditorToolbarAction::Mirror)
+        return state.HasDocument && state.CanMirrorSelection;
     return state.HasDocument;
 }
 

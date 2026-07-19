@@ -14,7 +14,7 @@ constexpr std::size_t Index(const EditorInputKey key) noexcept
 bool IsToolCommand(const EditorInputCommand command) noexcept
 {
     return command >= EditorInputCommand::ToolPencil &&
-        command <= EditorInputCommand::ToolRotate;
+        command <= EditorInputCommand::ToolMirror;
 }
 
 bool SameChord(
@@ -73,11 +73,16 @@ bool EditorInputService::IsAvailable(
         return availability.HasDocument && availability.CanDuplicateSelection;
     if (command == EditorInputCommand::ToolRotate)
         return availability.HasDocument && availability.CanRotateSelection;
+    if (command == EditorInputCommand::ToolMirror)
+        return availability.HasDocument && availability.CanMirrorSelection;
     if (command == EditorInputCommand::RotateLeft ||
         command == EditorInputCommand::RotateRight)
         return availability.CanAdjustRotation;
-    if (command == EditorInputCommand::RotateApply)
-        return availability.CanApplyRotation;
+    if (command == EditorInputCommand::MirrorX ||
+        command == EditorInputCommand::MirrorZ)
+        return availability.CanAdjustMirror;
+    if (command == EditorInputCommand::TransformApply)
+        return availability.CanApplyTransform;
     if (IsToolCommand(command)) return availability.HasDocument;
     switch (command)
     {
@@ -119,9 +124,12 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ToolMove: return "Tool.Move";
     case EditorInputCommand::ToolDuplicate: return "Tool.Duplicate";
     case EditorInputCommand::ToolRotate: return "Tool.Rotate";
+    case EditorInputCommand::ToolMirror: return "Tool.Mirror";
     case EditorInputCommand::RotateLeft: return "Rotate.Left90";
     case EditorInputCommand::RotateRight: return "Rotate.Right90";
-    case EditorInputCommand::RotateApply: return "Rotate.Apply";
+    case EditorInputCommand::MirrorX: return "Mirror.X";
+    case EditorInputCommand::MirrorZ: return "Mirror.Z";
+    case EditorInputCommand::TransformApply: return "Transform.Apply";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";
     case EditorInputCommand::EditRedo: return "Edit.Redo";

@@ -473,6 +473,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelRotateTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelMirrorTests
+    Editor/VoxelMirrorTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelMirrorTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorVoxelMirrorTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelMirror
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelMirrorTests>
+)
+add_executable(
     VoxelForgeEditorQualityOfLifeTests
     Editor/QualityOfLifeTests.cpp
 )
@@ -762,6 +775,7 @@ set_tests_properties(
     VoxelForge.Editor.SelectionService
     VoxelForge.Editor.TransformPreview
     VoxelForge.Editor.VoxelRotate
+    VoxelForge.Editor.VoxelMirror
     VoxelForge.Editor.VoxelEditHistory
     VoxelForge.Editor.QualityOfLife
     VoxelForge.Editor.VoxelSave
@@ -926,6 +940,10 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-rotate-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.VoxelMirrorSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-mirror-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.SaveOnExitSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --save-on-exit-smoke-test
     )
@@ -965,6 +983,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelMoveSmoke
         VoxelForge.Editor.VoxelDuplicateSmoke
         VoxelForge.Editor.VoxelRotateSmoke
+        VoxelForge.Editor.VoxelMirrorSmoke
         VoxelForge.Editor.SaveOnExitSmoke
         PROPERTIES
             TIMEOUT 30

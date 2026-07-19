@@ -33,7 +33,7 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 17U,
+    Require(service.Bindings().size() == 20U,
         "The expected command bindings are incomplete.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
@@ -49,9 +49,12 @@ void TestCommandsAndBindings()
         service.ShortcutLabel(EditorInputCommand::ToolMove) == "M" &&
         service.ShortcutLabel(EditorInputCommand::ToolDuplicate) == "D" &&
         service.ShortcutLabel(EditorInputCommand::ToolRotate) == "R" &&
+        service.ShortcutLabel(EditorInputCommand::ToolMirror) == "H" &&
         service.ShortcutLabel(EditorInputCommand::RotateLeft) == "Q" &&
         service.ShortcutLabel(EditorInputCommand::RotateRight) == "Shift+Q" &&
-        service.ShortcutLabel(EditorInputCommand::RotateApply) == "Enter" &&
+        service.ShortcutLabel(EditorInputCommand::MirrorX) == "X" &&
+        service.ShortcutLabel(EditorInputCommand::MirrorZ) == "Z" &&
+        service.ShortcutLabel(EditorInputCommand::TransformApply) == "Enter" &&
         service.ShortcutLabel(EditorInputCommand::FileSave) == "Ctrl+S",
         "Shortcut labels do not reflect the real bindings.");
 }
@@ -60,7 +63,8 @@ void TestToolSelection()
 {
     const EditorInputService service;
     const EditorCommandAvailability available{
-        true, true, true, true, true, true, true, true, true, true};
+        true, true, true, true, true, true, true, true, true, true,
+        true, true};
     Require(Resolve(service, EditorInputKey::P, available) ==
             EditorInputCommand::ToolPencil &&
         Resolve(service, EditorInputKey::E, available) ==
@@ -81,12 +85,18 @@ void TestToolSelection()
             EditorInputCommand::ToolDuplicate &&
         Resolve(service, EditorInputKey::R, available) ==
             EditorInputCommand::ToolRotate &&
+        Resolve(service, EditorInputKey::H, available) ==
+            EditorInputCommand::ToolMirror &&
         Resolve(service, EditorInputKey::Q, available) ==
             EditorInputCommand::RotateLeft &&
         Resolve(service, EditorInputKey::Q, available, false, true) ==
             EditorInputCommand::RotateRight &&
+        Resolve(service, EditorInputKey::X, available) ==
+            EditorInputCommand::MirrorX &&
+        Resolve(service, EditorInputKey::Z, available) ==
+            EditorInputCommand::MirrorZ &&
         Resolve(service, EditorInputKey::Enter, available) ==
-            EditorInputCommand::RotateApply,
+            EditorInputCommand::TransformApply,
         "A tool shortcut resolves to the wrong command.");
     Require(Resolve(service, EditorInputKey::S, available, true) ==
             EditorInputCommand::FileSave,
@@ -152,6 +162,8 @@ void TestAvailabilityAndUnknownCommands()
     partial.CanDuplicateSelection = true;
     partial.CanRotateSelection = true;
     partial.CanAdjustRotation = true;
+    partial.CanMirrorSelection = true;
+    partial.CanAdjustMirror = true;
     Require(service.IsAvailable(EditorInputCommand::ToolMove, partial) &&
         Resolve(service, EditorInputKey::M, partial) ==
             EditorInputCommand::ToolMove &&
@@ -165,14 +177,21 @@ void TestAvailabilityAndUnknownCommands()
             EditorInputCommand::RotateLeft &&
         Resolve(service, EditorInputKey::Q, partial, false, true) ==
             EditorInputCommand::RotateRight &&
+        service.IsAvailable(EditorInputCommand::ToolMirror, partial) &&
+        Resolve(service, EditorInputKey::H, partial) ==
+            EditorInputCommand::ToolMirror &&
+        Resolve(service, EditorInputKey::X, partial) ==
+            EditorInputCommand::MirrorX &&
+        Resolve(service, EditorInputKey::Z, partial) ==
+            EditorInputCommand::MirrorZ &&
         Resolve(service, EditorInputKey::Enter, partial) ==
             EditorInputCommand::None,
-        "Rotate preview commands require selection but Apply requires preview.");
-    partial.CanApplyRotation = true;
+        "Transform preview commands require selection but Apply requires preview.");
+    partial.CanApplyTransform = true;
     Require(
         Resolve(service, EditorInputKey::Enter, partial) ==
-            EditorInputCommand::RotateApply,
-        "Rotate Apply stayed unavailable for a valid preview.");
+            EditorInputCommand::TransformApply,
+        "Transform Apply stayed unavailable for a valid preview.");
 }
 }
 

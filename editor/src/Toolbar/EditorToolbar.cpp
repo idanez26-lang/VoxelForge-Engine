@@ -203,6 +203,27 @@ void DrawRotateIcon(ImDrawList& drawList, const ImVec2 minimum,
         {tip.x + head * 0.12F, tip.y + head}, color);
 }
 
+void DrawMirrorIcon(ImDrawList& drawList, const ImVec2 minimum,
+    const ImVec2 maximum, const ImU32 color, const float thickness)
+{
+    const float centerX = (minimum.x + maximum.x) * 0.5F;
+    const float inset = (maximum.x - minimum.x) * 0.08F;
+    drawList.AddLine({centerX, minimum.y}, {centerX, maximum.y},
+        color, thickness);
+    const std::array<ImVec2, 3> left{{
+        {minimum.x + inset, (minimum.y + maximum.y) * 0.5F},
+        {centerX - inset, minimum.y + inset},
+        {centerX - inset, maximum.y - inset}}};
+    const std::array<ImVec2, 3> right{{
+        {maximum.x - inset, (minimum.y + maximum.y) * 0.5F},
+        {centerX + inset, minimum.y + inset},
+        {centerX + inset, maximum.y - inset}}};
+    drawList.AddPolyline(left.data(), static_cast<int>(left.size()), color,
+        ImDrawFlags_Closed, thickness);
+    drawList.AddPolyline(right.data(), static_cast<int>(right.size()), color,
+        ImDrawFlags_Closed, thickness);
+}
+
 bool DrawIcon(
     ImDrawList& drawList,
     const EditorToolbarAction action,
@@ -238,6 +259,9 @@ bool DrawIcon(
     case EditorToolbarAction::Rotate:
         DrawRotateIcon(drawList, minimum, maximum, color, thickness);
         return true;
+    case EditorToolbarAction::Mirror:
+        DrawMirrorIcon(drawList, minimum, maximum, color, thickness);
+        return true;
     }
     return false;
 }
@@ -265,6 +289,8 @@ void DrawTooltip(
             ? "Select one or more voxels to use Duplicate."
             : button.Action == EditorToolbarAction::Rotate
             ? "Select one or more voxels to use Rotate."
+            : button.Action == EditorToolbarAction::Mirror
+            ? "Select one or more voxels to use Mirror."
             : "Open a voxel model to use this tool.");
     ImGui::EndTooltip();
 }

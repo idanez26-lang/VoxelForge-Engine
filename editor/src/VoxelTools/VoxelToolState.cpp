@@ -18,6 +18,7 @@ const char* ActiveVoxelToolName(const ActiveVoxelTool tool) noexcept
     case ActiveVoxelTool::Move: return "Move";
     case ActiveVoxelTool::Duplicate: return "Duplicate";
     case ActiveVoxelTool::Rotate: return "Rotate";
+    case ActiveVoxelTool::Mirror: return "Mirror";
     }
     return "None";
 }
@@ -85,6 +86,11 @@ bool VoxelToolState::IsDuplicateActive() const noexcept
 bool VoxelToolState::IsRotateActive() const noexcept
 {
     return activeTool_ == ActiveVoxelTool::Rotate;
+}
+
+bool VoxelToolState::IsMirrorActive() const noexcept
+{
+    return activeTool_ == ActiveVoxelTool::Mirror;
 }
 
 bool VoxelToolState::IsEditingToolActive() const noexcept

@@ -903,12 +903,34 @@ void EditorWorkspace::DrawMainMenuBar()
                     false, transformPreviewModel_.IsActive()))
                 ExecuteInputCommand(EditorInputCommand::RotateRight);
             if (ImGui::MenuItem(
-                    "Apply Rotation", shortcut(EditorInputCommand::RotateApply),
+                    "Apply Rotation", shortcut(EditorInputCommand::TransformApply),
                     false, transformPreviewModel_.IsActive() &&
                         !transformPreviewModel_.HasCollisions() &&
                         !transformPreviewModel_.HasOutOfBounds()))
-                ExecuteInputCommand(EditorInputCommand::RotateApply);
+                ExecuteInputCommand(EditorInputCommand::TransformApply);
             if (ImGui::MenuItem("Cancel Rotation", "Esc"))
+                ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        }
+        if (ImGui::MenuItem(
+                "Mirror", shortcut(EditorInputCommand::ToolMirror),
+                voxelToolState_.IsMirrorActive(), CanMirrorSelection()))
+            ExecuteInputCommand(EditorInputCommand::ToolMirror);
+        if (voxelToolState_.IsMirrorActive())
+        {
+            ImGui::Separator();
+            if (ImGui::MenuItem(
+                    "Mirror X", shortcut(EditorInputCommand::MirrorX)))
+                ExecuteInputCommand(EditorInputCommand::MirrorX);
+            if (ImGui::MenuItem(
+                    "Mirror Z", shortcut(EditorInputCommand::MirrorZ)))
+                ExecuteInputCommand(EditorInputCommand::MirrorZ);
+            if (ImGui::MenuItem(
+                    "Apply Mirror", shortcut(EditorInputCommand::TransformApply),
+                    false, transformPreviewModel_.IsActive() &&
+                        !transformPreviewModel_.HasCollisions() &&
+                        !transformPreviewModel_.HasOutOfBounds()))
+                ExecuteInputCommand(EditorInputCommand::TransformApply);
+            if (ImGui::MenuItem("Cancel Mirror", "Esc"))
                 ExecuteInputCommand(EditorInputCommand::InteractionCancel);
         }
         ImGui::Separator();
@@ -982,6 +1004,10 @@ void EditorWorkspace::HandleCommandShortcuts()
         EditorInputKey::M, ImGui::IsKeyPressed(ImGuiKey_M, false));
     inputFrame.SetPressed(
         EditorInputKey::D, ImGui::IsKeyPressed(ImGuiKey_D, false));
+    inputFrame.SetPressed(
+        EditorInputKey::H, ImGui::IsKeyPressed(ImGuiKey_H, false));
+    inputFrame.SetPressed(
+        EditorInputKey::X, ImGui::IsKeyPressed(ImGuiKey_X, false));
     inputFrame.SetPressed(
         EditorInputKey::Q, ImGui::IsKeyPressed(ImGuiKey_Q, false));
     inputFrame.SetPressed(
@@ -1061,7 +1087,11 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
         CanDuplicateSelection(),
         CanRotateSelection(),
         voxelToolState_.IsRotateActive() && CanRotateSelection(),
-        voxelToolState_.IsRotateActive() && transformPreviewModel_.IsActive() &&
+        CanMirrorSelection(),
+        voxelToolState_.IsMirrorActive() && CanMirrorSelection(),
+        (voxelToolState_.IsRotateActive() ||
+         voxelToolState_.IsMirrorActive()) &&
+            transformPreviewModel_.IsActive() &&
             !transformPreviewModel_.HasCollisions() &&
             !transformPreviewModel_.HasOutOfBounds()};
 }
@@ -1082,6 +1112,11 @@ bool EditorWorkspace::CanDuplicateSelection() const noexcept
 }
 
 bool EditorWorkspace::CanRotateSelection() const noexcept
+{
+    return CanMoveSelection() && !selectionInteraction_.IsActive();
+}
+
+bool EditorWorkspace::CanMirrorSelection() const noexcept
 {
     return CanMoveSelection() && !selectionInteraction_.IsActive();
 }
@@ -1110,14 +1145,24 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         SelectVoxelTool(ActiveVoxelTool::Duplicate); break;
     case EditorInputCommand::ToolRotate:
         SelectVoxelTool(ActiveVoxelTool::Rotate); break;
+    case EditorInputCommand::ToolMirror:
+        SelectVoxelTool(ActiveVoxelTool::Mirror); break;
     case EditorInputCommand::RotateLeft:
         static_cast<void>(BeginVoxelRotatePreview(
             VoxelRotationDirection::CounterClockwise)); break;
     case EditorInputCommand::RotateRight:
         static_cast<void>(BeginVoxelRotatePreview(
             VoxelRotationDirection::Clockwise)); break;
-    case EditorInputCommand::RotateApply:
-        static_cast<void>(ApplyVoxelRotate()); break;
+    case EditorInputCommand::MirrorX:
+        static_cast<void>(BeginVoxelMirrorPreview(VoxelMirrorAxis::X)); break;
+    case EditorInputCommand::MirrorZ:
+        static_cast<void>(BeginVoxelMirrorPreview(VoxelMirrorAxis::Z)); break;
+    case EditorInputCommand::TransformApply:
+        if (voxelToolState_.IsRotateActive())
+            static_cast<void>(ApplyVoxelRotate());
+        else if (voxelToolState_.IsMirrorActive())
+            static_cast<void>(ApplyVoxelMirror());
+        break;
     case EditorInputCommand::FileSave:
         if (voxelDocumentSession_.HasActiveDocument())
             static_cast<void>(SaveVoxelModel());
@@ -1138,6 +1183,7 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool == ActiveVoxelTool::Move && !CanMoveSelection()) return;
     if (tool == ActiveVoxelTool::Duplicate && !CanDuplicateSelection()) return;
     if (tool == ActiveVoxelTool::Rotate && !CanRotateSelection()) return;
+    if (tool == ActiveVoxelTool::Mirror && !CanMirrorSelection()) return;
     if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
     if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
@@ -1156,19 +1202,22 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
             CancelSelectionInteraction();
     }
     if (tool != ActiveVoxelTool::Selection && tool != ActiveVoxelTool::Move &&
-        tool != ActiveVoxelTool::Duplicate && tool != ActiveVoxelTool::Rotate)
+        tool != ActiveVoxelTool::Duplicate && tool != ActiveVoxelTool::Rotate &&
+        tool != ActiveVoxelTool::Mirror)
         selectionBoxInteriorHovered_ = false;
     if (tool == ActiveVoxelTool::Selection)
         static_cast<void>(voxelSelection_.ClearSelection());
     if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Duplicate &&
-        tool != ActiveVoxelTool::Rotate)
+        tool != ActiveVoxelTool::Rotate && tool != ActiveVoxelTool::Mirror)
     {
         static_cast<void>(transformPreviewModel_.CancelPreview());
         voxelMoveStatusMessage_.clear();
         voxelDuplicateStatusMessage_.clear();
         voxelRotateStatusMessage_.clear();
+        voxelMirrorStatusMessage_.clear();
     }
     if (tool != ActiveVoxelTool::Rotate) CancelVoxelRotate();
+    if (tool != ActiveVoxelTool::Mirror) CancelVoxelMirror();
     voxelToolState_.SetActiveTool(tool);
     voxelToolInput_.Reset();
     UpdateVoxelHighlights();
@@ -1182,6 +1231,13 @@ void EditorWorkspace::CancelActiveInteraction()
     if (voxelToolState_.IsRotateActive())
     {
         CancelVoxelRotate();
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Selection);
+        UpdateVoxelHighlights();
+        return;
+    }
+    if (voxelToolState_.IsMirrorActive())
+    {
+        CancelVoxelMirror();
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Selection);
         UpdateVoxelHighlights();
         return;
@@ -1520,7 +1576,8 @@ void EditorWorkspace::DrawScenePanel()
         activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
     EditorToolbar::Draw(
         {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
-         CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection()},
+         CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection(),
+         CanMirrorSelection()},
         editorInputService_,
         {[this](const EditorInputCommand command)
          {
@@ -1542,13 +1599,37 @@ void EditorWorkspace::DrawScenePanel()
             transformPreviewModel_.HasCollisions() ||
             transformPreviewModel_.HasOutOfBounds());
         if (ImGui::Button("Apply"))
-            ExecuteInputCommand(EditorInputCommand::RotateApply);
+            ExecuteInputCommand(EditorInputCommand::TransformApply);
         ImGui::EndDisabled();
         DrawTooltip("Apply the current 90-degree rotation (Enter)");
         ImGui::SameLine();
         if (ImGui::Button("Cancel"))
             ExecuteInputCommand(EditorInputCommand::InteractionCancel);
         DrawTooltip("Cancel Rotate without changing the document (Esc)");
+        ImGui::SameLine();
+    }
+    if (voxelToolState_.IsMirrorActive())
+    {
+        if (ImGui::Button("Mirror X"))
+            ExecuteInputCommand(EditorInputCommand::MirrorX);
+        DrawTooltip("Preview Mirror X (X)");
+        ImGui::SameLine();
+        if (ImGui::Button("Mirror Z"))
+            ExecuteInputCommand(EditorInputCommand::MirrorZ);
+        DrawTooltip("Preview Mirror Z (Z)");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(
+            !transformPreviewModel_.IsActive() ||
+            transformPreviewModel_.HasCollisions() ||
+            transformPreviewModel_.HasOutOfBounds());
+        if (ImGui::Button("Apply"))
+            ExecuteInputCommand(EditorInputCommand::TransformApply);
+        ImGui::EndDisabled();
+        DrawTooltip("Apply the current mirror (Enter)");
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+            ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        DrawTooltip("Cancel Mirror without changing the document (Esc)");
         ImGui::SameLine();
     }
     ImGui::BeginDisabled(
@@ -1641,12 +1722,14 @@ void EditorWorkspace::DrawScenePanel()
         if ((voxelToolState_.IsSelectionActive() ||
              voxelToolState_.IsMoveActive() ||
              voxelToolState_.IsDuplicateActive() ||
-             voxelToolState_.IsRotateActive()) &&
+             voxelToolState_.IsRotateActive() ||
+             voxelToolState_.IsMirrorActive()) &&
             selectionService_.EditableBounds().Valid &&
             selectionInteraction_.Mode() != SelectionInteractionMode::Creating)
         {
             const SelectionBounds& handleBounds =
-                voxelToolState_.IsRotateActive() &&
+                (voxelToolState_.IsRotateActive() ||
+                 voxelToolState_.IsMirrorActive()) &&
                     transformPreviewModel_.IsActive()
                 ? transformPreviewModel_.PreviewBounds()
                 :
@@ -1898,11 +1981,26 @@ void EditorWorkspace::DrawScenePanel()
                 ? "Rotate Y: +90° — Enter to apply — Esc to cancel"
                 : "Rotate Y: -90° — Enter to apply — Esc to cancel";
         }
+        else if (voxelToolState_.IsMirrorActive())
+        {
+            viewportHelp = !voxelMirrorStatusMessage_.empty()
+                ? voxelMirrorStatusMessage_.c_str()
+                : !transformPreviewModel_.IsActive()
+                ? "Choose X or Z to preview a mirror"
+                : transformPreviewModel_.HasCollisions()
+                ? "Mirror blocked: destination is occupied"
+                : transformPreviewModel_.HasOutOfBounds()
+                ? "Mirror blocked: destination is outside the model"
+                : voxelMirrorAxis_ == VoxelMirrorAxis::X
+                ? "Mirror X — Enter to apply — Esc to cancel"
+                : "Mirror Z — Enter to apply — Esc to cancel";
+        }
         DrawTooltip(viewportHelp);
         if (voxelToolState_.IsSelectionActive() ||
             voxelToolState_.IsMoveActive() ||
             voxelToolState_.IsDuplicateActive() ||
-            voxelToolState_.IsRotateActive())
+            voxelToolState_.IsRotateActive() ||
+            voxelToolState_.IsMirrorActive())
         {
             const ImVec2 textSize = ImGui::CalcTextSize(viewportHelp);
             const ImVec2 helpMinimum{imageOrigin.x + 10.0F, imageOrigin.y + 10.0F};
@@ -4084,6 +4182,7 @@ void EditorWorkspace::PrepareForApplicationClose()
     voxelMoveStatusMessage_.clear();
     voxelDuplicateStatusMessage_.clear();
     voxelRotateStatusMessage_.clear();
+    voxelMirrorStatusMessage_.clear();
     voxelSelectionClickCandidate_ = false;
     selectionPointerAnchor_.reset();
     dragDropImport_.Reset();
@@ -8369,6 +8468,214 @@ bool EditorWorkspace::VoxelRotateSmokePassed() const noexcept
         voxelRotateSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunVoxelMirrorSmokeStep(const std::size_t frame)
+{
+    using Asset::Voxel::VoxelPosition;
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const std::vector<VoxelPosition> source{
+        {2, 1, 2}, {2, 1, 3}, {2, 1, 4}, {3, 1, 2}};
+    const SelectionBounds sourceBounds =
+        SelectionBounds::FromCorners({2, 1, 2}, {3, 1, 4});
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"MirrorSmoke", {64U, 64U, 64U}});
+        voxelMirrorSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+        const std::vector<VoxelChange> seed{
+            {0U, source[0], false, 0U, true, 3U},
+            {0U, source[1], false, 0U, true, 5U},
+            {0U, source[2], false, 0U, true, 7U},
+            {0U, source[3], false, 0U, true, 11U}};
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Mirror Smoke", seed});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace);
+        EditorInputFrame shortcut;
+        shortcut.SetPressed(EditorInputKey::H);
+        const bool inputReady = editorInputService_.Resolve(
+            shortcut, CurrentCommandAvailability()) ==
+            EditorInputCommand::ToolMirror;
+        const auto mirrorButton = std::find_if(
+            EditorToolbarModel::Buttons().begin(),
+            EditorToolbarModel::Buttons().end(),
+            [](const EditorToolbarButton& button)
+            {
+                return button.Action == EditorToolbarAction::Mirror;
+            });
+        const bool toolbarReady =
+            mirrorButton != EditorToolbarModel::Buttons().end() &&
+            EditorToolbarModel::IsEnabled(*mirrorButton,
+                {true, document->IsDirty(), voxelToolState_.ActiveTool(),
+                 CanMoveSelection(), CanDuplicateSelection(),
+                 CanRotateSelection(), CanMirrorSelection()});
+        const std::uint64_t revision = document->GetRevision();
+        ExecuteInputCommand(EditorInputCommand::ToolMirror);
+        EditorInputFrame x;
+        x.SetPressed(EditorInputKey::X);
+        EditorInputFrame z;
+        z.SetPressed(EditorInputKey::Z);
+        EditorInputFrame apply;
+        apply.SetPressed(EditorInputKey::Enter);
+        const EditorCommandAvailability availability =
+            CurrentCommandAvailability();
+        voxelMirrorSmokePrepared_ = seeded && selected && inputReady &&
+            toolbarReady && voxelToolState_.IsMirrorActive() &&
+            !transformPreviewModel_.IsActive() &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            editorInputService_.Resolve(x, availability) ==
+                EditorInputCommand::MirrorX &&
+            editorInputService_.Resolve(z, availability) ==
+                EditorInputCommand::MirrorZ &&
+            editorInputService_.Resolve(apply, availability) ==
+                EditorInputCommand::None &&
+            document->GetRevision() == revision &&
+            voxelEditHistory_.UndoCount() == 1U;
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelMirrorSmokePrepared_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        ExecuteInputCommand(EditorInputCommand::MirrorX);
+        std::vector<VoxelPosition> xDestinations;
+        for (const TransformPreviewVoxel& voxel : transformPreviewModel_.Voxels())
+            xDestinations.push_back(voxel.PreviewPosition);
+        const bool xReady = voxelMirrorAxis_ == VoxelMirrorAxis::X &&
+            transformPreviewModel_.IsActive() &&
+            !transformPreviewModel_.HasCollisions();
+        ExecuteInputCommand(EditorInputCommand::MirrorZ);
+        std::vector<VoxelPosition> zDestinations;
+        for (const TransformPreviewVoxel& voxel : transformPreviewModel_.Voxels())
+            zDestinations.push_back(voxel.PreviewPosition);
+        voxelMirrorSmokePreviewed_ = xReady &&
+            voxelMirrorAxis_ == VoxelMirrorAxis::Z &&
+            transformPreviewModel_.IsActive() &&
+            xDestinations != zDestinations &&
+            document->GetRevision() == revision &&
+            selectionService_.EditableBounds() == sourceBounds;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelMirrorSmokePreviewed_) return false;
+        const bool rendered = viewportRenderer_.HasTransformPreview() &&
+            viewportRenderer_.TransformPreviewSourcePrimitiveCount() == 4U &&
+            viewportRenderer_.TransformPreviewDestinationPrimitiveCount() == 4U;
+        const std::uint64_t revision = document->GetRevision();
+        voxelMirrorSmokeApplied_ = rendered && ApplyVoxelMirror() &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 4U &&
+            voxelToolState_.IsMirrorActive() &&
+            !transformPreviewModel_.IsActive() &&
+            document->GetVoxel({2, 1, 4})->PaletteIndex == 3U &&
+            document->GetVoxel({3, 1, 4})->PaletteIndex == 11U;
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !voxelMirrorSmokeApplied_) return false;
+        UndoCommand();
+        const bool undone = selectionService_.EditableBounds() == sourceBounds &&
+            document->GetVoxel(source[0])->PaletteIndex == 3U &&
+            document->GetVoxel(source[3])->PaletteIndex == 11U;
+        RedoCommand();
+        voxelMirrorSmokeUndoRedo_ = undone &&
+            selectionService_.Count() == 4U &&
+            !transformPreviewModel_.IsActive();
+        voxelMirrorSmokeInvolutive_ = voxelMirrorSmokeUndoRedo_ &&
+            BeginVoxelMirrorPreview(VoxelMirrorAxis::Z) &&
+            ApplyVoxelMirror() &&
+            document->GetVoxel(source[0])->PaletteIndex == 3U &&
+            document->GetVoxel(source[3])->PaletteIndex == 11U;
+        const std::array<VoxelPosition, 2U> symmetric{{
+            {6, 1, 6}, {7, 1, 6}}};
+        const VoxelMirrorGeometry identity =
+            MirrorVoxelSelectionOperation::BuildGeometry(
+                symmetric,
+                SelectionBounds::FromCorners({6, 1, 6}, {7, 1, 6}),
+                VoxelMirrorAxis::X);
+        std::vector<VoxelPosition> dense;
+        dense.reserve(512U);
+        for (std::int32_t z = 0; z < 8; ++z)
+            for (std::int32_t y = 0; y < 8; ++y)
+                for (std::int32_t x = 0; x < 8; ++x)
+                    dense.push_back({x + 16, y + 1, z + 16});
+        const VoxelMirrorGeometry large =
+            MirrorVoxelSelectionOperation::BuildGeometry(
+                dense,
+                SelectionBounds::FromCorners({16, 1, 16}, {23, 8, 23}),
+                VoxelMirrorAxis::X);
+        voxelMirrorSmokeIdentity_ = identity.Valid() && identity.Identity &&
+            large.Valid() && large.Destinations.size() == 512U;
+    }
+    else if (frame == 4U)
+    {
+        if (!document || !voxelMirrorSmokeInvolutive_ ||
+            !voxelMirrorSmokeIdentity_) return false;
+        const auto added =
+            document->SetVoxel({3, 1, 3}, 19U);
+        const bool preview = BeginVoxelMirrorPreview(VoxelMirrorAxis::X);
+        voxelMirrorSmokeRejected_ = added.Changed && preview &&
+            transformPreviewModel_.HasCollisions() &&
+            !ApplyVoxelMirror() && document->HasVoxel({3, 1, 3}) &&
+            document->RemoveVoxel({3, 1, 3}).Changed;
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace));
+    }
+    else if (frame == 5U)
+    {
+        voxelMirrorSmokeSaved_ = document && voxelMirrorSmokeRejected_ &&
+            SaveVoxelModel() && !document->IsDirty() &&
+            std::filesystem::is_regular_file(voxelMirrorSmokePath_);
+        if (!voxelMirrorSmokeSaved_) return false;
+        ClearVoxelViewport();
+        voxelMirrorSmokeReopened_ =
+            OpenVoxInViewportNow(voxelMirrorSmokePath_);
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelMirrorSmokeReopened_ = voxelMirrorSmokeReopened_ && document &&
+            document->GetVoxelCount() == 4U &&
+            document->GetVoxel(source[0])->PaletteIndex == 3U &&
+            document->GetVoxel(source[3])->PaletteIndex == 11U;
+    }
+    else if (frame == 6U)
+    {
+        if (!document || !voxelMirrorSmokeReopened_) return false;
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace));
+        SelectVoxelTool(ActiveVoxelTool::Mirror);
+        const bool preview = BeginVoxelMirrorPreview(VoxelMirrorAxis::X);
+        PrepareForApplicationClose();
+        const bool closeSafe = preview && !transformPreviewModel_.IsActive();
+        CloseProject();
+        voxelMirrorSmokeCleaned_ = closeSafe &&
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !transformPreviewModel_.IsActive() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelMirrorSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelMirrorSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelMirrorSmokePassed();
+}
+
+bool EditorWorkspace::VoxelMirrorSmokePassed() const noexcept
+{
+    return voxelMirrorSmokePrepared_ && voxelMirrorSmokePreviewed_ &&
+        voxelMirrorSmokeApplied_ && voxelMirrorSmokeUndoRedo_ &&
+        voxelMirrorSmokeInvolutive_ && voxelMirrorSmokeIdentity_ &&
+        voxelMirrorSmokeRejected_ && voxelMirrorSmokeSaved_ &&
+        voxelMirrorSmokeReopened_ && voxelMirrorSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunSaveOnExitSmokeStep(const std::size_t frame)
 {
     using Asset::Voxel::VoxelPosition;
@@ -8498,7 +8805,8 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
                 {
                     return button.Action == EditorToolbarAction::Move ||
                         button.Action == EditorToolbarAction::Duplicate ||
-                        button.Action == EditorToolbarAction::Rotate
+                        button.Action == EditorToolbarAction::Rotate ||
+                        button.Action == EditorToolbarAction::Mirror
                         ? !EditorToolbarModel::IsEnabled(button, state)
                         : EditorToolbarModel::IsEnabled(button, state);
                 });
@@ -9612,6 +9920,113 @@ void EditorWorkspace::CancelVoxelRotate() noexcept
     voxelRotateStatusMessage_.clear();
 }
 
+bool EditorWorkspace::BeginVoxelMirrorPreview(const VoxelMirrorAxis axis)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || !CanMirrorSelection())
+    {
+        voxelMirrorStatusMessage_ = "Select voxels before using Mirror";
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    const std::uint64_t generation = voxelDocumentSession_.Generation();
+    if (voxelToolState_.IsMirrorActive() && voxelMirrorAxis_ == axis &&
+        transformPreviewModel_.IsValidFor(
+            *document, selectionService_, generation) &&
+        transformPreviewModel_.HasExplicitDestinations())
+        return true;
+    if (!transformPreviewModel_.BeginPreview(
+            *document, selectionService_, generation, 0U,
+            TransformPreviewCollisionPolicy::IgnoreSource))
+    {
+        voxelMirrorStatusMessage_ =
+            "Mirror preview could not capture selection";
+        UpdateVoxelHighlights();
+        return false;
+    }
+    const VoxelMirrorGeometry geometry =
+        MirrorVoxelSelectionOperation::BuildGeometry(
+            selectionService_.Voxels(), selectionService_.EditableBounds(),
+            axis);
+    if (!geometry.Valid() ||
+        !transformPreviewModel_.SetExplicitDestinations(
+            *document, selectionService_, generation, geometry.Destinations))
+    {
+        voxelMirrorStatusMessage_ = geometry.Message.empty()
+            ? "Mirror preview could not be built" : geometry.Message;
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+    voxelMirrorAxis_ = axis;
+    voxelMirrorStatusMessage_.clear();
+    voxelMoveStatusMessage_.clear();
+    voxelDuplicateStatusMessage_.clear();
+    voxelRotateStatusMessage_.clear();
+    UpdateVoxelHighlights();
+    return true;
+}
+
+bool EditorWorkspace::ApplyVoxelMirror()
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || voxelEditInProgress_ || voxelEditHistory_.IsBusy())
+    {
+        CancelVoxelMirror();
+        return false;
+    }
+
+    MirrorVoxelSelectionResult prepared =
+        MirrorVoxelSelectionOperation::Build(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            transformPreviewModel_, voxelMirrorAxis_);
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    if (prepared.Code == MirrorVoxelSelectionResultCode::NoChange)
+    {
+        voxelMirrorStatusMessage_ = "Mirror has no visible effect";
+        AddConsoleMessage("[Edit] Mirror has no visible effect.");
+        UpdateVoxelHighlights();
+        return true;
+    }
+    if (!prepared.Ready())
+    {
+        voxelMirrorStatusMessage_ = prepared.Message;
+        if (!prepared.Message.empty())
+            AddConsoleMessage("[Edit] " + prepared.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    voxelEditInProgress_ = true;
+    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
+        *this, std::move(prepared.Operation));
+    voxelEditInProgress_ = false;
+    if (!result)
+    {
+        voxelMirrorStatusMessage_ = result.Message;
+        AddConsoleMessage("[Edit] Mirror failed: " + result.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+    ApplyVoxelHistorySelection(result);
+    voxelMirrorStatusMessage_.clear();
+    AddConsoleMessage("[Edit] Mirrored " +
+        std::to_string(selectionService_.Count()) + " voxel(s) on " +
+        VoxelMirrorAxisName(voxelMirrorAxis_) + ".");
+    UpdateVoxelHighlights();
+    return true;
+}
+
+void EditorWorkspace::CancelVoxelMirror() noexcept
+{
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    voxelMirrorStatusMessage_.clear();
+}
+
 void EditorWorkspace::CancelSelectionInteraction()
 {
     if (!selectionInteraction_.IsActive()) return;
@@ -9993,7 +10408,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<SelectionBounds> editableSelectionBounds;
     const bool selectionVisualActive =
         voxelToolState_.IsSelectionActive() || voxelToolState_.IsMoveActive() ||
-        voxelToolState_.IsDuplicateActive() || voxelToolState_.IsRotateActive();
+        voxelToolState_.IsDuplicateActive() || voxelToolState_.IsRotateActive() ||
+        voxelToolState_.IsMirrorActive();
     if (selectionVisualActive)
     {
         const auto selected = selectionService_.Voxels();
@@ -10006,7 +10422,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         if (bounds.Valid)
             selectionBounds = VoxelBoxBounds{bounds.Minimum, bounds.Maximum};
         const SelectionBounds& editable =
-            voxelToolState_.IsRotateActive() &&
+            (voxelToolState_.IsRotateActive() ||
+             voxelToolState_.IsMirrorActive()) &&
                 transformPreviewModel_.IsActive()
             ? transformPreviewModel_.PreviewBounds()
             :
@@ -10170,6 +10587,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     voxelMoveStatusMessage_.clear();
     voxelDuplicateStatusMessage_.clear();
     voxelRotateStatusMessage_.clear();
+    voxelMirrorStatusMessage_.clear();
     viewportRenderer_.ClearModel();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();
