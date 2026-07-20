@@ -1,5 +1,6 @@
 #include "ScaleVoxelSelectionOperation.h"
 #include "TransformOperationFramework.h"
+#include "VoxelForge/Asset/Vox/VoxFormat.h"
 
 #include <algorithm>
 #include <limits>
@@ -19,29 +20,22 @@ using Position = Asset::Voxel::VoxelPosition;
     return left.Z < right.Z;
 }
 
-[[nodiscard]] bool ScaleCoordinate(
-    const std::int32_t source,
-    const std::int32_t minimum,
-    std::int32_t& destination) noexcept
+[[nodiscard]] std::uint64_t DivideRoundUp(
+    const std::uint64_t numerator,
+    const std::uint64_t denominator) noexcept
 {
-    const std::int64_t local =
-        static_cast<std::int64_t>(source) - minimum;
-    const std::int64_t scaled =
-        static_cast<std::int64_t>(minimum) + local * 2;
-    if (local < 0 || scaled < std::numeric_limits<std::int32_t>::min() ||
-        scaled > std::numeric_limits<std::int32_t>::max())
-        return false;
-    destination = static_cast<std::int32_t>(scaled);
-    return true;
+    return numerator / denominator +
+        static_cast<std::uint64_t>(numerator % denominator != 0U);
 }
 
-[[nodiscard]] bool Increment(
-    const std::int32_t value,
-    const std::int32_t offset,
+[[nodiscard]] bool AddOffset(
+    const std::int32_t minimum,
+    const std::uint64_t offset,
     std::int32_t& destination) noexcept
 {
     const std::int64_t result =
-        static_cast<std::int64_t>(value) + offset;
+        static_cast<std::int64_t>(minimum) +
+        static_cast<std::int64_t>(offset);
     if (result < std::numeric_limits<std::int32_t>::min() ||
         result > std::numeric_limits<std::int32_t>::max())
         return false;
@@ -101,12 +95,36 @@ ScaleVoxelSelectionResult FromCommon(
         ? ScaleVoxelSelectionOperation::UniformFactor
         : ScaleVoxelSelectionOperation::AxisFactor;
 }
+
+[[nodiscard]] Asset::Voxel::VoxelDimensions DoubledDimensions(
+    const SelectionBounds bounds, const VoxelScaleMode mode) noexcept
+{
+    Asset::Voxel::VoxelDimensions dimensions = bounds.Dimensions();
+    if (mode == VoxelScaleMode::X || mode == VoxelScaleMode::Uniform)
+        dimensions.X *= 2U;
+    if (mode == VoxelScaleMode::Y || mode == VoxelScaleMode::Uniform)
+        dimensions.Y *= 2U;
+    if (mode == VoxelScaleMode::Z || mode == VoxelScaleMode::Uniform)
+        dimensions.Z *= 2U;
+    return dimensions;
+}
 }
 
 VoxelScaleGeometry ScaleVoxelSelectionOperation::BuildGeometry(
     const std::span<const TransformPreviewVoxel> sourceVoxels,
     const SelectionBounds sourceBounds,
     const VoxelScaleMode mode)
+{
+    return BuildGeometry(
+        sourceVoxels, sourceBounds, mode,
+        DoubledDimensions(sourceBounds, mode));
+}
+
+VoxelScaleGeometry ScaleVoxelSelectionOperation::BuildGeometry(
+    const std::span<const TransformPreviewVoxel> sourceVoxels,
+    const SelectionBounds sourceBounds,
+    const VoxelScaleMode mode,
+    const Asset::Voxel::VoxelDimensions targetDimensions)
 {
     VoxelScaleGeometry result;
     result.Mode = mode;
@@ -116,21 +134,47 @@ VoxelScaleGeometry ScaleVoxelSelectionOperation::BuildGeometry(
         result.Message = "Scale requires a non-empty selection.";
         return result;
     }
-    const std::size_t multiplier = Multiplier(mode);
-    if (sourceVoxels.size() >
-        std::numeric_limits<std::size_t>::max() / multiplier)
+    const Asset::Voxel::VoxelDimensions sourceDimensions =
+        sourceBounds.Dimensions();
+    if (sourceDimensions.X == 0U || sourceDimensions.Y == 0U ||
+        sourceDimensions.Z == 0U || targetDimensions.X == 0U ||
+        targetDimensions.Y == 0U || targetDimensions.Z == 0U)
+    {
+        result.Message = "Scale dimensions must remain at least one voxel.";
+        return result;
+    }
+    if (targetDimensions.X > Asset::Vox::MaximumVoxDimension ||
+        targetDimensions.Y > Asset::Vox::MaximumVoxDimension ||
+        targetDimensions.Z > Asset::Vox::MaximumVoxDimension)
+    {
+        result.Message = "Scale target exceeds VOX dimension limits.";
+        return result;
+    }
+    std::uint64_t maximumDestinationCount = targetDimensions.X;
+    if (maximumDestinationCount >
+            std::numeric_limits<std::uint64_t>::max() / targetDimensions.Y)
     {
         result.Message = "Scale destination count is not representable.";
         return result;
     }
-    const std::size_t destinationCount = sourceVoxels.size() * multiplier;
-    if (destinationCount > result.Destinations.max_size())
+    maximumDestinationCount *= targetDimensions.Y;
+    if (maximumDestinationCount >
+            std::numeric_limits<std::uint64_t>::max() / targetDimensions.Z)
+    {
+        result.Message = "Scale destination count is not representable.";
+        return result;
+    }
+    maximumDestinationCount *= targetDimensions.Z;
+    if (maximumDestinationCount > result.Destinations.max_size())
     {
         result.Message = "Scale destination count exceeds container limits.";
         return result;
     }
 
-    result.Destinations.reserve(destinationCount);
+    result.Destinations.reserve(static_cast<std::size_t>(
+        std::min<std::uint64_t>(maximumDestinationCount,
+            sourceVoxels.size() * static_cast<std::uint64_t>(
+                Multiplier(mode)))));
     Position minimum{};
     Position maximum{};
     bool first = true;
@@ -149,43 +193,31 @@ VoxelScaleGeometry ScaleVoxelSelectionOperation::BuildGeometry(
             return result;
         }
 
-        Position base = source;
-        if ((mode == VoxelScaleMode::X || mode == VoxelScaleMode::Uniform) &&
-            !ScaleCoordinate(source.X, sourceBounds.Minimum.X, base.X))
+        const std::array<std::uint64_t, 3U> local{
+            static_cast<std::uint64_t>(source.X - sourceBounds.Minimum.X),
+            static_cast<std::uint64_t>(source.Y - sourceBounds.Minimum.Y),
+            static_cast<std::uint64_t>(source.Z - sourceBounds.Minimum.Z)};
+        const std::array<std::uint64_t, 3U> sourceSize{
+            sourceDimensions.X, sourceDimensions.Y, sourceDimensions.Z};
+        const std::array<std::uint64_t, 3U> targetSize{
+            targetDimensions.X, targetDimensions.Y, targetDimensions.Z};
+        std::array<std::uint64_t, 3U> firstTarget{};
+        std::array<std::uint64_t, 3U> endTarget{};
+        for (std::size_t axis = 0U; axis < 3U; ++axis)
         {
-            result.Message = "Scale X destination is not representable.";
-            result.Destinations.clear();
-            return result;
+            firstTarget[axis] = DivideRoundUp(
+                local[axis] * targetSize[axis], sourceSize[axis]);
+            endTarget[axis] = DivideRoundUp(
+                (local[axis] + 1U) * targetSize[axis], sourceSize[axis]);
         }
-        if ((mode == VoxelScaleMode::Y || mode == VoxelScaleMode::Uniform) &&
-            !ScaleCoordinate(source.Y, sourceBounds.Minimum.Y, base.Y))
-        {
-            result.Message = "Scale Y destination is not representable.";
-            result.Destinations.clear();
-            return result;
-        }
-        if ((mode == VoxelScaleMode::Z || mode == VoxelScaleMode::Uniform) &&
-            !ScaleCoordinate(source.Z, sourceBounds.Minimum.Z, base.Z))
-        {
-            result.Message = "Scale Z destination is not representable.";
-            result.Destinations.clear();
-            return result;
-        }
-
-        const std::int32_t xCopies =
-            mode == VoxelScaleMode::X || mode == VoxelScaleMode::Uniform ? 2 : 1;
-        const std::int32_t yCopies =
-            mode == VoxelScaleMode::Y || mode == VoxelScaleMode::Uniform ? 2 : 1;
-        const std::int32_t zCopies =
-            mode == VoxelScaleMode::Z || mode == VoxelScaleMode::Uniform ? 2 : 1;
-        for (std::int32_t dz = 0; dz < zCopies; ++dz)
-            for (std::int32_t dy = 0; dy < yCopies; ++dy)
-                for (std::int32_t dx = 0; dx < xCopies; ++dx)
+        for (std::uint64_t z = firstTarget[2]; z < endTarget[2]; ++z)
+            for (std::uint64_t y = firstTarget[1]; y < endTarget[1]; ++y)
+                for (std::uint64_t x = firstTarget[0]; x < endTarget[0]; ++x)
                 {
                     Position destination{};
-                    if (!Increment(base.X, dx, destination.X) ||
-                        !Increment(base.Y, dy, destination.Y) ||
-                        !Increment(base.Z, dz, destination.Z))
+                    if (!AddOffset(sourceBounds.Minimum.X, x, destination.X) ||
+                        !AddOffset(sourceBounds.Minimum.Y, y, destination.Y) ||
+                        !AddOffset(sourceBounds.Minimum.Z, z, destination.Z))
                     {
                         result.Message =
                             "Scale destination is not representable.";
@@ -212,10 +244,9 @@ VoxelScaleGeometry ScaleVoxelSelectionOperation::BuildGeometry(
                 }
     }
 
-    if (result.Destinations.size() != destinationCount)
+    if (result.Destinations.empty())
     {
-        result.Message = "Scale destination count is incomplete.";
-        result.Destinations.clear();
+        result.Message = "Scale produced no destination voxels.";
         return result;
     }
     std::vector<Position> unique;
@@ -240,13 +271,28 @@ ScaleVoxelSelectionResult ScaleVoxelSelectionOperation::Build(
     const TransformPreviewModel& preview,
     const VoxelScaleMode mode)
 {
+    return Build(document, selection, documentGeneration, preview, mode,
+        DoubledDimensions(preview.SourceBounds(), mode));
+}
+
+ScaleVoxelSelectionResult ScaleVoxelSelectionOperation::Build(
+    const Asset::Voxel::VoxelDocument& document,
+    const SelectionService& selection,
+    const std::uint64_t documentGeneration,
+    const TransformPreviewModel& preview,
+    const VoxelScaleMode mode,
+    const Asset::Voxel::VoxelDimensions targetDimensions)
+{
     if (!preview.IsActive() || !preview.HasExpandedDestinations())
         return Refused(ScaleVoxelSelectionResultCode::InvalidPreview,
             "Scale preview is inactive.");
     TransformOperationBuildResult common = TransformOperationBuilder::Build(
         document, selection, documentGeneration, preview,
         {"Scale", std::string("Scale Voxels ") +
-            VoxelScaleModeName(mode) + " x2",
+            VoxelScaleModeName(mode) + " to " +
+            std::to_string(targetDimensions.X) + "x" +
+            std::to_string(targetDimensions.Y) + "x" +
+            std::to_string(targetDimensions.Z),
          {TransformSourcePolicy::RemoveSource,
           TransformCollisionPolicy::AllowSourceOverlap},
          preview.PreviewBounds()});
@@ -255,7 +301,7 @@ ScaleVoxelSelectionResult ScaleVoxelSelectionOperation::Build(
         return FromCommon(std::move(common));
     const TransformPreviewOperationData data = preview.OperationData();
     const VoxelScaleGeometry geometry = BuildGeometry(
-        data.SourceVoxels, data.SourceBounds, mode);
+        data.SourceVoxels, data.SourceBounds, mode, targetDimensions);
     if (!geometry.Valid() ||
         geometry.Destinations.size() != data.Voxels.size())
         return Refused(ScaleVoxelSelectionResultCode::InvalidGeometry,

@@ -8,14 +8,6 @@ namespace VoxelForge::Editor
 {
 namespace
 {
-constexpr std::array<float, 4U> ScaleFoundationXColor{
-    0.94F, 0.20F, 0.18F, 1.0F};
-constexpr std::array<float, 4U> ScaleFoundationYColor{
-    0.24F, 0.86F, 0.32F, 1.0F};
-constexpr std::array<float, 4U> ScaleFoundationZColor{
-    0.20F, 0.46F, 1.0F, 1.0F};
-constexpr float ScaleFoundationAxisThicknessPixels = 2.2F;
-constexpr float ScaleFoundationCenterPixels = 5.5F;
 constexpr float ProjectionTolerancePixels = 0.25F;
 constexpr float Pi = 3.14159265358979323846F;
 
@@ -265,6 +257,25 @@ std::string_view TransformGizmoModel::ContextHelpFor(
         }
         return {};
     }
+    if (mode == TransformGizmoMode::Scale)
+    {
+        if (state == TransformGizmoInteractionState::Dragging)
+        {
+            if (axis == TransformGizmoAxis::X)
+                return "Scaling on X - Release to apply - Esc to cancel";
+            if (axis == TransformGizmoAxis::Y)
+                return "Scaling on Y - Release to apply - Esc to cancel";
+            if (axis == TransformGizmoAxis::Z)
+                return "Scaling on Z - Release to apply - Esc to cancel";
+        }
+        if (state == TransformGizmoInteractionState::Hover)
+        {
+            if (axis == TransformGizmoAxis::X) return "Scale X";
+            if (axis == TransformGizmoAxis::Y) return "Scale Y";
+            if (axis == TransformGizmoAxis::Z) return "Scale Z";
+        }
+        return {};
+    }
     if (state == TransformGizmoInteractionState::Dragging)
     {
         if (axis == TransformGizmoAxis::X)
@@ -358,7 +369,8 @@ bool TransformGizmoModel::Update(
     next.Visible = true;
     next.Mode = mode;
     const bool interactiveMode = mode == TransformGizmoMode::Move ||
-        mode == TransformGizmoMode::Rotate;
+        mode == TransformGizmoMode::Rotate ||
+        mode == TransformGizmoMode::Scale;
     next.State = interactiveMode
         ? context.InteractionState : TransformGizmoInteractionState::Idle;
     next.ActiveAxis = interactiveMode
@@ -381,7 +393,7 @@ bool TransformGizmoModel::Update(
         ? GizmoStyle::RotateIdleThicknessPixels
         : mode == TransformGizmoMode::Move
         ? GizmoStyle::MoveAxisIdleThicknessPixels
-        : ScaleFoundationAxisThicknessPixels;
+        : GizmoStyle::MoveAxisIdleThicknessPixels;
     next.AxisThickness = std::min(
         representativeWorldPerPixel * normalThicknessPixels,
         representativeLength * 0.12F);
@@ -391,15 +403,12 @@ bool TransformGizmoModel::Update(
                 ? GizmoStyle::RotateCenterDiameterPixels * 0.5F
                 : mode == TransformGizmoMode::Move
                 ? GizmoStyle::MoveCenterDiameterPixels * 0.5F
-                : ScaleFoundationCenterPixels),
+                : GizmoStyle::MoveCenterDiameterPixels * 0.5F),
         representativeLength * 0.24F);
     const auto styled = [&next, mode](const TransformGizmoAxis axis,
                                      const std::array<float, 4U> color)
     {
         std::array<float, 4U> result = color;
-        if (mode != TransformGizmoMode::Move &&
-            mode != TransformGizmoMode::Rotate)
-            return result;
         float intensity = GizmoStyle::IdleIntensity;
         if (next.State == TransformGizmoInteractionState::Dragging)
             intensity = axis == next.ActiveAxis
@@ -428,8 +437,9 @@ bool TransformGizmoModel::Update(
         const float projectedPixels = std::max(
             sizing.ProjectedLengthPixels, 1.0F);
         const float worldPerPixel = sizing.WorldLength / projectedPixels;
-        float thicknessPixels = ScaleFoundationAxisThicknessPixels;
-        if (mode == TransformGizmoMode::Move)
+        float thicknessPixels = GizmoStyle::MoveAxisIdleThicknessPixels;
+        if (mode == TransformGizmoMode::Move ||
+            mode == TransformGizmoMode::Scale)
             thicknessPixels = next.State ==
                     TransformGizmoInteractionState::Dragging &&
                     axis == next.ActiveAxis
@@ -475,6 +485,16 @@ bool TransformGizmoModel::Update(
             result.ArrowBaseCorners = ArrowBaseCorners(
                 axis, result.ArrowBaseCenter, result.ArrowWidth * 0.5F);
         }
+        result.HasScaleHandle = mode == TransformGizmoMode::Scale;
+        if (result.HasScaleHandle)
+            result.ScaleHandleSizePixels = next.State ==
+                    TransformGizmoInteractionState::Dragging &&
+                    axis == next.ActiveAxis
+                ? GizmoStyle::ScaleHandleDraggingSizePixels
+                : next.State == TransformGizmoInteractionState::Hover &&
+                    axis == next.ActiveAxis
+                ? GizmoStyle::ScaleHandleHoverSizePixels
+                : GizmoStyle::ScaleHandleIdleSizePixels;
         result.HasRotationRing = mode == TransformGizmoMode::Rotate;
         if (result.HasRotationRing)
         {
@@ -501,15 +521,9 @@ bool TransformGizmoModel::Update(
         return result;
     };
     next.Axes = {{
-        makeAxis(0U, TransformGizmoAxis::X,
-            mode == TransformGizmoMode::Scale
-                ? ScaleFoundationXColor : GizmoStyle::AxisColorX),
-        makeAxis(1U, TransformGizmoAxis::Y,
-            mode == TransformGizmoMode::Scale
-                ? ScaleFoundationYColor : GizmoStyle::AxisColorY),
-        makeAxis(2U, TransformGizmoAxis::Z,
-            mode == TransformGizmoMode::Scale
-                ? ScaleFoundationZColor : GizmoStyle::AxisColorZ)}};
+        makeAxis(0U, TransformGizmoAxis::X, GizmoStyle::AxisColorX),
+        makeAxis(1U, TransformGizmoAxis::Y, GizmoStyle::AxisColorY),
+        makeAxis(2U, TransformGizmoAxis::Z, GizmoStyle::AxisColorZ)}};
     if (view_ == next) return false;
     view_ = next;
     return true;

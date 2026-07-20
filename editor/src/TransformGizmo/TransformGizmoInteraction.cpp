@@ -79,6 +79,14 @@ constexpr float RadiansToDegreesFactor =
     return distance;
 }
 
+[[nodiscard]] float DistanceToSquareSquared(
+    const Vec2 point, const Vec2 center, const float halfSize) noexcept
+{
+    const float dx = std::max(std::abs(point.X - center.X) - halfSize, 0.0F);
+    const float dy = std::max(std::abs(point.Y - center.Y) - halfSize, 0.0F);
+    return dx * dx + dy * dy;
+}
+
 [[nodiscard]] std::int32_t SnapToGrid(const float value) noexcept
 {
     if (!std::isfinite(value)) return 0;
@@ -99,14 +107,41 @@ TransformGizmoAxis TransformGizmoInteraction::UpdateHover(
     state_ = TransformGizmoInteractionState::Idle;
     if (!view.Visible ||
         (view.Mode != TransformGizmoMode::Move &&
-         view.Mode != TransformGizmoMode::Rotate) ||
+         view.Mode != TransformGizmoMode::Rotate &&
+         view.Mode != TransformGizmoMode::Scale) ||
         !IsFinite(input.ScreenPosition) || input.Viewport.Width <= 0.0F ||
         input.Viewport.Height <= 0.0F || !IsFinite(input.ViewProjection))
         return hoveredAxis_;
 
     float bestDistance = PickTolerancePixels * PickTolerancePixels;
+    if (view.Mode == TransformGizmoMode::Scale)
+    {
+        for (const TransformGizmoAxisView& axis : view.Axes)
+        {
+            if (!axis.HasScaleHandle) continue;
+            const auto end = TransformGizmoModel::ProjectWorldToScreen(
+                axis.End, input.Viewport, input.ViewProjection);
+            if (!end) continue;
+            const float distance = DistanceToSquareSquared(
+                input.ScreenPosition, *end,
+                axis.ScaleHandleSizePixels * 0.5F);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                hoveredAxis_ = axis.Axis;
+            }
+        }
+        if (hoveredAxis_ != TransformGizmoAxis::None)
+        {
+            state_ = TransformGizmoInteractionState::Hover;
+            return hoveredAxis_;
+        }
+    }
     for (const TransformGizmoAxisView& axis : view.Axes)
     {
+        if (view.Mode == TransformGizmoMode::Scale &&
+            !axis.HasScaleHandle)
+            continue;
         if (view.Mode == TransformGizmoMode::Rotate && axis.HasRotationRing)
         {
             float distance = std::numeric_limits<float>::max();
@@ -189,7 +224,8 @@ bool TransformGizmoInteraction::BeginDrag(
 {
     if (IsDragging() || !view.Visible ||
         (view.Mode != TransformGizmoMode::Move &&
-         view.Mode != TransformGizmoMode::Rotate) ||
+         view.Mode != TransformGizmoMode::Rotate &&
+         view.Mode != TransformGizmoMode::Scale) ||
         axis == TransformGizmoAxis::None || axis != hoveredAxis_ ||
         documentGeneration == 0U || !selectionBounds.Valid ||
         !IsFinite(input.ScreenPosition) || !std::isfinite(view.AxisLength) ||
@@ -236,7 +272,10 @@ bool TransformGizmoInteraction::BeginDrag(
         view.Axes.begin(), view.Axes.end(),
         [axis](const TransformGizmoAxisView& candidate)
         { return candidate.Axis == axis; });
-    if (axisView == view.Axes.end()) return false;
+    if (axisView == view.Axes.end() ||
+        (view.Mode == TransformGizmoMode::Scale &&
+         !axisView->HasScaleHandle))
+        return false;
     const float worldAxisLength = Length(axisView->End - axisView->Start);
     const auto endScreen = TransformGizmoModel::ProjectWorldToScreen(
         axisView->End, input.Viewport, input.ViewProjection);
@@ -257,13 +296,15 @@ bool TransformGizmoInteraction::BeginDrag(
         return false;
 
     state_ = TransformGizmoInteractionState::Dragging;
-    mode_ = TransformGizmoMode::Move;
+    mode_ = view.Mode;
     lockedAxis_ = axis;
     axisOrigin_ = view.Center;
     axisDirection_ = direction;
     pointerStart_ = input.ScreenPosition;
     documentGeneration_ = documentGeneration;
     selectionBounds_ = selectionBounds;
+    initialDimensions_ = selectionBounds.Dimensions();
+    targetDimensions_ = initialDimensions_;
     delta_ = {};
     rayAnchorParameter_ = input.Ray
         ? ClosestAxisParameter(*input.Ray, axisOrigin_, axisDirection_)
@@ -303,6 +344,28 @@ bool TransformGizmoInteraction::UpdateDrag(
     if (lockedAxis_ == TransformGizmoAxis::X) next.X = snapped;
     else if (lockedAxis_ == TransformGizmoAxis::Y) next.Y = snapped;
     else if (lockedAxis_ == TransformGizmoAxis::Z) next.Z = snapped;
+    if (mode_ == TransformGizmoMode::Scale)
+    {
+        Asset::Voxel::VoxelDimensions nextDimensions = initialDimensions_;
+        const auto scaledDimension = [snapped](const std::uint32_t initial)
+        {
+            const std::int64_t requested =
+                static_cast<std::int64_t>(initial) + snapped;
+            return static_cast<std::uint32_t>(std::clamp<std::int64_t>(
+                requested, 1, std::numeric_limits<std::uint32_t>::max()));
+        };
+        if (lockedAxis_ == TransformGizmoAxis::X)
+            nextDimensions.X = scaledDimension(initialDimensions_.X);
+        else if (lockedAxis_ == TransformGizmoAxis::Y)
+            nextDimensions.Y = scaledDimension(initialDimensions_.Y);
+        else if (lockedAxis_ == TransformGizmoAxis::Z)
+            nextDimensions.Z = scaledDimension(initialDimensions_.Z);
+        if (nextDimensions == targetDimensions_) return false;
+        targetDimensions_ = nextDimensions;
+        delta_ = targetDimensions_ == initialDimensions_
+            ? Asset::Voxel::VoxelPosition{} : next;
+        return true;
+    }
     if (next == delta_) return false;
     delta_ = next;
     return true;
@@ -318,6 +381,7 @@ TransformGizmoDragRelease TransformGizmoInteraction::EndDrag() noexcept
         release.Delta = delta_;
         release.QuarterTurns = quarterTurns_;
         release.AngleDegrees = accumulatedAngleDegrees_;
+        release.TargetDimensions = targetDimensions_;
         release.WasDragging = true;
     }
     ClearDrag();
@@ -383,6 +447,12 @@ std::int32_t TransformGizmoInteraction::QuarterTurns() const noexcept
 float TransformGizmoInteraction::AngleDegrees() const noexcept
 {
     return accumulatedAngleDegrees_;
+}
+
+Asset::Voxel::VoxelDimensions TransformGizmoInteraction::TargetDimensions()
+    const noexcept
+{
+    return targetDimensions_;
 }
 
 TransformGizmoMode TransformGizmoInteraction::Mode() const noexcept
@@ -502,6 +572,8 @@ void TransformGizmoInteraction::ClearDrag() noexcept
     accumulatedAngleDegrees_ = 0.0F;
     quarterTurns_ = 0;
     delta_ = {};
+    initialDimensions_ = {};
+    targetDimensions_ = {};
     documentGeneration_ = 0U;
     selectionBounds_ = {};
 }

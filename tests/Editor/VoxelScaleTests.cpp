@@ -165,6 +165,29 @@ Editor::ScaleVoxelSelectionResult Prepare(
         document, selection, generation, preview, mode);
 }
 
+Editor::ScaleVoxelSelectionResult PrepareTarget(
+    Asset::Voxel::VoxelDocument& document,
+    Editor::SelectionService& selection,
+    Editor::TransformPreviewModel& preview,
+    const Editor::VoxelScaleMode mode,
+    const Asset::Voxel::VoxelDimensions targetDimensions,
+    const std::uint64_t generation = 91U)
+{
+    Require(preview.BeginPreview(document, selection, generation, 0U,
+            Editor::TransformPreviewCollisionPolicy::IgnoreSource),
+        "Interactive Scale preview capture failed.");
+    const auto geometry = Editor::ScaleVoxelSelectionOperation::BuildGeometry(
+        preview.SourceVoxels(), preview.SourceBounds(), mode,
+        targetDimensions);
+    Require(geometry.Valid(), geometry.Message.empty()
+        ? "Interactive Scale geometry failed." : geometry.Message);
+    Require(preview.SetExplicitVoxelDestinations(
+            document, selection, generation, geometry.Destinations),
+        "Interactive Scale preview rejected integer target geometry.");
+    return Editor::ScaleVoxelSelectionOperation::Build(
+        document, selection, generation, preview, mode, targetDimensions);
+}
+
 void TestExactGeometry()
 {
     using Mode = Editor::VoxelScaleMode;
@@ -257,6 +280,63 @@ void TestAtomicScaleUndoRedo()
     Require(redone && document.GetVoxelCount() == 16U &&
         selection.Count() == 16U && session.rebuildCount_ == 3U,
         "Redo did not restore the exact Scale destination.");
+}
+
+void TestInteractiveIntegerDimensions()
+{
+    const std::array<Editor::TransformPreviewVoxel, 3U> line{{
+        {{4, 5, 6}, {4, 5, 6}, {3U}, Editor::TransformPreviewVoxelState::Valid},
+        {{5, 5, 6}, {5, 5, 6}, {9U}, Editor::TransformPreviewVoxelState::Valid},
+        {{6, 5, 6}, {6, 5, 6}, {12U}, Editor::TransformPreviewVoxelState::Valid}}};
+    const auto bounds =
+        Editor::SelectionBounds::FromCorners({4, 5, 6}, {6, 5, 6});
+    const auto expanded = Editor::ScaleVoxelSelectionOperation::BuildGeometry(
+        line, bounds, Editor::VoxelScaleMode::X, {5U, 1U, 1U});
+    const auto reduced = Editor::ScaleVoxelSelectionOperation::BuildGeometry(
+        line, bounds, Editor::VoxelScaleMode::X, {2U, 1U, 1U});
+    const auto minimum = Editor::ScaleVoxelSelectionOperation::BuildGeometry(
+        line, bounds, Editor::VoxelScaleMode::X, {1U, 1U, 1U});
+    const auto invalid = Editor::ScaleVoxelSelectionOperation::BuildGeometry(
+        line, bounds, Editor::VoxelScaleMode::X, {0U, 1U, 1U});
+    Require(expanded.Valid() && expanded.Destinations.size() == 5U &&
+            expanded.Bounds ==
+                Editor::SelectionBounds::FromCorners({4, 5, 6}, {8, 5, 6}) &&
+            reduced.Valid() && reduced.Destinations.size() == 2U &&
+            reduced.Bounds ==
+                Editor::SelectionBounds::FromCorners({4, 5, 6}, {5, 5, 6}) &&
+            minimum.Valid() && minimum.Destinations.size() == 1U &&
+            !invalid.Valid(),
+        "Interactive Scale did not honor integer targets and minimum size.");
+
+    auto document = MakeDocument({
+        {4U, 5U, 6U, 3U}, {5U, 5U, 6U, 9U}, {6U, 5U, 6U, 12U}});
+    document.MarkSaved();
+    TestSession session(document);
+    Editor::VoxelEditHistory history;
+    history.MarkSavedState(document);
+    auto selection = MakeSelection(
+        session.generation_, {{4, 5, 6}, {5, 5, 6}, {6, 5, 6}});
+    Editor::TransformPreviewModel preview;
+    const auto revision = document.GetRevision();
+    auto prepared = PrepareTarget(document, selection, preview,
+        Editor::VoxelScaleMode::X, {2U, 1U, 1U});
+    Require(prepared.Ready() && document.GetRevision() == revision &&
+            !document.IsDirty() && preview.VoxelCount() == 2U,
+        "Interactive Scale preview must remain non-destructive.");
+    const auto applied = history.Execute(session, std::move(prepared.Operation));
+    ApplySelectionTransition(selection, applied);
+    Require(applied && history.UndoCount() == 1U &&
+            document.GetRevision() == revision + 1U &&
+            document.GetVoxelCount() == 2U && selection.Count() == 2U &&
+            session.rebuildCount_ == 1U,
+        "Interactive Scale must apply once with one history entry.");
+    const auto undone = history.Undo(session);
+    ApplySelectionTransition(selection, undone);
+    const auto redone = history.Redo(session);
+    ApplySelectionTransition(selection, redone);
+    Require(undone && redone && document.GetVoxelCount() == 2U &&
+            history.RedoCount() == 0U && session.rebuildCount_ == 3U,
+        "Interactive Scale Undo/Redo did not restore atomic states.");
 }
 
 void TestRefusalsAndRollback()
@@ -398,6 +478,7 @@ int main()
     {
         TestExactGeometry();
         TestAtomicScaleUndoRedo();
+        TestInteractiveIntegerDimensions();
         TestRefusalsAndRollback();
         TestLargeScaleSaveAndReopen();
         std::cout << "Voxel Scale tests passed.\n";

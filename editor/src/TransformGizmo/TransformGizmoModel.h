@@ -61,6 +61,8 @@ struct TransformGizmoAxisView final
     std::array<Vec3, 4U> ArrowBaseCorners{};
     float ArrowLength = 0.0F;
     float ArrowWidth = 0.0F;
+    bool HasScaleHandle = false;
+    float ScaleHandleSizePixels = 0.0F;
     bool HasRotationRing = false;
     float RotationRingRadius = 0.0F;
     std::array<Vec3, RotationRingSegmentCount> RotationRingPoints{};

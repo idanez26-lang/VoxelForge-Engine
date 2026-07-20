@@ -30,6 +30,10 @@ struct GizmoStyle final
     static constexpr float MoveCenterIdleIntensity = 0.40F;
     static constexpr float MoveCenterDraggingIntensity = 0.55F;
 
+    static constexpr float ScaleHandleIdleSizePixels = 7.0F;
+    static constexpr float ScaleHandleHoverSizePixels = 8.0F;
+    static constexpr float ScaleHandleDraggingSizePixels = 8.0F;
+
     static constexpr float RotateIdleThicknessPixels = 1.65F;
     static constexpr float RotateHoverThicknessPixels = 1.90F;
     static constexpr float RotateDraggingThicknessPixels = 1.85F;

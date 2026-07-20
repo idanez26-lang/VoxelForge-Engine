@@ -27,6 +27,7 @@ struct TransformGizmoDragRelease final
     Asset::Voxel::VoxelPosition Delta{};
     std::int32_t QuarterTurns = 0;
     float AngleDegrees = 0.0F;
+    Asset::Voxel::VoxelDimensions TargetDimensions{};
     bool WasDragging = false;
 };
 
@@ -63,6 +64,8 @@ public:
     [[nodiscard]] Asset::Voxel::VoxelPosition Delta() const noexcept;
     [[nodiscard]] std::int32_t QuarterTurns() const noexcept;
     [[nodiscard]] float AngleDegrees() const noexcept;
+    [[nodiscard]] Asset::Voxel::VoxelDimensions TargetDimensions()
+        const noexcept;
     [[nodiscard]] TransformGizmoMode Mode() const noexcept;
     [[nodiscard]] TransformGizmoInteractionState State() const noexcept;
 
@@ -96,6 +99,8 @@ private:
     float accumulatedAngleDegrees_ = 0.0F;
     std::int32_t quarterTurns_ = 0;
     Asset::Voxel::VoxelPosition delta_{};
+    Asset::Voxel::VoxelDimensions initialDimensions_{};
+    Asset::Voxel::VoxelDimensions targetDimensions_{};
     std::uint64_t documentGeneration_ = 0U;
     SelectionBounds selectionBounds_{};
 };

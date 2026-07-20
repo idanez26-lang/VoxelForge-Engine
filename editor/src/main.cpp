@@ -59,6 +59,7 @@ constexpr std::size_t VoxelScaleSmokeTestFrameCount = 8;
 constexpr std::size_t VoxelAlignSmokeTestFrameCount = 9;
 constexpr std::size_t MoveGizmoSmokeTestFrameCount = 9;
 constexpr std::size_t RotateGizmoSmokeTestFrameCount = 7;
+constexpr std::size_t ScaleGizmoSmokeTestFrameCount = 6;
 constexpr std::size_t TransformGizmoFoundationSmokeTestFrameCount = 16;
 constexpr std::size_t SaveOnExitSmokeTestFrameCount = 3;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
@@ -106,6 +107,7 @@ struct CommandLine final
     bool VoxelAlignSmokeTest = false;
     bool MoveGizmoSmokeTest = false;
     bool RotateGizmoSmokeTest = false;
+    bool ScaleGizmoSmokeTest = false;
     bool TransformGizmoFoundationSmokeTest = false;
     bool SaveOnExitSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
@@ -187,6 +189,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.MoveGizmoSmokeTest |= argument == "--move-gizmo-smoke-test";
         result.RotateGizmoSmokeTest |=
             argument == "--rotate-gizmo-smoke-test";
+        result.ScaleGizmoSmokeTest |=
+            argument == "--scale-gizmo-smoke-test";
         result.TransformGizmoFoundationSmokeTest |=
             argument == "--transform-gizmo-foundation-smoke-test";
         result.SaveOnExitSmokeTest |= argument == "--save-on-exit-smoke-test";
@@ -431,6 +435,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelAlignSmokeTest ||
             commandLine.MoveGizmoSmokeTest ||
             commandLine.RotateGizmoSmokeTest ||
+            commandLine.ScaleGizmoSmokeTest ||
             commandLine.TransformGizmoFoundationSmokeTest ||
             commandLine.SaveOnExitSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
@@ -465,6 +470,7 @@ int main(const int argumentCount, char* arguments[])
                || commandLine.VoxelAlignSmokeTest
                || commandLine.MoveGizmoSmokeTest
                || commandLine.RotateGizmoSmokeTest
+               || commandLine.ScaleGizmoSmokeTest
                || commandLine.TransformGizmoFoundationSmokeTest
               || commandLine.SaveOnExitSmokeTest
                 ? viewportFixture.CreateEmptyProject(projectManager)
@@ -571,6 +577,8 @@ int main(const int argumentCount, char* arguments[])
                      ? MoveGizmoSmokeTestFrameCount
                      : commandLine.RotateGizmoSmokeTest
                      ? RotateGizmoSmokeTestFrameCount
+                     : commandLine.ScaleGizmoSmokeTest
+                     ? ScaleGizmoSmokeTestFrameCount
                      : commandLine.TransformGizmoFoundationSmokeTest
                      ? TransformGizmoFoundationSmokeTestFrameCount
                      : commandLine.SaveOnExitSmokeTest
@@ -620,6 +628,7 @@ int main(const int argumentCount, char* arguments[])
                      commandLine.VoxelAlignSmokeTest ||
                      commandLine.MoveGizmoSmokeTest ||
                      commandLine.RotateGizmoSmokeTest ||
+                     commandLine.ScaleGizmoSmokeTest ||
                      commandLine.TransformGizmoFoundationSmokeTest ||
                      commandLine.SaveOnExitSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
@@ -666,6 +675,7 @@ int main(const int argumentCount, char* arguments[])
                  commandLine.VoxelAlignSmokeTest,
                  commandLine.MoveGizmoSmokeTest,
                  commandLine.RotateGizmoSmokeTest,
+                 commandLine.ScaleGizmoSmokeTest,
                  commandLine.TransformGizmoFoundationSmokeTest,
                  commandLine.SaveOnExitSmokeTest,
                  isolatedTest ? viewportFixture.ImGuiIniPath()

@@ -450,6 +450,22 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorRotateGizmoTests>
 )
 add_executable(
+    VoxelForgeEditorScaleGizmoTests
+    Editor/ScaleGizmoTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorScaleGizmoTests
+    PRIVATE
+        VoxelForgeEditorTransformGizmo
+        VoxelForgeEditorCommands
+        VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorScaleGizmoTests)
+add_test(
+    NAME VoxelForge.Editor.ScaleGizmo
+    COMMAND $<TARGET_FILE:VoxelForgeEditorScaleGizmoTests>
+)
+add_executable(
     VoxelForgeEditorTransformOperationFrameworkTests
     Editor/TransformOperationFrameworkTests.cpp
 )
@@ -857,6 +873,7 @@ set_tests_properties(
     VoxelForge.Editor.TransformPreview
     VoxelForge.Editor.TransformGizmo
     VoxelForge.Editor.MoveGizmo
+    VoxelForge.Editor.ScaleGizmo
     VoxelForge.Editor.VoxelRotate
     VoxelForge.Editor.VoxelMirror
     VoxelForge.Editor.VoxelScale
@@ -1049,6 +1066,10 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --rotate-gizmo-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.ScaleGizmoSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --scale-gizmo-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.SaveOnExitSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --save-on-exit-smoke-test
     )
@@ -1094,6 +1115,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.TransformGizmoFoundationSmoke
         VoxelForge.Editor.MoveGizmoSmoke
         VoxelForge.Editor.RotateGizmoSmoke
+        VoxelForge.Editor.ScaleGizmoSmoke
         VoxelForge.Editor.SaveOnExitSmoke
         PROPERTIES
             TIMEOUT 30

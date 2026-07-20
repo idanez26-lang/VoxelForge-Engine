@@ -69,6 +69,11 @@ public:
         std::span<const TransformPreviewVoxel> sourceVoxels,
         SelectionBounds sourceBounds,
         VoxelScaleMode mode);
+    [[nodiscard]] static VoxelScaleGeometry BuildGeometry(
+        std::span<const TransformPreviewVoxel> sourceVoxels,
+        SelectionBounds sourceBounds,
+        VoxelScaleMode mode,
+        Asset::Voxel::VoxelDimensions targetDimensions);
 
     [[nodiscard]] static ScaleVoxelSelectionResult Build(
         const Asset::Voxel::VoxelDocument& document,
@@ -76,6 +81,13 @@ public:
         std::uint64_t documentGeneration,
         const TransformPreviewModel& preview,
         VoxelScaleMode mode);
+    [[nodiscard]] static ScaleVoxelSelectionResult Build(
+        const Asset::Voxel::VoxelDocument& document,
+        const SelectionService& selection,
+        std::uint64_t documentGeneration,
+        const TransformPreviewModel& preview,
+        VoxelScaleMode mode,
+        Asset::Voxel::VoxelDimensions targetDimensions);
 };
 
 [[nodiscard]] const char* VoxelScaleModeName(VoxelScaleMode mode) noexcept;

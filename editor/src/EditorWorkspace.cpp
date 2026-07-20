@@ -1304,7 +1304,8 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
     if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
-    if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Rotate)
+    if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Rotate &&
+        tool != ActiveVoxelTool::Scale)
         CancelTransformGizmoInteraction();
     if (selectionInteraction_.IsActive())
     {
@@ -2111,7 +2112,8 @@ void EditorWorkspace::DrawScenePanel()
         gizmoPointerInput.Ray = viewportRay;
         const bool gizmoToolAvailable =
             (voxelToolState_.IsMoveActive() && CanMoveSelection()) ||
-            (voxelToolState_.IsRotateActive() && CanRotateSelection());
+            (voxelToolState_.IsRotateActive() && CanRotateSelection()) ||
+            (voxelToolState_.IsScaleActive() && CanScaleSelection());
         const bool gizmoInputAvailable =
             gizmoToolAvailable && document != nullptr &&
             transformGizmoModel_.View().Visible && imageHovered &&
@@ -2129,7 +2131,10 @@ void EditorWorkspace::DrawScenePanel()
                      voxelToolState_.IsMoveActive()) ||
                     (transformGizmoInteraction_.Mode() ==
                          TransformGizmoMode::Rotate &&
-                     voxelToolState_.IsRotateActive())) &&
+                     voxelToolState_.IsRotateActive()) ||
+                    (transformGizmoInteraction_.Mode() ==
+                         TransformGizmoMode::Scale &&
+                     voxelToolState_.IsScaleActive())) &&
                 (!transformPreviewModel_.IsActive() ||
                  transformPreviewModel_.IsValidFor(
                      *document, selectionService_,
@@ -2162,7 +2167,9 @@ void EditorWorkspace::DrawScenePanel()
                 transformGizmoInteraction_.HoveredAxis(),
                 gizmoPointerInput, voxelDocumentSession_.Generation(),
                 selectionService_.EditableBounds());
-            if (gizmoCaptured && voxelToolState_.IsMoveActive())
+            if (gizmoCaptured &&
+                (voxelToolState_.IsMoveActive() ||
+                 voxelToolState_.IsScaleActive()))
                 gizmoCaptured = transformPreviewModel_.BeginPreview(
                     *document, selectionService_,
                     voxelDocumentSession_.Generation());
@@ -2185,7 +2192,8 @@ void EditorWorkspace::DrawScenePanel()
                     *document, selectionService_,
                     voxelDocumentSession_.Generation(),
                     transformGizmoInteraction_.Delta()));
-            else
+            else if (transformGizmoInteraction_.Mode() ==
+                     TransformGizmoMode::Rotate)
             {
                 const TransformGizmoAxis axis =
                     transformGizmoInteraction_.LockedAxis();
@@ -2200,6 +2208,18 @@ void EditorWorkspace::DrawScenePanel()
                 else
                     static_cast<void>(BeginVoxelRotatePreview(
                         rotationAxis, turns));
+            }
+            else
+            {
+                const TransformGizmoAxis axis =
+                    transformGizmoInteraction_.LockedAxis();
+                const VoxelScaleMode scaleMode =
+                    axis == TransformGizmoAxis::X ? VoxelScaleMode::X :
+                    axis == TransformGizmoAxis::Y ? VoxelScaleMode::Y :
+                    VoxelScaleMode::Z;
+                static_cast<void>(UpdateVoxelScalePreview(
+                    scaleMode,
+                    transformGizmoInteraction_.TargetDimensions()));
             }
             UpdateVoxelHighlights();
         }
@@ -2711,6 +2731,15 @@ void EditorWorkspace::DrawScenePanel()
                             transformPreviewModel_.CancelPreview());
                     else
                         static_cast<void>(ApplyVoxelRotate());
+                }
+                else if (gizmoRelease.Mode == TransformGizmoMode::Scale)
+                {
+                    if (gizmoRelease.Delta ==
+                            Asset::Voxel::VoxelPosition{})
+                        static_cast<void>(
+                            transformPreviewModel_.CancelPreview());
+                    else
+                        static_cast<void>(ApplyVoxelScale());
                 }
                 else if (gizmoRelease.Delta ==
                              Asset::Voxel::VoxelPosition{})
@@ -10381,6 +10410,186 @@ bool EditorWorkspace::RotateGizmoSmokePassed() const noexcept
         rotateGizmoSmokeReopened_;
 }
 
+bool EditorWorkspace::RunScaleGizmoSmokeStep(const std::size_t frame)
+{
+    using Asset::Voxel::VoxelPosition;
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const std::vector<VoxelPosition> source{{2, 2, 2}, {3, 2, 2}, {4, 2, 2}};
+    const SelectionBounds sourceBounds =
+        SelectionBounds::FromCorners({2, 2, 2}, {4, 2, 2});
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"ScaleGizmoSmoke", {16U, 16U, 16U}});
+        scaleGizmoSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Scale Gizmo Smoke",
+                {{0U, source[0], false, 0U, true, 3U},
+                 {0U, source[1], false, 0U, true, 7U},
+                 {0U, source[2], false, 0U, true, 11U}}});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace);
+        SelectVoxelTool(ActiveVoxelTool::Scale);
+        scaleGizmoSmokePrepared_ = seeded && selected &&
+            voxelToolState_.IsScaleActive() && CanScaleSelection() &&
+            document->GetVoxelCount() == 3U;
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !scaleGizmoSmokePrepared_) return false;
+        TransformGizmoUpdateContext context;
+        context.DocumentActive = true;
+        context.SelectionEmpty = false;
+        context.ActiveDocumentGeneration = 9U;
+        context.SelectionDocumentGeneration = 9U;
+        context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {5, 5, 5});
+        context.ModelCenter = {3, 3, 3};
+        context.ActiveTool = ActiveVoxelTool::Scale;
+        context.CameraPosition = {0, 0, -20};
+        context.CameraForward = {0, 0, 1};
+        context.ViewportHeightPixels = 1000;
+        context.Viewport = {0, 0, 1000, 1000};
+        context.ViewProjection = IdentityMatrix();
+        context.ViewProjection[0] = 0.035F;
+        context.ViewProjection[2] = -0.018F;
+        context.ViewProjection[4] = 0.008F;
+        context.ViewProjection[5] = 0.032F;
+        context.ViewProjection[6] = 0.014F;
+        TransformGizmoModel model;
+        if (!model.Update(context)) return false;
+        const TransformGizmoView view = model.View();
+        TransformGizmoPointerInput input;
+        input.Viewport = context.Viewport;
+        input.ViewProjection = context.ViewProjection;
+        bool allAxesPickable = true;
+        for (const TransformGizmoAxisView& handle : view.Axes)
+        {
+            const auto screen = TransformGizmoModel::ProjectWorldToScreen(
+                handle.End, input.Viewport, input.ViewProjection);
+            TransformGizmoInteraction probe;
+            if (!screen)
+            {
+                allAxesPickable = false;
+                continue;
+            }
+            input.ScreenPosition = *screen;
+            allAxesPickable = allAxesPickable &&
+                probe.UpdateHover(view, input) == handle.Axis;
+        }
+        const auto start = TransformGizmoModel::ProjectWorldToScreen(
+            view.Axes[0].Start, input.Viewport, input.ViewProjection);
+        const auto end = TransformGizmoModel::ProjectWorldToScreen(
+            view.Axes[0].End, input.Viewport, input.ViewProjection);
+        TransformGizmoInteraction drag;
+        bool dragged = false;
+        if (start && end)
+        {
+            input.ScreenPosition = *end;
+            dragged = drag.UpdateHover(view, input) == TransformGizmoAxis::X &&
+                drag.BeginDrag(view, TransformGizmoAxis::X, input, 9U,
+                    context.Bounds);
+            const float dx = end->X - start->X;
+            const float dy = end->Y - start->Y;
+            const float pixels = std::sqrt(dx * dx + dy * dy);
+            const float worldLength = Length(
+                view.Axes[0].End - view.Axes[0].Start);
+            if (dragged && pixels > 1.0F && worldLength > 0.0F)
+            {
+                const float distance = 2.0F * pixels / worldLength;
+                input.ScreenPosition = {
+                    end->X + dx / pixels * distance,
+                    end->Y + dy / pixels * distance};
+                dragged = drag.UpdateDrag(input) &&
+                    drag.TargetDimensions().X == 8U;
+            }
+        }
+        const std::uint64_t revision = document->GetRevision();
+        const bool previewed = transformPreviewModel_.BeginPreview(
+                *document, selectionService_, voxelDocumentSession_.Generation()) &&
+            UpdateVoxelScalePreview(VoxelScaleMode::X, {5U, 1U, 1U});
+        scaleGizmoSmokeInteractive_ = allAxesPickable && dragged &&
+            view.Mode == TransformGizmoMode::Scale &&
+            std::ranges::all_of(view.Axes,
+                [](const TransformGizmoAxisView& axis)
+                { return axis.HasScaleHandle && !axis.HasArrowHead; }) &&
+            previewed && transformPreviewModel_.VoxelCount() == 5U &&
+            document->GetRevision() == revision;
+        scaleGizmoSmokeApplied_ = scaleGizmoSmokeInteractive_ &&
+            ApplyVoxelScale() && document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 5U &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({2, 2, 2}, {6, 2, 2});
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !scaleGizmoSmokeApplied_) return false;
+        UndoCommand();
+        const bool expandedUndone = document->GetVoxelCount() == 3U &&
+            selectionService_.EditableBounds() == sourceBounds;
+        RedoCommand();
+        const bool expandedRedone = document->GetVoxelCount() == 5U;
+        const bool reduced = transformPreviewModel_.BeginPreview(
+                *document, selectionService_, voxelDocumentSession_.Generation()) &&
+            UpdateVoxelScalePreview(VoxelScaleMode::X, {3U, 1U, 1U}) &&
+            ApplyVoxelScale();
+        UndoCommand();
+        const bool reductionUndone = document->GetVoxelCount() == 5U;
+        RedoCommand();
+        scaleGizmoSmokeUndoRedo_ = expandedUndone && expandedRedone &&
+            reduced && reductionUndone && document->GetVoxelCount() == 3U &&
+            selectionService_.EditableBounds() == sourceBounds;
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !scaleGizmoSmokeUndoRedo_) return false;
+        const auto obstacle = document->SetVoxel({6, 2, 2}, 19U);
+        const bool collision = transformPreviewModel_.BeginPreview(
+                *document, selectionService_, voxelDocumentSession_.Generation()) &&
+            UpdateVoxelScalePreview(VoxelScaleMode::X, {5U, 1U, 1U}) &&
+            transformPreviewModel_.HasCollisions() && !ApplyVoxelScale();
+        const bool obstacleRemoved = document->RemoveVoxel({6, 2, 2}).Changed;
+        const bool minimum = transformPreviewModel_.BeginPreview(
+                *document, selectionService_, voxelDocumentSession_.Generation()) &&
+            UpdateVoxelScalePreview(VoxelScaleMode::X, {1U, 1U, 1U}) &&
+            transformPreviewModel_.PreviewBounds().Dimensions() ==
+                Asset::Voxel::VoxelDimensions{1U, 1U, 1U};
+        CancelTransformGizmoInteraction();
+        SelectVoxelTool(ActiveVoxelTool::Move);
+        scaleGizmoSmokeRejected_ = obstacle.Changed && collision &&
+            obstacleRemoved && minimum && !transformPreviewModel_.IsActive() &&
+            voxelToolState_.IsMoveActive();
+    }
+    else if (frame == 4U)
+    {
+        if (!document || !scaleGizmoSmokeRejected_) return false;
+        const bool saved = SaveVoxelModel();
+        CloseProject();
+        scaleGizmoSmokeCleaned_ = saved &&
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !transformPreviewModel_.IsActive() &&
+            !transformGizmoInteraction_.IsDragging() &&
+            !std::filesystem::exists(
+                scaleGizmoSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                scaleGizmoSmokePath_.string() + ".vfsave.bak");
+    }
+    return ScaleGizmoSmokePassed();
+}
+
+bool EditorWorkspace::ScaleGizmoSmokePassed() const noexcept
+{
+    return scaleGizmoSmokePrepared_ && scaleGizmoSmokeInteractive_ &&
+        scaleGizmoSmokeApplied_ && scaleGizmoSmokeUndoRedo_ &&
+        scaleGizmoSmokeRejected_ && scaleGizmoSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunSaveOnExitSmokeStep(const std::size_t frame)
 {
     using Asset::Voxel::VoxelPosition;
@@ -11790,12 +11999,75 @@ bool EditorWorkspace::BeginVoxelScalePreview(const VoxelScaleMode mode)
         return false;
     }
     voxelScaleMode_ = mode;
+    voxelScaleTargetDimensions_.reset();
     voxelScaleStatusMessage_.clear();
     voxelMoveStatusMessage_.clear();
     voxelDuplicateStatusMessage_.clear();
     voxelRotateStatusMessage_.clear();
     voxelMirrorStatusMessage_.clear();
     UpdateVoxelHighlights();
+    return true;
+}
+
+bool EditorWorkspace::UpdateVoxelScalePreview(
+    const VoxelScaleMode mode,
+    const Asset::Voxel::VoxelDimensions targetDimensions)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const std::uint64_t generation = voxelDocumentSession_.Generation();
+    if (!document || !CanScaleSelection())
+    {
+        voxelScaleStatusMessage_ = "Scale preview source is no longer valid";
+        return false;
+    }
+    if (!transformPreviewModel_.IsValidFor(
+            *document, selectionService_, generation) &&
+        !transformPreviewModel_.BeginPreview(
+            *document, selectionService_, generation, 0U,
+            TransformPreviewCollisionPolicy::IgnoreSource))
+    {
+        voxelScaleStatusMessage_ = "Scale preview source is no longer valid";
+        return false;
+    }
+    if (voxelScaleTargetDimensions_ == targetDimensions &&
+        transformPreviewModel_.HasExpandedDestinations())
+        return true;
+
+    const VoxelScaleGeometry geometry =
+        ScaleVoxelSelectionOperation::BuildGeometry(
+            transformPreviewModel_.SourceVoxels(),
+            transformPreviewModel_.SourceBounds(), mode, targetDimensions);
+    if (!geometry.Valid())
+    {
+        voxelScaleStatusMessage_ = geometry.Message.empty()
+            ? "Scale preview could not be built" : geometry.Message;
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        voxelScaleTargetDimensions_.reset();
+        return false;
+    }
+    const bool rebuilt = transformPreviewModel_.SetExplicitVoxelDestinations(
+        *document, selectionService_, generation, geometry.Destinations);
+    const auto current = transformPreviewModel_.Voxels();
+    const bool alreadyMatches = current.size() == geometry.Destinations.size() &&
+        std::equal(current.begin(), current.end(), geometry.Destinations.begin(),
+            [](const TransformPreviewVoxel& voxel,
+               const TransformPreviewDestinationVoxel& destination)
+            {
+                return voxel.SourcePosition == destination.SourcePosition &&
+                    voxel.PreviewPosition == destination.DestinationPosition &&
+                    voxel.Value == destination.Value;
+            });
+    if (!rebuilt && !alreadyMatches)
+    {
+        voxelScaleStatusMessage_ = "Scale preview could not be built";
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        voxelScaleTargetDimensions_.reset();
+        return false;
+    }
+    voxelScaleMode_ = mode;
+    voxelScaleTargetDimensions_ = targetDimensions;
+    voxelScaleStatusMessage_.clear();
     return true;
 }
 
@@ -11809,11 +12081,16 @@ bool EditorWorkspace::ApplyVoxelScale()
         return false;
     }
 
-    ScaleVoxelSelectionResult prepared =
-        ScaleVoxelSelectionOperation::Build(
+    ScaleVoxelSelectionResult prepared = voxelScaleTargetDimensions_
+        ? ScaleVoxelSelectionOperation::Build(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            transformPreviewModel_, voxelScaleMode_,
+            *voxelScaleTargetDimensions_)
+        : ScaleVoxelSelectionOperation::Build(
             *document, selectionService_, voxelDocumentSession_.Generation(),
             transformPreviewModel_, voxelScaleMode_);
     static_cast<void>(transformPreviewModel_.CancelPreview());
+    voxelScaleTargetDimensions_.reset();
     if (!prepared.Ready())
     {
         voxelScaleStatusMessage_ = prepared.Message;
@@ -11837,7 +12114,7 @@ bool EditorWorkspace::ApplyVoxelScale()
     ApplyVoxelHistorySelection(result);
     voxelScaleStatusMessage_.clear();
     AddConsoleMessage("[Edit] Scaled selection " +
-        std::string(VoxelScaleModeName(voxelScaleMode_)) + " x2 to " +
+        std::string(VoxelScaleModeName(voxelScaleMode_)) + " to " +
         std::to_string(selectionService_.Count()) + " voxel(s).");
     UpdateVoxelHighlights();
     return true;
@@ -11846,6 +12123,7 @@ bool EditorWorkspace::ApplyVoxelScale()
 void EditorWorkspace::CancelVoxelScale() noexcept
 {
     static_cast<void>(transformPreviewModel_.CancelPreview());
+    voxelScaleTargetDimensions_.reset();
     voxelScaleStatusMessage_.clear();
 }
 
@@ -11982,9 +12260,16 @@ void EditorWorkspace::CancelTransformGizmoInteraction() noexcept
 {
     const bool rotate = transformGizmoInteraction_.Mode() ==
         TransformGizmoMode::Rotate;
+    const bool scale = transformGizmoInteraction_.Mode() ==
+        TransformGizmoMode::Scale;
     const bool changed = transformGizmoInteraction_.Cancel();
     const bool previewCancelled = transformPreviewModel_.CancelPreview();
     if (rotate) voxelRotateStatusMessage_.clear();
+    if (scale)
+    {
+        voxelScaleTargetDimensions_.reset();
+        voxelScaleStatusMessage_.clear();
+    }
     if (changed || previewCancelled) UpdateVoxelHighlights();
 }
 
@@ -12774,6 +13059,36 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
             drawList->AddTriangleFilled(*end, left, right, color);
         }
     }
+    if (view.Mode == TransformGizmoMode::Scale)
+    {
+        const Vec3 cameraForward = viewportCamera_.GetForward();
+        for (const TransformGizmoAxisView& axis : view.Axes)
+        {
+            if (!axis.HasScaleHandle) continue;
+            const auto start = project(axis.Start);
+            const auto end = project(axis.End);
+            if (!start || !end) continue;
+            const Vec3 midpoint = (axis.Start + axis.End) * 0.5F;
+            const float visibility =
+                Dot(midpoint - view.Center, cameraForward) > 0.0F
+                ? GizmoStyle::OccludedIntensity : 1.0F;
+            const ImU32 color = ImGui::ColorConvertFloat4ToU32({
+                axis.Color[0] * visibility,
+                axis.Color[1] * visibility,
+                axis.Color[2] * visibility,
+                1.0F});
+            const float worldLength = Length(axis.End - axis.Start);
+            const float screenThickness = axis.Thickness > 0.0F &&
+                    worldLength > 0.0001F
+                ? axis.Thickness * axis.ProjectedLengthPixels / worldLength
+                : GizmoStyle::MoveAxisIdleThicknessPixels;
+            drawList->AddLine(*start, *end, color, screenThickness);
+            const float halfSize = axis.ScaleHandleSizePixels * 0.5F;
+            drawList->AddRectFilled(
+                {end->x - halfSize, end->y - halfSize},
+                {end->x + halfSize, end->y + halfSize}, color, 1.0F);
+        }
+    }
     if (const auto center = project(view.Center))
     {
         if (view.Mode == TransformGizmoMode::Rotate)
@@ -12790,7 +13105,8 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
                     0.78F * intensity,
                     0.72F}), 12);
         }
-        else if (view.Mode == TransformGizmoMode::Move)
+        else if (view.Mode == TransformGizmoMode::Move ||
+                 view.Mode == TransformGizmoMode::Scale)
         {
             const float intensity = view.State ==
                     TransformGizmoInteractionState::Dragging

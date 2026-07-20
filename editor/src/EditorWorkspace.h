@@ -197,6 +197,8 @@ public:
     [[nodiscard]] bool MoveGizmoSmokePassed() const noexcept;
     [[nodiscard]] bool RunRotateGizmoSmokeStep(std::size_t frame);
     [[nodiscard]] bool RotateGizmoSmokePassed() const noexcept;
+    [[nodiscard]] bool RunScaleGizmoSmokeStep(std::size_t frame);
+    [[nodiscard]] bool ScaleGizmoSmokePassed() const noexcept;
     [[nodiscard]] bool RunSaveOnExitSmokeStep(std::size_t frame);
     [[nodiscard]] bool SaveOnExitSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
@@ -319,6 +321,9 @@ private:
     [[nodiscard]] bool ApplyVoxelMirror();
     void CancelVoxelMirror() noexcept;
     [[nodiscard]] bool BeginVoxelScalePreview(VoxelScaleMode mode);
+    [[nodiscard]] bool UpdateVoxelScalePreview(
+        VoxelScaleMode mode,
+        Asset::Voxel::VoxelDimensions targetDimensions);
     [[nodiscard]] bool ApplyVoxelScale();
     void CancelVoxelScale() noexcept;
     [[nodiscard]] bool BeginVoxelAlignPreview(VoxelAlignDirection direction);
@@ -400,6 +405,7 @@ private:
     VoxelMirrorAxis voxelMirrorAxis_ = VoxelMirrorAxis::X;
     std::string voxelMirrorStatusMessage_;
     VoxelScaleMode voxelScaleMode_ = VoxelScaleMode::X;
+    std::optional<Asset::Voxel::VoxelDimensions> voxelScaleTargetDimensions_;
     std::string voxelScaleStatusMessage_;
     VoxelAlignDirection voxelAlignDirection_ = VoxelAlignDirection::Left;
     std::string voxelAlignStatusMessage_;
@@ -688,6 +694,13 @@ private:
     bool rotateGizmoSmokeCancelled_ = false;
     bool rotateGizmoSmokeSaved_ = false;
     bool rotateGizmoSmokeReopened_ = false;
+    std::filesystem::path scaleGizmoSmokePath_;
+    bool scaleGizmoSmokePrepared_ = false;
+    bool scaleGizmoSmokeInteractive_ = false;
+    bool scaleGizmoSmokeApplied_ = false;
+    bool scaleGizmoSmokeUndoRedo_ = false;
+    bool scaleGizmoSmokeRejected_ = false;
+    bool scaleGizmoSmokeCleaned_ = false;
     std::filesystem::path saveOnExitSmokePath_;
     bool saveOnExitSmokeRequested_ = false;
     bool saveOnExitSmokeCallbackDeferred_ = false;
