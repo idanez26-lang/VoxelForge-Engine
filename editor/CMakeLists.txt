@@ -185,7 +185,9 @@ endif()
 add_library(VoxelForgeEditorTransformGizmo STATIC)
 target_sources(
     VoxelForgeEditorTransformGizmo
-    PRIVATE src/TransformGizmo/TransformGizmoModel.cpp
+    PRIVATE
+        src/TransformGizmo/TransformGizmoModel.cpp
+        src/TransformGizmo/TransformGizmoInteraction.cpp
 )
 target_include_directories(
     VoxelForgeEditorTransformGizmo

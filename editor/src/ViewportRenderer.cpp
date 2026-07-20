@@ -79,6 +79,45 @@ void AppendBox(
     }
 }
 
+void AppendTriangle(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const Vec3 a,
+    const Vec3 b,
+    const Vec3 c,
+    const std::array<float, 4>& color)
+{
+    const Vec3 normal = Normalize(Cross(b - a, c - a));
+    const auto first = static_cast<std::uint32_t>(vertices.size());
+    for (const Vec3 point : {a, b, c})
+        vertices.push_back({
+            {point.X, point.Y, point.Z},
+            {normal.X, normal.Y, normal.Z}, color});
+    indices.insert(indices.end(), {first, first + 1U, first + 2U});
+}
+
+void AppendArrowHead(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const TransformGizmoAxisView& axis,
+    const std::array<float, 4>& color)
+{
+    if (!axis.HasArrowHead) return;
+    for (std::size_t index = 0U; index < axis.ArrowBaseCorners.size(); ++index)
+    {
+        const Vec3 current = axis.ArrowBaseCorners[index];
+        const Vec3 next = axis.ArrowBaseCorners[
+            (index + 1U) % axis.ArrowBaseCorners.size()];
+        AppendTriangle(vertices, indices, current, next, axis.End, color);
+    }
+    AppendTriangle(vertices, indices,
+        axis.ArrowBaseCorners[0], axis.ArrowBaseCorners[2],
+        axis.ArrowBaseCorners[1], color);
+    AppendTriangle(vertices, indices,
+        axis.ArrowBaseCorners[0], axis.ArrowBaseCorners[3],
+        axis.ArrowBaseCorners[2], color);
+}
+
 void AppendVoxelOutline(
     std::vector<GPUVertex>& vertices,
     std::vector<std::uint32_t>& indices,
@@ -157,12 +196,17 @@ void AppendVoxelBoxOutline(
 void AppendTransformGizmo(
     std::vector<GPUVertex>& vertices,
     std::vector<std::uint32_t>& indices,
-    const TransformGizmoView& gizmo)
+    const TransformGizmoView& gizmo,
+    const float colorScale = 1.0F,
+    const float alpha = 1.0F,
+    const float thicknessScale = 1.0F,
+    const bool centerOnly = false)
 {
     if (!gizmo.Visible) return;
     const float centerRadius = gizmo.CenterRadius;
-    constexpr std::array<float, 4U> centerColor{
-        0.92F, 0.94F, 0.98F, 1.0F};
+    const std::array<float, 4U> centerColor{
+        0.92F * colorScale, 0.94F * colorScale,
+        0.98F * colorScale, alpha};
     AppendBox(vertices, indices,
         {gizmo.Center.X - centerRadius, gizmo.Center.Y - centerRadius,
          gizmo.Center.Z - centerRadius},
@@ -170,15 +214,26 @@ void AppendTransformGizmo(
          gizmo.Center.Z + centerRadius}, centerColor);
     for (const TransformGizmoAxisView& axis : gizmo.Axes)
     {
-        const float thickness = gizmo.AxisThickness;
+        if (centerOnly) break;
+        const Vec3 shaftEnd = axis.HasArrowHead
+            ? axis.ArrowBaseCenter : axis.End;
+        const float thickness = axis.Thickness > 0.0F
+            ? axis.Thickness * thicknessScale
+            : gizmo.AxisThickness * thicknessScale;
+        const std::array<float, 4U> color{
+            axis.Color[0] * colorScale,
+            axis.Color[1] * colorScale,
+            axis.Color[2] * colorScale,
+            alpha};
         AppendBox(vertices, indices,
-            {std::min(axis.Start.X, axis.End.X) - thickness,
-             std::min(axis.Start.Y, axis.End.Y) - thickness,
-             std::min(axis.Start.Z, axis.End.Z) - thickness},
-            {std::max(axis.Start.X, axis.End.X) + thickness,
-             std::max(axis.Start.Y, axis.End.Y) + thickness,
-             std::max(axis.Start.Z, axis.End.Z) + thickness},
-            axis.Color);
+            {std::min(axis.Start.X, shaftEnd.X) - thickness,
+             std::min(axis.Start.Y, shaftEnd.Y) - thickness,
+             std::min(axis.Start.Z, shaftEnd.Z) - thickness},
+            {std::max(axis.Start.X, shaftEnd.X) + thickness,
+             std::max(axis.Start.Y, shaftEnd.Y) + thickness,
+             std::max(axis.Start.Z, shaftEnd.Z) + thickness},
+            color);
+        AppendArrowHead(vertices, indices, axis, color);
     }
 }
 
@@ -313,7 +368,8 @@ ViewportRenderer::~ViewportRenderer()
 
 bool ViewportRenderer::EnsurePipeline()
 {
-    if (pipeline_ != nullptr)
+    if (pipeline_ != nullptr && transformGizmoVisiblePipeline_ != nullptr &&
+        transformGizmoOccludedPipeline_ != nullptr)
     {
         return true;
     }
@@ -353,7 +409,7 @@ bool ViewportRenderer::EnsurePipeline()
         {0U, 0U, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GPUVertex, Position)},
         {1U, 0U, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GPUVertex, Normal)},
         {2U, 0U, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GPUVertex, Color)}}};
-    const SDL_GPUColorTargetDescription colorDescription{
+    SDL_GPUColorTargetDescription colorDescription{
         SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, {}};
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.vertex_shader = vertexShader;
@@ -366,19 +422,62 @@ bool ViewportRenderer::EnsurePipeline()
     pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
     pipelineInfo.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     pipelineInfo.rasterizer_state.enable_depth_clip = true;
-    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
-    pipelineInfo.depth_stencil_state.enable_depth_test = true;
-    pipelineInfo.depth_stencil_state.enable_depth_write = true;
     pipelineInfo.target_info.color_target_descriptions = &colorDescription;
     pipelineInfo.target_info.num_color_targets = 1U;
     pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
     pipelineInfo.target_info.has_depth_stencil_target = true;
+
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pipelineInfo.depth_stencil_state.enable_depth_test = true;
+    pipelineInfo.depth_stencil_state.enable_depth_write = true;
     pipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &pipelineInfo);
+
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pipelineInfo.depth_stencil_state.enable_depth_test =
+        TransformGizmoRenderPolicy::VisiblePassDepthTestEnabled;
+    pipelineInfo.depth_stencil_state.enable_depth_write =
+        TransformGizmoRenderPolicy::VisiblePassDepthWriteEnabled;
+    transformGizmoVisiblePipeline_ =
+        SDL_CreateGPUGraphicsPipeline(device_, &pipelineInfo);
+
+    colorDescription.blend_state.src_color_blendfactor =
+        SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    colorDescription.blend_state.dst_color_blendfactor =
+        SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    colorDescription.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    colorDescription.blend_state.src_alpha_blendfactor =
+        SDL_GPU_BLENDFACTOR_ONE;
+    colorDescription.blend_state.dst_alpha_blendfactor =
+        SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    colorDescription.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    colorDescription.blend_state.enable_blend = true;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER;
+    pipelineInfo.depth_stencil_state.enable_depth_test =
+        TransformGizmoRenderPolicy::OccludedPassDepthTestEnabled;
+    pipelineInfo.depth_stencil_state.enable_depth_write =
+        TransformGizmoRenderPolicy::OccludedPassDepthWriteEnabled;
+    transformGizmoOccludedPipeline_ =
+        SDL_CreateGPUGraphicsPipeline(device_, &pipelineInfo);
+
     SDL_ReleaseGPUShader(device_, vertexShader);
     SDL_ReleaseGPUShader(device_, fragmentShader);
-    if (pipeline_ == nullptr)
+    if (pipeline_ == nullptr || transformGizmoVisiblePipeline_ == nullptr ||
+        transformGizmoOccludedPipeline_ == nullptr)
     {
-        SetError(std::string("Unable to create viewport pipeline: ") + SDL_GetError());
+        if (pipeline_ != nullptr)
+            SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
+        if (transformGizmoVisiblePipeline_ != nullptr)
+            SDL_ReleaseGPUGraphicsPipeline(
+                device_, transformGizmoVisiblePipeline_);
+        if (transformGizmoOccludedPipeline_ != nullptr)
+            SDL_ReleaseGPUGraphicsPipeline(
+                device_, transformGizmoOccludedPipeline_);
+        pipeline_ = nullptr;
+        transformGizmoVisiblePipeline_ = nullptr;
+        transformGizmoOccludedPipeline_ = nullptr;
+        SetError(std::string("Unable to create viewport pipelines: ") +
+            SDL_GetError());
         return false;
     }
     return true;
@@ -720,9 +819,7 @@ bool ViewportRenderer::EnsureHighlights()
     constexpr std::size_t sphereBoxCount = 3U * 48U;
     const std::size_t boxCount =
         (outlineCount + transformOutlineCount) * boxesPerOutline +
-        (spherePreviewHighlight_ ? sphereBoxCount : 0U) +
-        (transformGizmo_
-            ? TransformGizmoModel::TotalPrimitiveCount : 0U);
+        (spherePreviewHighlight_ ? sphereBoxCount : 0U);
     vertices.reserve(boxCount * 24U);
     indices.reserve(boxCount * 36U);
     if (placementPreviewHighlight_)
@@ -851,14 +948,20 @@ bool ViewportRenderer::EnsureHighlights()
                     modelCenter_, outOfBoundsColor, 0.060F, 0.055F);
         }
     }
-    if (transformGizmo_)
-        AppendTransformGizmo(vertices, indices, *transformGizmo_);
     if (indices.empty())
     {
-        highlightsDirty_ = false;
-        return true;
+        if (device_ != nullptr)
+        {
+            if (highlightVertexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(device_, highlightVertexBuffer_);
+            if (highlightIndexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(device_, highlightIndexBuffer_);
+        }
+        highlightVertexBuffer_ = nullptr;
+        highlightIndexBuffer_ = nullptr;
+        highlightIndexCount_ = 0U;
     }
-    if (!UploadBufferPair(
+    else if (!UploadBufferPair(
             vertices.data(), vertices.size() * sizeof(GPUVertex),
             indices.data(), indices.size() * sizeof(std::uint32_t),
             highlightVertexBuffer_, highlightIndexBuffer_,
@@ -866,7 +969,82 @@ bool ViewportRenderer::EnsureHighlights()
     {
         return false;
     }
-    highlightIndexCount_ = static_cast<std::uint32_t>(indices.size());
+    else
+    {
+        highlightIndexCount_ = static_cast<std::uint32_t>(indices.size());
+    }
+
+    const auto releaseGizmoGeometry = [this]()
+    {
+        if (device_ != nullptr)
+        {
+            if (transformGizmoVisibleVertexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(
+                    device_, transformGizmoVisibleVertexBuffer_);
+            if (transformGizmoVisibleIndexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(
+                    device_, transformGizmoVisibleIndexBuffer_);
+            if (transformGizmoOccludedVertexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(
+                    device_, transformGizmoOccludedVertexBuffer_);
+            if (transformGizmoOccludedIndexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(
+                    device_, transformGizmoOccludedIndexBuffer_);
+        }
+        transformGizmoVisibleVertexBuffer_ = nullptr;
+        transformGizmoVisibleIndexBuffer_ = nullptr;
+        transformGizmoOccludedVertexBuffer_ = nullptr;
+        transformGizmoOccludedIndexBuffer_ = nullptr;
+        transformGizmoVisibleIndexCount_ = 0U;
+        transformGizmoOccludedIndexCount_ = 0U;
+    };
+    if (transformGizmo_)
+    {
+        std::vector<GPUVertex> visibleVertices;
+        std::vector<std::uint32_t> visibleIndices;
+        std::vector<GPUVertex> occludedVertices;
+        std::vector<std::uint32_t> occludedIndices;
+        visibleVertices.reserve(192U);
+        visibleIndices.reserve(288U);
+        occludedVertices.reserve(192U);
+        occludedIndices.reserve(288U);
+        AppendTransformGizmo(
+            visibleVertices, visibleIndices, *transformGizmo_);
+        AppendTransformGizmo(
+            occludedVertices, occludedIndices, *transformGizmo_,
+            TransformGizmoRenderPolicy::OccludedColorScale,
+            TransformGizmoRenderPolicy::OccludedAlpha,
+            TransformGizmoRenderPolicy::OccludedThicknessScale);
+        if (visibleIndices.empty() || occludedIndices.empty() ||
+            !UploadBufferPair(
+                visibleVertices.data(),
+                visibleVertices.size() * sizeof(GPUVertex),
+                visibleIndices.data(),
+                visibleIndices.size() * sizeof(std::uint32_t),
+                transformGizmoVisibleVertexBuffer_,
+                transformGizmoVisibleIndexBuffer_,
+                "visible transform gizmo") ||
+            !UploadBufferPair(
+                occludedVertices.data(),
+                occludedVertices.size() * sizeof(GPUVertex),
+                occludedIndices.data(),
+                occludedIndices.size() * sizeof(std::uint32_t),
+                transformGizmoOccludedVertexBuffer_,
+                transformGizmoOccludedIndexBuffer_,
+                "occluded transform gizmo"))
+        {
+            releaseGizmoGeometry();
+            return false;
+        }
+        transformGizmoVisibleIndexCount_ =
+            static_cast<std::uint32_t>(visibleIndices.size());
+        transformGizmoOccludedIndexCount_ =
+            static_cast<std::uint32_t>(occludedIndices.size());
+    }
+    else
+    {
+        releaseGizmoGeometry();
+    }
     highlightsDirty_ = false;
     ++highlightUploadCount_;
     return true;
@@ -1117,6 +1295,32 @@ bool ViewportRenderer::Render(
             pass, highlightIndexCount_, 1U, 0U, 0, 0U);
         ++highlightRenderCount_;
     }
+    if (transformGizmoOccludedIndexCount_ > 0U)
+    {
+        SDL_BindGPUGraphicsPipeline(pass, transformGizmoOccludedPipeline_);
+        const SDL_GPUBufferBinding vertexBinding{
+            transformGizmoOccludedVertexBuffer_, 0U};
+        const SDL_GPUBufferBinding indexBinding{
+            transformGizmoOccludedIndexBuffer_, 0U};
+        SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+        SDL_BindGPUIndexBuffer(
+            pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        SDL_DrawGPUIndexedPrimitives(
+            pass, transformGizmoOccludedIndexCount_, 1U, 0U, 0, 0U);
+    }
+    if (transformGizmoVisibleIndexCount_ > 0U)
+    {
+        SDL_BindGPUGraphicsPipeline(pass, transformGizmoVisiblePipeline_);
+        const SDL_GPUBufferBinding vertexBinding{
+            transformGizmoVisibleVertexBuffer_, 0U};
+        const SDL_GPUBufferBinding indexBinding{
+            transformGizmoVisibleIndexBuffer_, 0U};
+        SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+        SDL_BindGPUIndexBuffer(
+            pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        SDL_DrawGPUIndexedPrimitives(
+            pass, transformGizmoVisibleIndexCount_, 1U, 0U, 0, 0U);
+    }
     SDL_EndGPURenderPass(pass);
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
     {
@@ -1157,10 +1361,28 @@ void ViewportRenderer::ReleaseHighlights() noexcept
             SDL_ReleaseGPUBuffer(device_, highlightVertexBuffer_);
         if (highlightIndexBuffer_ != nullptr)
             SDL_ReleaseGPUBuffer(device_, highlightIndexBuffer_);
+        if (transformGizmoVisibleVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(
+                device_, transformGizmoVisibleVertexBuffer_);
+        if (transformGizmoVisibleIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(
+                device_, transformGizmoVisibleIndexBuffer_);
+        if (transformGizmoOccludedVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(
+                device_, transformGizmoOccludedVertexBuffer_);
+        if (transformGizmoOccludedIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(
+                device_, transformGizmoOccludedIndexBuffer_);
     }
     highlightVertexBuffer_ = nullptr;
     highlightIndexBuffer_ = nullptr;
     highlightIndexCount_ = 0U;
+    transformGizmoVisibleVertexBuffer_ = nullptr;
+    transformGizmoVisibleIndexBuffer_ = nullptr;
+    transformGizmoOccludedVertexBuffer_ = nullptr;
+    transformGizmoOccludedIndexBuffer_ = nullptr;
+    transformGizmoVisibleIndexCount_ = 0U;
+    transformGizmoOccludedIndexCount_ = 0U;
 }
 
 void ViewportRenderer::ReleaseGuides() noexcept
@@ -1203,7 +1425,15 @@ void ViewportRenderer::Shutdown() noexcept
     {
         SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
     }
+    if (device_ != nullptr && transformGizmoVisiblePipeline_ != nullptr)
+        SDL_ReleaseGPUGraphicsPipeline(
+            device_, transformGizmoVisiblePipeline_);
+    if (device_ != nullptr && transformGizmoOccludedPipeline_ != nullptr)
+        SDL_ReleaseGPUGraphicsPipeline(
+            device_, transformGizmoOccludedPipeline_);
     pipeline_ = nullptr;
+    transformGizmoVisiblePipeline_ = nullptr;
+    transformGizmoOccludedPipeline_ = nullptr;
     device_ = nullptr;
 }
 

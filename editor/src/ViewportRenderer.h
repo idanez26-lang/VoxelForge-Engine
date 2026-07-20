@@ -47,6 +47,15 @@ enum class SelectionBoxVisualState : std::uint8_t
 class ViewportRenderer final
 {
 public:
+    static constexpr bool TransformGizmoVisibleDepthTestEnabled =
+        TransformGizmoRenderPolicy::VisiblePassDepthTestEnabled;
+    static constexpr bool TransformGizmoVisibleDepthWriteEnabled =
+        TransformGizmoRenderPolicy::VisiblePassDepthWriteEnabled;
+    static constexpr bool TransformGizmoOccludedDepthTestEnabled =
+        TransformGizmoRenderPolicy::OccludedPassDepthTestEnabled;
+    static constexpr bool TransformGizmoOccludedDepthWriteEnabled =
+        TransformGizmoRenderPolicy::OccludedPassDepthWriteEnabled;
+
     ViewportRenderer();
     ~ViewportRenderer();
 
@@ -124,12 +133,18 @@ private:
 
     SDL_GPUDevice* device_ = nullptr;
     SDL_GPUGraphicsPipeline* pipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* transformGizmoVisiblePipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* transformGizmoOccludedPipeline_ = nullptr;
     SDL_GPUBuffer* vertexBuffer_ = nullptr;
     SDL_GPUBuffer* indexBuffer_ = nullptr;
     SDL_GPUBuffer* guideVertexBuffer_ = nullptr;
     SDL_GPUBuffer* guideIndexBuffer_ = nullptr;
     SDL_GPUBuffer* highlightVertexBuffer_ = nullptr;
     SDL_GPUBuffer* highlightIndexBuffer_ = nullptr;
+    SDL_GPUBuffer* transformGizmoVisibleVertexBuffer_ = nullptr;
+    SDL_GPUBuffer* transformGizmoVisibleIndexBuffer_ = nullptr;
+    SDL_GPUBuffer* transformGizmoOccludedVertexBuffer_ = nullptr;
+    SDL_GPUBuffer* transformGizmoOccludedIndexBuffer_ = nullptr;
     SDL_GPUTexture* colorTarget_ = nullptr;
     SDL_GPUTexture* depthTarget_ = nullptr;
     std::uint32_t width_ = 0;
@@ -138,6 +153,8 @@ private:
     std::uint32_t gridIndexCount_ = 0;
     std::uint32_t axesIndexCount_ = 0;
     std::uint32_t highlightIndexCount_ = 0;
+    std::uint32_t transformGizmoVisibleIndexCount_ = 0;
+    std::uint32_t transformGizmoOccludedIndexCount_ = 0;
     float guideWidth_ = 0.0F;
     float guideHeight_ = 0.0F;
     float guideDepth_ = 0.0F;

@@ -1,12 +1,14 @@
 #pragma once
 
-#include "EditorMath.h"
+#include "EditorMatrix.h"
 #include "Selection/SelectionService.h"
+#include "VoxelSelection/ViewportRayBuilder.h"
 #include "VoxelTools/VoxelToolState.h"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace VoxelForge::Editor
 {
@@ -47,6 +49,14 @@ struct TransformGizmoAxisView final
     Vec3 Start{};
     Vec3 End{};
     std::array<float, 4U> Color{};
+    float Thickness = 0.0F;
+    float ProjectedLengthPixels = 0.0F;
+    bool CameraFacing = false;
+    bool HasArrowHead = false;
+    Vec3 ArrowBaseCenter{};
+    std::array<Vec3, 4U> ArrowBaseCorners{};
+    float ArrowLength = 0.0F;
+    float ArrowWidth = 0.0F;
 
     [[nodiscard]] bool operator==(
         const TransformGizmoAxisView&) const noexcept = default;
@@ -86,14 +96,64 @@ struct TransformGizmoUpdateContext final
     TransformGizmoProjection Projection =
         TransformGizmoProjection::Perspective;
     float OrthographicWorldHeight = 0.0F;
+    TransformGizmoInteractionState InteractionState =
+        TransformGizmoInteractionState::Idle;
+    TransformGizmoAxis ActiveAxis = TransformGizmoAxis::None;
+    Matrix4 ViewProjection = IdentityMatrix();
+    ViewportRectangle Viewport{};
+};
+
+struct TransformGizmoSizingResult final
+{
+    bool Visible = false;
+    float CameraDepth = 0.0F;
+    float UnclampedWorldLength = 0.0F;
+    float WorldLength = 0.0F;
+    float ProjectedLengthPixels = 0.0F;
+    float SelectionMaximumExtent = 0.0F;
+    bool MinimumClampApplied = false;
+    bool MaximumClampApplied = false;
+    bool CorrectionMinimumClampApplied = false;
+    bool CorrectionMaximumClampApplied = false;
+    bool CameraFacing = false;
+    std::uint8_t CorrectionIterations = 0U;
+};
+
+struct TransformGizmoRenderPolicy final
+{
+    static constexpr bool VisiblePassDepthTestEnabled = true;
+    static constexpr bool VisiblePassDepthWriteEnabled = false;
+    static constexpr bool OccludedPassDepthTestEnabled = true;
+    static constexpr bool OccludedPassDepthWriteEnabled = false;
+    static constexpr float OccludedColorScale = 0.48F;
+    static constexpr float OccludedAlpha = 0.34F;
+    static constexpr float OccludedThicknessScale = 0.82F;
+    static constexpr bool CenterScreenOverlayEnabled = true;
 };
 
 class TransformGizmoModel final
 {
 public:
-    static constexpr float DesiredAxisLengthPixels = 90.0F;
+    static constexpr float SelectionRelativeFactor = 0.35F;
+    static constexpr float AxisCeilingTargetPixels = 100.0F;
+    static constexpr float MaximumAxisLengthPixels = 110.0F;
+    static constexpr float MinimumPositiveDepth = 0.0001F;
+    static constexpr float MinimumWorldLength = 0.75F;
+    static constexpr float MaximumWorldLength = 18.0F;
+    static constexpr float MinimumScreenCappedWorldLength = 0.0001F;
+    static constexpr float MinimumCorrectionFactor = 0.001F;
+    static constexpr float MaximumCorrectionFactor = 1.0F;
+    static constexpr float MinimumAxisViewSine = 0.15F;
+    static constexpr float ArrowLengthRatio = 0.18F;
+    static constexpr float MinimumArrowLengthPixels = 6.0F;
+    static constexpr float MaximumArrowLengthPixels = 14.0F;
+    static constexpr float MinimumArrowWidthPixels = 6.0F;
+    static constexpr float MaximumArrowWidthPixels = 12.0F;
+    static constexpr float MaximumArrowAxisRatio = 0.40F;
+    static constexpr float MinimumCenterPixels = 7.0F;
     static constexpr std::size_t AxisPrimitiveCount = 3U;
-    static constexpr std::size_t TotalPrimitiveCount = 4U;
+    static constexpr std::size_t ArrowPrimitiveCount = 3U;
+    static constexpr std::size_t TotalPrimitiveCount = 7U;
 
     [[nodiscard]] bool Update(
         const TransformGizmoUpdateContext& context) noexcept;
@@ -105,6 +165,14 @@ public:
     [[nodiscard]] static float CalculateWorldAxisLength(
         const TransformGizmoUpdateContext& context,
         Vec3 worldCenter) noexcept;
+    [[nodiscard]] static TransformGizmoSizingResult CalculateSizing(
+        const TransformGizmoUpdateContext& context,
+        Vec3 worldCenter,
+        TransformGizmoAxis axis = TransformGizmoAxis::X) noexcept;
+    [[nodiscard]] static std::optional<Vec2> ProjectWorldToScreen(
+        Vec3 worldPosition,
+        const ViewportRectangle& viewport,
+        const Matrix4& viewProjection) noexcept;
 
 private:
     TransformGizmoView view_{};

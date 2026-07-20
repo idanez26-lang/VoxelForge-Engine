@@ -1,0 +1,497 @@
+#include "TransformGizmo/TransformGizmoInteraction.h"
+
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string_view>
+
+namespace
+{
+using namespace VoxelForge::Editor;
+using VoxelForge::Asset::Voxel::VoxelPosition;
+
+void Require(const bool condition, const std::string_view message)
+{
+    if (!condition) throw std::runtime_error(std::string(message));
+}
+
+[[nodiscard]] TransformGizmoView MakeView()
+{
+    TransformGizmoView view;
+    view.Visible = true;
+    view.Mode = TransformGizmoMode::Move;
+    view.State = TransformGizmoInteractionState::Idle;
+    view.Center = {};
+    view.AxisLength = 10.0F;
+    view.AxisThickness = 0.25F;
+    view.CenterRadius = 0.5F;
+    view.Axes = {{
+        {TransformGizmoAxis::X, {}, {10.0F, 0.0F, 0.0F}, {1, 0, 0, 1}, 0.25F},
+        {TransformGizmoAxis::Y, {}, {0.0F, 10.0F, 0.0F}, {0, 1, 0, 1}, 0.25F},
+        {TransformGizmoAxis::Z, {}, {0.0F, 0.0F, 10.0F}, {0, 0, 1, 1}, 0.25F}}};
+    return view;
+}
+
+[[nodiscard]] Matrix4 MakeProjection()
+{
+    Matrix4 matrix = IdentityMatrix();
+    matrix[0] = 0.02F;
+    matrix[2] = -0.014F;
+    matrix[5] = 0.02F;
+    matrix[6] = 0.014F;
+    matrix[10] = 0.01F;
+    return matrix;
+}
+
+[[nodiscard]] Matrix4 MakePerspectiveProjection(
+    const float cameraDepth,
+    const float viewportWidth,
+    const float viewportHeight,
+    const float verticalFovDegrees = 45.0F)
+{
+    const float yScale = 1.0F / std::tan(
+        DegreesToRadians(verticalFovDegrees) * 0.5F);
+    const float xScale = yScale / (viewportWidth / viewportHeight);
+    return {
+        xScale, 0.0F, 0.0F, 0.0F,
+        0.0F, yScale, 0.0F, 0.0F,
+        0.0F, 0.0F, 1.0F, 0.0F,
+        0.0F, 0.0F, 1.0F, cameraDepth};
+}
+
+[[nodiscard]] TransformGizmoView MakeHybridView(
+    const float cameraDepth,
+    const float viewportHeight,
+    const SelectionBounds bounds =
+        SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0}))
+{
+    const Vec3 gridCenter{
+        (static_cast<float>(bounds.Minimum.X + bounds.Maximum.X) + 1.0F) * 0.5F,
+        (static_cast<float>(bounds.Minimum.Y + bounds.Maximum.Y) + 1.0F) * 0.5F,
+        (static_cast<float>(bounds.Minimum.Z + bounds.Maximum.Z) + 1.0F) * 0.5F};
+    TransformGizmoUpdateContext context;
+    context.DocumentActive = true;
+    context.SelectionEmpty = false;
+    context.ActiveDocumentGeneration = 9U;
+    context.SelectionDocumentGeneration = 9U;
+    context.Bounds = bounds;
+    context.ModelCenter = gridCenter;
+    context.ActiveTool = ActiveVoxelTool::Move;
+    context.CameraPosition = {0.0F, 0.0F, -cameraDepth};
+    context.CameraForward = {0.0F, 0.0F, 1.0F};
+    context.ViewportHeightPixels = viewportHeight;
+    context.Viewport = {0.0F, 0.0F,
+        viewportHeight * (16.0F / 9.0F), viewportHeight};
+    context.ViewProjection = MakePerspectiveProjection(
+        cameraDepth, context.Viewport.Width, context.Viewport.Height);
+    TransformGizmoModel model;
+    Require(model.Update(context) && model.View().Visible,
+        "Unable to construct the hybrid Move gizmo fixture.");
+    return model.View();
+}
+
+[[nodiscard]] Vec2 PointerFor(const TransformGizmoAxis axis)
+{
+    if (axis == TransformGizmoAxis::X) return {575.0F, 500.0F};
+    if (axis == TransformGizmoAxis::Y) return {500.0F, 425.0F};
+    return {447.5F, 447.5F};
+}
+
+[[nodiscard]] Vec2 ScreenDirection(const TransformGizmoAxis axis)
+{
+    if (axis == TransformGizmoAxis::X) return {1.0F, 0.0F};
+    if (axis == TransformGizmoAxis::Y) return {0.0F, -1.0F};
+    constexpr float inverseRootTwo = 0.70710678118F;
+    return {-inverseRootTwo, -inverseRootTwo};
+}
+
+[[nodiscard]] TransformGizmoPointerInput MakeInput(
+    const TransformGizmoAxis axis)
+{
+    TransformGizmoPointerInput input;
+    input.ScreenPosition = PointerFor(axis);
+    input.Viewport = {0.0F, 0.0F, 1000.0F, 1000.0F};
+    input.ViewProjection = MakeProjection();
+    return input;
+}
+
+[[nodiscard]] bool Begin(
+    TransformGizmoInteraction& interaction,
+    const TransformGizmoAxis axis,
+    TransformGizmoPointerInput& input)
+{
+    input = MakeInput(axis);
+    return interaction.UpdateHover(MakeView(), input) == axis &&
+        interaction.BeginDrag(MakeView(), axis, input, 9U,
+            SelectionBounds::FromCorners({1, 1, 1}, {2, 2, 2}));
+}
+
+void TestPickingAndPriority()
+{
+    TransformGizmoInteraction interaction;
+    auto view = MakeView();
+    for (const TransformGizmoAxis axis : {
+             TransformGizmoAxis::X,
+             TransformGizmoAxis::Y,
+             TransformGizmoAxis::Z})
+    {
+        auto input = MakeInput(axis);
+        Require(interaction.UpdateHover(view, input) == axis,
+            "Each Move axis must be pickable in screen space.");
+        Require(interaction.State() == TransformGizmoInteractionState::Hover,
+            "A picked axis must produce the Hover state.");
+    }
+
+    auto input = MakeInput(TransformGizmoAxis::X);
+    input.ScreenPosition = {500.0F, 520.0F};
+    Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::None &&
+            interaction.State() == TransformGizmoInteractionState::Idle,
+        "Picking outside the 8 px tolerance must miss.");
+    input.ScreenPosition = {500.0F, 507.9F};
+    Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::X,
+        "Picking inside the tolerance must hit.");
+    input.ScreenPosition = {500.0F, 500.0F};
+    Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::X,
+        "Exact ties must resolve deterministically in X/Y/Z order.");
+
+    view.Mode = TransformGizmoMode::Rotate;
+    Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::None,
+        "Rotate visuals must remain non-interactive in Move Gizmo v1.");
+    view.Mode = TransformGizmoMode::Scale;
+    Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::None,
+        "Scale visuals must remain non-interactive in Move Gizmo v1.");
+    view = MakeView();
+    view.Visible = false;
+    Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::None,
+        "A hidden gizmo must never capture input.");
+    input.Viewport.Width = 0.0F;
+    Require(interaction.UpdateHover(MakeView(), input) == TransformGizmoAxis::None,
+        "A degenerate viewport must be rejected safely.");
+}
+
+void TestPickingMatchesHybridRenderedSegmentsAtEveryDepth()
+{
+    for (const auto [cameraDepth, viewportWidth, viewportHeight] :
+         {std::array<float, 3U>{0.05F, 640.0F, 360.0F},
+          std::array<float, 3U>{1.0F, 1280.0F, 720.0F},
+          std::array<float, 3U>{250.0F, 2560.0F, 1440.0F}})
+    {
+        TransformGizmoView view = MakeHybridView(
+            cameraDepth, viewportHeight);
+        const float invalid = std::numeric_limits<float>::quiet_NaN();
+        view.Axes[1].Start = {invalid, invalid, invalid};
+        view.Axes[1].End = {invalid, invalid, invalid};
+        view.Axes[2].Start = {invalid, invalid, invalid};
+        view.Axes[2].End = {invalid, invalid, invalid};
+        TransformGizmoPointerInput input;
+        input.Viewport = {0.0F, 0.0F, viewportWidth, viewportHeight};
+        input.ViewProjection = MakePerspectiveProjection(
+            cameraDepth, viewportWidth, viewportHeight);
+        input.ScreenPosition = {
+            viewportWidth * 0.5F +
+                view.Axes[0].ProjectedLengthPixels * 0.5F,
+            viewportHeight * 0.5F};
+        TransformGizmoInteraction interaction;
+        Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::X,
+            "Picking must hit the exact rendered X segment at near, normal, and far depth.");
+        if (view.Axes[0].ProjectedLengthPixels > 20.0F)
+        {
+            input.ScreenPosition.Y +=
+                TransformGizmoInteraction::PickTolerancePixels - 0.1F;
+            Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::X,
+                "The minimum pixel picking tolerance must remain usable across depth and resolution.");
+            input.ScreenPosition.Y += 1.0F;
+            Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::None,
+                "Picking must not create a large invisible region around a normal shaft.");
+        }
+    }
+
+    const SelectionBounds large =
+        SelectionBounds::FromCorners({0, 0, 0}, {63, 63, 63});
+    const TransformGizmoView small = MakeHybridView(20.0F, 720.0F);
+    const TransformGizmoView largeView =
+        MakeHybridView(20.0F, 720.0F, large);
+    Require(largeView.AxisLength > small.AxisLength,
+        "Visual geometry must scale with the selection while picking remains screen based.");
+
+    TransformGizmoUpdateContext previewContext;
+    previewContext.DocumentActive = true;
+    previewContext.SelectionEmpty = false;
+    previewContext.ActiveDocumentGeneration = 9U;
+    previewContext.SelectionDocumentGeneration = 9U;
+    previewContext.Bounds =
+        SelectionBounds::FromCorners({10, 0, 0}, {10, 0, 0});
+    previewContext.ModelCenter = {0.5F, 0.5F, 0.5F};
+    previewContext.ActiveTool = ActiveVoxelTool::Move;
+    previewContext.CameraPosition = {0.0F, 0.0F, -20.0F};
+    previewContext.CameraForward = {0.0F, 0.0F, 1.0F};
+    previewContext.ViewportHeightPixels = 720.0F;
+    TransformGizmoModel previewModel;
+    Require(previewModel.Update(previewContext) &&
+            previewModel.View().Center == Vec3{10.0F, 0.0F, 0.0F} &&
+            std::abs(previewModel.View().AxisLength - small.AxisLength) < 0.0001F,
+        "A Move preview must relocate same-sized bounds without changing gizmo size.");
+
+    TransformGizmoPointerInput faceOn;
+    faceOn.Viewport = {0.0F, 0.0F, 1280.0F, 720.0F};
+    faceOn.ViewProjection = MakePerspectiveProjection(20.0F, 1280.0F, 720.0F);
+    faceOn.ScreenPosition = {640.0F, 360.0F};
+    TransformGizmoInteraction faceOnInteraction;
+    Require(faceOnInteraction.UpdateHover(small, faceOn) == TransformGizmoAxis::X,
+        "A camera-aligned collapsed axis must remain finite and resolve ties deterministically.");
+}
+
+void TestArrowHeadsAndPickingUseTheFinalProjection()
+{
+    for (const auto [cameraDepth, viewportWidth, viewportHeight] :
+         {std::array<float, 3U>{0.1F, 640.0F, 360.0F},
+          std::array<float, 3U>{20.0F, 1280.0F, 720.0F},
+          std::array<float, 3U>{500.0F, 2560.0F, 1440.0F}})
+    {
+        const TransformGizmoView view = MakeHybridView(
+            cameraDepth, viewportHeight);
+        const TransformGizmoAxisView& x = view.Axes[0];
+        Require(x.HasArrowHead && x.Axis == TransformGizmoAxis::X &&
+                x.ArrowBaseCenter.X < x.End.X &&
+                x.ArrowBaseCenter.Y == x.End.Y &&
+                x.ArrowBaseCenter.Z == x.End.Z,
+            "Move X must have one arrow head oriented at its positive endpoint.");
+        TransformGizmoPointerInput input;
+        input.Viewport = {0.0F, 0.0F, viewportWidth, viewportHeight};
+        input.ViewProjection = MakePerspectiveProjection(
+            cameraDepth, viewportWidth, viewportHeight);
+        const auto tip = TransformGizmoModel::ProjectWorldToScreen(
+            x.End, input.Viewport, input.ViewProjection);
+        Require(tip.has_value(), "The arrow tip must project to screen space.");
+        input.ScreenPosition = *tip;
+        TransformGizmoInteraction interaction;
+        Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::X,
+            "The visible arrow tip must be pickable at near, medium and far zoom.");
+    }
+
+    TransformGizmoUpdateContext context;
+    context.DocumentActive = true;
+    context.SelectionEmpty = false;
+    context.ActiveDocumentGeneration = 9U;
+    context.SelectionDocumentGeneration = 9U;
+    context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0});
+    context.ModelCenter = {0.5F, 0.5F, 0.5F};
+    context.ActiveTool = ActiveVoxelTool::Move;
+    context.CameraPosition = {0.0F, 0.0F, -20.0F};
+    context.CameraForward = {0.0F, 0.0F, 1.0F};
+    context.ViewportHeightPixels = 720.0F;
+    context.Viewport = {0.0F, 0.0F, 1280.0F, 720.0F};
+    context.ViewProjection = MakePerspectiveProjection(
+        20.0F, 1280.0F, 720.0F);
+    context.InteractionState = TransformGizmoInteractionState::Hover;
+    context.ActiveAxis = TransformGizmoAxis::X;
+    TransformGizmoModel model;
+    Require(model.Update(context), "Unable to construct hovered arrows.");
+    const TransformGizmoView hovered = model.View();
+    context.InteractionState = TransformGizmoInteractionState::Dragging;
+    Require(model.Update(context), "Unable to construct dragged arrows.");
+    const TransformGizmoView dragged = model.View();
+    Require(dragged.Axes[0].HasArrowHead &&
+            dragged.Axes[0].Color == hovered.Axes[0].Color &&
+            dragged.Axes[0].Thickness == hovered.Axes[0].Thickness &&
+            dragged.Axes[1].Color[1] < hovered.Axes[1].Color[1],
+        "The locked segment and its arrow must stay highlighted together while other axes dim.");
+}
+
+void TestAxisLockedIntegerDragging()
+{
+    for (const TransformGizmoAxis axis : {
+             TransformGizmoAxis::X,
+             TransformGizmoAxis::Y,
+             TransformGizmoAxis::Z})
+    {
+        TransformGizmoInteraction interaction;
+        TransformGizmoPointerInput input;
+        Require(Begin(interaction, axis, input),
+            "A hovered Move axis must begin dragging.");
+        Require(interaction.IsDragging() && interaction.LockedAxis() == axis &&
+                interaction.State() == TransformGizmoInteractionState::Dragging,
+            "BeginDrag must lock exactly one axis.");
+        const Vec2 direction = ScreenDirection(axis);
+        input.ScreenPosition = {
+            input.ScreenPosition.X + direction.X * 26.0F,
+            input.ScreenPosition.Y + direction.Y * 26.0F};
+        Require(interaction.UpdateDrag(input),
+            "A grid-sized pointer change must update the preview delta.");
+        const VoxelPosition positive = interaction.Delta();
+        Require((axis == TransformGizmoAxis::X && positive == VoxelPosition{3, 0, 0}) ||
+                (axis == TransformGizmoAxis::Y && positive == VoxelPosition{0, 3, 0}) ||
+                (axis == TransformGizmoAxis::Z && positive == VoxelPosition{0, 0, 3}),
+            "Drag deltas must be integer, mono-axis and positive.");
+        Require(!interaction.UpdateDrag(input),
+            "An unchanged integer delta must not request a preview rebuild.");
+
+        input.ScreenPosition = {
+            PointerFor(axis).X - direction.X * 26.0F,
+            PointerFor(axis).Y - direction.Y * 26.0F};
+        Require(interaction.UpdateDrag(input),
+            "Negative dragging must update the preview delta.");
+        const VoxelPosition negative = interaction.Delta();
+        Require((axis == TransformGizmoAxis::X && negative == VoxelPosition{-3, 0, 0}) ||
+                (axis == TransformGizmoAxis::Y && negative == VoxelPosition{0, -3, 0}) ||
+                (axis == TransformGizmoAxis::Z && negative == VoxelPosition{0, 0, -3}),
+            "Drag deltas must remain locked during negative movement.");
+        const TransformGizmoDragRelease release = interaction.EndDrag();
+        Require(release.WasDragging && release.Axis == axis &&
+                release.Delta == negative && !interaction.IsDragging(),
+            "MouseUp must expose one final delta and release capture.");
+    }
+}
+
+void TestRoundingRayGeometryAndParallelFallback()
+{
+    TransformGizmoInteraction interaction;
+    TransformGizmoPointerInput input;
+    Require(Begin(interaction, TransformGizmoAxis::X, input),
+        "Unable to begin rounding fixture.");
+    input.ScreenPosition.X += 4.9F;
+    Require(!interaction.UpdateDrag(input) && interaction.Delta() == VoxelPosition{},
+        "Movement below half a voxel must remain zero.");
+    input.ScreenPosition.X += 0.2F;
+    Require(interaction.UpdateDrag(input) &&
+            interaction.Delta() == VoxelPosition{1, 0, 0},
+        "Nearest-integer rounding must switch at half a voxel.");
+    interaction.Reset();
+
+    input = MakeInput(TransformGizmoAxis::X);
+    input.Ray = VoxelRay{{0.0F, 0.0F, -10.0F}, {0.0F, 0.0F, 1.0F}};
+    Require(interaction.UpdateHover(MakeView(), input) == TransformGizmoAxis::X &&
+            interaction.BeginDrag(MakeView(), TransformGizmoAxis::X, input, 9U,
+                SelectionBounds::FromCorners({1, 1, 1}, {2, 2, 2})),
+        "Unable to begin ray-constrained fixture.");
+    input.Ray = VoxelRay{{0.0F, 0.0F, -10.0F},
+        Normalize(Vec3{3.0F, 0.0F, 10.0F})};
+    Require(interaction.UpdateDrag(input) &&
+            interaction.Delta() == VoxelPosition{3, 0, 0},
+        "Closest ray/axis geometry must recover the exact X displacement.");
+    interaction.Reset();
+
+    input = MakeInput(TransformGizmoAxis::X);
+    input.Ray = VoxelRay{{-10.0F, 0.0F, 0.0F}, {1.0F, 0.0F, 0.0F}};
+    Require(interaction.UpdateHover(MakeView(), input) == TransformGizmoAxis::X &&
+            interaction.BeginDrag(MakeView(), TransformGizmoAxis::X, input, 9U,
+                SelectionBounds::FromCorners({1, 1, 1}, {2, 2, 2})),
+        "A camera-parallel axis must still begin safely.");
+    input.ScreenPosition.X += 20.0F;
+    Require(interaction.UpdateDrag(input) &&
+            interaction.Delta() == VoxelPosition{2, 0, 0},
+        "A ray parallel to the axis must use the stable screen fallback.");
+    input.ScreenPosition.X = std::numeric_limits<float>::quiet_NaN();
+    Require(!interaction.UpdateDrag(input),
+        "Non-finite pointer input must never create NaN or mutate the delta.");
+}
+
+void TestInvalidationCancellationAndCaptureLifetime()
+{
+    TransformGizmoInteraction interaction;
+    TransformGizmoPointerInput input;
+    Require(Begin(interaction, TransformGizmoAxis::Y, input),
+        "Unable to begin cancellation fixture.");
+    Require(interaction.UpdateHover(MakeView(), MakeInput(TransformGizmoAxis::X)) ==
+            TransformGizmoAxis::Y,
+        "Hover updates during capture must preserve the locked axis.");
+    Require(interaction.Validate(9U,
+            SelectionBounds::FromCorners({1, 1, 1}, {2, 2, 2}), true),
+        "An unchanged document and selection must preserve capture.");
+    Require(!interaction.Validate(10U,
+            SelectionBounds::FromCorners({1, 1, 1}, {2, 2, 2}), true) &&
+            !interaction.IsDragging(),
+        "A document generation change must cancel capture.");
+
+    Require(Begin(interaction, TransformGizmoAxis::Y, input),
+        "Unable to restart after document invalidation.");
+    Require(!interaction.Validate(9U,
+            SelectionBounds::FromCorners({1, 1, 1}, {3, 2, 2}), true),
+        "A selection bounds change must cancel capture.");
+    Require(Begin(interaction, TransformGizmoAxis::Y, input),
+        "Unable to restart after selection invalidation.");
+    Require(!interaction.Validate(9U,
+            SelectionBounds::FromCorners({1, 1, 1}, {2, 2, 2}), false),
+        "Changing tools must cancel capture.");
+    Require(Begin(interaction, TransformGizmoAxis::Y, input),
+        "Unable to restart before Esc cancellation.");
+    Require(interaction.Cancel() && !interaction.IsDragging() &&
+            interaction.LockedAxis() == TransformGizmoAxis::None &&
+            interaction.Delta() == VoxelPosition{},
+        "Esc-style cancellation must purge all transient state.");
+    Require(!interaction.Cancel(),
+        "Cancelling an already idle interaction must be a no-op.");
+
+    auto view = MakeView();
+    input = MakeInput(TransformGizmoAxis::X);
+    Require(interaction.UpdateHover(view, input) == TransformGizmoAxis::X,
+        "Hover fixture setup failed.");
+    Require(!interaction.BeginDrag(view, TransformGizmoAxis::Y, input, 9U,
+            SelectionBounds::FromCorners({1, 1, 1}, {2, 2, 2})),
+        "A non-hovered axis must not steal capture.");
+    Require(!interaction.BeginDrag(view, TransformGizmoAxis::X, input, 0U,
+            SelectionBounds::FromCorners({1, 1, 1}, {2, 2, 2})),
+        "A missing document generation must reject capture.");
+    Require(!interaction.BeginDrag(view, TransformGizmoAxis::X, input, 9U, {}),
+        "Invalid selection bounds must reject capture.");
+}
+
+void TestVisualStateIsPreparedOutsideRenderer()
+{
+    TransformGizmoModel model;
+    TransformGizmoUpdateContext context;
+    context.DocumentActive = true;
+    context.SelectionEmpty = false;
+    context.ActiveDocumentGeneration = 9U;
+    context.SelectionDocumentGeneration = 9U;
+    context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {2, 2, 2});
+    context.ActiveTool = ActiveVoxelTool::Move;
+    context.CameraPosition = {0.0F, 0.0F, -10.0F};
+    context.CameraForward = {0.0F, 0.0F, 1.0F};
+    context.ViewportHeightPixels = 800.0F;
+    context.InteractionState = TransformGizmoInteractionState::Hover;
+    context.ActiveAxis = TransformGizmoAxis::X;
+    Require(model.Update(context), "Hover view was not rebuilt.");
+    const auto hover = model.View();
+    Require(hover.State == TransformGizmoInteractionState::Hover &&
+            hover.ActiveAxis == TransformGizmoAxis::X &&
+            hover.Axes[0].Thickness > hover.Axes[1].Thickness,
+        "The model must prepare a thicker active axis for the renderer.");
+
+    context.InteractionState = TransformGizmoInteractionState::Dragging;
+    Require(model.Update(context), "Dragging view was not rebuilt.");
+    const auto drag = model.View();
+    Require(drag.State == TransformGizmoInteractionState::Dragging &&
+            drag.Axes[0].Color[0] > drag.Axes[1].Color[0] &&
+            drag.Axes[2].Color[2] < hover.Axes[2].Color[2],
+        "Dragging must emphasize only the locked axis and dim the others.");
+    context.ActiveTool = ActiveVoxelTool::Rotate;
+    Require(model.Update(context) &&
+            model.View().State == TransformGizmoInteractionState::Idle &&
+            model.View().ActiveAxis == TransformGizmoAxis::None,
+        "Rotate remains visual-only and must ignore Move interaction state.");
+}
+}
+
+int main()
+{
+    try
+    {
+        TestPickingAndPriority();
+        TestPickingMatchesHybridRenderedSegmentsAtEveryDepth();
+        TestArrowHeadsAndPickingUseTheFinalProjection();
+        TestAxisLockedIntegerDragging();
+        TestRoundingRayGeometryAndParallelFallback();
+        TestInvalidationCancellationAndCaptureLifetime();
+        TestVisualStateIsPreparedOutsideRenderer();
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "MoveGizmoTests failed: " << error.what() << '\n';
+        return EXIT_FAILURE;
+    }
+    std::cout << "MoveGizmoTests passed\n";
+    return EXIT_SUCCESS;
+}

@@ -63,6 +63,7 @@ EditorLayer::EditorLayer(
     const bool voxelMirrorSmokeTest,
     const bool voxelScaleSmokeTest,
     const bool voxelAlignSmokeTest,
+    const bool moveGizmoSmokeTest,
     const bool transformGizmoFoundationSmokeTest,
     const bool saveOnExitSmokeTest,
     std::filesystem::path imguiIniPathOverride)
@@ -84,7 +85,8 @@ EditorLayer::EditorLayer(
               keyboardShortcutsSmokeTest || voxelMoveSmokeTest ||
               voxelDuplicateSmokeTest || voxelRotateSmokeTest ||
               voxelMirrorSmokeTest || voxelScaleSmokeTest ||
-              voxelAlignSmokeTest || transformGizmoFoundationSmokeTest ||
+              voxelAlignSmokeTest || moveGizmoSmokeTest ||
+              transformGizmoFoundationSmokeTest ||
               saveOnExitSmokeTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
@@ -103,7 +105,8 @@ EditorLayer::EditorLayer(
               keyboardShortcutsSmokeTest || voxelMoveSmokeTest ||
               voxelDuplicateSmokeTest || voxelRotateSmokeTest ||
               voxelMirrorSmokeTest || voxelScaleSmokeTest ||
-              voxelAlignSmokeTest || transformGizmoFoundationSmokeTest ||
+              voxelAlignSmokeTest || moveGizmoSmokeTest ||
+              transformGizmoFoundationSmokeTest ||
               saveOnExitSmokeTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
@@ -148,6 +151,7 @@ EditorLayer::EditorLayer(
       voxelMirrorSmokeTest_(voxelMirrorSmokeTest),
       voxelScaleSmokeTest_(voxelScaleSmokeTest),
       voxelAlignSmokeTest_(voxelAlignSmokeTest),
+      moveGizmoSmokeTest_(moveGizmoSmokeTest),
       transformGizmoFoundationSmokeTest_(transformGizmoFoundationSmokeTest),
       saveOnExitSmokeTest_(saveOnExitSmokeTest)
 {
@@ -268,8 +272,8 @@ void EditorLayer::OnImGuiRender()
          !keyboardShortcutsSmokeTest_ && !voxelMoveSmokeTest_ &&
          !voxelDuplicateSmokeTest_ && !voxelRotateSmokeTest_ &&
          !voxelMirrorSmokeTest_ && !voxelScaleSmokeTest_ &&
-         !voxelAlignSmokeTest_ && !transformGizmoFoundationSmokeTest_ &&
-         !saveOnExitSmokeTest_)
+         !voxelAlignSmokeTest_ && !moveGizmoSmokeTest_ &&
+         !transformGizmoFoundationSmokeTest_ && !saveOnExitSmokeTest_)
     {
         if (!workspace_.OpenVoxInViewport(startupVoxPath_))
         {
@@ -415,6 +419,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunVoxelAlignSmokeStep(
             renderedFrameCount_));
     }
+    if (moveGizmoSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunMoveGizmoSmokeStep(
+            renderedFrameCount_));
+    }
     if (transformGizmoFoundationSmokeTest_)
     {
         static_cast<void>(workspace_.RunTransformGizmoFoundationSmokeStep(
@@ -496,6 +505,7 @@ void EditorLayer::OnImGuiRender()
         (voxelMirrorSmokeTest_ && workspace_.VoxelMirrorSmokePassed()) ||
         (voxelScaleSmokeTest_ && workspace_.VoxelScaleSmokePassed()) ||
         (voxelAlignSmokeTest_ && workspace_.VoxelAlignSmokePassed()) ||
+        (moveGizmoSmokeTest_ && workspace_.MoveGizmoSmokePassed()) ||
         (transformGizmoFoundationSmokeTest_ &&
             workspace_.TransformGizmoFoundationSmokePassed()) ||
         (saveOnExitSmokeTest_ && workspace_.SaveOnExitSmokePassed());
@@ -695,6 +705,11 @@ void EditorLayer::OnImGuiRender()
         !workspace_.VoxelAlignSmokePassed())
     {
         throw std::runtime_error("Voxel Align smoke test did not complete.");
+    }
+    if (moveGizmoSmokeTest_ && smokeTestComplete &&
+        !workspace_.MoveGizmoSmokePassed())
+    {
+        throw std::runtime_error("Move Gizmo smoke test did not complete.");
     }
     if (transformGizmoFoundationSmokeTest_ && smokeTestComplete &&
         !workspace_.TransformGizmoFoundationSmokePassed())

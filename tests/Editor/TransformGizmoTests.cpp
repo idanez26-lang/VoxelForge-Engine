@@ -1,10 +1,13 @@
 #include "TransformGizmo/TransformGizmoModel.h"
+#include "EditorMatrix.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 
 #include <cmath>
+#include <array>
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -44,6 +47,98 @@ void Require(const bool condition, const std::string_view message)
     context.VerticalFieldOfViewDegrees = 45.0F;
     context.ViewportHeightPixels = 900.0F;
     return context;
+}
+
+[[nodiscard]] float ReprojectXAxisPixels(
+    const float worldLength,
+    const float depth,
+    const float verticalFovDegrees,
+    const float viewportWidth,
+    const float viewportHeight)
+{
+    const float yScale = 1.0F / std::tan(
+        DegreesToRadians(verticalFovDegrees) * 0.5F);
+    const float xScale = yScale / (viewportWidth / viewportHeight);
+    const Matrix4 projection{
+        xScale, 0.0F, 0.0F, 0.0F,
+        0.0F, yScale, 0.0F, 0.0F,
+        0.0F, 0.0F, 1.0F, 0.0F,
+        0.0F, 0.0F, 1.0F, 0.0F};
+    const Vec3 start = TransformPoint(projection, {0.0F, 0.0F, depth});
+    const Vec3 end = TransformPoint(
+        projection, {worldLength, 0.0F, depth});
+    const float startPixel = (start.X * 0.5F + 0.5F) * viewportWidth;
+    const float endPixel = (end.X * 0.5F + 0.5F) * viewportWidth;
+    return std::abs(endPixel - startPixel);
+}
+
+[[nodiscard]] Matrix4 MakeViewProjection(
+    const Vec3 eye,
+    const Vec3 forwardValue,
+    const float verticalFovDegrees,
+    const float viewportWidth,
+    const float viewportHeight)
+{
+    const Vec3 forward = Normalize(forwardValue);
+    const Vec3 referenceUp = std::abs(Dot(forward, {0.0F, 1.0F, 0.0F})) >
+            0.98F
+        ? Vec3{0.0F, 0.0F, 1.0F}
+        : Vec3{0.0F, 1.0F, 0.0F};
+    const Vec3 right = Normalize(Cross(forward, referenceUp));
+    const Vec3 up = Normalize(Cross(right, forward));
+    const Matrix4 view{
+        right.X, right.Y, right.Z, -Dot(right, eye),
+        up.X, up.Y, up.Z, -Dot(up, eye),
+        forward.X, forward.Y, forward.Z, -Dot(forward, eye),
+        0.0F, 0.0F, 0.0F, 1.0F};
+    const float yScale = 1.0F / std::tan(
+        DegreesToRadians(verticalFovDegrees) * 0.5F);
+    const float xScale = yScale / (viewportWidth / viewportHeight);
+    constexpr float nearPlane = 0.05F;
+    constexpr float farPlane = 100000.0F;
+    const float depthScale = farPlane / (farPlane - nearPlane);
+    const Matrix4 projection{
+        xScale, 0.0F, 0.0F, 0.0F,
+        0.0F, yScale, 0.0F, 0.0F,
+        0.0F, 0.0F, depthScale, -nearPlane * depthScale,
+        0.0F, 0.0F, 1.0F, 0.0F};
+    return MultiplyMatrix(projection, view);
+}
+
+[[nodiscard]] TransformGizmoUpdateContext MakeProjectedContext(
+    const Vec3 center,
+    const Vec3 forward,
+    const float depth,
+    const float viewportWidth = 1280.0F,
+    const float viewportHeight = 720.0F,
+    const float fieldOfView = 45.0F)
+{
+    TransformGizmoUpdateContext context = MakeContext();
+    context.ModelCenter = {
+        0.5F - center.X, 0.5F - center.Y, 0.5F - center.Z};
+    context.CameraForward = Normalize(forward);
+    context.CameraPosition = center - context.CameraForward * depth;
+    context.VerticalFieldOfViewDegrees = fieldOfView;
+    context.ViewportHeightPixels = viewportHeight;
+    context.Viewport = {0.0F, 0.0F, viewportWidth, viewportHeight};
+    context.ViewProjection = MakeViewProjection(
+        context.CameraPosition, context.CameraForward, fieldOfView,
+        viewportWidth, viewportHeight);
+    return context;
+}
+
+[[nodiscard]] float ProjectedLength(
+    const TransformGizmoAxisView& axis,
+    const TransformGizmoUpdateContext& context)
+{
+    const auto start = TransformGizmoModel::ProjectWorldToScreen(
+        axis.Start, context.Viewport, context.ViewProjection);
+    const auto end = TransformGizmoModel::ProjectWorldToScreen(
+        axis.End, context.Viewport, context.ViewProjection);
+    if (!start || !end) return 0.0F;
+    const float dx = end->X - start->X;
+    const float dy = end->Y - start->Y;
+    return std::sqrt(dx * dx + dy * dy);
 }
 
 void TestVisibilityModesAndStateMachine()
@@ -140,43 +235,63 @@ void TestExactSpatialCentersAndInvalidation()
         "Changing document generation must purge the old gizmo.");
 }
 
-void TestScreenStableScaleAndDegenerateInputs()
+void TestHybridScaleAndDegenerateInputs()
 {
     auto context = MakeContext();
-    const Vec3 center{0.5F, 0.5F, 0.5F};
-    const float nearLength =
-        TransformGizmoModel::CalculateWorldAxisLength(context, center);
-    context.CameraPosition.Z = -20.5F;
-    const float farLength =
-        TransformGizmoModel::CalculateWorldAxisLength(context, center);
-    Require(nearLength > 0.0F && farLength > nearLength &&
-            Near(farLength / nearLength, 2.0F, 0.01F),
-        "Perspective world length must grow linearly with camera depth.");
-    const auto projectedPixels = [&context](
-        const float worldLength, const float depth)
+    context.CameraPosition = {};
+    context.CameraForward = {0.0F, 0.0F, 1.0F};
+    context.ViewportHeightPixels = 720.0F;
+    constexpr float viewportWidth = 1280.0F;
+    context.Viewport = {0.0F, 0.0F, viewportWidth,
+        context.ViewportHeightPixels};
+    context.ViewProjection = MakeViewProjection(
+        context.CameraPosition, context.CameraForward,
+        context.VerticalFieldOfViewDegrees,
+        viewportWidth, context.ViewportHeightPixels);
+    const auto sizingAt = [&](const float depth)
     {
-        return worldLength * context.ViewportHeightPixels /
-            (depth * 2.0F * std::tan(
-                DegreesToRadians(context.VerticalFieldOfViewDegrees) * 0.5F));
+        return TransformGizmoModel::CalculateSizing(
+            context, {0.0F, 0.0F, depth});
     };
-    Require(Near(projectedPixels(nearLength, 10.5F),
-                 TransformGizmoModel::DesiredAxisLengthPixels, 0.01F) &&
-            Near(projectedPixels(farLength, 21.0F),
-                 TransformGizmoModel::DesiredAxisLengthPixels, 0.01F),
-        "Perspective projection must keep the requested pixel length.");
+    const auto nearSizing = sizingAt(0.05F);
+    const auto mediumSizing = sizingAt(20.0F);
+    const auto farSizing = sizingAt(500.0F);
+    Require(nearSizing.Visible && mediumSizing.Visible && farSizing.Visible &&
+            nearSizing.ProjectedLengthPixels <=
+                TransformGizmoModel::MaximumAxisLengthPixels + 0.5F &&
+            farSizing.ProjectedLengthPixels <
+                mediumSizing.ProjectedLengthPixels &&
+            mediumSizing.WorldLength == farSizing.WorldLength &&
+            mediumSizing.WorldLength ==
+                TransformGizmoModel::MinimumWorldLength,
+        "Hybrid sizing must cap only the near view and shrink naturally with distance.");
+    Require(nearSizing.CorrectionIterations > 0U &&
+            mediumSizing.CorrectionIterations == 0U &&
+            farSizing.CorrectionIterations == 0U,
+        "Projection correction must only enforce the maximum pixel ceiling.");
+
+    const auto almostNear = TransformGizmoModel::CalculateSizing(
+        context, {0.0F, 0.0F, 0.001F});
+    Require(almostNear.Visible && almostNear.WorldLength > 0.0F &&
+            std::isfinite(almostNear.WorldLength),
+        "A positive center close to the near plane must not disappear or produce NaN.");
+    Require(!TransformGizmoModel::CalculateSizing(
+                context, {0.0F, 0.0F, -1.0F}).Visible,
+        "A center behind the camera must be hidden safely.");
 
     context.Projection = TransformGizmoProjection::Orthographic;
+    context.Viewport = {};
     context.OrthographicWorldHeight = 32.0F;
+    const Vec3 center{0.0F, 0.0F, 10.0F};
     const float orthographicNear =
         TransformGizmoModel::CalculateWorldAxisLength(context, center);
-    context.CameraPosition.Z = -500.0F;
+    context.CameraPosition.Z = -490.0F;
     const float orthographicFar =
         TransformGizmoModel::CalculateWorldAxisLength(context, center);
     Require(Near(orthographicNear, orthographicFar) &&
-            Near(orthographicNear * context.ViewportHeightPixels /
-                    context.OrthographicWorldHeight,
-                TransformGizmoModel::DesiredAxisLengthPixels),
-        "Orthographic sizing must be independent of camera distance.");
+            Near(orthographicNear,
+                TransformGizmoModel::MinimumWorldLength),
+        "Orthographic sizing must remain bounds-relative and distance independent.");
 
     TransformGizmoModel model;
     context = MakeContext();
@@ -187,6 +302,200 @@ void TestScreenStableScaleAndDegenerateInputs()
     context.CameraForward = {};
     Require(!model.Update(context) && !model.View().Visible,
         "A degenerate camera direction must be rejected safely.");
+    context = MakeContext();
+    context.VerticalFieldOfViewDegrees = 180.0F;
+    Require(!model.Update(context) && !model.View().Visible,
+        "An invalid FOV must be rejected safely.");
+
+    context = MakeContext(
+        SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0}));
+    context.Viewport = {};
+    const auto minimumClamped = TransformGizmoModel::CalculateSizing(
+        context, {0.0F, 0.0F, 1.0F});
+    Require(minimumClamped.Visible && minimumClamped.MinimumClampApplied &&
+            minimumClamped.WorldLength ==
+                TransformGizmoModel::MinimumWorldLength,
+        "The minimum world-size safety clamp must be finite and explicit.");
+    context = MakeContext(
+        SelectionBounds::FromCorners({0, 0, 0}, {63, 63, 63}));
+    context.Viewport = {};
+    context.CameraPosition = {0.0F, 0.0F, -1000.0F};
+    const auto maximumClamped = TransformGizmoModel::CalculateSizing(
+        context, {0.0F, 0.0F, 1.0F});
+    Require(maximumClamped.Visible && maximumClamped.MaximumClampApplied &&
+            maximumClamped.WorldLength ==
+                TransformGizmoModel::MaximumWorldLength,
+        "The maximum world-size safety clamp must prevent numerical explosion.");
+
+    Require(TransformGizmoRenderPolicy::VisiblePassDepthTestEnabled &&
+            !TransformGizmoRenderPolicy::VisiblePassDepthWriteEnabled &&
+            TransformGizmoRenderPolicy::OccludedPassDepthTestEnabled &&
+            !TransformGizmoRenderPolicy::OccludedPassDepthWriteEnabled &&
+            TransformGizmoRenderPolicy::OccludedColorScale > 0.0F &&
+            TransformGizmoRenderPolicy::OccludedColorScale < 1.0F &&
+            TransformGizmoRenderPolicy::OccludedAlpha > 0.0F &&
+            TransformGizmoRenderPolicy::OccludedAlpha < 1.0F &&
+            TransformGizmoRenderPolicy::CenterScreenOverlayEnabled,
+        "The gizmo needs dedicated no-write visible and attenuated occluded passes plus a stable center overlay.");
+}
+
+void TestMeasuredProjectionAcrossCamerasAndArrowGeometry()
+{
+    struct ProjectionCase final
+    {
+        Vec3 Center;
+        Vec3 Forward;
+        float Depth;
+        float Width;
+        float Height;
+        float FieldOfView;
+    };
+    const std::array cases{
+        ProjectionCase{{}, Normalize(Vec3{1.0F, 0.7F, 1.0F}),
+            0.08F, 640.0F, 360.0F, 45.0F},
+        ProjectionCase{{}, Normalize(Vec3{1.0F, 0.7F, 1.0F}),
+            10.0F, 1280.0F, 720.0F, 45.0F},
+        ProjectionCase{{}, Normalize(Vec3{1.0F, 0.7F, 1.0F}),
+            500.0F, 1920.0F, 1080.0F, 45.0F},
+        ProjectionCase{{1000.0F, -500.0F, 750.0F},
+            Normalize(Vec3{-0.8F, 0.4F, 1.0F}),
+            2000.0F, 1280.0F, 720.0F, 45.0F},
+        ProjectionCase{{}, Normalize(Vec3{1.0F, 1.0F, 1.0F}),
+            30.0F, 1920.0F, 1080.0F, 25.0F},
+        ProjectionCase{{}, Normalize(Vec3{1.0F, 1.0F, 1.0F}),
+            30.0F, 800.0F, 500.0F, 100.0F}};
+
+    for (const ProjectionCase& fixture : cases)
+    {
+        TransformGizmoUpdateContext context = MakeProjectedContext(
+            fixture.Center, fixture.Forward, fixture.Depth,
+            fixture.Width, fixture.Height, fixture.FieldOfView);
+        TransformGizmoModel model;
+        Require(model.Update(context) && model.View().Visible,
+            "A finite projected camera fixture must produce a gizmo.");
+        for (const TransformGizmoAxisView& axis : model.View().Axes)
+        {
+            const float pixels = ProjectedLength(axis, context);
+            if (!axis.CameraFacing && pixels >
+                TransformGizmoModel::MaximumAxisLengthPixels + 1.0F)
+                std::cerr << "hybrid projection diagnostic: axis="
+                    << static_cast<int>(axis.Axis) << " depth="
+                    << fixture.Depth << " fov=" << fixture.FieldOfView
+                    << " pixels=" << pixels << " world="
+                    << Length(axis.End - axis.Start) << " stored="
+                    << axis.ProjectedLengthPixels << '\n';
+            Require(std::isfinite(pixels) && pixels >= 0.0F &&
+                    (axis.CameraFacing || pixels <=
+                        TransformGizmoModel::MaximumAxisLengthPixels + 1.0F),
+                "Every non-degenerate axis must respect the pixel ceiling without numerical explosion.");
+            Require(axis.HasArrowHead && axis.ArrowLength > 0.0F &&
+                    axis.ArrowWidth > 0.0F && axis.End != axis.ArrowBaseCenter,
+                "Move must expose one finite arrow head at every axis endpoint.");
+            const float projectedArrowLength = pixels *
+                axis.ArrowLength / Length(axis.End - axis.Start);
+            Require(std::isfinite(projectedArrowLength) &&
+                    projectedArrowLength <=
+                        TransformGizmoModel::MaximumArrowLengthPixels + 0.5F &&
+                    projectedArrowLength <=
+                        pixels * TransformGizmoModel::MaximumArrowAxisRatio +
+                            0.5F,
+                "Arrow heads must remain proportional and never consume the complete axis.");
+            if (!axis.CameraFacing && pixels >= 15.0F)
+                Require(projectedArrowLength >=
+                        TransformGizmoModel::MinimumArrowLengthPixels - 0.5F,
+                    "A normally projected arrow head must retain its discrete minimum size.");
+        }
+    }
+
+    for (const Vec3 forward : {
+             Vec3{1.0F, 0.0F, 0.0F},
+             Vec3{0.0F, 1.0F, 0.0F},
+             Vec3{0.0F, 0.0F, 1.0F}})
+    {
+        const TransformGizmoUpdateContext context =
+            MakeProjectedContext({}, forward, 20.0F);
+        TransformGizmoModel model;
+        Require(model.Update(context),
+            "A camera-facing axis must not hide the complete gizmo.");
+        bool foundFacing = false;
+        for (const TransformGizmoAxisView& axis : model.View().Axes)
+        {
+            const Vec3 direction = Normalize(axis.End - axis.Start);
+            if (std::abs(Dot(direction, forward)) > 0.99F)
+            {
+                foundFacing = true;
+                Require(axis.CameraFacing && axis.HasArrowHead &&
+                        std::isfinite(axis.ArrowLength) &&
+                        axis.ArrowLength <=
+                            TransformGizmoModel::MaximumWorldLength,
+                    "A face-on axis must use a bounded visible handle instead of exploding its world length.");
+            }
+            else
+            {
+                Require(ProjectedLength(axis, context) <=
+                        TransformGizmoModel::MaximumAxisLengthPixels + 1.0F,
+                    "Non-facing axes in orthogonal views must respect the pixel ceiling.");
+            }
+        }
+        Require(foundFacing,
+            "Each orthogonal camera fixture must identify its face-on axis.");
+    }
+
+    for (const ActiveVoxelTool tool : {
+             ActiveVoxelTool::Rotate, ActiveVoxelTool::Scale})
+    {
+        TransformGizmoUpdateContext context = MakeProjectedContext(
+            {}, Normalize(Vec3{1.0F, 1.0F, 1.0F}), 20.0F);
+        context.ActiveTool = tool;
+        TransformGizmoModel model;
+        Require(model.Update(context) &&
+                std::none_of(model.View().Axes.begin(),
+                    model.View().Axes.end(),
+                    [](const TransformGizmoAxisView& axis)
+                    { return axis.HasArrowHead; }),
+            "Arrow heads are exclusive to Move and must not leak into Rotate or Scale.");
+    }
+}
+
+void TestSelectionShapeControlsHybridWorldSize()
+{
+    TransformGizmoModel model;
+    float previousLength = 0.0F;
+    for (const SelectionBounds bounds : {
+             SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0}),
+             SelectionBounds::FromCorners({0, 0, 0}, {1, 1, 1}),
+             SelectionBounds::FromCorners({0, 0, 0}, {15, 15, 15}),
+             SelectionBounds::FromCorners({0, 0, 0}, {31, 31, 31}),
+             SelectionBounds::FromCorners({0, 0, 0}, {31, 0, 31}),
+             SelectionBounds::FromCorners({0, 0, 0}, {63, 0, 0})})
+    {
+        auto context = MakeContext(bounds);
+        const Vec3 gridCenter{
+            (static_cast<float>(bounds.Minimum.X + bounds.Maximum.X) + 1.0F) * 0.5F,
+            (static_cast<float>(bounds.Minimum.Y + bounds.Maximum.Y) + 1.0F) * 0.5F,
+            (static_cast<float>(bounds.Minimum.Z + bounds.Maximum.Z) + 1.0F) * 0.5F};
+        context.CameraForward = {0.0F, 0.0F, 1.0F};
+        context.CameraPosition = gridCenter - Vec3{0.0F, 0.0F, 20.0F};
+        Require(model.Update(context) && model.View().Visible,
+            "Every compact, large, flat or long selection must keep a visible gizmo.");
+        Require(model.View().AxisLength + 0.0001F >= previousLength,
+            "Larger selection bounds must not produce a smaller world-space gizmo.");
+        previousLength = model.View().AxisLength;
+        Require(model.View().Center == gridCenter,
+            "Every selection shape must retain its exact spatial center.");
+    }
+    const auto unitContext = MakeContext(
+        SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0}));
+    auto maximumContext = MakeContext(
+        SelectionBounds::FromCorners({0, 0, 0}, {63, 63, 63}));
+    maximumContext.CameraPosition = {32.0F, 32.0F, -1000.0F};
+    Require(Near(TransformGizmoModel::CalculateSizing(
+                     unitContext, {0.5F, 0.5F, 0.5F}).UnclampedWorldLength,
+                TransformGizmoModel::SelectionRelativeFactor) &&
+            Near(TransformGizmoModel::CalculateSizing(
+                     maximumContext, {32.0F, 32.0F, 32.0F}).WorldLength,
+                TransformGizmoModel::MaximumWorldLength),
+        "The hybrid world size must use the selection factor and explicit world clamps.");
 }
 
 void TestImmutableRenderViewAndConstantPrimitives()
@@ -206,7 +515,7 @@ void TestImmutableRenderViewAndConstantPrimitives()
     Require(model.Update(context), "A valid render view was not produced.");
     const TransformGizmoView first = model.View();
     Require(first.Axes.size() == TransformGizmoModel::AxisPrimitiveCount &&
-            TransformGizmoModel::TotalPrimitiveCount == 4U &&
+            TransformGizmoModel::TotalPrimitiveCount == 7U &&
             first.Axes[0].Axis == TransformGizmoAxis::X &&
             first.Axes[1].Axis == TransformGizmoAxis::Y &&
             first.Axes[2].Axis == TransformGizmoAxis::Z,
@@ -289,7 +598,9 @@ int main()
     {
         TestVisibilityModesAndStateMachine();
         TestExactSpatialCentersAndInvalidation();
-        TestScreenStableScaleAndDegenerateInputs();
+        TestHybridScaleAndDegenerateInputs();
+        TestMeasuredProjectionAcrossCamerasAndArrowGeometry();
+        TestSelectionShapeControlsHybridWorldSize();
         TestImmutableRenderViewAndConstantPrimitives();
         TestNoDocumentOrHistoryMutation();
     }
