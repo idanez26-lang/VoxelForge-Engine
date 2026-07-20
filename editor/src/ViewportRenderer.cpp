@@ -154,6 +154,34 @@ void AppendVoxelBoxOutline(
                 {x + thickness, y + thickness, z1}, color);
 }
 
+void AppendTransformGizmo(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const TransformGizmoView& gizmo)
+{
+    if (!gizmo.Visible) return;
+    const float centerRadius = gizmo.CenterRadius;
+    constexpr std::array<float, 4U> centerColor{
+        0.92F, 0.94F, 0.98F, 1.0F};
+    AppendBox(vertices, indices,
+        {gizmo.Center.X - centerRadius, gizmo.Center.Y - centerRadius,
+         gizmo.Center.Z - centerRadius},
+        {gizmo.Center.X + centerRadius, gizmo.Center.Y + centerRadius,
+         gizmo.Center.Z + centerRadius}, centerColor);
+    for (const TransformGizmoAxisView& axis : gizmo.Axes)
+    {
+        const float thickness = gizmo.AxisThickness;
+        AppendBox(vertices, indices,
+            {std::min(axis.Start.X, axis.End.X) - thickness,
+             std::min(axis.Start.Y, axis.End.Y) - thickness,
+             std::min(axis.Start.Z, axis.End.Z) - thickness},
+            {std::max(axis.Start.X, axis.End.X) + thickness,
+             std::max(axis.Start.Y, axis.End.Y) + thickness,
+             std::max(axis.Start.Z, axis.End.Z) + thickness},
+            axis.Color);
+    }
+}
+
 void AppendSphereOutline(
     std::vector<GPUVertex>& vertices,
     std::vector<std::uint32_t>& indices,
@@ -585,7 +613,8 @@ void ViewportRenderer::ConfigureHighlights(
         editableSelectionBoundsHighlight_.has_value() ||
         placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
-        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr;
+        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr ||
+        transformGizmo_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
 }
 
@@ -627,7 +656,28 @@ void ViewportRenderer::ConfigureTransformPreview(
         editableSelectionBoundsHighlight_.has_value() ||
         placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
-        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr;
+        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr ||
+        transformGizmo_.has_value();
+    if (!highlightsDirty_) ReleaseHighlights();
+}
+
+void ViewportRenderer::ConfigureTransformGizmo(
+    const TransformGizmoView* gizmo) noexcept
+{
+    const std::optional<TransformGizmoView> next =
+        gizmo != nullptr && gizmo->Visible
+        ? std::optional<TransformGizmoView>(*gizmo)
+        : std::nullopt;
+    if (transformGizmo_ == next) return;
+    transformGizmo_ = next;
+    highlightsDirty_ = hoveredHighlight_.has_value() ||
+        !selectedHighlights_.empty() ||
+        selectionBoundsHighlight_.has_value() ||
+        editableSelectionBoundsHighlight_.has_value() ||
+        placementPreviewHighlight_.has_value() ||
+        boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
+        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr ||
+        transformGizmo_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
 }
 
@@ -670,7 +720,9 @@ bool ViewportRenderer::EnsureHighlights()
     constexpr std::size_t sphereBoxCount = 3U * 48U;
     const std::size_t boxCount =
         (outlineCount + transformOutlineCount) * boxesPerOutline +
-        (spherePreviewHighlight_ ? sphereBoxCount : 0U);
+        (spherePreviewHighlight_ ? sphereBoxCount : 0U) +
+        (transformGizmo_
+            ? TransformGizmoModel::TotalPrimitiveCount : 0U);
     vertices.reserve(boxCount * 24U);
     indices.reserve(boxCount * 36U);
     if (placementPreviewHighlight_)
@@ -799,6 +851,8 @@ bool ViewportRenderer::EnsureHighlights()
                     modelCenter_, outOfBoundsColor, 0.060F, 0.055F);
         }
     }
+    if (transformGizmo_)
+        AppendTransformGizmo(vertices, indices, *transformGizmo_);
     if (indices.empty())
     {
         highlightsDirty_ = false;
@@ -1084,6 +1138,7 @@ void ViewportRenderer::ClearModel() noexcept
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
     ConfigureTransformPreview(nullptr);
+    ConfigureTransformGizmo(nullptr);
     ConfigureHighlights(
         std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
         std::nullopt, std::nullopt,
@@ -1230,6 +1285,17 @@ std::size_t ViewportRenderer::TransformPreviewCollisionPrimitiveCount()
                transformPreview_->CollisionBounds.Valid) +
         static_cast<std::size_t>(
                transformPreview_->OutOfBoundsBounds.Valid);
+}
+
+bool ViewportRenderer::HasTransformGizmo() const noexcept
+{
+    return transformGizmo_.has_value();
+}
+
+std::size_t ViewportRenderer::TransformGizmoAxisPrimitiveCount() const noexcept
+{
+    return transformGizmo_
+        ? TransformGizmoModel::AxisPrimitiveCount : 0U;
 }
 
 void ViewportRenderer::SetError(std::string message)

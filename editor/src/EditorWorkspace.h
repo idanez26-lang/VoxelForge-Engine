@@ -27,6 +27,7 @@
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
 #include "Transform/TransformPreviewModel.h"
+#include "TransformGizmo/TransformGizmoModel.h"
 #include "Transform/AlignVoxelSelectionOperation.h"
 #include "Transform/MoveVoxelSelectionOperation.h"
 #include "Transform/DuplicateVoxelSelectionOperation.h"
@@ -188,6 +189,9 @@ public:
     [[nodiscard]] bool VoxelScaleSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelAlignSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelAlignSmokePassed() const noexcept;
+    [[nodiscard]] bool RunTransformGizmoFoundationSmokeStep(
+        std::size_t frame);
+    [[nodiscard]] bool TransformGizmoFoundationSmokePassed() const noexcept;
     [[nodiscard]] bool RunSaveOnExitSmokeStep(std::size_t frame);
     [[nodiscard]] bool SaveOnExitSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
@@ -286,6 +290,7 @@ private:
     void ClearVoxelViewport() noexcept;
     void FrameVoxelViewport() noexcept;
     void UpdateVoxelHighlights() noexcept;
+    void UpdateTransformGizmo(float viewportHeightPixels) noexcept;
     [[nodiscard]] bool SynchronizeVoxelDocumentRendering();
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
@@ -356,6 +361,7 @@ private:
     SelectionVolumeCache selectionVolumeCache_;
     SelectionInteraction selectionInteraction_;
     TransformPreviewModel transformPreviewModel_;
+    TransformGizmoModel transformGizmoModel_;
     bool selectionBoxInteriorHovered_ = false;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
@@ -643,6 +649,17 @@ private:
     bool voxelAlignSmokeSaved_ = false;
     bool voxelAlignSmokeReopened_ = false;
     bool voxelAlignSmokeSaveOnExit_ = false;
+    std::filesystem::path transformGizmoSmokePath_;
+    float transformGizmoSmokeInitialLength_ = 0.0F;
+    float transformGizmoSmokeInitialPixels_ = 0.0F;
+    bool transformGizmoSmokePrepared_ = false;
+    bool transformGizmoSmokeRendered_ = false;
+    bool transformGizmoSmokeScaleStable_ = false;
+    bool transformGizmoSmokeModes_ = false;
+    bool transformGizmoSmokeVisibility_ = false;
+    bool transformGizmoSmokeMoveUndoRedo_ = false;
+    bool transformGizmoSmokeDocumentReset_ = false;
+    bool transformGizmoSmokeSaveOnExit_ = false;
     std::filesystem::path saveOnExitSmokePath_;
     bool saveOnExitSmokeRequested_ = false;
     bool saveOnExitSmokeCallbackDeferred_ = false;

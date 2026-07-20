@@ -3,6 +3,7 @@
 #include "EditorCamera.h"
 #include "Selection/SelectionService.h"
 #include "Transform/TransformPreviewModel.h"
+#include "TransformGizmo/TransformGizmoModel.h"
 #include "VoxelSelection/VoxelRaycast.h"
 #include "VoxelTools/VoxelBoxService.h"
 #include "VoxelTools/VoxelSphereService.h"
@@ -69,6 +70,8 @@ public:
         Vec3 modelCenter) noexcept;
     void ConfigureTransformPreview(
         const TransformPreviewRenderData* preview) noexcept;
+    void ConfigureTransformGizmo(
+        const TransformGizmoView* gizmo) noexcept;
     void ClearModel() noexcept;
     [[nodiscard]] bool Render(
         std::uint32_t width,
@@ -93,6 +96,9 @@ public:
     [[nodiscard]] std::size_t TransformPreviewDestinationPrimitiveCount()
         const noexcept;
     [[nodiscard]] std::size_t TransformPreviewCollisionPrimitiveCount()
+        const noexcept;
+    [[nodiscard]] bool HasTransformGizmo() const noexcept;
+    [[nodiscard]] std::size_t TransformGizmoAxisPrimitiveCount()
         const noexcept;
 
 private:
@@ -151,6 +157,7 @@ private:
     std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
     std::unique_ptr<HighlightGeometryCache> highlightGeometry_;
     std::unique_ptr<TransformPreviewSnapshot> transformPreview_;
+    std::optional<TransformGizmoView> transformGizmo_;
     std::optional<VoxelSpherePreview> spherePreviewHighlight_;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;

@@ -182,6 +182,28 @@ else()
         VoxelForgeEditorTransformPreview PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorTransformGizmo STATIC)
+target_sources(
+    VoxelForgeEditorTransformGizmo
+    PRIVATE src/TransformGizmo/TransformGizmoModel.cpp
+)
+target_include_directories(
+    VoxelForgeEditorTransformGizmo
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorTransformGizmo
+    PUBLIC VoxelForgeEditorVoxelSelection
+)
+target_compile_features(VoxelForgeEditorTransformGizmo PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorTransformGizmo PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorTransformGizmo PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorVoxelDocument STATIC)
 target_sources(
     VoxelForgeEditorVoxelDocument
@@ -509,6 +531,7 @@ target_link_libraries(
         VoxelForgeEditorLayout
         VoxelForgeEditorProjectSession
         VoxelForgeEditorPalette
+        VoxelForgeEditorTransformGizmo
         VoxelForgeEditorTransformPreview
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorVoxelDocument
