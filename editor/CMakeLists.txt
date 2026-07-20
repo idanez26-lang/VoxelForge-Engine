@@ -232,6 +232,7 @@ target_sources(
         src/Commands/Voxel/EraseVoxelCommand.cpp
         src/Commands/Voxel/PaintVoxelCommand.cpp
         src/Commands/Voxel/VoxelEditTransaction.cpp
+        src/Transform/AlignVoxelSelectionOperation.cpp
         src/Transform/DuplicateVoxelSelectionOperation.cpp
         src/Transform/MoveVoxelSelectionOperation.cpp
         src/Transform/MirrorVoxelSelectionOperation.cpp

@@ -33,7 +33,7 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 25U,
+    Require(service.Bindings().size() == 26U,
         "The expected command bindings are incomplete.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
@@ -51,6 +51,7 @@ void TestCommandsAndBindings()
         service.ShortcutLabel(EditorInputCommand::ToolRotate) == "R" &&
         service.ShortcutLabel(EditorInputCommand::ToolMirror) == "H" &&
         service.ShortcutLabel(EditorInputCommand::ToolScale) == "K" &&
+        service.ShortcutLabel(EditorInputCommand::ToolAlign) == "Shift+A" &&
         service.ShortcutLabel(EditorInputCommand::RotateLeft) == "Q" &&
         service.ShortcutLabel(EditorInputCommand::RotateRight) == "Shift+Q" &&
         service.ShortcutLabel(EditorInputCommand::MirrorX) == "X" &&
@@ -80,6 +81,8 @@ void TestToolSelection()
     available.CanMirrorSelection = true;
     available.CanAdjustMirror = true;
     available.CanScaleSelection = true;
+    available.CanAlignSelection = true;
+    available.CanAdjustAlign = true;
     available.CanApplyTransform = true;
     Require(Resolve(service, EditorInputKey::P, available) ==
             EditorInputCommand::ToolPencil &&
@@ -105,6 +108,8 @@ void TestToolSelection()
             EditorInputCommand::ToolMirror &&
         Resolve(service, EditorInputKey::K, available) ==
             EditorInputCommand::ToolScale &&
+        Resolve(service, EditorInputKey::A, available, false, true) ==
+            EditorInputCommand::ToolAlign &&
         Resolve(service, EditorInputKey::Q, available) ==
             EditorInputCommand::RotateLeft &&
         Resolve(service, EditorInputKey::Q, available, false, true) ==
@@ -194,6 +199,7 @@ void TestAvailabilityAndUnknownCommands()
     partial.CanMirrorSelection = true;
     partial.CanAdjustMirror = true;
     partial.CanScaleSelection = true;
+    partial.CanAlignSelection = true;
     Require(service.IsAvailable(EditorInputCommand::ToolMove, partial) &&
         Resolve(service, EditorInputKey::M, partial) ==
             EditorInputCommand::ToolMove &&
@@ -217,6 +223,9 @@ void TestAvailabilityAndUnknownCommands()
         service.IsAvailable(EditorInputCommand::ToolScale, partial) &&
         Resolve(service, EditorInputKey::K, partial) ==
             EditorInputCommand::ToolScale &&
+        service.IsAvailable(EditorInputCommand::ToolAlign, partial) &&
+        Resolve(service, EditorInputKey::A, partial, false, true) ==
+            EditorInputCommand::ToolAlign &&
         Resolve(service, EditorInputKey::Enter, partial) ==
             EditorInputCommand::None,
         "Transform preview commands require selection but Apply requires preview.");
@@ -231,6 +240,17 @@ void TestAvailabilityAndUnknownCommands()
         Resolve(service, EditorInputKey::U, partial) ==
             EditorInputCommand::ScaleUniform,
         "Scale mode commands are not gated by Scale context.");
+    partial.CanAdjustScale = false;
+    partial.CanAdjustAlign = true;
+    Require(service.IsAvailable(EditorInputCommand::AlignLeft, partial) &&
+        service.IsAvailable(EditorInputCommand::AlignRight, partial) &&
+        service.IsAvailable(EditorInputCommand::AlignBottom, partial) &&
+        service.IsAvailable(EditorInputCommand::AlignTop, partial) &&
+        service.IsAvailable(EditorInputCommand::AlignFront, partial) &&
+        service.IsAvailable(EditorInputCommand::AlignBack, partial) &&
+        service.CommandName(EditorInputCommand::AlignLeft) == "Align.Left" &&
+        service.CommandName(EditorInputCommand::AlignBack) == "Align.Back",
+        "Align direction commands are not gated by Align context.");
     partial.CanApplyTransform = true;
     Require(
         Resolve(service, EditorInputKey::Enter, partial) ==

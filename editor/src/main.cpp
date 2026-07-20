@@ -56,6 +56,7 @@ constexpr std::size_t VoxelDuplicateSmokeTestFrameCount = 9;
 constexpr std::size_t VoxelRotateSmokeTestFrameCount = 6;
 constexpr std::size_t VoxelMirrorSmokeTestFrameCount = 7;
 constexpr std::size_t VoxelScaleSmokeTestFrameCount = 8;
+constexpr std::size_t VoxelAlignSmokeTestFrameCount = 9;
 constexpr std::size_t SaveOnExitSmokeTestFrameCount = 3;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
@@ -99,6 +100,7 @@ struct CommandLine final
     bool VoxelRotateSmokeTest = false;
     bool VoxelMirrorSmokeTest = false;
     bool VoxelScaleSmokeTest = false;
+    bool VoxelAlignSmokeTest = false;
     bool SaveOnExitSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
@@ -175,6 +177,7 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.VoxelRotateSmokeTest |= argument == "--voxel-rotate-smoke-test";
         result.VoxelMirrorSmokeTest |= argument == "--voxel-mirror-smoke-test";
         result.VoxelScaleSmokeTest |= argument == "--voxel-scale-smoke-test";
+        result.VoxelAlignSmokeTest |= argument == "--voxel-align-smoke-test";
         result.SaveOnExitSmokeTest |= argument == "--save-on-exit-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
@@ -414,6 +417,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelRotateSmokeTest ||
             commandLine.VoxelMirrorSmokeTest ||
             commandLine.VoxelScaleSmokeTest ||
+            commandLine.VoxelAlignSmokeTest ||
             commandLine.SaveOnExitSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         const bool isolatedTest = commandLine.SmokeTest || viewportTest;
@@ -444,6 +448,7 @@ int main(const int argumentCount, char* arguments[])
               || commandLine.VoxelRotateSmokeTest
               || commandLine.VoxelMirrorSmokeTest
               || commandLine.VoxelScaleSmokeTest
+              || commandLine.VoxelAlignSmokeTest
               || commandLine.SaveOnExitSmokeTest
                 ? viewportFixture.CreateEmptyProject(projectManager)
                 : viewportFixture.Create(
@@ -543,6 +548,8 @@ int main(const int argumentCount, char* arguments[])
                      ? VoxelMirrorSmokeTestFrameCount
                      : commandLine.VoxelScaleSmokeTest
                      ? VoxelScaleSmokeTestFrameCount
+                     : commandLine.VoxelAlignSmokeTest
+                     ? VoxelAlignSmokeTestFrameCount
                      : commandLine.SaveOnExitSmokeTest
                      ? SaveOnExitSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
@@ -587,6 +594,7 @@ int main(const int argumentCount, char* arguments[])
                      commandLine.VoxelRotateSmokeTest ||
                      commandLine.VoxelMirrorSmokeTest ||
                      commandLine.VoxelScaleSmokeTest ||
+                     commandLine.VoxelAlignSmokeTest ||
                      commandLine.SaveOnExitSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
@@ -629,6 +637,7 @@ int main(const int argumentCount, char* arguments[])
                  commandLine.VoxelRotateSmokeTest,
                  commandLine.VoxelMirrorSmokeTest,
                  commandLine.VoxelScaleSmokeTest,
+                 commandLine.VoxelAlignSmokeTest,
                  commandLine.SaveOnExitSmokeTest,
                  isolatedTest ? viewportFixture.ImGuiIniPath()
                              : std::filesystem::path{});

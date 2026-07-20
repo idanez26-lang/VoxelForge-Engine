@@ -250,6 +250,26 @@ void DrawScaleIcon(ImDrawList& drawList, const ImVec2 minimum,
         {maximum.x - inset, maximum.y - corner}, color, thickness);
 }
 
+void DrawAlignIcon(ImDrawList& drawList, const ImVec2 minimum,
+    const ImVec2 maximum, const ImU32 color, const float thickness)
+{
+    const float width = maximum.x - minimum.x;
+    const float guideX = minimum.x + width * 0.18F;
+    drawList.AddLine({guideX, minimum.y}, {guideX, maximum.y}, color,
+        thickness * 1.25F);
+    drawList.AddLine(
+        {guideX, minimum.y + width * 0.22F},
+        {maximum.x, minimum.y + width * 0.22F}, color, thickness);
+    drawList.AddLine(
+        {guideX, minimum.y + width * 0.50F},
+        {maximum.x - width * 0.25F, minimum.y + width * 0.50F},
+        color, thickness);
+    drawList.AddLine(
+        {guideX, minimum.y + width * 0.78F},
+        {maximum.x - width * 0.10F, minimum.y + width * 0.78F},
+        color, thickness);
+}
+
 bool DrawIcon(
     ImDrawList& drawList,
     const EditorToolbarAction action,
@@ -291,6 +311,9 @@ bool DrawIcon(
     case EditorToolbarAction::Scale:
         DrawScaleIcon(drawList, minimum, maximum, color, thickness);
         return true;
+    case EditorToolbarAction::Align:
+        DrawAlignIcon(drawList, minimum, maximum, color, thickness);
+        return true;
     }
     return false;
 }
@@ -322,6 +345,8 @@ void DrawTooltip(
             ? "Select one or more voxels to use Mirror."
             : button.Action == EditorToolbarAction::Scale
             ? "Select one or more voxels to use Scale."
+            : button.Action == EditorToolbarAction::Align
+            ? "Select one or more voxels to use Align."
             : "Open a voxel model to use this tool.");
     ImGui::EndTooltip();
 }

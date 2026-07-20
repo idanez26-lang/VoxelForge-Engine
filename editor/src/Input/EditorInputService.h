@@ -23,6 +23,7 @@ enum class EditorInputCommand : std::uint8_t
     ToolRotate,
     ToolMirror,
     ToolScale,
+    ToolAlign,
     RotateLeft,
     RotateRight,
     MirrorX,
@@ -31,6 +32,12 @@ enum class EditorInputCommand : std::uint8_t
     ScaleY,
     ScaleZ,
     ScaleUniform,
+    AlignLeft,
+    AlignRight,
+    AlignBottom,
+    AlignTop,
+    AlignFront,
+    AlignBack,
     TransformApply,
     FileSave,
     EditUndo,
@@ -56,6 +63,7 @@ enum class EditorInputKey : std::uint8_t
     X,
     Q,
     R,
+    A,
     Enter,
     Z,
     Y,
@@ -105,13 +113,15 @@ struct EditorCommandAvailability final
     bool CanAdjustMirror = false;
     bool CanScaleSelection = false;
     bool CanAdjustScale = false;
+    bool CanAlignSelection = false;
+    bool CanAdjustAlign = false;
     bool CanApplyTransform = false;
 };
 
 class EditorInputService final
 {
 public:
-    static constexpr std::size_t BindingCount = 25U;
+    static constexpr std::size_t BindingCount = 26U;
 
     [[nodiscard]] EditorInputCommand Resolve(
         const EditorInputFrame& frame,
@@ -161,6 +171,8 @@ private:
          false, false, false, "H"},
         {EditorInputCommand::ToolScale, EditorInputKey::K,
          false, false, false, "K"},
+        {EditorInputCommand::ToolAlign, EditorInputKey::A,
+         false, true, false, "Shift+A"},
         {EditorInputCommand::RotateLeft, EditorInputKey::Q,
          false, false, false, "Q"},
         {EditorInputCommand::RotateRight, EditorInputKey::Q,

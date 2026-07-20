@@ -27,6 +27,7 @@
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
 #include "Transform/TransformPreviewModel.h"
+#include "Transform/AlignVoxelSelectionOperation.h"
 #include "Transform/MoveVoxelSelectionOperation.h"
 #include "Transform/DuplicateVoxelSelectionOperation.h"
 #include "Transform/MirrorVoxelSelectionOperation.h"
@@ -185,6 +186,8 @@ public:
     [[nodiscard]] bool VoxelMirrorSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelScaleSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelScaleSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelAlignSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelAlignSmokePassed() const noexcept;
     [[nodiscard]] bool RunSaveOnExitSmokeStep(std::size_t frame);
     [[nodiscard]] bool SaveOnExitSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
@@ -206,6 +209,7 @@ private:
     [[nodiscard]] bool CanRotateSelection() const noexcept;
     [[nodiscard]] bool CanMirrorSelection() const noexcept;
     [[nodiscard]] bool CanScaleSelection() const noexcept;
+    [[nodiscard]] bool CanAlignSelection() const noexcept;
     void ApplyVoxelHistorySelection(const VoxelEditHistoryResult& result);
     void UndoCommand();
     void RedoCommand();
@@ -304,6 +308,9 @@ private:
     [[nodiscard]] bool BeginVoxelScalePreview(VoxelScaleMode mode);
     [[nodiscard]] bool ApplyVoxelScale();
     void CancelVoxelScale() noexcept;
+    [[nodiscard]] bool BeginVoxelAlignPreview(VoxelAlignDirection direction);
+    [[nodiscard]] bool ApplyVoxelAlign();
+    void CancelVoxelAlign() noexcept;
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
         CurrentTwoPointToolTarget() const noexcept;
     [[nodiscard]] std::optional<Asset::Voxel::VoxelPosition>
@@ -376,6 +383,8 @@ private:
     std::string voxelMirrorStatusMessage_;
     VoxelScaleMode voxelScaleMode_ = VoxelScaleMode::X;
     std::string voxelScaleStatusMessage_;
+    VoxelAlignDirection voxelAlignDirection_ = VoxelAlignDirection::Left;
+    std::string voxelAlignStatusMessage_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -625,6 +634,15 @@ private:
     bool voxelScaleSmokeSaved_ = false;
     bool voxelScaleSmokeReopened_ = false;
     bool voxelScaleSmokeCleaned_ = false;
+    std::filesystem::path voxelAlignSmokePath_;
+    bool voxelAlignSmokePrepared_ = false;
+    bool voxelAlignSmokeDirections_ = false;
+    bool voxelAlignSmokeApplied_ = false;
+    bool voxelAlignSmokeUndoRedo_ = false;
+    bool voxelAlignSmokeRejected_ = false;
+    bool voxelAlignSmokeSaved_ = false;
+    bool voxelAlignSmokeReopened_ = false;
+    bool voxelAlignSmokeSaveOnExit_ = false;
     std::filesystem::path saveOnExitSmokePath_;
     bool saveOnExitSmokeRequested_ = false;
     bool saveOnExitSmokeCallbackDeferred_ = false;

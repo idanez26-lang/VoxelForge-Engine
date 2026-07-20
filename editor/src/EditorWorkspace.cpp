@@ -961,6 +961,34 @@ void EditorWorkspace::DrawMainMenuBar()
             if (ImGui::MenuItem("Cancel Scale", "Esc"))
                 ExecuteInputCommand(EditorInputCommand::InteractionCancel);
         }
+        if (ImGui::MenuItem(
+                "Align", shortcut(EditorInputCommand::ToolAlign),
+                voxelToolState_.IsAlignActive(), CanAlignSelection()))
+            ExecuteInputCommand(EditorInputCommand::ToolAlign);
+        if (voxelToolState_.IsAlignActive())
+        {
+            ImGui::Separator();
+            if (ImGui::MenuItem("Align Left"))
+                ExecuteInputCommand(EditorInputCommand::AlignLeft);
+            if (ImGui::MenuItem("Align Right"))
+                ExecuteInputCommand(EditorInputCommand::AlignRight);
+            if (ImGui::MenuItem("Align Bottom"))
+                ExecuteInputCommand(EditorInputCommand::AlignBottom);
+            if (ImGui::MenuItem("Align Top"))
+                ExecuteInputCommand(EditorInputCommand::AlignTop);
+            if (ImGui::MenuItem("Align Front"))
+                ExecuteInputCommand(EditorInputCommand::AlignFront);
+            if (ImGui::MenuItem("Align Back"))
+                ExecuteInputCommand(EditorInputCommand::AlignBack);
+            if (ImGui::MenuItem("Apply Align",
+                    shortcut(EditorInputCommand::TransformApply), false,
+                    transformPreviewModel_.IsActive() &&
+                        !transformPreviewModel_.HasCollisions() &&
+                        !transformPreviewModel_.HasOutOfBounds()))
+                ExecuteInputCommand(EditorInputCommand::TransformApply);
+            if (ImGui::MenuItem("Cancel Align", "Esc"))
+                ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        }
         ImGui::Separator();
         if (ImGui::MenuItem("Voxel Editor"))
         {
@@ -1045,6 +1073,8 @@ void EditorWorkspace::HandleCommandShortcuts()
     inputFrame.SetPressed(
         EditorInputKey::R, ImGui::IsKeyPressed(ImGuiKey_R, false));
     inputFrame.SetPressed(
+        EditorInputKey::A, ImGui::IsKeyPressed(ImGuiKey_A, false));
+    inputFrame.SetPressed(
         EditorInputKey::Enter, ImGui::IsKeyPressed(ImGuiKey_Enter, false));
     inputFrame.SetPressed(
         EditorInputKey::Z, ImGui::IsKeyPressed(ImGuiKey_Z, false));
@@ -1123,9 +1153,12 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
         voxelToolState_.IsMirrorActive() && CanMirrorSelection(),
         CanScaleSelection(),
         voxelToolState_.IsScaleActive() && CanScaleSelection(),
+        CanAlignSelection(),
+        voxelToolState_.IsAlignActive() && CanAlignSelection(),
         (voxelToolState_.IsRotateActive() ||
          voxelToolState_.IsMirrorActive() ||
-         voxelToolState_.IsScaleActive()) &&
+         voxelToolState_.IsScaleActive() ||
+         voxelToolState_.IsAlignActive()) &&
             transformPreviewModel_.IsActive() &&
             !transformPreviewModel_.HasCollisions() &&
             !transformPreviewModel_.HasOutOfBounds()};
@@ -1161,6 +1194,11 @@ bool EditorWorkspace::CanScaleSelection() const noexcept
     return CanMoveSelection() && !selectionInteraction_.IsActive();
 }
 
+bool EditorWorkspace::CanAlignSelection() const noexcept
+{
+    return CanMoveSelection() && !selectionInteraction_.IsActive();
+}
+
 void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
 {
     switch (command)
@@ -1189,6 +1227,8 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         SelectVoxelTool(ActiveVoxelTool::Mirror); break;
     case EditorInputCommand::ToolScale:
         SelectVoxelTool(ActiveVoxelTool::Scale); break;
+    case EditorInputCommand::ToolAlign:
+        SelectVoxelTool(ActiveVoxelTool::Align); break;
     case EditorInputCommand::RotateLeft:
         static_cast<void>(BeginVoxelRotatePreview(
             VoxelRotationDirection::CounterClockwise)); break;
@@ -1208,6 +1248,24 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
     case EditorInputCommand::ScaleUniform:
         static_cast<void>(BeginVoxelScalePreview(VoxelScaleMode::Uniform));
         break;
+    case EditorInputCommand::AlignLeft:
+        static_cast<void>(BeginVoxelAlignPreview(VoxelAlignDirection::Left));
+        break;
+    case EditorInputCommand::AlignRight:
+        static_cast<void>(BeginVoxelAlignPreview(VoxelAlignDirection::Right));
+        break;
+    case EditorInputCommand::AlignBottom:
+        static_cast<void>(BeginVoxelAlignPreview(VoxelAlignDirection::Bottom));
+        break;
+    case EditorInputCommand::AlignTop:
+        static_cast<void>(BeginVoxelAlignPreview(VoxelAlignDirection::Top));
+        break;
+    case EditorInputCommand::AlignFront:
+        static_cast<void>(BeginVoxelAlignPreview(VoxelAlignDirection::Front));
+        break;
+    case EditorInputCommand::AlignBack:
+        static_cast<void>(BeginVoxelAlignPreview(VoxelAlignDirection::Back));
+        break;
     case EditorInputCommand::TransformApply:
         if (voxelToolState_.IsRotateActive())
             static_cast<void>(ApplyVoxelRotate());
@@ -1215,6 +1273,8 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
             static_cast<void>(ApplyVoxelMirror());
         else if (voxelToolState_.IsScaleActive())
             static_cast<void>(ApplyVoxelScale());
+        else if (voxelToolState_.IsAlignActive())
+            static_cast<void>(ApplyVoxelAlign());
         break;
     case EditorInputCommand::FileSave:
         if (voxelDocumentSession_.HasActiveDocument())
@@ -1238,6 +1298,7 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool == ActiveVoxelTool::Rotate && !CanRotateSelection()) return;
     if (tool == ActiveVoxelTool::Mirror && !CanMirrorSelection()) return;
     if (tool == ActiveVoxelTool::Scale && !CanScaleSelection()) return;
+    if (tool == ActiveVoxelTool::Align && !CanAlignSelection()) return;
     if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
     if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
@@ -1257,13 +1318,14 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     }
     if (tool != ActiveVoxelTool::Selection && tool != ActiveVoxelTool::Move &&
         tool != ActiveVoxelTool::Duplicate && tool != ActiveVoxelTool::Rotate &&
-        tool != ActiveVoxelTool::Mirror && tool != ActiveVoxelTool::Scale)
+        tool != ActiveVoxelTool::Mirror && tool != ActiveVoxelTool::Scale &&
+        tool != ActiveVoxelTool::Align)
         selectionBoxInteriorHovered_ = false;
     if (tool == ActiveVoxelTool::Selection)
         static_cast<void>(voxelSelection_.ClearSelection());
     if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Duplicate &&
         tool != ActiveVoxelTool::Rotate && tool != ActiveVoxelTool::Mirror &&
-        tool != ActiveVoxelTool::Scale)
+        tool != ActiveVoxelTool::Scale && tool != ActiveVoxelTool::Align)
     {
         static_cast<void>(transformPreviewModel_.CancelPreview());
         voxelMoveStatusMessage_.clear();
@@ -1271,10 +1333,12 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
         voxelRotateStatusMessage_.clear();
         voxelMirrorStatusMessage_.clear();
         voxelScaleStatusMessage_.clear();
+        voxelAlignStatusMessage_.clear();
     }
     if (tool != ActiveVoxelTool::Rotate) CancelVoxelRotate();
     if (tool != ActiveVoxelTool::Mirror) CancelVoxelMirror();
     if (tool != ActiveVoxelTool::Scale) CancelVoxelScale();
+    if (tool != ActiveVoxelTool::Align) CancelVoxelAlign();
     voxelToolState_.SetActiveTool(tool);
     voxelToolInput_.Reset();
     UpdateVoxelHighlights();
@@ -1306,6 +1370,13 @@ void EditorWorkspace::CancelActiveInteraction()
         UpdateVoxelHighlights();
         return;
     }
+    if (voxelToolState_.IsAlignActive())
+    {
+        CancelVoxelAlign();
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Selection);
+        UpdateVoxelHighlights();
+        return;
+    }
     if (selectionInteraction_.IsActive())
     {
         CancelSelectionInteraction();
@@ -1327,6 +1398,9 @@ void EditorWorkspace::UndoCommand()
         if (voxelToolState_.IsScaleActive() &&
             transformPreviewModel_.IsActive())
             CancelVoxelScale();
+        if (voxelToolState_.IsAlignActive() &&
+            transformPreviewModel_.IsActive())
+            CancelVoxelAlign();
         voxelEditInProgress_ = true;
         const VoxelEditHistoryResult result = voxelEditHistory_.Undo(*this);
         voxelEditInProgress_ = false;
@@ -1361,6 +1435,9 @@ void EditorWorkspace::RedoCommand()
         if (voxelToolState_.IsScaleActive() &&
             transformPreviewModel_.IsActive())
             CancelVoxelScale();
+        if (voxelToolState_.IsAlignActive() &&
+            transformPreviewModel_.IsActive())
+            CancelVoxelAlign();
         voxelEditInProgress_ = true;
         const VoxelEditHistoryResult result = voxelEditHistory_.Redo(*this);
         voxelEditInProgress_ = false;
@@ -1647,7 +1724,7 @@ void EditorWorkspace::DrawScenePanel()
     EditorToolbar::Draw(
         {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
          CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection(),
-         CanMirrorSelection(), CanScaleSelection()},
+         CanMirrorSelection(), CanScaleSelection(), CanAlignSelection()},
         editorInputService_,
         {[this](const EditorInputCommand command)
          {
@@ -1732,6 +1809,35 @@ void EditorWorkspace::DrawScenePanel()
         if (ImGui::Button("Cancel"))
             ExecuteInputCommand(EditorInputCommand::InteractionCancel);
         DrawTooltip("Cancel Mirror without changing the document (Esc)");
+        ImGui::SameLine();
+    }
+    if (voxelToolState_.IsAlignActive())
+    {
+        const auto directionButton = [this](
+            const char* label, const VoxelAlignDirection direction)
+        {
+            if (ImGui::Button(label))
+                static_cast<void>(BeginVoxelAlignPreview(direction));
+            ImGui::SameLine();
+        };
+        directionButton("Left", VoxelAlignDirection::Left);
+        directionButton("Right", VoxelAlignDirection::Right);
+        directionButton("Bottom", VoxelAlignDirection::Bottom);
+        directionButton("Top", VoxelAlignDirection::Top);
+        directionButton("Front", VoxelAlignDirection::Front);
+        directionButton("Back", VoxelAlignDirection::Back);
+        ImGui::BeginDisabled(
+            !transformPreviewModel_.IsActive() ||
+            transformPreviewModel_.HasCollisions() ||
+            transformPreviewModel_.HasOutOfBounds());
+        if (ImGui::Button("Apply"))
+            ExecuteInputCommand(EditorInputCommand::TransformApply);
+        ImGui::EndDisabled();
+        DrawTooltip("Apply the current alignment (Enter)");
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+            ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        DrawTooltip("Cancel Align without changing the document (Esc)");
         ImGui::SameLine();
     }
     ImGui::BeginDisabled(
@@ -1826,14 +1932,16 @@ void EditorWorkspace::DrawScenePanel()
              voxelToolState_.IsDuplicateActive() ||
              voxelToolState_.IsRotateActive() ||
              voxelToolState_.IsMirrorActive() ||
-             voxelToolState_.IsScaleActive()) &&
+             voxelToolState_.IsScaleActive() ||
+             voxelToolState_.IsAlignActive()) &&
             selectionService_.EditableBounds().Valid &&
             selectionInteraction_.Mode() != SelectionInteractionMode::Creating)
         {
             const SelectionBounds& handleBounds =
                 (voxelToolState_.IsRotateActive() ||
                  voxelToolState_.IsMirrorActive() ||
-                 voxelToolState_.IsScaleActive()) &&
+                 voxelToolState_.IsScaleActive() ||
+                 voxelToolState_.IsAlignActive()) &&
                     transformPreviewModel_.IsActive()
                 ? transformPreviewModel_.PreviewBounds()
                 :
@@ -2117,13 +2225,26 @@ void EditorWorkspace::DrawScenePanel()
                 ? "Scale Y x2 - Enter to apply - Esc to cancel"
                 : "Scale Z x2 - Enter to apply - Esc to cancel";
         }
+        else if (voxelToolState_.IsAlignActive())
+        {
+            viewportHelp = !voxelAlignStatusMessage_.empty()
+                ? voxelAlignStatusMessage_.c_str()
+                : !transformPreviewModel_.IsActive()
+                ? "Choose Left, Right, Bottom, Top, Front or Back"
+                : transformPreviewModel_.HasCollisions()
+                ? "Align blocked: destination is occupied"
+                : transformPreviewModel_.HasOutOfBounds()
+                ? "Align blocked: destination is outside the model"
+                : "Align preview - Enter to apply - Esc to cancel";
+        }
         DrawTooltip(viewportHelp);
         if (voxelToolState_.IsSelectionActive() ||
             voxelToolState_.IsMoveActive() ||
             voxelToolState_.IsDuplicateActive() ||
             voxelToolState_.IsRotateActive() ||
             voxelToolState_.IsMirrorActive() ||
-            voxelToolState_.IsScaleActive())
+            voxelToolState_.IsScaleActive() ||
+            voxelToolState_.IsAlignActive())
         {
             const ImVec2 textSize = ImGui::CalcTextSize(viewportHelp);
             const ImVec2 helpMinimum{imageOrigin.x + 10.0F, imageOrigin.y + 10.0F};
@@ -2488,7 +2609,8 @@ void EditorWorkspace::DrawScenePanel()
             viewportCamera_.Reset();
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
             eraseRequested = true;
-        if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_A, false))
+        if (shortcutsEnabled && !io.KeyCtrl && !io.KeyShift && !io.KeyAlt &&
+            ImGui::IsKeyPressed(ImGuiKey_A, false))
             addRequested = true;
     }
     else if (!viewportRenderer_.LastError().empty())
@@ -8860,7 +8982,7 @@ bool EditorWorkspace::RunVoxelScaleSmokeStep(const std::size_t frame)
                 {true, document->IsDirty(), voxelToolState_.ActiveTool(),
                  CanMoveSelection(), CanDuplicateSelection(),
                  CanRotateSelection(), CanMirrorSelection(),
-                 CanScaleSelection()});
+                 CanScaleSelection(), CanAlignSelection()});
         const std::uint64_t revision = document->GetRevision();
         ExecuteInputCommand(EditorInputCommand::ToolScale);
         EditorInputFrame apply;
@@ -9029,6 +9151,215 @@ bool EditorWorkspace::VoxelScaleSmokePassed() const noexcept
         voxelScaleSmokeReopened_ && voxelScaleSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunVoxelAlignSmokeStep(const std::size_t frame)
+{
+    using Asset::Voxel::VoxelPosition;
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const SelectionBounds initialBounds =
+        SelectionBounds::FromCorners({2, 1, 2}, {3, 1, 2});
+    const SelectionBounds leftBounds =
+        SelectionBounds::FromCorners({0, 1, 2}, {1, 1, 2});
+    const std::array<VoxelPosition, 2U> initial{{{2, 1, 2}, {3, 1, 2}}};
+    const std::array<VoxelPosition, 2U> left{{{0, 1, 2}, {1, 1, 2}}};
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"AlignSmoke", {64U, 64U, 64U}});
+        voxelAlignSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Align Smoke",
+                {{0U, initial[0], false, 0U, true, 3U},
+                 {0U, initial[1], false, 0U, true, 11U}}});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            initial, initialBounds, SelectionMode::Replace);
+        EditorInputFrame shortcut;
+        shortcut.SetPressed(EditorInputKey::A);
+        shortcut.Shift = true;
+        const bool inputReady = editorInputService_.Resolve(
+            shortcut, CurrentCommandAvailability()) ==
+            EditorInputCommand::ToolAlign;
+        const auto alignButton = std::find_if(
+            EditorToolbarModel::Buttons().begin(),
+            EditorToolbarModel::Buttons().end(),
+            [](const EditorToolbarButton& button)
+            {
+                return button.Action == EditorToolbarAction::Align;
+            });
+        const bool toolbarReady =
+            alignButton != EditorToolbarModel::Buttons().end() &&
+            EditorToolbarModel::IsEnabled(*alignButton,
+                {true, document->IsDirty(), voxelToolState_.ActiveTool(),
+                 CanMoveSelection(), CanDuplicateSelection(),
+                 CanRotateSelection(), CanMirrorSelection(),
+                 CanScaleSelection(), CanAlignSelection()});
+        const std::uint64_t revision = document->GetRevision();
+        ExecuteInputCommand(EditorInputCommand::ToolAlign);
+        voxelAlignSmokePrepared_ = seeded && selected && inputReady &&
+            toolbarReady && voxelToolState_.IsAlignActive() &&
+            !transformPreviewModel_.IsActive() &&
+            selectionService_.EditableBounds() == initialBounds &&
+            document->GetRevision() == revision;
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !voxelAlignSmokePrepared_) return false;
+        struct DirectionExpectation final
+        {
+            VoxelAlignDirection Direction;
+            VoxelPosition Delta;
+        };
+        constexpr std::array<DirectionExpectation, 6U> expectations{{
+            {VoxelAlignDirection::Left, {-2, 0, 0}},
+            {VoxelAlignDirection::Right, {60, 0, 0}},
+            {VoxelAlignDirection::Bottom, {0, -1, 0}},
+            {VoxelAlignDirection::Top, {0, 62, 0}},
+            {VoxelAlignDirection::Front, {0, 0, -2}},
+            {VoxelAlignDirection::Back, {0, 0, 61}}}};
+        const std::uint64_t revision = document->GetRevision();
+        bool directionsValid = true;
+        for (const auto& expectation : expectations)
+        {
+            directionsValid = directionsValid &&
+                BeginVoxelAlignPreview(expectation.Direction) &&
+                transformPreviewModel_.Delta() == expectation.Delta &&
+                !transformPreviewModel_.HasCollisions() &&
+                !transformPreviewModel_.HasOutOfBounds();
+        }
+        voxelAlignSmokeDirections_ = directionsValid &&
+            BeginVoxelAlignPreview(VoxelAlignDirection::Left) &&
+            document->GetRevision() == revision &&
+            document->GetVoxelCount() == 2U;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !voxelAlignSmokeDirections_) return false;
+        const bool rendered = viewportRenderer_.HasTransformPreview() &&
+            viewportRenderer_.TransformPreviewSourcePrimitiveCount() == 2U &&
+            viewportRenderer_.TransformPreviewDestinationPrimitiveCount() ==
+                2U;
+        const std::uint64_t revision = document->GetRevision();
+        voxelAlignSmokeApplied_ = rendered && ApplyVoxelAlign() &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 2U &&
+            document->GetVoxel(left[0])->PaletteIndex == 3U &&
+            document->GetVoxel(left[1])->PaletteIndex == 11U &&
+            selectionService_.EditableBounds() == leftBounds &&
+            voxelEditHistory_.UndoCount() == 2U &&
+            !transformPreviewModel_.IsActive();
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !voxelAlignSmokeApplied_) return false;
+        UndoCommand();
+        const bool undone = document->HasVoxel(initial[0]) &&
+            document->HasVoxel(initial[1]) &&
+            selectionService_.EditableBounds() == initialBounds;
+        RedoCommand();
+        voxelAlignSmokeUndoRedo_ = undone && document->HasVoxel(left[0]) &&
+            document->HasVoxel(left[1]) &&
+            selectionService_.EditableBounds() == leftBounds &&
+            !transformPreviewModel_.IsActive();
+    }
+    else if (frame == 4U)
+    {
+        if (!document || !voxelAlignSmokeUndoRedo_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        const auto obstacle = document->SetVoxel({63, 1, 2}, 19U);
+        const bool collisionPreview =
+            BeginVoxelAlignPreview(VoxelAlignDirection::Right);
+        const bool collisionRejected = obstacle.Changed && collisionPreview &&
+            transformPreviewModel_.HasCollisions() && !ApplyVoxelAlign() &&
+            document->HasVoxel({63, 1, 2}) &&
+            document->RemoveVoxel({63, 1, 2}).Changed;
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            left, leftBounds, SelectionMode::Replace));
+        const bool outsidePreview = transformPreviewModel_.BeginPreview(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            0U, TransformPreviewCollisionPolicy::IgnoreSource) &&
+            transformPreviewModel_.SetDelta(
+                *document, selectionService_,
+                voxelDocumentSession_.Generation(), {-1, 0, 0});
+        const bool outsideRejected = outsidePreview &&
+            transformPreviewModel_.HasOutOfBounds() && !ApplyVoxelAlign();
+        voxelAlignSmokeRejected_ = collisionRejected && outsideRejected &&
+            document->GetVoxelCount() == 2U &&
+            document->GetRevision() == revision + 2U;
+    }
+    else if (frame == 5U)
+    {
+        voxelAlignSmokeSaved_ = document && voxelAlignSmokeRejected_ &&
+            SaveVoxelModel() && !document->IsDirty() &&
+            std::filesystem::is_regular_file(voxelAlignSmokePath_);
+        if (!voxelAlignSmokeSaved_) return false;
+        ClearVoxelViewport();
+        voxelAlignSmokeReopened_ = OpenVoxInViewportNow(voxelAlignSmokePath_);
+        document = voxelDocumentSession_.ActiveDocument();
+        voxelAlignSmokeReopened_ = voxelAlignSmokeReopened_ && document &&
+            document->GetVoxelCount() == 2U &&
+            document->GetVoxel(left[0])->PaletteIndex == 3U &&
+            document->GetVoxel(left[1])->PaletteIndex == 11U;
+    }
+    else if (frame == 6U)
+    {
+        if (!document || !voxelAlignSmokeReopened_) return false;
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            left, leftBounds, SelectionMode::Replace);
+        SelectVoxelTool(ActiveVoxelTool::Align);
+        const bool aligned = BeginVoxelAlignPreview(
+                VoxelAlignDirection::Right) && ApplyVoxelAlign();
+        const bool pendingPreview = BeginVoxelAlignPreview(
+            VoxelAlignDirection::Left);
+        RequestExit();
+        voxelAlignSmokeSaveOnExit_ = selected && aligned && pendingPreview &&
+            document->IsDirty() && transformPreviewModel_.IsActive() &&
+            closeRequest_.State() ==
+                EditorCloseRequestState::WaitingForUser;
+    }
+    else if (frame == 7U)
+    {
+        if (!document || !voxelAlignSmokeSaveOnExit_) return false;
+        const bool scheduled = closeRequest_.ScheduleSave();
+        deferredDirtySaveRequested_ = scheduled;
+        voxelAlignSmokeSaveOnExit_ = scheduled && document->IsDirty() &&
+            transformPreviewModel_.IsActive() &&
+            closeRequest_.State() ==
+                EditorCloseRequestState::SavingBeforeClose;
+    }
+    else if (frame == 8U)
+    {
+        const Asset::Voxel::VoxDocumentLoadResult loaded =
+            Asset::Voxel::VoxDocumentLoader{}.Load(voxelAlignSmokePath_);
+        voxelAlignSmokeSaveOnExit_ = voxelAlignSmokeSaveOnExit_ && document &&
+            closeRequest_.State() == EditorCloseRequestState::Closing &&
+            !document->IsDirty() && !transformPreviewModel_.IsActive() &&
+            loaded.Succeeded() && loaded.Document &&
+            loaded.Document->GetVoxelCount() == 2U &&
+            loaded.Document->HasVoxel({62, 1, 2}) &&
+            loaded.Document->HasVoxel({63, 1, 2}) &&
+            !std::filesystem::exists(
+                voxelAlignSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelAlignSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelAlignSmokePassed();
+}
+
+bool EditorWorkspace::VoxelAlignSmokePassed() const noexcept
+{
+    return voxelAlignSmokePrepared_ && voxelAlignSmokeDirections_ &&
+        voxelAlignSmokeApplied_ && voxelAlignSmokeUndoRedo_ &&
+        voxelAlignSmokeRejected_ && voxelAlignSmokeSaved_ &&
+        voxelAlignSmokeReopened_ && voxelAlignSmokeSaveOnExit_;
+}
+
 bool EditorWorkspace::RunSaveOnExitSmokeStep(const std::size_t frame)
 {
     using Asset::Voxel::VoxelPosition;
@@ -9117,7 +9448,7 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
                 !voxelDocumentSaveService_.IsBusy(),
             voxelToolState_.ActiveTool(), CanMoveSelection(),
             CanDuplicateSelection(), CanRotateSelection(),
-            CanMirrorSelection(), CanScaleSelection()};
+            CanMirrorSelection(), CanScaleSelection(), CanAlignSelection()};
     };
     const auto activeToolCount = [](const EditorToolbarState state)
     {
@@ -9161,7 +9492,8 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
                         button.Action == EditorToolbarAction::Duplicate ||
                         button.Action == EditorToolbarAction::Rotate ||
                         button.Action == EditorToolbarAction::Mirror ||
-                        button.Action == EditorToolbarAction::Scale
+                        button.Action == EditorToolbarAction::Scale ||
+                        button.Action == EditorToolbarAction::Align
                         ? !EditorToolbarModel::IsEnabled(button, state)
                         : EditorToolbarModel::IsEnabled(button, state);
                 });
@@ -10482,6 +10814,112 @@ void EditorWorkspace::CancelVoxelScale() noexcept
     voxelScaleStatusMessage_.clear();
 }
 
+bool EditorWorkspace::BeginVoxelAlignPreview(
+    const VoxelAlignDirection direction)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || !CanAlignSelection())
+    {
+        voxelAlignStatusMessage_ = "Select voxels before using Align";
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    const auto dimensions = document->GetDimensions(0U);
+    const auto delta = dimensions
+        ? AlignVoxelSelectionOperation::CalculateDelta(
+            selectionService_.EditableBounds(), *dimensions, direction)
+        : std::nullopt;
+    if (!delta)
+    {
+        voxelAlignStatusMessage_ = "Align could not calculate a valid delta";
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    const std::uint64_t generation = voxelDocumentSession_.Generation();
+    const bool previewStarted = transformPreviewModel_.BeginPreview(
+        *document, selectionService_, generation, 0U,
+        TransformPreviewCollisionPolicy::IgnoreSource);
+    const bool previewPositioned = previewStarted &&
+        (*delta == Asset::Voxel::VoxelPosition{} ||
+         transformPreviewModel_.SetDelta(
+             *document, selectionService_, generation, *delta));
+    if (!previewPositioned)
+    {
+        voxelAlignStatusMessage_ = "Align preview could not be built";
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    voxelAlignDirection_ = direction;
+    voxelAlignStatusMessage_.clear();
+    voxelMoveStatusMessage_.clear();
+    voxelDuplicateStatusMessage_.clear();
+    voxelRotateStatusMessage_.clear();
+    voxelMirrorStatusMessage_.clear();
+    voxelScaleStatusMessage_.clear();
+    UpdateVoxelHighlights();
+    return true;
+}
+
+bool EditorWorkspace::ApplyVoxelAlign()
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || voxelEditInProgress_ || voxelEditHistory_.IsBusy())
+    {
+        CancelVoxelAlign();
+        return false;
+    }
+
+    MoveVoxelSelectionResult prepared = AlignVoxelSelectionOperation::Build(
+        *document, selectionService_, voxelDocumentSession_.Generation(),
+        transformPreviewModel_);
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    if (!prepared.Ready())
+    {
+        voxelAlignStatusMessage_ =
+            prepared.Code == MoveVoxelSelectionResultCode::NoChange
+            ? "Selection is already aligned to this face"
+            : prepared.Message;
+        if (!voxelAlignStatusMessage_.empty())
+            AddConsoleMessage("[Edit] " + voxelAlignStatusMessage_);
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    prepared.Operation.Label = "Align Voxels";
+    voxelEditInProgress_ = true;
+    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
+        *this, std::move(prepared.Operation));
+    voxelEditInProgress_ = false;
+    if (!result)
+    {
+        voxelAlignStatusMessage_ = result.Message;
+        AddConsoleMessage("[Edit] Align failed: " + result.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+    ApplyVoxelHistorySelection(result);
+    voxelAlignStatusMessage_.clear();
+    AddConsoleMessage("[Edit] Aligned " +
+        std::to_string(selectionService_.Count()) + " voxel(s) " +
+        VoxelAlignDirectionName(voxelAlignDirection_) + ".");
+    UpdateVoxelHighlights();
+    return true;
+}
+
+void EditorWorkspace::CancelVoxelAlign() noexcept
+{
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    voxelAlignStatusMessage_.clear();
+}
+
 void EditorWorkspace::CancelSelectionInteraction()
 {
     if (!selectionInteraction_.IsActive()) return;
@@ -10864,7 +11302,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     const bool selectionVisualActive =
         voxelToolState_.IsSelectionActive() || voxelToolState_.IsMoveActive() ||
         voxelToolState_.IsDuplicateActive() || voxelToolState_.IsRotateActive() ||
-        voxelToolState_.IsMirrorActive() || voxelToolState_.IsScaleActive();
+        voxelToolState_.IsMirrorActive() || voxelToolState_.IsScaleActive() ||
+        voxelToolState_.IsAlignActive();
     if (selectionVisualActive)
     {
         const auto selected = selectionService_.Voxels();
@@ -10879,7 +11318,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         const SelectionBounds& editable =
             (voxelToolState_.IsRotateActive() ||
              voxelToolState_.IsMirrorActive() ||
-             voxelToolState_.IsScaleActive()) &&
+             voxelToolState_.IsScaleActive() ||
+             voxelToolState_.IsAlignActive()) &&
                 transformPreviewModel_.IsActive()
             ? transformPreviewModel_.PreviewBounds()
             :

@@ -14,7 +14,7 @@ constexpr std::size_t Index(const EditorInputKey key) noexcept
 bool IsToolCommand(const EditorInputCommand command) noexcept
 {
     return command >= EditorInputCommand::ToolPencil &&
-        command <= EditorInputCommand::ToolScale;
+        command <= EditorInputCommand::ToolAlign;
 }
 
 bool SameChord(
@@ -91,6 +91,8 @@ bool EditorInputService::IsAvailable(
         return availability.HasDocument && availability.CanMirrorSelection;
     if (command == EditorInputCommand::ToolScale)
         return availability.HasDocument && availability.CanScaleSelection;
+    if (command == EditorInputCommand::ToolAlign)
+        return availability.HasDocument && availability.CanAlignSelection;
     if (command == EditorInputCommand::RotateLeft ||
         command == EditorInputCommand::RotateRight)
         return availability.CanAdjustRotation;
@@ -102,6 +104,13 @@ bool EditorInputService::IsAvailable(
         command == EditorInputCommand::ScaleZ ||
         command == EditorInputCommand::ScaleUniform)
         return availability.CanAdjustScale;
+    if (command == EditorInputCommand::AlignLeft ||
+        command == EditorInputCommand::AlignRight ||
+        command == EditorInputCommand::AlignBottom ||
+        command == EditorInputCommand::AlignTop ||
+        command == EditorInputCommand::AlignFront ||
+        command == EditorInputCommand::AlignBack)
+        return availability.CanAdjustAlign;
     if (command == EditorInputCommand::TransformApply)
         return availability.CanApplyTransform;
     if (IsToolCommand(command)) return availability.HasDocument;
@@ -147,6 +156,7 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ToolRotate: return "Tool.Rotate";
     case EditorInputCommand::ToolMirror: return "Tool.Mirror";
     case EditorInputCommand::ToolScale: return "Tool.Scale";
+    case EditorInputCommand::ToolAlign: return "Tool.Align";
     case EditorInputCommand::RotateLeft: return "Rotate.Left90";
     case EditorInputCommand::RotateRight: return "Rotate.Right90";
     case EditorInputCommand::MirrorX: return "Mirror.X";
@@ -155,6 +165,12 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ScaleY: return "Scale.Y2";
     case EditorInputCommand::ScaleZ: return "Scale.Z2";
     case EditorInputCommand::ScaleUniform: return "Scale.Uniform2";
+    case EditorInputCommand::AlignLeft: return "Align.Left";
+    case EditorInputCommand::AlignRight: return "Align.Right";
+    case EditorInputCommand::AlignBottom: return "Align.Bottom";
+    case EditorInputCommand::AlignTop: return "Align.Top";
+    case EditorInputCommand::AlignFront: return "Align.Front";
+    case EditorInputCommand::AlignBack: return "Align.Back";
     case EditorInputCommand::TransformApply: return "Transform.Apply";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";

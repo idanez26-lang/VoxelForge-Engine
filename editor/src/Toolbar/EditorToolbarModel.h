@@ -24,7 +24,8 @@ enum class EditorToolbarAction : std::uint8_t
     Duplicate,
     Rotate,
     Mirror,
-    Scale
+    Scale,
+    Align
 };
 
 enum class EditorToolbarGroup : std::uint8_t
@@ -55,6 +56,7 @@ struct EditorToolbarState final
     bool CanRotateSelection = false;
     bool CanMirrorSelection = false;
     bool CanScaleSelection = false;
+    bool CanAlignSelection = false;
 };
 
 struct EditorToolbarLayout final
@@ -68,7 +70,7 @@ struct EditorToolbarLayout final
 class EditorToolbarModel final
 {
 public:
-    static constexpr std::size_t ButtonCount = 13U;
+    static constexpr std::size_t ButtonCount = 14U;
 
     [[nodiscard]] static const std::array<EditorToolbarButton, ButtonCount>&
         Buttons() noexcept;

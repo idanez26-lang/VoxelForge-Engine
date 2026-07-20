@@ -73,6 +73,7 @@ public:
         bool voxelRotateSmokeTest = false,
         bool voxelMirrorSmokeTest = false,
         bool voxelScaleSmokeTest = false,
+        bool voxelAlignSmokeTest = false,
         bool saveOnExitSmokeTest = false,
         std::filesystem::path imguiIniPathOverride = {});
 
@@ -154,6 +155,7 @@ private:
     bool voxelRotateSmokeTest_ = false;
     bool voxelMirrorSmokeTest_ = false;
     bool voxelScaleSmokeTest_ = false;
+    bool voxelAlignSmokeTest_ = false;
     bool saveOnExitSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
