@@ -1003,7 +1003,7 @@ bool ViewportRenderer::EnsureHighlights()
         transformGizmoOccludedIndexCount_ = 0U;
     };
     if (transformGizmo_ &&
-        transformGizmo_->Mode != TransformGizmoMode::Rotate)
+        transformGizmo_->Mode == TransformGizmoMode::Scale)
     {
         std::vector<GPUVertex> visibleVertices;
         std::vector<std::uint32_t> visibleIndices;

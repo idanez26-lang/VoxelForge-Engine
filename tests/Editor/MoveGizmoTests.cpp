@@ -1,4 +1,5 @@
 #include "TransformGizmo/TransformGizmoInteraction.h"
+#include "TransformGizmo/GizmoStyle.h"
 
 #include <algorithm>
 #include <cmath>
@@ -306,8 +307,8 @@ void TestArrowHeadsAndPickingUseTheFinalProjection()
     Require(model.Update(context), "Unable to construct dragged arrows.");
     const TransformGizmoView dragged = model.View();
     Require(dragged.Axes[0].HasArrowHead &&
-            dragged.Axes[0].Color == hovered.Axes[0].Color &&
-            dragged.Axes[0].Thickness == hovered.Axes[0].Thickness &&
+            dragged.Axes[0].Color[0] > hovered.Axes[0].Color[0] &&
+            dragged.Axes[0].Thickness < hovered.Axes[0].Thickness &&
             dragged.Axes[1].Color[1] < hovered.Axes[1].Color[1],
         "The locked segment and its arrow must stay highlighted together while other axes dim.");
 }
@@ -567,18 +568,47 @@ void TestProfessionalMoveGizmoStyleAndContextHelp()
     TransformGizmoModel model;
     Require(model.Update(context), "Unable to build the normal Move style.");
     const TransformGizmoView normal = model.View();
+    constexpr std::array<std::array<float, 4U>, 3U> colors{
+        GizmoStyle::AxisColorX,
+        GizmoStyle::AxisColorY,
+        GizmoStyle::AxisColorZ};
     Require(normal.Visible && normal.CenterRadius > 0.0F &&
             normal.Axes[0].Color[0] > normal.Axes[0].Color[1] &&
             normal.Axes[1].Color[1] > normal.Axes[1].Color[0] &&
             normal.Axes[2].Color[2] > normal.Axes[2].Color[0],
         "The normal style must keep a discreet center and canonical RGB axes.");
-    for (const TransformGizmoAxisView& axis : normal.Axes)
+    for (std::size_t index = 0U; index < normal.Axes.size(); ++index)
     {
+        const TransformGizmoAxisView& axis = normal.Axes[index];
+        const float worldLength = Length(axis.End - axis.Start);
+        const float thicknessPixels = axis.Thickness *
+            axis.ProjectedLengthPixels / worldLength;
         Require(axis.HasArrowHead && axis.Thickness > 0.0F &&
                 axis.ArrowLength > 0.0F && axis.ArrowWidth > 0.0F &&
-                axis.ArrowWidth < axis.ArrowLength,
+                axis.ArrowWidth < axis.ArrowLength &&
+                (axis.CameraFacing || std::abs(thicknessPixels -
+                    GizmoStyle::MoveAxisIdleThicknessPixels) < 0.01F) &&
+                std::abs(axis.Color[0] -
+                    colors[index][0] * GizmoStyle::IdleIntensity) < 0.001F &&
+                std::abs(axis.Color[1] -
+                    colors[index][1] * GizmoStyle::IdleIntensity) < 0.001F &&
+                std::abs(axis.Color[2] -
+                    colors[index][2] * GizmoStyle::IdleIntensity) < 0.001F,
             "Move must expose three thin shafts with compact arrow heads.");
     }
+    Require(normal.CenterRadius < normal.AxisThickness &&
+            GizmoStyle::MoveCenterDiameterPixels == 3.0F &&
+            GizmoStyle::AxisColorX == GizmoStyle::RotateXColor &&
+            GizmoStyle::AxisColorY == GizmoStyle::RotateYColor &&
+            GizmoStyle::AxisColorZ == GizmoStyle::RotateZColor &&
+            GizmoStyle::MoveAxisIdleThicknessPixels >= 1.65F &&
+            GizmoStyle::MoveAxisIdleThicknessPixels <= 1.85F &&
+            GizmoStyle::MoveAxisHoverThicknessPixels >
+                GizmoStyle::MoveAxisIdleThicknessPixels &&
+            GizmoStyle::MoveAxisHoverThicknessPixels <= 2.10F &&
+            GizmoStyle::MoveAxisDraggingThicknessPixels >= 1.85F &&
+            GizmoStyle::MoveAxisDraggingThicknessPixels <= 2.05F,
+        "Move and Rotate must share one soft palette and a compact visual hierarchy.");
 
     constexpr std::array<TransformGizmoAxis, 3U> axes{
         TransformGizmoAxis::X,
@@ -619,9 +649,12 @@ void TestProfessionalMoveGizmoStyleAndContextHelp()
         Require(model.Update(context), "Unable to build a dragged Move style.");
         const TransformGizmoView dragged = model.View();
         Require(dragged.Axes[activeIndex].Color ==
-                    hovered.Axes[activeIndex].Color &&
-                dragged.Axes[activeIndex].Thickness ==
-                    hovered.Axes[activeIndex].Thickness &&
+                    colors[activeIndex] &&
+                (dragged.Axes[activeIndex].CameraFacing ||
+                    (dragged.Axes[activeIndex].Thickness <
+                        hovered.Axes[activeIndex].Thickness &&
+                     dragged.Axes[activeIndex].Thickness >
+                        normal.Axes[activeIndex].Thickness)) &&
                 TransformGizmoModel::ContextHelpFor(
                     dragged.State, dragged.ActiveAxis) == dragHelp[activeIndex],
             "Dragging must lock the highlighted shaft, tip, and contextual help.");

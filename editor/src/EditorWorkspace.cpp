@@ -9931,10 +9931,20 @@ bool EditorWorkspace::RunMoveGizmoSmokeStep(const std::size_t frame)
         TransformGizmoModel model;
         if (!model.Update(context)) return false;
         const TransformGizmoView normal = model.View();
-        for (const TransformGizmoAxisView& axis : normal.Axes)
+        constexpr std::array<std::array<float, 4U>, 3U> colors{
+            GizmoStyle::AxisColorX,
+            GizmoStyle::AxisColorY,
+            GizmoStyle::AxisColorZ};
+        for (std::size_t index = 0U; index < normal.Axes.size(); ++index)
+        {
+            const TransformGizmoAxisView& axis = normal.Axes[index];
             if (!axis.HasArrowHead || axis.ArrowWidth <= 0.0F ||
-                axis.ArrowWidth >= axis.ArrowLength)
+                axis.ArrowWidth >= axis.ArrowLength ||
+                std::abs(axis.Color[index] -
+                    colors[index][index] * GizmoStyle::IdleIntensity) >
+                    0.001F)
                 return false;
+        }
 
         constexpr std::array<TransformGizmoAxis, 3U> axes{
             TransformGizmoAxis::X,
@@ -9957,7 +9967,12 @@ bool EditorWorkspace::RunMoveGizmoSmokeStep(const std::size_t frame)
             context.InteractionState = TransformGizmoInteractionState::Dragging;
             if (!model.Update(context)) return false;
             const TransformGizmoView dragged = model.View();
-            if (dragged.Axes[index].Color != hovered.Axes[index].Color ||
+            if (dragged.Axes[index].Color != colors[index] ||
+                (!dragged.Axes[index].CameraFacing &&
+                    (dragged.Axes[index].Thickness >=
+                        hovered.Axes[index].Thickness ||
+                     dragged.Axes[index].Thickness <=
+                        normal.Axes[index].Thickness)) ||
                 TransformGizmoModel::ContextHelpFor(
                     dragged.State, dragged.ActiveAxis).empty())
                 return false;
@@ -9969,6 +9984,17 @@ bool EditorWorkspace::RunMoveGizmoSmokeStep(const std::size_t frame)
         }
         context.InteractionState = TransformGizmoInteractionState::Idle;
         context.ActiveAxis = TransformGizmoAxis::None;
+        if (!model.Update(context) || model.View().Axes != normal.Axes)
+            return false;
+        context.ActiveTool = ActiveVoxelTool::Rotate;
+        if (!model.Update(context) ||
+            !std::ranges::all_of(model.View().Axes,
+                [](const TransformGizmoAxisView& axis)
+                {
+                    return axis.HasRotationRing && !axis.HasArrowHead;
+                }))
+            return false;
+        context.ActiveTool = ActiveVoxelTool::Move;
         return model.Update(context) && model.View().Axes == normal.Axes;
     };
 
@@ -12676,44 +12702,77 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
             flush();
         }
     }
-    for (const TransformGizmoAxisView& axis : view.Axes)
+    if (view.Mode == TransformGizmoMode::Move)
     {
-        if (!axis.HasArrowHead ||
-            (!axis.CameraFacing && axis.ProjectedLengthPixels >= 14.0F))
-            continue;
-        const auto start = project(axis.Start);
-        const auto end = project(axis.End);
-        if (!start || !end) continue;
-        const ImU32 color = ImGui::ColorConvertFloat4ToU32({
-            axis.Color[0], axis.Color[1], axis.Color[2], 1.0F});
-        const float dx = end->x - start->x;
-        const float dy = end->y - start->y;
-        const float projectedLength = std::sqrt(dx * dx + dy * dy);
-        if (axis.CameraFacing || projectedLength < 0.5F)
+        const Vec3 cameraForward = viewportCamera_.GetForward();
+        for (const TransformGizmoAxisView& axis : view.Axes)
         {
-            const float radius = axis.Axis == view.ActiveAxis ? 5.2F : 4.5F;
-            drawList->AddCircleFilled(*end, radius, color, 16);
-            drawList->AddCircle(*end, radius + 1.0F,
-                IM_COL32(24, 28, 36, 255), 16, 1.25F);
-            continue;
+            if (!axis.HasArrowHead) continue;
+            const auto start = project(axis.Start);
+            const auto end = project(axis.End);
+            if (!start || !end) continue;
+            const Vec3 midpoint = (axis.Start + axis.End) * 0.5F;
+            const float visibility =
+                Dot(midpoint - view.Center, cameraForward) > 0.0F
+                ? GizmoStyle::OccludedIntensity : 1.0F;
+            const ImU32 color = ImGui::ColorConvertFloat4ToU32({
+                axis.Color[0] * visibility,
+                axis.Color[1] * visibility,
+                axis.Color[2] * visibility,
+                1.0F});
+            float dx = end->x - start->x;
+            float dy = end->y - start->y;
+            const float projectedLength = std::sqrt(dx * dx + dy * dy);
+            if (projectedLength >= 0.5F)
+            {
+                const float inverseLength = 1.0F / projectedLength;
+                dx *= inverseLength;
+                dy *= inverseLength;
+            }
+            else if (axis.Axis == TransformGizmoAxis::X)
+            {
+                dx = 1.0F;
+                dy = 0.0F;
+            }
+            else if (axis.Axis == TransformGizmoAxis::Y)
+            {
+                dx = 0.0F;
+                dy = -1.0F;
+            }
+            else
+            {
+                constexpr float inverseRootTwo = 0.70710678F;
+                dx = -inverseRootTwo;
+                dy = -inverseRootTwo;
+            }
+            const ImVec2 direction{dx, dy};
+            const ImVec2 perpendicular{-direction.y, direction.x};
+            const float headLength = std::clamp(
+                projectedLength * GizmoStyle::MoveArrowLengthRatio,
+                TransformGizmoModel::MinimumArrowLengthPixels,
+                TransformGizmoModel::MaximumArrowLengthPixels);
+            const float headWidth = std::clamp(
+                headLength * GizmoStyle::MoveArrowWidthRatio,
+                TransformGizmoModel::MinimumArrowWidthPixels,
+                TransformGizmoModel::MaximumArrowWidthPixels);
+            const ImVec2 base{
+                end->x - direction.x * headLength,
+                end->y - direction.y * headLength};
+            const ImVec2 left{
+                base.x + perpendicular.x * headWidth * 0.5F,
+                base.y + perpendicular.y * headWidth * 0.5F};
+            const ImVec2 right{
+                base.x - perpendicular.x * headWidth * 0.5F,
+                base.y - perpendicular.y * headWidth * 0.5F};
+            const float worldLength = Length(axis.End - axis.Start);
+            const float screenThickness = axis.Thickness > 0.0F &&
+                    worldLength > 0.0001F
+                ? axis.Thickness * axis.ProjectedLengthPixels / worldLength
+                : GizmoStyle::MoveAxisIdleThicknessPixels;
+            if (projectedLength > headLength * 0.75F)
+                drawList->AddLine(*start, base, color, screenThickness);
+            drawList->AddTriangleFilled(*end, left, right, color);
         }
-        const float inverseLength = 1.0F / projectedLength;
-        const ImVec2 direction{dx * inverseLength, dy * inverseLength};
-        const ImVec2 perpendicular{-direction.y, direction.x};
-        const float headLength = axis.Axis == view.ActiveAxis ? 6.9F : 6.0F;
-        const float halfWidth = axis.Axis == view.ActiveAxis ? 3.75F : 3.25F;
-        const ImVec2 base{
-            end->x - direction.x * headLength,
-            end->y - direction.y * headLength};
-        const ImVec2 left{
-            base.x + perpendicular.x * halfWidth,
-            base.y + perpendicular.y * halfWidth};
-        const ImVec2 right{
-            base.x - perpendicular.x * halfWidth,
-            base.y - perpendicular.y * halfWidth};
-        drawList->AddTriangleFilled(*end, left, right, color);
-        drawList->AddTriangle(*end, left, right,
-            IM_COL32(24, 28, 36, 255), 1.25F);
     }
     if (const auto center = project(view.Center))
     {
@@ -12725,6 +12784,20 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
                 : GizmoStyle::RotateCenterIdleIntensity;
             drawList->AddCircleFilled(*center,
                 GizmoStyle::RotateCenterDiameterPixels * 0.5F,
+                ImGui::ColorConvertFloat4ToU32({
+                    0.72F * intensity,
+                    0.74F * intensity,
+                    0.78F * intensity,
+                    0.72F}), 12);
+        }
+        else if (view.Mode == TransformGizmoMode::Move)
+        {
+            const float intensity = view.State ==
+                    TransformGizmoInteractionState::Dragging
+                ? GizmoStyle::MoveCenterDraggingIntensity
+                : GizmoStyle::MoveCenterIdleIntensity;
+            drawList->AddCircleFilled(*center,
+                GizmoStyle::MoveCenterDiameterPixels * 0.5F,
                 ImGui::ColorConvertFloat4ToU32({
                     0.72F * intensity,
                     0.74F * intensity,
