@@ -195,6 +195,8 @@ public:
     [[nodiscard]] bool TransformGizmoFoundationSmokePassed() const noexcept;
     [[nodiscard]] bool RunMoveGizmoSmokeStep(std::size_t frame);
     [[nodiscard]] bool MoveGizmoSmokePassed() const noexcept;
+    [[nodiscard]] bool RunRotateGizmoSmokeStep(std::size_t frame);
+    [[nodiscard]] bool RotateGizmoSmokePassed() const noexcept;
     [[nodiscard]] bool RunSaveOnExitSmokeStep(std::size_t frame);
     [[nodiscard]] bool SaveOnExitSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
@@ -309,6 +311,8 @@ private:
     [[nodiscard]] bool ApplyVoxelDuplicate();
     [[nodiscard]] bool BeginVoxelRotatePreview(
         VoxelRotationDirection direction);
+    [[nodiscard]] bool BeginVoxelRotatePreview(
+        VoxelRotationAxis axis, std::int32_t quarterTurns);
     [[nodiscard]] bool ApplyVoxelRotate();
     void CancelVoxelRotate() noexcept;
     [[nodiscard]] bool BeginVoxelMirrorPreview(VoxelMirrorAxis axis);
@@ -390,6 +394,8 @@ private:
     std::string voxelDuplicateStatusMessage_;
     VoxelRotationDirection voxelRotateDirection_ =
         VoxelRotationDirection::Clockwise;
+    VoxelRotationAxis voxelRotateAxis_ = VoxelRotationAxis::Y;
+    std::int32_t voxelRotateQuarterTurns_ = 1;
     std::string voxelRotateStatusMessage_;
     VoxelMirrorAxis voxelMirrorAxis_ = VoxelMirrorAxis::X;
     std::string voxelMirrorStatusMessage_;
@@ -674,6 +680,14 @@ private:
     bool moveGizmoSmokeRejected_ = false;
     bool moveGizmoSmokeCancelled_ = false;
     bool moveGizmoSmokeCleaned_ = false;
+    std::filesystem::path rotateGizmoSmokePath_;
+    bool rotateGizmoSmokePrepared_ = false;
+    bool rotateGizmoSmokeInteractive_ = false;
+    bool rotateGizmoSmokeApplied_ = false;
+    bool rotateGizmoSmokeUndoRedo_ = false;
+    bool rotateGizmoSmokeCancelled_ = false;
+    bool rotateGizmoSmokeSaved_ = false;
+    bool rotateGizmoSmokeReopened_ = false;
     std::filesystem::path saveOnExitSmokePath_;
     bool saveOnExitSmokeRequested_ = false;
     bool saveOnExitSmokeCallbackDeferred_ = false;

@@ -6,6 +6,7 @@
 #include "Layout/PalettePanelLayout.h"
 #include "Dialogs/EditorDialogStyle.h"
 #include "Toolbar/EditorToolbar.h"
+#include "TransformGizmo/GizmoStyle.h"
 
 #include "VoxelForge/Project/Project.h"
 #include "VoxelForge/Project/ProjectManager.h"
@@ -1303,7 +1304,8 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool != ActiveVoxelTool::Box) CancelVoxelBox();
     if (tool != ActiveVoxelTool::Line) CancelVoxelLine();
     if (tool != ActiveVoxelTool::Sphere) CancelVoxelSphere();
-    if (tool != ActiveVoxelTool::Move) CancelTransformGizmoInteraction();
+    if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Rotate)
+        CancelTransformGizmoInteraction();
     if (selectionInteraction_.IsActive())
     {
         const SelectionInteractionMode interactionMode =
@@ -2107,11 +2109,14 @@ void EditorWorkspace::DrawScenePanel()
         gizmoPointerInput.Viewport = currentViewportRectangle_;
         gizmoPointerInput.ViewProjection = viewportCamera_.GetViewProjection();
         gizmoPointerInput.Ray = viewportRay;
+        const bool gizmoToolAvailable =
+            (voxelToolState_.IsMoveActive() && CanMoveSelection()) ||
+            (voxelToolState_.IsRotateActive() && CanRotateSelection());
         const bool gizmoInputAvailable =
-            voxelToolState_.IsMoveActive() && document != nullptr &&
+            gizmoToolAvailable && document != nullptr &&
             transformGizmoModel_.View().Visible && imageHovered &&
             sceneFocused && !inputBlocked && !cameraControl &&
-            !dragDropActive && CanMoveSelection();
+            !dragDropActive;
         if (transformGizmoInteraction_.IsDragging())
         {
             const bool valid = sceneFocused && !inputBlocked &&
@@ -2119,10 +2124,16 @@ void EditorWorkspace::DrawScenePanel()
                 transformGizmoInteraction_.Validate(
                     voxelDocumentSession_.Generation(),
                     selectionService_.EditableBounds(),
-                    voxelToolState_.IsMoveActive()) &&
-                transformPreviewModel_.IsValidFor(
-                    *document, selectionService_,
-                    voxelDocumentSession_.Generation());
+                    (transformGizmoInteraction_.Mode() ==
+                         TransformGizmoMode::Move &&
+                     voxelToolState_.IsMoveActive()) ||
+                    (transformGizmoInteraction_.Mode() ==
+                         TransformGizmoMode::Rotate &&
+                     voxelToolState_.IsRotateActive())) &&
+                (!transformPreviewModel_.IsActive() ||
+                 transformPreviewModel_.IsValidFor(
+                     *document, selectionService_,
+                     voxelDocumentSession_.Generation()));
             if (!valid)
                 CancelTransformGizmoInteraction();
         }
@@ -2147,11 +2158,12 @@ void EditorWorkspace::DrawScenePanel()
             ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         {
             gizmoCaptured = transformGizmoInteraction_.BeginDrag(
-                    transformGizmoModel_.View(),
-                    transformGizmoInteraction_.HoveredAxis(),
-                    gizmoPointerInput, voxelDocumentSession_.Generation(),
-                    selectionService_.EditableBounds()) &&
-                transformPreviewModel_.BeginPreview(
+                transformGizmoModel_.View(),
+                transformGizmoInteraction_.HoveredAxis(),
+                gizmoPointerInput, voxelDocumentSession_.Generation(),
+                selectionService_.EditableBounds());
+            if (gizmoCaptured && voxelToolState_.IsMoveActive())
+                gizmoCaptured = transformPreviewModel_.BeginPreview(
                     *document, selectionService_,
                     voxelDocumentSession_.Generation());
             if (!gizmoCaptured)
@@ -2168,10 +2180,27 @@ void EditorWorkspace::DrawScenePanel()
             ImGui::IsMouseDown(ImGuiMouseButton_Left) && document &&
             transformGizmoInteraction_.UpdateDrag(gizmoPointerInput))
         {
-            static_cast<void>(transformPreviewModel_.SetDelta(
-                *document, selectionService_,
-                voxelDocumentSession_.Generation(),
-                transformGizmoInteraction_.Delta()));
+            if (transformGizmoInteraction_.Mode() == TransformGizmoMode::Move)
+                static_cast<void>(transformPreviewModel_.SetDelta(
+                    *document, selectionService_,
+                    voxelDocumentSession_.Generation(),
+                    transformGizmoInteraction_.Delta()));
+            else
+            {
+                const TransformGizmoAxis axis =
+                    transformGizmoInteraction_.LockedAxis();
+                const VoxelRotationAxis rotationAxis =
+                    axis == TransformGizmoAxis::X ? VoxelRotationAxis::X :
+                    axis == TransformGizmoAxis::Y ? VoxelRotationAxis::Y :
+                    VoxelRotationAxis::Z;
+                const std::int32_t turns =
+                    transformGizmoInteraction_.QuarterTurns();
+                if ((turns % 4) == 0)
+                    static_cast<void>(transformPreviewModel_.CancelPreview());
+                else
+                    static_cast<void>(BeginVoxelRotatePreview(
+                        rotationAxis, turns));
+            }
             UpdateVoxelHighlights();
         }
         if (transformGizmoInteraction_.IsDragging() &&
@@ -2301,14 +2330,23 @@ void EditorWorkspace::DrawScenePanel()
         }
         else if (voxelToolState_.IsRotateActive())
         {
-            viewportHelp = !voxelRotateStatusMessage_.empty()
-                ? voxelRotateStatusMessage_.c_str()
-                : !transformPreviewModel_.IsActive()
-                ? "Rotate ready — Q left — Shift+Q right — Esc to exit"
-                : transformPreviewModel_.HasCollisions()
+            const std::string_view gizmoHelp =
+                TransformGizmoModel::ContextHelpFor(
+                    TransformGizmoMode::Rotate,
+                    transformGizmoInteraction_.State(),
+                    transformGizmoInteraction_.IsDragging()
+                        ? transformGizmoInteraction_.LockedAxis()
+                        : transformGizmoInteraction_.HoveredAxis());
+            viewportHelp = transformPreviewModel_.HasCollisions()
                 ? "Rotate blocked: destination is occupied"
                 : transformPreviewModel_.HasOutOfBounds()
                 ? "Rotate blocked: destination is outside the model"
+                : !gizmoHelp.empty()
+                ? gizmoHelp.data()
+                : !voxelRotateStatusMessage_.empty()
+                ? voxelRotateStatusMessage_.c_str()
+                : !transformPreviewModel_.IsActive()
+                ? "Drag a rotation ring — Q left — Shift+Q right — Esc to exit"
                 : voxelRotateDirection_ == VoxelRotationDirection::Clockwise
                 ? "Rotate Y: +90° — Enter to apply — Esc to cancel"
                 : "Rotate Y: -90° — Enter to apply — Esc to cancel";
@@ -2666,8 +2704,16 @@ void EditorWorkspace::DrawScenePanel()
                 transformGizmoInteraction_.EndDrag();
             if (gizmoRelease.WasDragging)
             {
-                if (gizmoRelease.Delta ==
-                        Asset::Voxel::VoxelPosition{})
+                if (gizmoRelease.Mode == TransformGizmoMode::Rotate)
+                {
+                    if ((gizmoRelease.QuarterTurns % 4) == 0)
+                        static_cast<void>(
+                            transformPreviewModel_.CancelPreview());
+                    else
+                        static_cast<void>(ApplyVoxelRotate());
+                }
+                else if (gizmoRelease.Delta ==
+                             Asset::Voxel::VoxelPosition{})
                     static_cast<void>(transformPreviewModel_.CancelPreview());
                 else
                     static_cast<void>(ApplyVoxelMove());
@@ -10161,6 +10207,154 @@ bool EditorWorkspace::MoveGizmoSmokePassed() const noexcept
         moveGizmoSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunRotateGizmoSmokeStep(const std::size_t frame)
+{
+    using Asset::Voxel::VoxelPosition;
+    const std::vector<VoxelPosition> source{{4, 3, 4}, {4, 4, 4}, {4, 5, 4}};
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"RotateGizmoSmoke", {16U, 16U, 16U}});
+        rotateGizmoSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+        std::vector<VoxelChange> seed;
+        for (std::size_t index = 0U; index < source.size(); ++index)
+            seed.push_back({0U, source[index], false, 0U, true,
+                static_cast<std::uint8_t>(3U + index)});
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Rotate Gizmo Smoke", seed});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            source, SelectionBounds::FromCorners({4, 3, 4}, {4, 5, 4}),
+            SelectionMode::Replace);
+        SelectVoxelTool(ActiveVoxelTool::Rotate);
+        rotateGizmoSmokePrepared_ = seeded && selected &&
+            document->GetVoxelCount() == 3U && CanRotateSelection();
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !rotateGizmoSmokePrepared_) return false;
+        TransformGizmoUpdateContext context;
+        context.DocumentActive = true;
+        context.SelectionEmpty = false;
+        context.ActiveDocumentGeneration = 9U;
+        context.SelectionDocumentGeneration = 9U;
+        context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {5, 5, 5});
+        context.ModelCenter = {3, 3, 3};
+        context.ActiveTool = ActiveVoxelTool::Rotate;
+        context.CameraPosition = {0, 0, -20};
+        context.CameraForward = {0, 0, 1};
+        context.ViewportHeightPixels = 1000;
+        context.Viewport = {0, 0, 1000, 1000};
+        context.ViewProjection = IdentityMatrix();
+        context.ViewProjection[0] = 0.035F;
+        context.ViewProjection[2] = -0.018F;
+        context.ViewProjection[4] = 0.008F;
+        context.ViewProjection[5] = 0.032F;
+        context.ViewProjection[6] = 0.014F;
+        TransformGizmoModel model;
+        if (!model.Update(context)) return false;
+        const TransformGizmoView view = model.View();
+        TransformGizmoPointerInput input;
+        input.Viewport = context.Viewport;
+        input.ViewProjection = context.ViewProjection;
+        bool allAxesPickable = true;
+        for (const TransformGizmoAxisView& ring : view.Axes)
+        {
+            bool picked = false;
+            for (const Vec3 point : ring.RotationRingPoints)
+            {
+                const auto screen = TransformGizmoModel::ProjectWorldToScreen(
+                    point, input.Viewport, input.ViewProjection);
+                if (!screen) continue;
+                input.ScreenPosition = *screen;
+                TransformGizmoInteraction probe;
+                if (probe.UpdateHover(view, input) == ring.Axis)
+                {
+                    picked = true;
+                    break;
+                }
+            }
+            allAxesPickable = allAxesPickable && picked;
+        }
+        const std::uint64_t revision = document->GetRevision();
+        const bool previewed = BeginVoxelRotatePreview(
+            VoxelRotationAxis::X, 1);
+        rotateGizmoSmokeInteractive_ = allAxesPickable && previewed &&
+            view.Mode == TransformGizmoMode::Rotate &&
+            std::ranges::all_of(view.Axes,
+                [](const TransformGizmoAxisView& ring)
+                { return ring.HasRotationRing && !ring.HasArrowHead; }) &&
+            transformPreviewModel_.VoxelCount() == 3U &&
+            document->GetRevision() == revision;
+        rotateGizmoSmokeApplied_ = rotateGizmoSmokeInteractive_ &&
+            ApplyVoxelRotate() && document->GetRevision() == revision + 1U &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({4, 4, 3}, {4, 4, 5});
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !rotateGizmoSmokeApplied_) return false;
+        UndoCommand();
+        const bool undone = selectionService_.EditableBounds() ==
+            SelectionBounds::FromCorners({4, 3, 4}, {4, 5, 4});
+        RedoCommand();
+        rotateGizmoSmokeUndoRedo_ = undone &&
+            selectionService_.EditableBounds() ==
+                SelectionBounds::FromCorners({4, 4, 3}, {4, 4, 5});
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !rotateGizmoSmokeUndoRedo_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        const bool previewed = BeginVoxelRotatePreview(
+            VoxelRotationAxis::Z, -1);
+        CancelVoxelRotate();
+        rotateGizmoSmokeCancelled_ = previewed &&
+            !transformPreviewModel_.IsActive() &&
+            document->GetRevision() == revision;
+    }
+    else if (frame == 4U)
+    {
+        rotateGizmoSmokeSaved_ = rotateGizmoSmokeCancelled_ &&
+            SaveVoxelModel() && document && !document->IsDirty();
+    }
+    else if (frame == 5U)
+    {
+        if (!rotateGizmoSmokeSaved_) return false;
+        rotateGizmoSmokeReopened_ = OpenVoxInViewportNow(
+            rotateGizmoSmokePath_);
+        document = voxelDocumentSession_.ActiveDocument();
+        rotateGizmoSmokeReopened_ = rotateGizmoSmokeReopened_ && document &&
+            document->GetVoxelCount() == 3U &&
+            document->HasVoxel({4, 4, 3}) &&
+            document->HasVoxel({4, 4, 5});
+    }
+    else if (frame == 6U)
+    {
+        if (!rotateGizmoSmokeReopened_) return false;
+        CloseProject();
+        rotateGizmoSmokeReopened_ =
+            voxelDocumentSession_.ActiveDocument() == nullptr &&
+            !transformPreviewModel_.IsActive() &&
+            !transformGizmoInteraction_.IsDragging();
+    }
+    return RotateGizmoSmokePassed();
+}
+
+bool EditorWorkspace::RotateGizmoSmokePassed() const noexcept
+{
+    return rotateGizmoSmokePrepared_ && rotateGizmoSmokeInteractive_ &&
+        rotateGizmoSmokeApplied_ && rotateGizmoSmokeUndoRedo_ &&
+        rotateGizmoSmokeCancelled_ && rotateGizmoSmokeSaved_ &&
+        rotateGizmoSmokeReopened_;
+}
+
 bool EditorWorkspace::RunSaveOnExitSmokeStep(const std::size_t frame)
 {
     using Asset::Voxel::VoxelPosition;
@@ -11312,6 +11506,14 @@ bool EditorWorkspace::ApplyVoxelDuplicate()
 bool EditorWorkspace::BeginVoxelRotatePreview(
     const VoxelRotationDirection direction)
 {
+    return BeginVoxelRotatePreview(VoxelRotationAxis::Y,
+        direction == VoxelRotationDirection::Clockwise ? 1 : -1);
+}
+
+bool EditorWorkspace::BeginVoxelRotatePreview(
+    const VoxelRotationAxis axis,
+    const std::int32_t quarterTurns)
+{
     Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
     if (!document || !CanRotateSelection())
@@ -11324,7 +11526,8 @@ bool EditorWorkspace::BeginVoxelRotatePreview(
 
     const std::uint64_t generation = voxelDocumentSession_.Generation();
     if (voxelToolState_.IsRotateActive() &&
-        voxelRotateDirection_ == direction &&
+        voxelRotateAxis_ == axis &&
+        voxelRotateQuarterTurns_ == quarterTurns &&
         transformPreviewModel_.IsValidFor(
             *document, selectionService_, generation) &&
         transformPreviewModel_.HasExplicitDestinations())
@@ -11340,7 +11543,7 @@ bool EditorWorkspace::BeginVoxelRotatePreview(
     const VoxelRotationGeometry geometry =
         RotateVoxelSelectionOperation::BuildGeometry(
             selectionService_.Voxels(), selectionService_.EditableBounds(),
-            direction);
+            axis, quarterTurns);
     if (!geometry.Valid() ||
         !transformPreviewModel_.SetExplicitDestinations(
             *document, selectionService_, generation, geometry.Destinations))
@@ -11351,7 +11554,11 @@ bool EditorWorkspace::BeginVoxelRotatePreview(
         UpdateVoxelHighlights();
         return false;
     }
-    voxelRotateDirection_ = direction;
+    voxelRotateAxis_ = axis;
+    voxelRotateQuarterTurns_ = quarterTurns;
+    voxelRotateDirection_ = quarterTurns < 0
+        ? VoxelRotationDirection::CounterClockwise
+        : VoxelRotationDirection::Clockwise;
     voxelRotateStatusMessage_.clear();
     voxelMoveStatusMessage_.clear();
     voxelDuplicateStatusMessage_.clear();
@@ -11372,7 +11579,8 @@ bool EditorWorkspace::ApplyVoxelRotate()
     RotateVoxelSelectionResult prepared =
         RotateVoxelSelectionOperation::Build(
             *document, selectionService_, voxelDocumentSession_.Generation(),
-            transformPreviewModel_, voxelRotateDirection_);
+            transformPreviewModel_, voxelRotateAxis_,
+            voxelRotateQuarterTurns_);
     static_cast<void>(transformPreviewModel_.CancelPreview());
     if (!prepared.Ready())
     {
@@ -11746,8 +11954,11 @@ void EditorWorkspace::CancelSelectionInteraction()
 
 void EditorWorkspace::CancelTransformGizmoInteraction() noexcept
 {
+    const bool rotate = transformGizmoInteraction_.Mode() ==
+        TransformGizmoMode::Rotate;
     const bool changed = transformGizmoInteraction_.Cancel();
     const bool previewCancelled = transformPreviewModel_.CancelPreview();
+    if (rotate) voxelRotateStatusMessage_.clear();
     if (changed || previewCancelled) UpdateVoxelHighlights();
 }
 
@@ -12342,6 +12553,129 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
         {currentViewportRectangle_.X + currentViewportRectangle_.Width,
          currentViewportRectangle_.Y + currentViewportRectangle_.Height},
         true);
+    const ImDrawListFlags previousFlags = drawList->Flags;
+    drawList->Flags |= ImDrawListFlags_AntiAliasedLines;
+    if (ImGui::GetStyle().AntiAliasedLinesUseTex &&
+        !(ImGui::GetIO().Fonts->Flags & ImFontAtlasFlags_NoBakedLines))
+        drawList->Flags |= ImDrawListFlags_AntiAliasedLinesUseTex;
+
+    if (view.Mode == TransformGizmoMode::Rotate)
+    {
+        const Vec3 cameraPosition = viewportCamera_.GetPosition();
+        const Vec3 cameraForward = viewportCamera_.GetForward();
+        for (const TransformGizmoAxisView& axis : view.Axes)
+        {
+            if (!axis.HasRotationRing) continue;
+            constexpr std::size_t pointCount =
+                TransformGizmoAxisView::RotationRingSegmentCount;
+            std::array<ImVec2, pointCount> points{};
+            std::array<bool, pointCount> valid{};
+            std::array<bool, pointCount> occluded{};
+            for (std::size_t index = 0U; index < pointCount; ++index)
+            {
+                const Vec3 world = axis.RotationRingPoints[index];
+                const float cameraDepth =
+                    Dot(world - cameraPosition, cameraForward);
+                const auto screen = cameraDepth >
+                        GizmoStyle::RotateNearPlaneDistance
+                    ? project(world) : std::nullopt;
+                valid[index] = screen.has_value() &&
+                    std::isfinite(screen->x) && std::isfinite(screen->y);
+                if (screen) points[index] = *screen;
+                const std::size_t next = (index + 1U) % pointCount;
+                const Vec3 midpoint =
+                    (axis.RotationRingPoints[index] +
+                     axis.RotationRingPoints[next]) * 0.5F;
+                occluded[index] =
+                    Dot(midpoint - view.Center, cameraForward) > 0.0F;
+            }
+            const float screenThickness =
+                axis.Thickness > 0.0F && axis.RotationRingRadius > 0.001F
+                ? axis.Thickness * axis.ProjectedLengthPixels /
+                    axis.RotationRingRadius
+                : GizmoStyle::RotateIdleThicknessPixels;
+            const auto colorFor = [&axis](const bool behind)
+            {
+                const float intensity = behind
+                    ? GizmoStyle::RotateOccludedIntensity : 1.0F;
+                return ImGui::ColorConvertFloat4ToU32({
+                    axis.Color[0] * intensity,
+                    axis.Color[1] * intensity,
+                    axis.Color[2] * intensity,
+                    1.0F});
+            };
+            std::array<bool, pointCount> validSegment{};
+            bool closed = true;
+            bool uniformVisibility = true;
+            for (std::size_t index = 0U; index < pointCount; ++index)
+            {
+                const std::size_t next = (index + 1U) % pointCount;
+                if (!valid[index] || !valid[next])
+                {
+                    closed = false;
+                    continue;
+                }
+                const float dx = points[next].x - points[index].x;
+                const float dy = points[next].y - points[index].y;
+                validSegment[index] = dx * dx + dy * dy <=
+                    GizmoStyle::RotateMaximumChordPixels *
+                    GizmoStyle::RotateMaximumChordPixels;
+                closed = closed && validSegment[index];
+                if (index > 0U && occluded[index] != occluded[0])
+                    uniformVisibility = false;
+            }
+            if (closed && uniformVisibility)
+            {
+                drawList->AddPolyline(points.data(),
+                    static_cast<int>(points.size()), colorFor(occluded[0]),
+                    ImDrawFlags_Closed, screenThickness);
+                continue;
+            }
+            std::size_t start = 0U;
+            for (; start < pointCount; ++start)
+            {
+                const std::size_t previous =
+                    (start + pointCount - 1U) % pointCount;
+                if (!validSegment[previous] || !validSegment[start] ||
+                    occluded[start] != occluded[previous])
+                    break;
+            }
+            std::array<ImVec2, pointCount + 1U> run{};
+            std::size_t runCount = 0U;
+            bool runOccluded = false;
+            const auto flush = [&]()
+            {
+                if (runCount >= 2U)
+                    drawList->AddPolyline(run.data(),
+                        static_cast<int>(runCount), colorFor(runOccluded),
+                        ImDrawFlags_None, screenThickness);
+                runCount = 0U;
+            };
+            for (std::size_t step = 0U; step < pointCount; ++step)
+            {
+                const std::size_t index = (start + step) % pointCount;
+                const std::size_t next = (index + 1U) % pointCount;
+                if (!validSegment[index])
+                {
+                    flush();
+                    continue;
+                }
+                if (runCount == 0U)
+                {
+                    runOccluded = occluded[index];
+                    run[runCount++] = points[index];
+                }
+                else if (runOccluded != occluded[index])
+                {
+                    flush();
+                    runOccluded = occluded[index];
+                    run[runCount++] = points[index];
+                }
+                run[runCount++] = points[next];
+            }
+            flush();
+        }
+    }
     for (const TransformGizmoAxisView& axis : view.Axes)
     {
         if (!axis.HasArrowHead ||
@@ -12383,11 +12717,29 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
     }
     if (const auto center = project(view.Center))
     {
-        drawList->AddCircleFilled(*center, 3.0F,
-            IM_COL32(170, 178, 194, 255), 16);
-        drawList->AddCircle(*center, 4.25F,
-            IM_COL32(24, 28, 36, 255), 16, 1.25F);
+        if (view.Mode == TransformGizmoMode::Rotate)
+        {
+            const float intensity = view.State ==
+                    TransformGizmoInteractionState::Dragging
+                ? GizmoStyle::RotateCenterDraggingIntensity
+                : GizmoStyle::RotateCenterIdleIntensity;
+            drawList->AddCircleFilled(*center,
+                GizmoStyle::RotateCenterDiameterPixels * 0.5F,
+                ImGui::ColorConvertFloat4ToU32({
+                    0.72F * intensity,
+                    0.74F * intensity,
+                    0.78F * intensity,
+                    0.72F}), 12);
+        }
+        else
+        {
+            drawList->AddCircleFilled(*center, 3.0F,
+                IM_COL32(170, 178, 194, 255), 16);
+            drawList->AddCircle(*center, 4.25F,
+                IM_COL32(24, 28, 36, 255), 16, 1.25F);
+        }
     }
+    drawList->Flags = previousFlags;
     drawList->PopClipRect();
 }
 

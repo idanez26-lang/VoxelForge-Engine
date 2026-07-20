@@ -46,6 +46,8 @@ enum class TransformGizmoProjection : std::uint8_t
 
 struct TransformGizmoAxisView final
 {
+    static constexpr std::size_t RotationRingSegmentCount = 128U;
+
     TransformGizmoAxis Axis = TransformGizmoAxis::None;
     Vec3 Start{};
     Vec3 End{};
@@ -58,6 +60,9 @@ struct TransformGizmoAxisView final
     std::array<Vec3, 4U> ArrowBaseCorners{};
     float ArrowLength = 0.0F;
     float ArrowWidth = 0.0F;
+    bool HasRotationRing = false;
+    float RotationRingRadius = 0.0F;
+    std::array<Vec3, RotationRingSegmentCount> RotationRingPoints{};
 
     [[nodiscard]] bool operator==(
         const TransformGizmoAxisView&) const noexcept = default;
@@ -179,6 +184,10 @@ public:
         const ViewportRectangle& viewport,
         const Matrix4& viewProjection) noexcept;
     [[nodiscard]] static std::string_view ContextHelpFor(
+        TransformGizmoInteractionState state,
+        TransformGizmoAxis axis) noexcept;
+    [[nodiscard]] static std::string_view ContextHelpFor(
+        TransformGizmoMode mode,
         TransformGizmoInteractionState state,
         TransformGizmoAxis axis) noexcept;
 

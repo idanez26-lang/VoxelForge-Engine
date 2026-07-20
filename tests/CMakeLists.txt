@@ -435,6 +435,20 @@ add_test(
     NAME VoxelForge.Editor.MoveGizmo
     COMMAND $<TARGET_FILE:VoxelForgeEditorMoveGizmoTests>
 )
+
+add_executable(
+    VoxelForgeEditorRotateGizmoTests
+    Editor/RotateGizmoTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorRotateGizmoTests
+    PRIVATE VoxelForgeEditorTransformGizmo VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorRotateGizmoTests)
+add_test(
+    NAME VoxelForge.Editor.RotateGizmo
+    COMMAND $<TARGET_FILE:VoxelForgeEditorRotateGizmoTests>
+)
 add_executable(
     VoxelForgeEditorTransformOperationFrameworkTests
     Editor/TransformOperationFrameworkTests.cpp
@@ -1031,6 +1045,10 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --move-gizmo-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.RotateGizmoSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --rotate-gizmo-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.SaveOnExitSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --save-on-exit-smoke-test
     )
@@ -1075,6 +1093,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelAlignSmoke
         VoxelForge.Editor.TransformGizmoFoundationSmoke
         VoxelForge.Editor.MoveGizmoSmoke
+        VoxelForge.Editor.RotateGizmoSmoke
         VoxelForge.Editor.SaveOnExitSmoke
         PROPERTIES
             TIMEOUT 30

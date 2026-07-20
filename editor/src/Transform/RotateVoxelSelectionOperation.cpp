@@ -74,6 +74,107 @@ RotateVoxelSelectionResult FromCommon(
     return Refused(RotateVoxelSelectionResultCode::Failed,
         "Unable to prepare atomic Rotate.");
 }
+
+[[nodiscard]] std::int32_t NormalizeQuarterTurns(
+    std::int32_t turns) noexcept
+{
+    turns %= 4;
+    if (turns > 2) turns -= 4;
+    if (turns < -2) turns += 4;
+    return turns;
+}
+
+[[nodiscard]] std::int32_t Coordinate(
+    const Position position, const VoxelRotationAxis axis,
+    const bool first) noexcept
+{
+    if (axis == VoxelRotationAxis::X) return first ? position.Y : position.Z;
+    if (axis == VoxelRotationAxis::Y) return first ? position.X : position.Z;
+    return first ? position.X : position.Y;
+}
+
+void SetCoordinate(Position& position, const VoxelRotationAxis axis,
+    const bool first, const std::int32_t value) noexcept
+{
+    if (axis == VoxelRotationAxis::X) (first ? position.Y : position.Z) = value;
+    else if (axis == VoxelRotationAxis::Y)
+        (first ? position.X : position.Z) = value;
+    else (first ? position.X : position.Y) = value;
+}
+
+[[nodiscard]] SelectionBounds BoundsFor(
+    const std::span<const Position> positions) noexcept
+{
+    if (positions.empty()) return {};
+    Position minimum = positions.front();
+    Position maximum = positions.front();
+    for (const Position position : positions.subspan(1U))
+    {
+        minimum.X = std::min(minimum.X, position.X);
+        minimum.Y = std::min(minimum.Y, position.Y);
+        minimum.Z = std::min(minimum.Z, position.Z);
+        maximum.X = std::max(maximum.X, position.X);
+        maximum.Y = std::max(maximum.Y, position.Y);
+        maximum.Z = std::max(maximum.Z, position.Z);
+    }
+    return SelectionBounds::FromCorners(minimum, maximum);
+}
+
+[[nodiscard]] bool RotateQuarter(
+    std::vector<Position>& positions,
+    SelectionBounds& bounds,
+    const VoxelRotationAxis axis,
+    const VoxelRotationDirection direction,
+    std::int64_t& correctionFirst,
+    std::int64_t& correctionSecond,
+    std::string& message)
+{
+    const std::int64_t minimumFirst = Coordinate(bounds.Minimum, axis, true);
+    const std::int64_t maximumFirst = Coordinate(bounds.Maximum, axis, true);
+    const std::int64_t minimumSecond = Coordinate(bounds.Minimum, axis, false);
+    const std::int64_t maximumSecond = Coordinate(bounds.Maximum, axis, false);
+    const std::int64_t centerFirst = minimumFirst + maximumFirst;
+    const std::int64_t centerSecond = minimumSecond + maximumSecond;
+    const std::int64_t firstExtent = maximumFirst - minimumFirst + 1LL;
+    const std::int64_t secondExtent = maximumSecond - minimumSecond + 1LL;
+    correctionFirst = (secondExtent & 1LL) - (firstExtent & 1LL);
+    correctionSecond = (firstExtent & 1LL) - (secondExtent & 1LL);
+    for (Position& position : positions)
+    {
+        const std::int64_t relativeFirst =
+            2LL * Coordinate(position, axis, true) - centerFirst;
+        const std::int64_t relativeSecond =
+            2LL * Coordinate(position, axis, false) - centerSecond;
+        const std::int64_t rotatedFirst =
+            direction == VoxelRotationDirection::Clockwise
+            ? relativeSecond : -relativeSecond;
+        const std::int64_t rotatedSecond =
+            direction == VoxelRotationDirection::Clockwise
+            ? -relativeFirst : relativeFirst;
+        const std::int64_t destinationFirst =
+            centerFirst + rotatedFirst + correctionFirst;
+        const std::int64_t destinationSecond =
+            centerSecond + rotatedSecond + correctionSecond;
+        if ((destinationFirst & 1LL) != 0LL ||
+            (destinationSecond & 1LL) != 0LL)
+        {
+            message = "Rotate produced a non-integral voxel destination.";
+            return false;
+        }
+        std::int32_t first = 0;
+        std::int32_t second = 0;
+        if (!ToInt32(destinationFirst / 2LL, first) ||
+            !ToInt32(destinationSecond / 2LL, second))
+        {
+            message = "Rotate destination is not representable.";
+            return false;
+        }
+        SetCoordinate(position, axis, true, first);
+        SetCoordinate(position, axis, false, second);
+    }
+    bounds = BoundsFor(positions);
+    return bounds.Valid;
+}
 }
 
 VoxelRotationGeometry RotateVoxelSelectionOperation::BuildGeometry(
@@ -81,8 +182,23 @@ VoxelRotationGeometry RotateVoxelSelectionOperation::BuildGeometry(
     const SelectionBounds sourceBounds,
     const VoxelRotationDirection direction)
 {
+    return BuildGeometry(sourcePositions, sourceBounds,
+        VoxelRotationAxis::Y,
+        direction == VoxelRotationDirection::Clockwise ? 1 : -1);
+}
+
+VoxelRotationGeometry RotateVoxelSelectionOperation::BuildGeometry(
+    const std::span<const Position> sourcePositions,
+    const SelectionBounds sourceBounds,
+    const VoxelRotationAxis axis,
+    const std::int32_t quarterTurns)
+{
     VoxelRotationGeometry result;
-    result.Direction = direction;
+    result.Axis = axis;
+    result.QuarterTurns = NormalizeQuarterTurns(quarterTurns);
+    result.Direction = result.QuarterTurns < 0
+        ? VoxelRotationDirection::CounterClockwise
+        : VoxelRotationDirection::Clockwise;
     if (sourcePositions.empty() || !sourceBounds.Valid)
     {
         result.Message = "Rotate requires a non-empty selection.";
@@ -97,71 +213,24 @@ VoxelRotationGeometry RotateVoxelSelectionOperation::BuildGeometry(
         sourceBounds.Maximum.Z;
     result.Pivot2X = result.SourceCenter2X;
     result.Pivot2Z = result.SourceCenter2Z;
-    const std::int64_t width =
-        static_cast<std::int64_t>(sourceBounds.Maximum.X) -
-        sourceBounds.Minimum.X + 1LL;
-    const std::int64_t depth =
-        static_cast<std::int64_t>(sourceBounds.Maximum.Z) -
-        sourceBounds.Minimum.Z + 1LL;
-    // Grid convention: rotate around the exact doubled source center. When X
-    // and Z extents have different parity, no integral 90-degree destination
-    // can retain that center. Select the nearest grid-compatible center using
-    // an exact half-cell correction derived only from extent parity. Swapping
-    // the extents reverses the correction, so inverse turns and four equal
-    // turns return to the original cells without accumulated drift.
-    result.GridCorrection2X = (depth & 1LL) - (width & 1LL);
-    result.GridCorrection2Z = (width & 1LL) - (depth & 1LL);
-    result.Destinations.reserve(sourcePositions.size());
-    Position minimum{};
-    Position maximum{};
-    bool first = true;
-    for (const Position source : sourcePositions)
+    result.Destinations.assign(sourcePositions.begin(), sourcePositions.end());
+    result.Bounds = sourceBounds;
+    const std::int32_t turns = std::abs(result.QuarterTurns);
+    for (std::int32_t turn = 0; turn < turns; ++turn)
     {
-        const std::int64_t relative2X =
-            2LL * source.X - result.Pivot2X;
-        const std::int64_t relative2Z =
-            2LL * source.Z - result.Pivot2Z;
-        const std::int64_t rotated2X =
-            direction == VoxelRotationDirection::Clockwise
-            ? relative2Z : -relative2Z;
-        const std::int64_t rotated2Z =
-            direction == VoxelRotationDirection::Clockwise
-            ? -relative2X : relative2X;
-        const std::int64_t destination2X = result.Pivot2X + rotated2X +
-            result.GridCorrection2X;
-        const std::int64_t destination2Z = result.Pivot2Z + rotated2Z +
-            result.GridCorrection2Z;
-        if ((destination2X & 1LL) != 0LL ||
-            (destination2Z & 1LL) != 0LL)
+        std::int64_t correctionFirst = 0;
+        std::int64_t correctionSecond = 0;
+        if (!RotateQuarter(result.Destinations, result.Bounds, axis,
+                result.Direction, correctionFirst, correctionSecond,
+                result.Message))
         {
-            result.Message =
-                "Rotate produced a non-integral voxel destination.";
             result.Destinations.clear();
             return result;
         }
-        Position destination{0, source.Y, 0};
-        if (!ToInt32(destination2X / 2LL, destination.X) ||
-            !ToInt32(destination2Z / 2LL, destination.Z))
+        if (axis == VoxelRotationAxis::Y && turn == 0)
         {
-            result.Message = "Rotate destination is not representable.";
-            result.Destinations.clear();
-            return result;
-        }
-        result.Destinations.push_back(destination);
-        if (first)
-        {
-            minimum = destination;
-            maximum = destination;
-            first = false;
-        }
-        else
-        {
-            minimum.X = std::min(minimum.X, destination.X);
-            minimum.Y = std::min(minimum.Y, destination.Y);
-            minimum.Z = std::min(minimum.Z, destination.Z);
-            maximum.X = std::max(maximum.X, destination.X);
-            maximum.Y = std::max(maximum.Y, destination.Y);
-            maximum.Z = std::max(maximum.Z, destination.Z);
+            result.GridCorrection2X = correctionFirst;
+            result.GridCorrection2Z = correctionSecond;
         }
     }
 
@@ -173,11 +242,12 @@ VoxelRotationGeometry RotateVoxelSelectionOperation::BuildGeometry(
         result.Destinations.clear();
         return result;
     }
-    result.Bounds = SelectionBounds::FromCorners(minimum, maximum);
     result.DestinationCenter2X =
-        static_cast<std::int64_t>(minimum.X) + maximum.X;
+        static_cast<std::int64_t>(result.Bounds.Minimum.X) +
+        result.Bounds.Maximum.X;
     result.DestinationCenter2Z =
-        static_cast<std::int64_t>(minimum.Z) + maximum.Z;
+        static_cast<std::int64_t>(result.Bounds.Minimum.Z) +
+        result.Bounds.Maximum.Z;
     return result;
 }
 
@@ -187,6 +257,19 @@ RotateVoxelSelectionResult RotateVoxelSelectionOperation::Build(
     const std::uint64_t documentGeneration,
     const TransformPreviewModel& preview,
     const VoxelRotationDirection direction)
+{
+    return Build(document, selection, documentGeneration, preview,
+        VoxelRotationAxis::Y,
+        direction == VoxelRotationDirection::Clockwise ? 1 : -1);
+}
+
+RotateVoxelSelectionResult RotateVoxelSelectionOperation::Build(
+    const Asset::Voxel::VoxelDocument& document,
+    const SelectionService& selection,
+    const std::uint64_t documentGeneration,
+    const TransformPreviewModel& preview,
+    const VoxelRotationAxis axis,
+    const std::int32_t quarterTurns)
 {
     if (!preview.IsActive() || !preview.HasExplicitDestinations())
         return Refused(RotateVoxelSelectionResultCode::InvalidPreview,
@@ -202,7 +285,7 @@ RotateVoxelSelectionResult RotateVoxelSelectionOperation::Build(
         return FromCommon(std::move(common));
     const TransformPreviewOperationData data = preview.OperationData();
     const VoxelRotationGeometry geometry = BuildGeometry(
-        data.SourcePositions, data.SourceBounds, direction);
+        data.SourcePositions, data.SourceBounds, axis, quarterTurns);
     if (!geometry.Valid() ||
         geometry.Destinations.size() != data.Voxels.size())
         return Refused(RotateVoxelSelectionResultCode::InvalidGeometry,
@@ -219,6 +302,13 @@ RotateVoxelSelectionResult RotateVoxelSelectionOperation::Build(
         return Refused(RotateVoxelSelectionResultCode::InvalidGeometry,
             "Rotate destination bounds do not match the preview.");
     return FromCommon(std::move(common));
+}
+
+const char* VoxelRotationAxisName(const VoxelRotationAxis axis) noexcept
+{
+    if (axis == VoxelRotationAxis::X) return "X";
+    if (axis == VoxelRotationAxis::Y) return "Y";
+    return "Z";
 }
 
 const char* VoxelRotationDirectionName(

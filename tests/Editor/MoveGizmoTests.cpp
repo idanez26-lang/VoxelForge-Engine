@@ -541,9 +541,10 @@ void TestVisualStateIsPreparedOutsideRenderer()
         "Dragging must emphasize only the locked axis and dim the others.");
     context.ActiveTool = ActiveVoxelTool::Rotate;
     Require(model.Update(context) &&
-            model.View().State == TransformGizmoInteractionState::Idle &&
-            model.View().ActiveAxis == TransformGizmoAxis::None,
-        "Rotate remains visual-only and must ignore Move interaction state.");
+            model.View().State == TransformGizmoInteractionState::Dragging &&
+            model.View().ActiveAxis == TransformGizmoAxis::X &&
+            model.View().Axes[0].HasRotationRing,
+        "Rotate must now consume the shared gizmo interaction state.");
 }
 
 void TestProfessionalMoveGizmoStyleAndContextHelp()

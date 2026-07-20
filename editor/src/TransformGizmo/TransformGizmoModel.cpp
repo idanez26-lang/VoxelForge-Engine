@@ -1,4 +1,5 @@
 #include "TransformGizmoModel.h"
+#include "GizmoStyle.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +12,7 @@ constexpr std::array<float, 4U> XAxisColor{0.94F, 0.20F, 0.18F, 1.0F};
 constexpr std::array<float, 4U> YAxisColor{0.24F, 0.86F, 0.32F, 1.0F};
 constexpr std::array<float, 4U> ZAxisColor{0.20F, 0.46F, 1.0F, 1.0F};
 constexpr float ProjectionTolerancePixels = 0.25F;
+constexpr float Pi = 3.14159265358979323846F;
 
 [[nodiscard]] TransformGizmoView HiddenView() noexcept
 {
@@ -231,6 +233,33 @@ std::string_view TransformGizmoModel::ContextHelpFor(
     const TransformGizmoInteractionState state,
     const TransformGizmoAxis axis) noexcept
 {
+    return ContextHelpFor(TransformGizmoMode::Move, state, axis);
+}
+
+std::string_view TransformGizmoModel::ContextHelpFor(
+    const TransformGizmoMode mode,
+    const TransformGizmoInteractionState state,
+    const TransformGizmoAxis axis) noexcept
+{
+    if (mode == TransformGizmoMode::Rotate)
+    {
+        if (state == TransformGizmoInteractionState::Dragging)
+        {
+            if (axis == TransformGizmoAxis::X)
+                return "Rotating on X - Release to apply - Esc to cancel";
+            if (axis == TransformGizmoAxis::Y)
+                return "Rotating on Y - Release to apply - Esc to cancel";
+            if (axis == TransformGizmoAxis::Z)
+                return "Rotating on Z - Release to apply - Esc to cancel";
+        }
+        if (state == TransformGizmoInteractionState::Hover)
+        {
+            if (axis == TransformGizmoAxis::X) return "Rotate X";
+            if (axis == TransformGizmoAxis::Y) return "Rotate Y";
+            if (axis == TransformGizmoAxis::Z) return "Rotate Z";
+        }
+        return {};
+    }
     if (state == TransformGizmoInteractionState::Dragging)
     {
         if (axis == TransformGizmoAxis::X)
@@ -276,7 +305,7 @@ bool TransformGizmoModel::Update(
         (static_cast<float>(context.Bounds.Minimum.Z) +
          static_cast<float>(context.Bounds.Maximum.Z) + 1.0F) * 0.5F};
     const Vec3 worldCenter = gridCenter - context.ModelCenter;
-    const std::array<TransformGizmoSizingResult, 3U> sizings{{
+    std::array<TransformGizmoSizingResult, 3U> sizings{{
         CalculateSizing(context, worldCenter, TransformGizmoAxis::X),
         CalculateSizing(context, worldCenter, TransformGizmoAxis::Y),
         CalculateSizing(context, worldCenter, TransformGizmoAxis::Z)}};
@@ -287,13 +316,47 @@ bool TransformGizmoModel::Update(
         view_ = hidden;
         return true;
     }
+    if (mode == TransformGizmoMode::Rotate)
+    {
+        const float extentX = static_cast<float>(
+            context.Bounds.Maximum.X - context.Bounds.Minimum.X + 1);
+        const float extentY = static_cast<float>(
+            context.Bounds.Maximum.Y - context.Bounds.Minimum.Y + 1);
+        const float extentZ = static_cast<float>(
+            context.Bounds.Maximum.Z - context.Bounds.Minimum.Z + 1);
+        const float requestedRadius = 0.5F * GizmoStyle::RotateRadiusMultiplier *
+            std::sqrt(extentX * extentX + extentY * extentY +
+                extentZ * extentZ);
+        for (TransformGizmoSizingResult& sizing : sizings)
+        {
+            const float previousWorld = sizing.WorldLength;
+            if (previousWorld <= 0.0F ||
+                sizing.UnclampedWorldLength <= 0.0F)
+                continue;
+            sizing.WorldLength = std::clamp(
+                previousWorld * requestedRadius /
+                    sizing.UnclampedWorldLength,
+                MinimumScreenCappedWorldLength, MaximumWorldLength);
+            sizing.ProjectedLengthPixels *=
+                sizing.WorldLength / previousWorld;
+            if (sizing.ProjectedLengthPixels > MaximumAxisLengthPixels)
+            {
+                const float correction = AxisCeilingTargetPixels /
+                    sizing.ProjectedLengthPixels;
+                sizing.WorldLength *= correction;
+                sizing.ProjectedLengthPixels *= correction;
+            }
+        }
+    }
 
     TransformGizmoView next;
     next.Visible = true;
     next.Mode = mode;
-    next.State = mode == TransformGizmoMode::Move
+    const bool interactiveMode = mode == TransformGizmoMode::Move ||
+        mode == TransformGizmoMode::Rotate;
+    next.State = interactiveMode
         ? context.InteractionState : TransformGizmoInteractionState::Idle;
-    next.ActiveAxis = mode == TransformGizmoMode::Move
+    next.ActiveAxis = interactiveMode
         ? context.ActiveAxis : TransformGizmoAxis::None;
     next.Center = worldCenter;
     next.AxisLength = std::max({
@@ -309,16 +372,37 @@ bool TransformGizmoModel::Update(
          sizings[2].ProjectedLengthPixels) / 3.0F);
     const float representativeWorldPerPixel =
         representativeLength / representativePixels;
+    const float normalThicknessPixels = mode == TransformGizmoMode::Rotate
+        ? GizmoStyle::RotateIdleThicknessPixels
+        : NormalAxisThicknessPixels;
     next.AxisThickness = std::min(
-        representativeWorldPerPixel * NormalAxisThicknessPixels,
+        representativeWorldPerPixel * normalThicknessPixels,
         representativeLength * 0.12F);
     next.CenterRadius = std::min(
-        representativeWorldPerPixel * MinimumCenterPixels,
+        representativeWorldPerPixel *
+            (mode == TransformGizmoMode::Rotate
+                ? GizmoStyle::RotateCenterDiameterPixels * 0.5F
+                : MinimumCenterPixels),
         representativeLength * 0.24F);
-    const auto styled = [&next](const TransformGizmoAxis axis,
-                                const std::array<float, 4U> color)
+    const auto styled = [&next, mode](const TransformGizmoAxis axis,
+                                     const std::array<float, 4U> color)
     {
         std::array<float, 4U> result = color;
+        if (mode == TransformGizmoMode::Rotate)
+        {
+            float intensity = GizmoStyle::RotateIdleIntensity;
+            if (next.State == TransformGizmoInteractionState::Dragging)
+                intensity = axis == next.ActiveAxis
+                    ? GizmoStyle::RotateDraggingIntensity
+                    : GizmoStyle::RotateInactiveDraggingIntensity;
+            else if (next.State == TransformGizmoInteractionState::Hover &&
+                     axis == next.ActiveAxis)
+                intensity = GizmoStyle::RotateHoverIntensity;
+            result[0] *= intensity;
+            result[1] *= intensity;
+            result[2] *= intensity;
+            return result;
+        }
         if (next.State == TransformGizmoInteractionState::Dragging &&
             axis != next.ActiveAxis)
         {
@@ -349,9 +433,19 @@ bool TransformGizmoModel::Update(
         const float projectedPixels = std::max(
             sizing.ProjectedLengthPixels, 1.0F);
         const float worldPerPixel = sizing.WorldLength / projectedPixels;
+        float thicknessPixels = axis == next.ActiveAxis
+            ? ActiveAxisThicknessPixels : NormalAxisThicknessPixels;
+        if (mode == TransformGizmoMode::Rotate)
+            thicknessPixels = next.State ==
+                    TransformGizmoInteractionState::Dragging &&
+                    axis == next.ActiveAxis
+                ? GizmoStyle::RotateDraggingThicknessPixels
+                : next.State == TransformGizmoInteractionState::Hover &&
+                    axis == next.ActiveAxis
+                ? GizmoStyle::RotateHoverThicknessPixels
+                : GizmoStyle::RotateIdleThicknessPixels;
         result.Thickness = std::min(
-            worldPerPixel * (axis == next.ActiveAxis
-                ? ActiveAxisThicknessPixels : NormalAxisThicknessPixels),
+            worldPerPixel * thicknessPixels,
             sizing.WorldLength * 0.12F);
         result.ProjectedLengthPixels = sizing.ProjectedLengthPixels;
         result.CameraFacing = sizing.CameraFacing;
@@ -378,12 +472,41 @@ bool TransformGizmoModel::Update(
             result.ArrowBaseCorners = ArrowBaseCorners(
                 axis, result.ArrowBaseCenter, result.ArrowWidth * 0.5F);
         }
+        result.HasRotationRing = mode == TransformGizmoMode::Rotate;
+        if (result.HasRotationRing)
+        {
+            result.RotationRingRadius = sizing.WorldLength;
+            for (std::size_t segment = 0U;
+                 segment < result.RotationRingPoints.size(); ++segment)
+            {
+                const float angle = 2.0F * Pi *
+                    static_cast<float>(segment) /
+                    static_cast<float>(result.RotationRingPoints.size());
+                const float cosine = std::cos(angle) * sizing.WorldLength;
+                const float sine = std::sin(angle) * sizing.WorldLength;
+                if (axis == TransformGizmoAxis::X)
+                    result.RotationRingPoints[segment] =
+                        worldCenter + Vec3{0.0F, cosine, sine};
+                else if (axis == TransformGizmoAxis::Y)
+                    result.RotationRingPoints[segment] =
+                        worldCenter + Vec3{cosine, 0.0F, sine};
+                else
+                    result.RotationRingPoints[segment] =
+                        worldCenter + Vec3{cosine, sine, 0.0F};
+            }
+        }
         return result;
     };
     next.Axes = {{
-        makeAxis(0U, TransformGizmoAxis::X, XAxisColor),
-        makeAxis(1U, TransformGizmoAxis::Y, YAxisColor),
-        makeAxis(2U, TransformGizmoAxis::Z, ZAxisColor)}};
+        makeAxis(0U, TransformGizmoAxis::X,
+            mode == TransformGizmoMode::Rotate
+                ? GizmoStyle::RotateXColor : XAxisColor),
+        makeAxis(1U, TransformGizmoAxis::Y,
+            mode == TransformGizmoMode::Rotate
+                ? GizmoStyle::RotateYColor : YAxisColor),
+        makeAxis(2U, TransformGizmoAxis::Z,
+            mode == TransformGizmoMode::Rotate
+                ? GizmoStyle::RotateZColor : ZAxisColor)}};
     if (view_ == next) return false;
     view_ = next;
     return true;

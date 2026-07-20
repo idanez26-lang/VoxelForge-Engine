@@ -203,6 +203,10 @@ void AppendTransformGizmo(
     const bool centerOnly = false)
 {
     if (!gizmo.Visible) return;
+    // Rotate rings are screen-space anti-aliased polylines. Building each
+    // chord as an axis-aligned 3D box creates square joints, overlap and long
+    // projected extensions, especially without MSAA.
+    if (gizmo.Mode == TransformGizmoMode::Rotate) return;
     const float centerRadius = gizmo.CenterRadius;
     const std::array<float, 4U> centerColor{
         0.92F * colorScale, 0.94F * colorScale,
@@ -998,7 +1002,8 @@ bool ViewportRenderer::EnsureHighlights()
         transformGizmoVisibleIndexCount_ = 0U;
         transformGizmoOccludedIndexCount_ = 0U;
     };
-    if (transformGizmo_)
+    if (transformGizmo_ &&
+        transformGizmo_->Mode != TransformGizmoMode::Rotate)
     {
         std::vector<GPUVertex> visibleVertices;
         std::vector<std::uint32_t> visibleIndices;

@@ -17,9 +17,18 @@ enum class VoxelRotationDirection : std::uint8_t
     CounterClockwise
 };
 
+enum class VoxelRotationAxis : std::uint8_t
+{
+    X,
+    Y,
+    Z
+};
+
 struct VoxelRotationGeometry final
 {
     VoxelRotationDirection Direction = VoxelRotationDirection::Clockwise;
+    VoxelRotationAxis Axis = VoxelRotationAxis::Y;
+    std::int32_t QuarterTurns = 1;
     // Centers use doubled voxel coordinates so half-cell shifts remain exact.
     std::int64_t SourceCenter2X = 0;
     std::int64_t SourceCenter2Z = 0;
@@ -72,6 +81,11 @@ public:
         std::span<const Asset::Voxel::VoxelPosition> sourcePositions,
         SelectionBounds sourceBounds,
         VoxelRotationDirection direction);
+    [[nodiscard]] static VoxelRotationGeometry BuildGeometry(
+        std::span<const Asset::Voxel::VoxelPosition> sourcePositions,
+        SelectionBounds sourceBounds,
+        VoxelRotationAxis axis,
+        std::int32_t quarterTurns);
 
     [[nodiscard]] static RotateVoxelSelectionResult Build(
         const Asset::Voxel::VoxelDocument& document,
@@ -79,10 +93,19 @@ public:
         std::uint64_t documentGeneration,
         const TransformPreviewModel& preview,
         VoxelRotationDirection direction);
+    [[nodiscard]] static RotateVoxelSelectionResult Build(
+        const Asset::Voxel::VoxelDocument& document,
+        const SelectionService& selection,
+        std::uint64_t documentGeneration,
+        const TransformPreviewModel& preview,
+        VoxelRotationAxis axis,
+        std::int32_t quarterTurns);
 };
 
 [[nodiscard]] const char* VoxelRotationDirectionName(
     VoxelRotationDirection direction) noexcept;
+[[nodiscard]] const char* VoxelRotationAxisName(
+    VoxelRotationAxis axis) noexcept;
 [[nodiscard]] const char* RotateVoxelSelectionResultCodeName(
     RotateVoxelSelectionResultCode code) noexcept;
 

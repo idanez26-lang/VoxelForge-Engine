@@ -10,6 +10,8 @@ namespace VoxelForge::Editor
 namespace
 {
 constexpr float Epsilon = 1.0e-6F;
+constexpr float RadiansToDegreesFactor =
+    180.0F / 3.14159265358979323846F;
 
 [[nodiscard]] bool IsFinite(const Vec2 value) noexcept
 {
@@ -95,7 +97,9 @@ TransformGizmoAxis TransformGizmoInteraction::UpdateHover(
     if (IsDragging()) return lockedAxis_;
     hoveredAxis_ = TransformGizmoAxis::None;
     state_ = TransformGizmoInteractionState::Idle;
-    if (!view.Visible || view.Mode != TransformGizmoMode::Move ||
+    if (!view.Visible ||
+        (view.Mode != TransformGizmoMode::Move &&
+         view.Mode != TransformGizmoMode::Rotate) ||
         !IsFinite(input.ScreenPosition) || input.Viewport.Width <= 0.0F ||
         input.Viewport.Height <= 0.0F || !IsFinite(input.ViewProjection))
         return hoveredAxis_;
@@ -103,6 +107,31 @@ TransformGizmoAxis TransformGizmoInteraction::UpdateHover(
     float bestDistance = PickTolerancePixels * PickTolerancePixels;
     for (const TransformGizmoAxisView& axis : view.Axes)
     {
+        if (view.Mode == TransformGizmoMode::Rotate && axis.HasRotationRing)
+        {
+            float distance = std::numeric_limits<float>::max();
+            for (std::size_t segment = 0U;
+                 segment < axis.RotationRingPoints.size(); ++segment)
+            {
+                const auto start = TransformGizmoModel::ProjectWorldToScreen(
+                    axis.RotationRingPoints[segment], input.Viewport,
+                    input.ViewProjection);
+                const auto end = TransformGizmoModel::ProjectWorldToScreen(
+                    axis.RotationRingPoints[(segment + 1U) %
+                        axis.RotationRingPoints.size()], input.Viewport,
+                    input.ViewProjection);
+                if (start && end)
+                    distance = std::min(distance, DistanceToSegmentSquared(
+                        input.ScreenPosition, *start, *end));
+            }
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                hoveredAxis_ = axis.Axis;
+            }
+            continue;
+        }
+        if (view.Mode == TransformGizmoMode::Rotate) continue;
         const auto start = TransformGizmoModel::ProjectWorldToScreen(
             axis.Start, input.Viewport, input.ViewProjection);
         const auto end = TransformGizmoModel::ProjectWorldToScreen(
@@ -158,7 +187,9 @@ bool TransformGizmoInteraction::BeginDrag(
     const std::uint64_t documentGeneration,
     const SelectionBounds selectionBounds) noexcept
 {
-    if (IsDragging() || !view.Visible || view.Mode != TransformGizmoMode::Move ||
+    if (IsDragging() || !view.Visible ||
+        (view.Mode != TransformGizmoMode::Move &&
+         view.Mode != TransformGizmoMode::Rotate) ||
         axis == TransformGizmoAxis::None || axis != hoveredAxis_ ||
         documentGeneration == 0U || !selectionBounds.Valid ||
         !IsFinite(input.ScreenPosition) || !std::isfinite(view.AxisLength) ||
@@ -166,6 +197,39 @@ bool TransformGizmoInteraction::BeginDrag(
         return false;
 
     const Vec3 direction = AxisVector(axis);
+    if (view.Mode == TransformGizmoMode::Rotate)
+    {
+        const auto centerScreen = TransformGizmoModel::ProjectWorldToScreen(
+            view.Center, input.Viewport, input.ViewProjection);
+        if (!centerScreen) return false;
+        const Vec2 screenVector{
+            input.ScreenPosition.X - centerScreen->X,
+            input.ScreenPosition.Y - centerScreen->Y};
+        const float screenLength = std::sqrt(
+            screenVector.X * screenVector.X + screenVector.Y * screenVector.Y);
+        if (!std::isfinite(screenLength) || screenLength <= Epsilon)
+            return false;
+        mode_ = TransformGizmoMode::Rotate;
+        state_ = TransformGizmoInteractionState::Dragging;
+        lockedAxis_ = axis;
+        axisOrigin_ = view.Center;
+        axisDirection_ = direction;
+        pointerStart_ = input.ScreenPosition;
+        rotationStartScreenVector_ = {
+            screenVector.X / screenLength, screenVector.Y / screenLength};
+        if (input.Ray)
+        {
+            if (const auto point = IntersectRotationPlane(
+                    *input.Ray, axisOrigin_, axisDirection_))
+                rotationStartVector_ = Normalize(*point - axisOrigin_);
+        }
+        lastRawAngleDegrees_ = 0.0F;
+        accumulatedAngleDegrees_ = 0.0F;
+        quarterTurns_ = 0;
+        documentGeneration_ = documentGeneration;
+        selectionBounds_ = selectionBounds;
+        return true;
+    }
     const auto centerScreen = TransformGizmoModel::ProjectWorldToScreen(
         view.Center, input.Viewport, input.ViewProjection);
     const auto axisView = std::find_if(
@@ -193,6 +257,7 @@ bool TransformGizmoInteraction::BeginDrag(
         return false;
 
     state_ = TransformGizmoInteractionState::Dragging;
+    mode_ = TransformGizmoMode::Move;
     lockedAxis_ = axis;
     axisOrigin_ = view.Center;
     axisDirection_ = direction;
@@ -210,6 +275,22 @@ bool TransformGizmoInteraction::UpdateDrag(
     const TransformGizmoPointerInput& input) noexcept
 {
     if (!IsDragging() || !IsFinite(input.ScreenPosition)) return false;
+    if (mode_ == TransformGizmoMode::Rotate)
+    {
+        const float raw = RotationAngle(input);
+        if (!std::isfinite(raw)) return false;
+        float difference = raw - lastRawAngleDegrees_;
+        if (difference > 180.0F) difference -= 360.0F;
+        else if (difference < -180.0F) difference += 360.0F;
+        accumulatedAngleDegrees_ += difference;
+        lastRawAngleDegrees_ = raw;
+        const std::int32_t next = std::clamp(
+            static_cast<std::int32_t>(std::llround(
+                accumulatedAngleDegrees_ / 90.0F)), -4, 4);
+        if (next == quarterTurns_) return false;
+        quarterTurns_ = next;
+        return true;
+    }
     float worldDelta = ScreenFallbackParameter(input.ScreenPosition);
     if (input.Ray && rayAnchorParameter_)
     {
@@ -232,8 +313,11 @@ TransformGizmoDragRelease TransformGizmoInteraction::EndDrag() noexcept
     TransformGizmoDragRelease release;
     if (IsDragging())
     {
+        release.Mode = mode_;
         release.Axis = lockedAxis_;
         release.Delta = delta_;
+        release.QuarterTurns = quarterTurns_;
+        release.AngleDegrees = accumulatedAngleDegrees_;
         release.WasDragging = true;
     }
     ClearDrag();
@@ -291,6 +375,21 @@ Asset::Voxel::VoxelPosition TransformGizmoInteraction::Delta() const noexcept
     return delta_;
 }
 
+std::int32_t TransformGizmoInteraction::QuarterTurns() const noexcept
+{
+    return quarterTurns_;
+}
+
+float TransformGizmoInteraction::AngleDegrees() const noexcept
+{
+    return accumulatedAngleDegrees_;
+}
+
+TransformGizmoMode TransformGizmoInteraction::Mode() const noexcept
+{
+    return mode_;
+}
+
 TransformGizmoInteractionState TransformGizmoInteraction::State() const noexcept
 {
     return state_;
@@ -336,6 +435,57 @@ float TransformGizmoInteraction::ScreenFallbackParameter(
     return std::isfinite(result) ? result : 0.0F;
 }
 
+std::optional<Vec3> TransformGizmoInteraction::IntersectRotationPlane(
+    const VoxelRay& ray, const Vec3 center, const Vec3 normal) noexcept
+{
+    const Vec3 direction = Normalize(ray.Direction);
+    const float denominator = Dot(direction, normal);
+    if (!IsFinite(ray.Origin) || !IsFinite(direction) || !IsFinite(center) ||
+        !IsFinite(normal) || std::abs(denominator) <= 1.0e-5F)
+        return std::nullopt;
+    const float distance = Dot(center - ray.Origin, normal) / denominator;
+    if (!std::isfinite(distance)) return std::nullopt;
+    const Vec3 point = ray.Origin + direction * distance;
+    return IsFinite(point) ? std::optional<Vec3>(point) : std::nullopt;
+}
+
+float TransformGizmoInteraction::RotationAngle(
+    const TransformGizmoPointerInput& input) const noexcept
+{
+    if (input.Ray && Length(rotationStartVector_) > Epsilon)
+    {
+        if (const auto point = IntersectRotationPlane(
+                *input.Ray, axisOrigin_, axisDirection_))
+        {
+            const Vec3 current = Normalize(*point - axisOrigin_);
+            if (Length(current) > Epsilon)
+            {
+                const float sine = Dot(axisDirection_,
+                    Cross(rotationStartVector_, current));
+                const float cosine = Dot(rotationStartVector_, current);
+                const float angle = std::atan2(sine, cosine) *
+                    RadiansToDegreesFactor;
+                if (std::isfinite(angle)) return angle;
+            }
+        }
+    }
+    const auto center = TransformGizmoModel::ProjectWorldToScreen(
+        axisOrigin_, input.Viewport, input.ViewProjection);
+    if (!center) return lastRawAngleDegrees_;
+    Vec2 current{input.ScreenPosition.X - center->X,
+                 input.ScreenPosition.Y - center->Y};
+    const float length = std::sqrt(current.X * current.X + current.Y * current.Y);
+    if (!std::isfinite(length) || length <= Epsilon)
+        return lastRawAngleDegrees_;
+    current = {current.X / length, current.Y / length};
+    const float sine = rotationStartScreenVector_.X * current.Y -
+        rotationStartScreenVector_.Y * current.X;
+    const float cosine = rotationStartScreenVector_.X * current.X +
+        rotationStartScreenVector_.Y * current.Y;
+    const float angle = std::atan2(sine, cosine) * RadiansToDegreesFactor;
+    return std::isfinite(angle) ? angle : lastRawAngleDegrees_;
+}
+
 void TransformGizmoInteraction::ClearDrag() noexcept
 {
     lockedAxis_ = TransformGizmoAxis::None;
@@ -345,6 +495,12 @@ void TransformGizmoInteraction::ClearDrag() noexcept
     screenAxisDirection_ = {0.0F, -1.0F};
     worldUnitsPerPixel_ = 0.0F;
     rayAnchorParameter_.reset();
+    mode_ = TransformGizmoMode::None;
+    rotationStartVector_ = {};
+    rotationStartScreenVector_ = {1.0F, 0.0F};
+    lastRawAngleDegrees_ = 0.0F;
+    accumulatedAngleDegrees_ = 0.0F;
+    quarterTurns_ = 0;
     delta_ = {};
     documentGeneration_ = 0U;
     selectionBounds_ = {};
