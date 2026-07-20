@@ -1,5 +1,6 @@
 #include "TransformGizmo/TransformGizmoInteraction.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -253,11 +254,22 @@ void TestArrowHeadsAndPickingUseTheFinalProjection()
         const TransformGizmoView view = MakeHybridView(
             cameraDepth, viewportHeight);
         const TransformGizmoAxisView& x = view.Axes[0];
-        Require(x.HasArrowHead && x.Axis == TransformGizmoAxis::X &&
+        const TransformGizmoAxisView& y = view.Axes[1];
+        const TransformGizmoAxisView& z = view.Axes[2];
+        Require(x.HasArrowHead && y.HasArrowHead && z.HasArrowHead &&
+                x.Axis == TransformGizmoAxis::X &&
+                y.Axis == TransformGizmoAxis::Y &&
+                z.Axis == TransformGizmoAxis::Z &&
                 x.ArrowBaseCenter.X < x.End.X &&
                 x.ArrowBaseCenter.Y == x.End.Y &&
-                x.ArrowBaseCenter.Z == x.End.Z,
-            "Move X must have one arrow head oriented at its positive endpoint.");
+                x.ArrowBaseCenter.Z == x.End.Z &&
+                y.ArrowBaseCenter.X == y.End.X &&
+                y.ArrowBaseCenter.Y < y.End.Y &&
+                y.ArrowBaseCenter.Z == y.End.Z &&
+                z.ArrowBaseCenter.X == z.End.X &&
+                z.ArrowBaseCenter.Y == z.End.Y &&
+                z.ArrowBaseCenter.Z < z.End.Z,
+            "Move must prepare one correctly oriented positive arrow per axis.");
         TransformGizmoPointerInput input;
         input.Viewport = {0.0F, 0.0F, viewportWidth, viewportHeight};
         input.ViewProjection = MakePerspectiveProjection(
@@ -298,6 +310,66 @@ void TestArrowHeadsAndPickingUseTheFinalProjection()
             dragged.Axes[0].Thickness == hovered.Axes[0].Thickness &&
             dragged.Axes[1].Color[1] < hovered.Axes[1].Color[1],
         "The locked segment and its arrow must stay highlighted together while other axes dim.");
+}
+
+void TestShaftAndArrowTipPickingStaySynchronized()
+{
+    TransformGizmoView view = MakeView();
+    constexpr float base = 8.5F;
+    constexpr float halfWidth = 0.5F;
+    view.Axes[0].HasArrowHead = true;
+    view.Axes[0].ArrowBaseCenter = {base, 0.0F, 0.0F};
+    view.Axes[0].ArrowBaseCorners = {{{base, -halfWidth, -halfWidth},
+        {base, halfWidth, -halfWidth}, {base, halfWidth, halfWidth},
+        {base, -halfWidth, halfWidth}}};
+    view.Axes[1].HasArrowHead = true;
+    view.Axes[1].ArrowBaseCenter = {0.0F, base, 0.0F};
+    view.Axes[1].ArrowBaseCorners = {{{-halfWidth, base, -halfWidth},
+        {halfWidth, base, -halfWidth}, {halfWidth, base, halfWidth},
+        {-halfWidth, base, halfWidth}}};
+    view.Axes[2].HasArrowHead = true;
+    view.Axes[2].ArrowBaseCenter = {0.0F, 0.0F, base};
+    view.Axes[2].ArrowBaseCorners = {{{-halfWidth, -halfWidth, base},
+        {halfWidth, -halfWidth, base}, {halfWidth, halfWidth, base},
+        {-halfWidth, halfWidth, base}}};
+
+    TransformGizmoPointerInput input;
+    input.Viewport = {0.0F, 0.0F, 1000.0F, 1000.0F};
+    input.ViewProjection = MakeProjection();
+    TransformGizmoInteraction interaction;
+    for (std::size_t index = 0U; index < view.Axes.size(); ++index)
+    {
+        const TransformGizmoAxisView& axis = view.Axes[index];
+        const auto shaft = TransformGizmoModel::ProjectWorldToScreen(
+            (axis.Start + axis.ArrowBaseCenter) * 0.5F,
+            input.Viewport, input.ViewProjection);
+        const auto tip = TransformGizmoModel::ProjectWorldToScreen(
+            axis.End, input.Viewport, input.ViewProjection);
+        Require(shaft.has_value() && tip.has_value(),
+            "Every professional Move arrow must project fully.");
+        input.ScreenPosition = *shaft;
+        Require(interaction.UpdateHover(view, input) == axis.Axis,
+            "Each rendered shaft must be pickable.");
+        input.ScreenPosition = *tip;
+        Require(interaction.UpdateHover(view, input) == axis.Axis,
+            "Each rendered arrow tip must be pickable without a ghost region.");
+    }
+
+    view.Mode = TransformGizmoMode::Rotate;
+    for (TransformGizmoAxisView& axis : view.Axes) axis.HasArrowHead = false;
+    Require(std::ranges::none_of(view.Axes,
+                [](const TransformGizmoAxisView& axis)
+                {
+                    return axis.HasArrowHead;
+                }),
+        "Rotate must not inherit Move arrow heads.");
+    view.Mode = TransformGizmoMode::Scale;
+    Require(std::ranges::none_of(view.Axes,
+                [](const TransformGizmoAxisView& axis)
+                {
+                    return axis.HasArrowHead;
+                }),
+        "Scale must not inherit Move arrow heads.");
 }
 
 void TestAxisLockedIntegerDragging()
@@ -473,6 +545,121 @@ void TestVisualStateIsPreparedOutsideRenderer()
             model.View().ActiveAxis == TransformGizmoAxis::None,
         "Rotate remains visual-only and must ignore Move interaction state.");
 }
+
+void TestProfessionalMoveGizmoStyleAndContextHelp()
+{
+    TransformGizmoUpdateContext context;
+    context.DocumentActive = true;
+    context.SelectionEmpty = false;
+    context.ActiveDocumentGeneration = 9U;
+    context.SelectionDocumentGeneration = 9U;
+    context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {4, 2, 1});
+    context.ModelCenter = {2.5F, 1.5F, 1.0F};
+    context.ActiveTool = ActiveVoxelTool::Move;
+    context.CameraPosition = {0.0F, 0.0F, -20.0F};
+    context.CameraForward = {0.0F, 0.0F, 1.0F};
+    context.ViewportHeightPixels = 720.0F;
+    context.Viewport = {0.0F, 0.0F, 1280.0F, 720.0F};
+    context.ViewProjection = MakePerspectiveProjection(
+        20.0F, context.Viewport.Width, context.Viewport.Height);
+
+    TransformGizmoModel model;
+    Require(model.Update(context), "Unable to build the normal Move style.");
+    const TransformGizmoView normal = model.View();
+    Require(normal.Visible && normal.CenterRadius > 0.0F &&
+            normal.Axes[0].Color[0] > normal.Axes[0].Color[1] &&
+            normal.Axes[1].Color[1] > normal.Axes[1].Color[0] &&
+            normal.Axes[2].Color[2] > normal.Axes[2].Color[0],
+        "The normal style must keep a discreet center and canonical RGB axes.");
+    for (const TransformGizmoAxisView& axis : normal.Axes)
+    {
+        Require(axis.HasArrowHead && axis.Thickness > 0.0F &&
+                axis.ArrowLength > 0.0F && axis.ArrowWidth > 0.0F &&
+                axis.ArrowWidth < axis.ArrowLength,
+            "Move must expose three thin shafts with compact arrow heads.");
+    }
+
+    constexpr std::array<TransformGizmoAxis, 3U> axes{
+        TransformGizmoAxis::X,
+        TransformGizmoAxis::Y,
+        TransformGizmoAxis::Z};
+    constexpr std::array<std::string_view, 3U> hoverHelp{
+        "Move X", "Move Y", "Move Z"};
+    constexpr std::array<std::string_view, 3U> dragHelp{
+        "Moving on X — Release to apply — Esc to cancel",
+        "Moving on Y — Release to apply — Esc to cancel",
+        "Moving on Z — Release to apply — Esc to cancel"};
+    for (std::size_t activeIndex = 0U; activeIndex < axes.size(); ++activeIndex)
+    {
+        context.InteractionState = TransformGizmoInteractionState::Hover;
+        context.ActiveAxis = axes[activeIndex];
+        Require(model.Update(context), "Unable to build a hovered Move style.");
+        const TransformGizmoView hovered = model.View();
+        const float thicknessRatio =
+            hovered.Axes[activeIndex].Thickness /
+            normal.Axes[activeIndex].Thickness;
+        Require((hovered.Axes[activeIndex].CameraFacing ||
+                    (thicknessRatio >= 1.10F && thicknessRatio <= 1.20F)) &&
+                hovered.Axes[activeIndex].Color !=
+                    normal.Axes[activeIndex].Color &&
+                TransformGizmoModel::ContextHelpFor(
+                    hovered.State, hovered.ActiveAxis) == hoverHelp[activeIndex],
+            "Hover must brighten its axis and restrain visible shaft thickening.");
+        for (std::size_t index = 0U; index < axes.size(); ++index)
+        {
+            if (index == activeIndex) continue;
+            Require(hovered.Axes[index].Color == normal.Axes[index].Color &&
+                    hovered.Axes[index].Thickness ==
+                        normal.Axes[index].Thickness,
+                "Hover must leave both inactive axes visually unchanged.");
+        }
+
+        context.InteractionState = TransformGizmoInteractionState::Dragging;
+        Require(model.Update(context), "Unable to build a dragged Move style.");
+        const TransformGizmoView dragged = model.View();
+        Require(dragged.Axes[activeIndex].Color ==
+                    hovered.Axes[activeIndex].Color &&
+                dragged.Axes[activeIndex].Thickness ==
+                    hovered.Axes[activeIndex].Thickness &&
+                TransformGizmoModel::ContextHelpFor(
+                    dragged.State, dragged.ActiveAxis) == dragHelp[activeIndex],
+            "Dragging must lock the highlighted shaft, tip, and contextual help.");
+        for (std::size_t index = 0U; index < axes.size(); ++index)
+        {
+            if (index == activeIndex) continue;
+            Require(dragged.Axes[index].Color[3] == 1.0F &&
+                    dragged.Axes[index].Color[0] < normal.Axes[index].Color[0] &&
+                    dragged.Axes[index].Color[1] < normal.Axes[index].Color[1] &&
+                    dragged.Axes[index].Color[2] < normal.Axes[index].Color[2] &&
+                    dragged.Axes[index].Color[0] >
+                        normal.Axes[index].Color[0] * 0.65F,
+                "Inactive drag axes must remain visible with restrained dimming.");
+        }
+    }
+
+    context.InteractionState = TransformGizmoInteractionState::Idle;
+    context.ActiveAxis = TransformGizmoAxis::None;
+    Require(model.Update(context) && model.View().Axes == normal.Axes &&
+            TransformGizmoModel::ContextHelpFor(
+                context.InteractionState, context.ActiveAxis).empty(),
+        "MouseUp, Esc, or tool reset must restore the exact normal appearance.");
+    Require(TransformGizmoModel::ContextHelpFor(
+                TransformGizmoInteractionState::Hover,
+                TransformGizmoAxis::None).empty(),
+        "No axis must produce no contextual gizmo help.");
+    for (const ActiveVoxelTool tool : {
+             ActiveVoxelTool::Rotate, ActiveVoxelTool::Scale})
+    {
+        context.ActiveTool = tool;
+        Require(model.Update(context) &&
+                std::ranges::none_of(model.View().Axes,
+                    [](const TransformGizmoAxisView& axis)
+                    {
+                        return axis.HasArrowHead;
+                    }),
+            "Rotate and Scale must remain free of Move arrow heads.");
+    }
+}
 }
 
 int main()
@@ -482,10 +669,12 @@ int main()
         TestPickingAndPriority();
         TestPickingMatchesHybridRenderedSegmentsAtEveryDepth();
         TestArrowHeadsAndPickingUseTheFinalProjection();
+        TestShaftAndArrowTipPickingStaySynchronized();
         TestAxisLockedIntegerDragging();
         TestRoundingRayGeometryAndParallelFallback();
         TestInvalidationCancellationAndCaptureLifetime();
         TestVisualStateIsPreparedOutsideRenderer();
+        TestProfessionalMoveGizmoStyleAndContextHelp();
     }
     catch (const std::exception& error)
     {

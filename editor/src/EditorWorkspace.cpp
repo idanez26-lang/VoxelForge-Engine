@@ -2243,11 +2243,17 @@ void EditorWorkspace::DrawScenePanel()
         {
             if (transformGizmoInteraction_.IsDragging())
             {
+                const std::string_view gizmoHelp =
+                    TransformGizmoModel::ContextHelpFor(
+                        TransformGizmoInteractionState::Dragging,
+                        transformGizmoInteraction_.LockedAxis());
                 viewportHelp = transformPreviewModel_.HasCollisions()
                     ? "Move blocked: destination is occupied"
                     : transformPreviewModel_.HasOutOfBounds()
                     ? "Move blocked: destination is outside the model"
-                    : "Move on locked axis - Release to validate - Esc to cancel";
+                    : !gizmoHelp.empty()
+                    ? gizmoHelp.data()
+                    : "Moving — Release to apply — Esc to cancel";
             }
             else if (selectionInteraction_.Mode() ==
                     SelectionInteractionMode::MovingContent)
@@ -2260,7 +2266,13 @@ void EditorWorkspace::DrawScenePanel()
             }
             else
             {
-                viewportHelp = !voxelMoveStatusMessage_.empty()
+                const std::string_view gizmoHelp =
+                    TransformGizmoModel::ContextHelpFor(
+                        transformGizmoInteraction_.State(),
+                        transformGizmoInteraction_.HoveredAxis());
+                viewportHelp = !gizmoHelp.empty()
+                    ? gizmoHelp.data()
+                    : !voxelMoveStatusMessage_.empty()
                     ? voxelMoveStatusMessage_.c_str()
                     : CanMoveSelection()
                     ? "Drag an axis or drag inside the selection to move its voxels"
@@ -9847,6 +9859,72 @@ bool EditorWorkspace::RunMoveGizmoSmokeStep(const std::size_t frame)
             model.View(), input) == TransformGizmoAxis::X;
         return segmentHit && arrowHit;
     };
+    const auto professionalStyle = []
+    {
+        TransformGizmoUpdateContext context;
+        context.DocumentActive = true;
+        context.SelectionEmpty = false;
+        context.ActiveDocumentGeneration = 1U;
+        context.SelectionDocumentGeneration = 1U;
+        context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {7, 3, 2});
+        context.ModelCenter = {4.0F, 2.0F, 1.5F};
+        context.ActiveTool = ActiveVoxelTool::Move;
+        context.CameraPosition = {0.0F, 0.0F, -20.0F};
+        context.CameraForward = {0.0F, 0.0F, 1.0F};
+        context.ViewportHeightPixels = 720.0F;
+        context.Viewport = {0.0F, 0.0F, 1280.0F, 720.0F};
+        const float yScale = 1.0F / std::tan(
+            DegreesToRadians(context.VerticalFieldOfViewDegrees) * 0.5F);
+        const float xScale = yScale /
+            (context.Viewport.Width / context.Viewport.Height);
+        context.ViewProjection = {
+            xScale, 0.0F, 0.0F, 0.0F,
+            0.0F, yScale, 0.0F, 0.0F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.0F, 0.0F, 1.0F, 20.0F};
+        TransformGizmoModel model;
+        if (!model.Update(context)) return false;
+        const TransformGizmoView normal = model.View();
+        for (const TransformGizmoAxisView& axis : normal.Axes)
+            if (!axis.HasArrowHead || axis.ArrowWidth <= 0.0F ||
+                axis.ArrowWidth >= axis.ArrowLength)
+                return false;
+
+        constexpr std::array<TransformGizmoAxis, 3U> axes{
+            TransformGizmoAxis::X,
+            TransformGizmoAxis::Y,
+            TransformGizmoAxis::Z};
+        for (const TransformGizmoAxis axis : axes)
+        {
+            const std::size_t index = static_cast<std::size_t>(axis) - 1U;
+            context.InteractionState = TransformGizmoInteractionState::Hover;
+            context.ActiveAxis = axis;
+            if (!model.Update(context)) return false;
+            const TransformGizmoView hovered = model.View();
+            const float ratio = hovered.Axes[index].Thickness /
+                normal.Axes[index].Thickness;
+            if ((!hovered.Axes[index].CameraFacing &&
+                    (ratio < 1.10F || ratio > 1.20F)) ||
+                TransformGizmoModel::ContextHelpFor(
+                    hovered.State, hovered.ActiveAxis).empty())
+                return false;
+            context.InteractionState = TransformGizmoInteractionState::Dragging;
+            if (!model.Update(context)) return false;
+            const TransformGizmoView dragged = model.View();
+            if (dragged.Axes[index].Color != hovered.Axes[index].Color ||
+                TransformGizmoModel::ContextHelpFor(
+                    dragged.State, dragged.ActiveAxis).empty())
+                return false;
+            for (std::size_t other = 0U; other < axes.size(); ++other)
+                if (other != index &&
+                    dragged.Axes[other].Color[other] >=
+                        normal.Axes[other].Color[other])
+                    return false;
+        }
+        context.InteractionState = TransformGizmoInteractionState::Idle;
+        context.ActiveAxis = TransformGizmoAxis::None;
+        return model.Update(context) && model.View().Axes == normal.Axes;
+    };
 
     if (frame == 0U)
     {
@@ -9915,7 +9993,8 @@ bool EditorWorkspace::RunMoveGizmoSmokeStep(const std::size_t frame)
         UpdateTransformGizmo(720.0F);
         moveGizmoSmokeAxes_ = allAxes &&
             screenStablePick(0.05F, 640.0F, 360.0F) &&
-            screenStablePick(250.0F, 2560.0F, 1440.0F) && changed &&
+            screenStablePick(250.0F, 2560.0F, 1440.0F) &&
+            professionalStyle() && changed &&
             transformGizmoInteraction_.LockedAxis() == TransformGizmoAxis::X &&
             transformGizmoInteraction_.Delta() == VoxelPosition{3, 0, 0} &&
             transformPreviewModel_.VoxelCount() == 512U &&
@@ -12278,17 +12357,17 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
         const float projectedLength = std::sqrt(dx * dx + dy * dy);
         if (axis.CameraFacing || projectedLength < 0.5F)
         {
-            const float radius = axis.Axis == view.ActiveAxis ? 8.0F : 6.0F;
+            const float radius = axis.Axis == view.ActiveAxis ? 5.2F : 4.5F;
             drawList->AddCircleFilled(*end, radius, color, 16);
-            drawList->AddCircle(*end, radius + 1.5F,
-                IM_COL32(24, 28, 36, 255), 16, 1.5F);
+            drawList->AddCircle(*end, radius + 1.0F,
+                IM_COL32(24, 28, 36, 255), 16, 1.25F);
             continue;
         }
         const float inverseLength = 1.0F / projectedLength;
         const ImVec2 direction{dx * inverseLength, dy * inverseLength};
         const ImVec2 perpendicular{-direction.y, direction.x};
-        const float headLength = axis.Axis == view.ActiveAxis ? 8.0F : 7.0F;
-        const float halfWidth = axis.Axis == view.ActiveAxis ? 5.0F : 4.0F;
+        const float headLength = axis.Axis == view.ActiveAxis ? 6.9F : 6.0F;
+        const float halfWidth = axis.Axis == view.ActiveAxis ? 3.75F : 3.25F;
         const ImVec2 base{
             end->x - direction.x * headLength,
             end->y - direction.y * headLength};
@@ -12304,10 +12383,10 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
     }
     if (const auto center = project(view.Center))
     {
-        drawList->AddCircleFilled(*center, 4.0F,
+        drawList->AddCircleFilled(*center, 3.0F,
             IM_COL32(170, 178, 194, 255), 16);
-        drawList->AddCircle(*center, 5.5F,
-            IM_COL32(24, 28, 36, 255), 16, 1.5F);
+        drawList->AddCircle(*center, 4.25F,
+            IM_COL32(24, 28, 36, 255), 16, 1.25F);
     }
     drawList->PopClipRect();
 }

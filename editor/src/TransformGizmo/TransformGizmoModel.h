@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 
 namespace VoxelForge::Editor
 {
@@ -147,10 +148,14 @@ public:
     static constexpr float ArrowLengthRatio = 0.18F;
     static constexpr float MinimumArrowLengthPixels = 6.0F;
     static constexpr float MaximumArrowLengthPixels = 14.0F;
-    static constexpr float MinimumArrowWidthPixels = 6.0F;
-    static constexpr float MaximumArrowWidthPixels = 12.0F;
+    static constexpr float MinimumArrowWidthPixels = 4.0F;
+    static constexpr float MaximumArrowWidthPixels = 8.0F;
     static constexpr float MaximumArrowAxisRatio = 0.40F;
-    static constexpr float MinimumCenterPixels = 7.0F;
+    static constexpr float NormalAxisThicknessPixels = 2.2F;
+    static constexpr float ActiveAxisThicknessPixels = 2.55F;
+    static constexpr float HoverColorBlend = 0.18F;
+    static constexpr float InactiveDragColorScale = 0.72F;
+    static constexpr float MinimumCenterPixels = 5.5F;
     static constexpr std::size_t AxisPrimitiveCount = 3U;
     static constexpr std::size_t ArrowPrimitiveCount = 3U;
     static constexpr std::size_t TotalPrimitiveCount = 7U;
@@ -173,6 +178,9 @@ public:
         Vec3 worldPosition,
         const ViewportRectangle& viewport,
         const Matrix4& viewProjection) noexcept;
+    [[nodiscard]] static std::string_view ContextHelpFor(
+        TransformGizmoInteractionState state,
+        TransformGizmoAxis axis) noexcept;
 
 private:
     TransformGizmoView view_{};

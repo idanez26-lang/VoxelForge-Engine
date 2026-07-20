@@ -10,8 +10,6 @@ namespace
 constexpr std::array<float, 4U> XAxisColor{0.94F, 0.20F, 0.18F, 1.0F};
 constexpr std::array<float, 4U> YAxisColor{0.24F, 0.86F, 0.32F, 1.0F};
 constexpr std::array<float, 4U> ZAxisColor{0.20F, 0.46F, 1.0F, 1.0F};
-constexpr float HighlightMultiplier = 1.35F;
-constexpr float InactiveDragMultiplier = 0.45F;
 constexpr float ProjectionTolerancePixels = 0.25F;
 
 [[nodiscard]] TransformGizmoView HiddenView() noexcept
@@ -229,6 +227,28 @@ std::optional<Vec2> TransformGizmoModel::ProjectWorldToScreen(
     return screen;
 }
 
+std::string_view TransformGizmoModel::ContextHelpFor(
+    const TransformGizmoInteractionState state,
+    const TransformGizmoAxis axis) noexcept
+{
+    if (state == TransformGizmoInteractionState::Dragging)
+    {
+        if (axis == TransformGizmoAxis::X)
+            return "Moving on X — Release to apply — Esc to cancel";
+        if (axis == TransformGizmoAxis::Y)
+            return "Moving on Y — Release to apply — Esc to cancel";
+        if (axis == TransformGizmoAxis::Z)
+            return "Moving on Z — Release to apply — Esc to cancel";
+    }
+    if (state == TransformGizmoInteractionState::Hover)
+    {
+        if (axis == TransformGizmoAxis::X) return "Move X";
+        if (axis == TransformGizmoAxis::Y) return "Move Y";
+        if (axis == TransformGizmoAxis::Z) return "Move Z";
+    }
+    return {};
+}
+
 bool TransformGizmoModel::Update(
     const TransformGizmoUpdateContext& context) noexcept
 {
@@ -290,7 +310,7 @@ bool TransformGizmoModel::Update(
     const float representativeWorldPerPixel =
         representativeLength / representativePixels;
     next.AxisThickness = std::min(
-        representativeWorldPerPixel * 3.0F,
+        representativeWorldPerPixel * NormalAxisThicknessPixels,
         representativeLength * 0.12F);
     next.CenterRadius = std::min(
         representativeWorldPerPixel * MinimumCenterPixels,
@@ -302,15 +322,15 @@ bool TransformGizmoModel::Update(
         if (next.State == TransformGizmoInteractionState::Dragging &&
             axis != next.ActiveAxis)
         {
-            result[0] *= InactiveDragMultiplier;
-            result[1] *= InactiveDragMultiplier;
-            result[2] *= InactiveDragMultiplier;
+            result[0] *= InactiveDragColorScale;
+            result[1] *= InactiveDragColorScale;
+            result[2] *= InactiveDragColorScale;
         }
         else if (axis == next.ActiveAxis)
         {
-            result[0] = std::min(1.0F, result[0] * HighlightMultiplier);
-            result[1] = std::min(1.0F, result[1] * HighlightMultiplier);
-            result[2] = std::min(1.0F, result[2] * HighlightMultiplier);
+            result[0] += (1.0F - result[0]) * HoverColorBlend;
+            result[1] += (1.0F - result[1]) * HoverColorBlend;
+            result[2] += (1.0F - result[2]) * HoverColorBlend;
         }
         return result;
     };
@@ -330,7 +350,8 @@ bool TransformGizmoModel::Update(
             sizing.ProjectedLengthPixels, 1.0F);
         const float worldPerPixel = sizing.WorldLength / projectedPixels;
         result.Thickness = std::min(
-            worldPerPixel * (axis == next.ActiveAxis ? 4.5F : 3.0F),
+            worldPerPixel * (axis == next.ActiveAxis
+                ? ActiveAxisThicknessPixels : NormalAxisThicknessPixels),
             sizing.WorldLength * 0.12F);
         result.ProjectedLengthPixels = sizing.ProjectedLengthPixels;
         result.CameraFacing = sizing.CameraFacing;
@@ -345,12 +366,13 @@ bool TransformGizmoModel::Update(
                     requestedArrowPixels / sizing.ProjectedLengthPixels)
                 : MaximumArrowAxisRatio;
             const float requestedWidthPixels = std::clamp(
-                requestedArrowPixels * 0.75F,
+                requestedArrowPixels * 0.55F,
                 MinimumArrowWidthPixels, MaximumArrowWidthPixels);
             result.ArrowLength = sizing.WorldLength * arrowRatio;
-            result.ArrowWidth = std::min(
+            result.ArrowWidth = std::min({
                 worldPerPixel * requestedWidthPixels,
-                sizing.WorldLength * 0.55F);
+                sizing.WorldLength * 0.55F,
+                result.ArrowLength * 0.75F});
             result.ArrowBaseCenter = result.End -
                 direction * result.ArrowLength;
             result.ArrowBaseCorners = ArrowBaseCorners(
