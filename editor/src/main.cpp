@@ -166,7 +166,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.LayoutStabilitySmokeTest |=
             argument == "--layout-stability-smoke-test";
         result.DoubleClickCameraSmokeTest |=
-            argument == "--double-click-camera-smoke-test";
+            argument == "--double-click-camera-smoke-test" ||
+            argument == "--viewport-navigation-smoke-test";
         result.PersistentWorkplaneSmokeTest |=
             argument == "--persistent-construction-plane-smoke-test";
         result.ProjectSessionRestoreSmokeTest |=

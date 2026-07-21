@@ -12,10 +12,10 @@ ViewportCameraActions ResolveViewportCameraActions(
     }
 
     // A simple click and every click in a double-click sequence belong to
-    // selection or editing. Only explicit keyboard shortcuts control framing.
+    // selection or editing. Only explicit keyboard shortcuts control navigation.
     static_cast<void>(input.LeftClickCount);
     return {
-        input.FrameShortcutPressed,
+        input.FocusShortcutPressed,
         input.ResetShortcutPressed};
 }
 

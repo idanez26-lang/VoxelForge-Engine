@@ -41,7 +41,7 @@ void TestCommandsAndBindings()
             "Interaction.Cancel" &&
         service.CommandName(static_cast<EditorInputCommand>(255)).empty(),
         "Command names or unknown-command handling are invalid.");
-    Require(service.ShortcutLabel(EditorInputCommand::ToolFill) == "F" &&
+    Require(service.ShortcutLabel(EditorInputCommand::ToolFill) == "Shift+F" &&
         service.ShortcutLabel(EditorInputCommand::ToolBox) == "B" &&
         service.ShortcutLabel(EditorInputCommand::ToolLine) == "L" &&
         service.ShortcutLabel(EditorInputCommand::ToolSphere) == "S" &&
@@ -88,7 +88,7 @@ void TestToolSelection()
             EditorInputCommand::ToolPencil &&
         Resolve(service, EditorInputKey::E, available) ==
             EditorInputCommand::ToolEraser &&
-        Resolve(service, EditorInputKey::F, available) ==
+        Resolve(service, EditorInputKey::F, available, false, true) ==
             EditorInputCommand::ToolFill &&
         Resolve(service, EditorInputKey::B, available) ==
             EditorInputCommand::ToolBox &&
@@ -135,6 +135,9 @@ void TestToolSelection()
     Require(Resolve(service, EditorInputKey::S, available, true) ==
             EditorInputCommand::FileSave,
         "Ctrl+S conflicts with the Sphere shortcut.");
+    Require(Resolve(service, EditorInputKey::F, available) ==
+            EditorInputCommand::None,
+        "F is no longer reserved for viewport focus.");
 }
 
 void TestSaveUndoRedoAndCancel()

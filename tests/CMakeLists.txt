@@ -186,6 +186,26 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorViewportNavigationTests
+    Editor/ViewportNavigationControllerTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportNavigationController.cpp
+)
+target_include_directories(
+    VoxelForgeEditorViewportNavigationTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeEditorViewportNavigationTests
+    PRIVATE VoxelForgeEditorVoxelSelection VoxelForgeImGui
+)
+vf_configure_test(VoxelForgeEditorViewportNavigationTests)
+add_test(
+    NAME VoxelForge.Editor.ViewportNavigation
+    COMMAND $<TARGET_FILE:VoxelForgeEditorViewportNavigationTests>
+)
+
+add_executable(
     VoxelForgeEditorVoxelSelectionTests
     Editor/VoxelSelectionTests.cpp
 )
@@ -881,6 +901,7 @@ set_tests_properties(
     VoxelForge.Editor.VoxThumbnail
     VoxelForge.Editor.VoxelViewport
     VoxelForge.Editor.DoubleClickCamera
+    VoxelForge.Editor.ViewportNavigation
     VoxelForge.Editor.VoxelSelection
     VoxelForge.Editor.VoxelRayPicking
     VoxelForge.Editor.CommandHistory
@@ -1014,6 +1035,10 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --double-click-camera-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.ViewportNavigationSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --viewport-navigation-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.PersistentWorkplaneSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --persistent-construction-plane-smoke-test
     )
@@ -1127,6 +1152,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.FirstCreationExperienceSmoke
         VoxelForge.Editor.LayoutStabilitySmoke
         VoxelForge.Editor.DoubleClickCameraSmoke
+        VoxelForge.Editor.ViewportNavigationSmoke
         VoxelForge.Editor.PersistentWorkplaneSmoke
         VoxelForge.Editor.ProjectSessionRestoreSmoke
         VoxelForge.Editor.DirectCreationFlowSmoke

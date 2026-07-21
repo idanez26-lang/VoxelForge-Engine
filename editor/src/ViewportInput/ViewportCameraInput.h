@@ -8,14 +8,14 @@ namespace VoxelForge::Editor
 struct ViewportCameraInput final
 {
     bool ShortcutsEnabled = false;
-    bool FrameShortcutPressed = false;
+    bool FocusShortcutPressed = false;
     bool ResetShortcutPressed = false;
     std::uint8_t LeftClickCount = 0U;
 };
 
 struct ViewportCameraActions final
 {
-    bool FrameRequested = false;
+    bool FocusRequested = false;
     bool ResetRequested = false;
 };
 

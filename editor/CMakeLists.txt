@@ -544,6 +544,7 @@ target_sources(
         src/Toolbar/EditorToolbar.cpp
         src/Toolbar/EditorToolbarModel.cpp
         src/ViewportInput/ViewportCameraInput.cpp
+        src/ViewportNavigationController.cpp
         src/ViewportRenderer.cpp
         src/VoxelViewportState.cpp
         src/main.cpp

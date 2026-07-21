@@ -1920,7 +1920,7 @@ void EditorWorkspace::DrawScenePanel()
             "Right-click a .vox file and choose Open in Viewport.");
     }
     ImGui::TextDisabled(
-        "Right: orbit | Middle: pan | Wheel: zoom | Home: reset");
+        "F: focus | Right: orbit | Middle: pan | Wheel: zoom | Home: reset");
 
     ImVec2 available = ImGui::GetContentRegionAvail();
     available.x = std::max(available.x, 1.0F);
@@ -1929,6 +1929,7 @@ void EditorWorkspace::DrawScenePanel()
     currentViewportRectangle_ = {
         imageOrigin.x, imageOrigin.y, available.x, available.y};
     viewportCamera_.SetAspectRatio(available.x / available.y);
+    viewportNavigation_.Tick(ImGui::GetIO().DeltaTime);
     UpdateTransformGizmo(available.y);
     const auto width = static_cast<std::uint32_t>(available.x);
     const auto height = static_cast<std::uint32_t>(available.y);
@@ -2223,6 +2224,22 @@ void EditorWorkspace::DrawScenePanel()
             CancelTransformGizmoInteraction();
         const bool gizmoConsumesPointer = gizmoCaptured || gizmoAxisHovered ||
             transformGizmoManager_.IsDragging();
+        const bool doubleClickFocus = !gizmoConsumesPointer &&
+            selectionInputAvailable &&
+            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+            voxelSelection_.Hovered().has_value();
+        if (doubleClickFocus)
+        {
+            const auto& hit = *voxelSelection_.Hovered();
+            const Asset::Voxel::VoxelPosition position{
+                static_cast<std::int32_t>(hit.Coordinates.X),
+                static_cast<std::int32_t>(hit.Coordinates.Y),
+                static_cast<std::int32_t>(hit.Coordinates.Z)};
+            static_cast<void>(selectionService_.Select(position));
+            UpdateVoxelHighlights();
+            static_cast<void>(viewportNavigation_.FocusSelection(
+                SelectionNavigationBounds()));
+        }
         std::optional<SelectionBoxRayHit> hoveredSelectionInterior;
         if ((voxelToolState_.IsSelectionActive() ||
              voxelToolState_.IsMoveActive() ||
@@ -2456,7 +2473,7 @@ void EditorWorkspace::DrawScenePanel()
                 cameraInteraction,
                 voxelEditInProgress_,
                 voxelDocumentSession_.Generation()});
-        if (toolDecision == VoxelToolInputDecision::Apply)
+        if (!doubleClickFocus && toolDecision == VoxelToolInputDecision::Apply)
         {
             if (voxelToolState_.IsPencilActive())
                 static_cast<void>(ApplyVoxelPencil());
@@ -2785,9 +2802,16 @@ void EditorWorkspace::DrawScenePanel()
             voxelSelectionClickCandidate_ = false;
             selectionPointerAnchor_.reset();
         }
-        viewportCamera_.Update(
-            imageHovered && !transformGizmoManager_.IsDragging(),
-            available.y);
+        if (imageHovered && !transformGizmoManager_.IsDragging())
+        {
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Right))
+                viewportNavigation_.Orbit(io.MouseDelta.x, io.MouseDelta.y);
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+                viewportNavigation_.Pan(
+                    io.MouseDelta.x, io.MouseDelta.y, available.y);
+            if (io.MouseWheel != 0.0F)
+                viewportNavigation_.Zoom(io.MouseWheel);
+        }
         const bool sceneActive = imageHovered || sceneFocused;
         const bool shortcutsEnabled = sceneActive &&
             !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
@@ -2799,11 +2823,11 @@ void EditorWorkspace::DrawScenePanel()
         const ViewportCameraActions cameraActions =
             ResolveViewportCameraActions({
                 shortcutsEnabled,
-                false,
+                ImGui::IsKeyPressed(ImGuiKey_F, false),
                 ImGui::IsKeyPressed(ImGuiKey_Home, false),
                 leftClickCount});
-        if (cameraActions.FrameRequested)
-            FrameVoxelViewport();
+        if (cameraActions.FocusRequested)
+            FocusSelectionOrFrameAll();
         if (cameraActions.ResetRequested)
             viewportCamera_.Reset();
         if (shortcutsEnabled && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
@@ -11257,7 +11281,7 @@ bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
 {
     const auto applyActions = [this](const ViewportCameraActions& actions)
     {
-        if (actions.FrameRequested) FrameVoxelViewport();
+        if (actions.FocusRequested) FocusSelectionOrFrameAll();
         if (actions.ResetRequested) viewportCamera_.Reset();
     };
     const auto verifyDoubleClick = [this, &applyActions]()
@@ -11265,7 +11289,7 @@ bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
         const ViewportCameraActions actions =
             ResolveViewportCameraActions({true, false, false, 2U});
         applyActions(actions);
-        return !actions.FrameRequested && !actions.ResetRequested &&
+        return !actions.FocusRequested && !actions.ResetRequested &&
             viewportCamera_.CaptureState() ==
                 doubleClickCameraSmokeReference_;
     };
@@ -11280,24 +11304,36 @@ bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
             return false;
         }
         FrameVoxelViewport();
-        viewportCamera_.Orbit(23.0F, -11.0F);
-        viewportCamera_.Pan(17.0F, -9.0F, 720.0F);
-        viewportCamera_.Zoom(1.0F);
         doubleClickCameraSmokeReference_ = viewportCamera_.CaptureState();
         return true;
     case 1U:
-        doubleClickCameraSmokeGridStable_ = verifyDoubleClick();
+    {
+        // The input resolver deliberately leaves pointer gestures to the
+        // viewport host. The host selection is then focused as one gesture.
+        const bool doubleClickIsNotAStandaloneCommand = verifyDoubleClick();
+        static_cast<void>(selectionService_.Select({0, 1, 1}));
+        static_cast<void>(viewportNavigation_.FocusSelection(
+            SelectionNavigationBounds()));
+        doubleClickCameraSmokeGridStable_ =
+            doubleClickIsNotAStandaloneCommand && viewportNavigation_.IsFocusing();
         return doubleClickCameraSmokeGridStable_;
+    }
     case 2U:
-        doubleClickCameraSmokeVoxelStable_ = verifyDoubleClick();
+        viewportNavigation_.Tick(0.125F);
+        doubleClickCameraSmokeVoxelStable_ = viewportNavigation_.IsFocusing() &&
+            viewportCamera_.GetTarget() != doubleClickCameraSmokeReference_.Target;
         return doubleClickCameraSmokeVoxelStable_;
     case 3U:
-        doubleClickCameraSmokeEmptyStable_ = verifyDoubleClick();
+        viewportNavigation_.Tick(0.125F);
+        doubleClickCameraSmokeEmptyStable_ = !viewportNavigation_.IsFocusing() &&
+            viewportCamera_.GetTarget() ==
+                (SelectionNavigationBounds().Minimum +
+                 SelectionNavigationBounds().Maximum) * 0.5F;
         return doubleClickCameraSmokeEmptyStable_;
     case 4U:
     {
         const EditorCameraState before = viewportCamera_.CaptureState();
-        viewportCamera_.Orbit(12.0F, -8.0F);
+        viewportNavigation_.Orbit(12.0F, -8.0F);
         const EditorCameraState after = viewportCamera_.CaptureState();
         doubleClickCameraSmokeOrbitWorked_ =
             after.RotationDegrees != before.RotationDegrees &&
@@ -11307,7 +11343,7 @@ bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
     case 5U:
     {
         const EditorCameraState before = viewportCamera_.CaptureState();
-        viewportCamera_.Pan(-14.0F, 7.0F, 720.0F);
+        viewportNavigation_.Pan(-14.0F, 7.0F, 720.0F);
         const EditorCameraState after = viewportCamera_.CaptureState();
         doubleClickCameraSmokePanWorked_ =
             after.Target != before.Target &&
@@ -11318,7 +11354,7 @@ bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
     case 6U:
     {
         const EditorCameraState before = viewportCamera_.CaptureState();
-        viewportCamera_.Zoom(-1.0F);
+        viewportNavigation_.Zoom(-1.0F);
         const EditorCameraState after = viewportCamera_.CaptureState();
         doubleClickCameraSmokeZoomWorked_ =
             after.Distance != before.Distance &&
@@ -11328,11 +11364,12 @@ bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
     }
     case 7U:
     {
+        static_cast<void>(selectionService_.Clear());
         const ViewportCameraActions actions =
             ResolveViewportCameraActions({true, true, false, 0U});
         applyActions(actions);
         doubleClickCameraSmokeShortcutsWorked_ =
-            actions.FrameRequested && !actions.ResetRequested &&
+            actions.FocusRequested && !actions.ResetRequested &&
             viewportCamera_.GetTarget() == Vec3{};
         return doubleClickCameraSmokeShortcutsWorked_;
     }
@@ -11344,7 +11381,7 @@ bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)
         EditorCamera defaultCamera;
         doubleClickCameraSmokeShortcutsWorked_ =
             doubleClickCameraSmokeShortcutsWorked_ &&
-            !actions.FrameRequested && actions.ResetRequested &&
+            !actions.FocusRequested && actions.ResetRequested &&
             viewportCamera_.CaptureState() == defaultCamera.CaptureState();
         return doubleClickCameraSmokeShortcutsWorked_;
     }
@@ -13420,11 +13457,44 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
 
 void EditorWorkspace::FrameVoxelViewport() noexcept
 {
+    static_cast<void>(viewportNavigation_.FrameAll(SceneNavigationBounds()));
+}
+
+void EditorWorkspace::FocusSelectionOrFrameAll() noexcept
+{
+    if (!selectionService_.Empty() &&
+        viewportNavigation_.FocusSelection(SelectionNavigationBounds()))
+        return;
+    FrameVoxelViewport();
+}
+
+ViewportNavigationBounds EditorWorkspace::SelectionNavigationBounds() const noexcept
+{
+    const SelectionBounds& bounds = selectionService_.EditableBounds().Valid
+        ? selectionService_.EditableBounds() : selectionService_.Bounds();
+    if (!bounds.Valid) return {};
+    return {
+        {static_cast<float>(bounds.Minimum.X) - voxelModelCenter_.X,
+         static_cast<float>(bounds.Minimum.Y) - voxelModelCenter_.Y,
+         static_cast<float>(bounds.Minimum.Z) - voxelModelCenter_.Z},
+        {static_cast<float>(bounds.Maximum.X + 1) - voxelModelCenter_.X,
+         static_cast<float>(bounds.Maximum.Y + 1) - voxelModelCenter_.Y,
+         static_cast<float>(bounds.Maximum.Z + 1) - voxelModelCenter_.Z},
+        true};
+}
+
+ViewportNavigationBounds EditorWorkspace::SceneNavigationBounds() const noexcept
+{
+    if (!viewportState_.HasModel())
+        return {{-0.5F, -0.5F, -0.5F}, {0.5F, 0.5F, 0.5F}, true};
     const VoxelViewportStatistics& statistics = viewportState_.Statistics();
-    viewportCamera_.Frame(
-        viewportState_.HasModel() ? static_cast<float>(statistics.Width) : 1.0F,
-        viewportState_.HasModel() ? static_cast<float>(statistics.Height) : 1.0F,
-        viewportState_.HasModel() ? static_cast<float>(statistics.Depth) : 1.0F);
+    return {
+        {-voxelModelCenter_.X, -voxelModelCenter_.Y, -voxelModelCenter_.Z},
+        {static_cast<float>(statistics.Width) - voxelModelCenter_.X,
+         static_cast<float>(statistics.Height) - voxelModelCenter_.Y,
+         static_cast<float>(statistics.Depth) - voxelModelCenter_.Z},
+        statistics.Width > 0U && statistics.Height > 0U &&
+            statistics.Depth > 0U};
 }
 
 void EditorWorkspace::UpdateWindowTitle()

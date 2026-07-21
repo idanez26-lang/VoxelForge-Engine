@@ -152,7 +152,7 @@ private:
         {EditorInputCommand::ToolEraser, EditorInputKey::E,
          false, false, false, "E"},
         {EditorInputCommand::ToolFill, EditorInputKey::F,
-         false, false, false, "F"},
+         false, true, false, "Shift+F"},
         {EditorInputCommand::ToolBox, EditorInputKey::B,
          false, false, false, "B"},
         {EditorInputCommand::ToolLine, EditorInputKey::L,

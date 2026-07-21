@@ -38,6 +38,7 @@
 #include "Transform/RotateVoxelSelectionOperation.h"
 #include "Transform/ScaleVoxelSelectionOperation.h"
 #include "ViewportInput/ViewportCameraInput.h"
+#include "ViewportNavigationController.h"
 #include "ViewportRenderer.h"
 #include "VoxelViewportState.h"
 #include "VoxelSave/VoxelSaveState.h"
@@ -300,6 +301,10 @@ private:
     void UpdateWindowTitle();
     void ClearVoxelViewport() noexcept;
     void FrameVoxelViewport() noexcept;
+    void FocusSelectionOrFrameAll() noexcept;
+    [[nodiscard]] ViewportNavigationBounds
+        SelectionNavigationBounds() const noexcept;
+    [[nodiscard]] ViewportNavigationBounds SceneNavigationBounds() const noexcept;
     void UpdateVoxelHighlights() noexcept;
     void UpdateTransformGizmo(float viewportHeightPixels) noexcept;
     void DrawTransformGizmoVisibilityAnchor() const noexcept;
@@ -364,6 +369,7 @@ private:
     ModelImportService modelImportService_;
     DragDropImportController dragDropImport_;
     EditorCamera viewportCamera_;
+    ViewportNavigationController viewportNavigation_{viewportCamera_};
     ViewportRenderer viewportRenderer_;
     VoxelViewportState viewportState_;
     VoxelDocumentSession voxelDocumentSession_;

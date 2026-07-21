@@ -20,7 +20,7 @@ void Apply(
     EditorCamera& camera,
     const ViewportCameraActions& actions)
 {
-    if (actions.FrameRequested) camera.Frame(8.0F, 6.0F, 4.0F);
+    if (actions.FocusRequested) camera.Frame(8.0F, 6.0F, 4.0F);
     if (actions.ResetRequested) camera.Reset();
 }
 
@@ -33,7 +33,7 @@ void RequirePointerClickDoesNotMoveCamera(
     const ViewportCameraActions actions =
         ResolveViewportCameraActions({true, false, false, clickCount});
     Apply(camera, actions);
-    Require(!actions.FrameRequested && !actions.ResetRequested,
+    Require(!actions.FocusRequested && !actions.ResetRequested,
         std::string(scenario) + " requested a camera command.");
     Require(camera.CaptureState() == before,
         std::string(scenario) + " changed position, rotation, distance, or target.");
@@ -87,25 +87,25 @@ int main()
                 afterZoom.Target == beforeZoom.Target,
             "Zoom no longer changes only the camera distance.");
 
-        const ViewportCameraActions frame =
+        const ViewportCameraActions focus =
             ResolveViewportCameraActions({true, true, false, 0U});
-        Apply(camera, frame);
-        Require(frame.FrameRequested && !frame.ResetRequested &&
+        Apply(camera, focus);
+        Require(focus.FocusRequested && !focus.ResetRequested &&
                 camera.GetTarget() == Vec3{},
-            "The explicit frame shortcut no longer works.");
+            "The explicit focus shortcut no longer works.");
 
         const ViewportCameraActions reset =
             ResolveViewportCameraActions({true, false, true, 0U});
         Apply(camera, reset);
         const EditorCamera defaultCamera;
-        Require(!reset.FrameRequested && reset.ResetRequested &&
+        Require(!reset.FocusRequested && reset.ResetRequested &&
                 camera.CaptureState() == defaultCamera.CaptureState(),
             "The explicit reset shortcut no longer works.");
 
         const ViewportCameraActions blocked =
             ResolveViewportCameraActions({false, true, true, 2U});
-        Require(!blocked.FrameRequested && !blocked.ResetRequested,
-            "Blocked viewport input requested camera actions.");
+        Require(!blocked.FocusRequested && !blocked.ResetRequested,
+            "Text input or a popup requested a focus command.");
 
         std::cout << "Double-click camera tests passed.\n";
         return 0;

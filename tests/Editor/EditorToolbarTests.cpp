@@ -63,7 +63,7 @@ void TestOrderGroupsAndTooltips()
     Require(inputService.ShortcutLabel(buttons[0].Command) == "Ctrl+S" &&
         inputService.ShortcutLabel(buttons[1].Command) == "P" &&
         inputService.ShortcutLabel(buttons[2].Command) == "E" &&
-        inputService.ShortcutLabel(buttons[3].Command) == "F" &&
+        inputService.ShortcutLabel(buttons[3].Command) == "Shift+F" &&
         inputService.ShortcutLabel(buttons[4].Command) == "B" &&
         inputService.ShortcutLabel(buttons[5].Command) == "L" &&
         inputService.ShortcutLabel(buttons[6].Command) == "S" &&

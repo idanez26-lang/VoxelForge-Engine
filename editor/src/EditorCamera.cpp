@@ -100,6 +100,17 @@ void EditorCamera::Frame(
     distance_ = std::max(1.0F, (radius / std::tan(halfFov)) * 1.40F);
 }
 
+void EditorCamera::SetTargetAndDistance(
+    const Vec3 target,
+    const float distance) noexcept
+{
+    if (!std::isfinite(target.X) || !std::isfinite(target.Y) ||
+        !std::isfinite(target.Z) || !std::isfinite(distance))
+        return;
+    target_ = target;
+    distance_ = std::clamp(distance, 0.1F, 10000.0F);
+}
+
 void EditorCamera::Reset() noexcept
 {
     target_ = {};

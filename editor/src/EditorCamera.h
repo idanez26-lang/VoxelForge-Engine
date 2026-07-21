@@ -43,6 +43,7 @@ public:
     void Pan(float horizontalPixels, float verticalPixels, float viewportHeight) noexcept;
     void Zoom(float wheelDelta) noexcept;
     void Frame(float width, float height, float depth) noexcept;
+    void SetTargetAndDistance(Vec3 target, float distance) noexcept;
     void Reset() noexcept;
     [[nodiscard]] bool RestoreState(
         const EditorCameraState& state) noexcept;
