@@ -97,7 +97,8 @@ struct TransformGizmoUpdateContext final
     std::uint64_t SelectionDocumentGeneration = 0U;
     SelectionBounds Bounds{};
     ActiveVoxelTool ActiveTool = ActiveVoxelTool::None;
-    Vec3 ModelCenter{};
+    bool PivotValid = false;
+    Vec3 PivotWorldPosition{};
     Vec3 CameraPosition{};
     Vec3 CameraForward{0.0F, 0.0F, 1.0F};
     float VerticalFieldOfViewDegrees = 45.0F;

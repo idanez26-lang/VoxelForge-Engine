@@ -229,6 +229,11 @@ else()
         VoxelForgeEditorTransformPivot PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+target_link_libraries(
+    VoxelForgeEditorTransformGizmo
+    PUBLIC VoxelForgeEditorTransformPivot
+)
+
 add_library(VoxelForgeEditorVoxelDocument STATIC)
 target_sources(
     VoxelForgeEditorVoxelDocument

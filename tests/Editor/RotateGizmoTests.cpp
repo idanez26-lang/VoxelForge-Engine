@@ -42,7 +42,8 @@ void Require(const bool condition, const std::string_view message)
     context.ActiveDocumentGeneration = 9U;
     context.SelectionDocumentGeneration = 9U;
     context.Bounds = SelectionBounds::FromCorners({2, 3, 4}, {7, 8, 9});
-    context.ModelCenter = {5.0F, 6.0F, 7.0F};
+    context.PivotValid = true;
+    context.PivotWorldPosition = {};
     context.ActiveTool = ActiveVoxelTool::Rotate;
     context.CameraPosition = {0.0F, 0.0F, -depth};
     context.CameraForward = {0.0F, 0.0F, 1.0F};

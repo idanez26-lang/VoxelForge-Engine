@@ -38,7 +38,6 @@ void Require(const bool condition, const std::string_view message)
     context.SelectionDocumentGeneration = 12U;
     context.Bounds = SelectionBounds::FromCorners({2, 3, 4}, {7, 8, 9});
     context.ActiveTool = tool;
-    context.ModelCenter = {5.0F, 6.0F, 7.0F};
     context.CameraPosition = {0.0F, 0.0F, -20.0F};
     context.CameraForward = {0.0F, 0.0F, 1.0F};
     context.ViewportHeightPixels = 1000.0F;
@@ -67,7 +66,8 @@ struct Fixture final
 {
     TransformGizmoModel Model;
     TransformGizmoInteraction Interaction;
-    TransformGizmoManager Manager{Model, Interaction};
+    TransformPivotManager PivotManager;
+    TransformGizmoManager Manager{Model, Interaction, PivotManager};
     TransformGizmoUpdateContext Visual = VisualContext(ActiveVoxelTool::Move);
     TransformGizmoRuntimeContext Runtime = RuntimeContext(ActiveVoxelTool::Move);
     TransformGizmoPointerInput Pointer{
@@ -77,6 +77,12 @@ struct Fixture final
     {
         Visual = VisualContext(tool);
         Runtime = RuntimeContext(tool);
+        static_cast<void>(PivotManager.UpdateFromBounds(
+            Visual.Bounds, {5.0F, 6.0F, 7.0F}));
+        Require(PivotManager.HasValidPivot(),
+            "Unable to resolve the shared pivot fixture.");
+        Visual.PivotValid = PivotManager.HasValidPivot();
+        Visual.PivotWorldPosition = PivotManager.GetPivot().WorldPosition;
         static_cast<void>(Manager.UpdateView(Visual));
         static_cast<void>(Manager.UpdateContext(Runtime));
     }
@@ -155,6 +161,53 @@ void TestModesVisibilityAndImmutableView()
     static_cast<void>(fixture.Manager.UpdateContext(runtime));
     Require(snapshot == fixture.Manager.View(),
         "Runtime context must not mutate an already prepared view.");
+}
+
+void TestSharedPivotIsTheOnlyVisualAndInteractiveOrigin()
+{
+    Fixture fixture;
+    const SelectionBounds first =
+        SelectionBounds::FromCorners({2, 3, 4}, {7, 8, 9});
+    const Vec3 modelCenter{1.0F, 2.0F, 3.0F};
+    static_cast<void>(fixture.PivotManager.UpdateFromBounds(
+        first, modelCenter));
+    Require(fixture.PivotManager.HasValidPivot() &&
+            fixture.PivotManager.GetMode() == TransformPivotMode::Center &&
+            fixture.PivotManager.GetPivot().WorldPosition ==
+                Vec3{4.0F, 4.0F, 4.0F},
+        "The shared integration must use one valid Center pivot.");
+
+    for (const ActiveVoxelTool tool : {
+             ActiveVoxelTool::Move,
+             ActiveVoxelTool::Rotate,
+             ActiveVoxelTool::Scale})
+    {
+        fixture.Visual = VisualContext(tool);
+        fixture.Visual.PivotValid = true;
+        fixture.Visual.PivotWorldPosition = {999.0F, 999.0F, 999.0F};
+        static_cast<void>(fixture.Manager.UpdateView(fixture.Visual));
+        Require(fixture.Manager.View().Visible &&
+                fixture.Manager.View().Center ==
+                    fixture.PivotManager.GetPivot().WorldPosition,
+            "Move, Rotate and Scale must ignore local centers and consume the manager pivot.");
+    }
+
+    const SelectionBounds second =
+        SelectionBounds::FromCorners({8, 3, 4}, {11, 8, 9});
+    static_cast<void>(fixture.PivotManager.UpdateFromBounds(
+        second, modelCenter));
+    fixture.Visual.Bounds = second;
+    static_cast<void>(fixture.Manager.UpdateView(fixture.Visual));
+    Require(fixture.Manager.View().Center ==
+                fixture.PivotManager.GetPivot().WorldPosition,
+        "A selection change must update the common gizmo pivot.");
+
+    fixture.PivotManager.Invalidate();
+    static_cast<void>(fixture.Manager.UpdateView(fixture.Visual));
+    static_cast<void>(fixture.Manager.UpdateContext(fixture.Runtime));
+    Require(!fixture.Manager.IsVisible() &&
+            !fixture.Manager.CanBeginInteraction(),
+        "An invalid pivot must hide and block the gizmo without a default origin.");
 }
 
 void TestHoverDragHelpCursorAndAxisLock()
@@ -305,6 +358,18 @@ void TestCommonCancellationPaths()
         [](auto& context) { context.Closing = true; },
         TransformGizmoCancellationReason::Closing,
         "Application closure must cancel the manager.");
+
+    Fixture pivotLoss;
+    begin(pivotLoss);
+    pivotLoss.PivotManager.Invalidate();
+    const auto pivotCancelled =
+        pivotLoss.Manager.UpdateContext(pivotLoss.Runtime);
+    static_cast<void>(pivotLoss.Manager.UpdateView(pivotLoss.Visual));
+    Require(pivotCancelled && pivotCancelled.Reason ==
+                TransformGizmoCancellationReason::ContextInvalid &&
+            !pivotLoss.Manager.IsDragging() &&
+            !pivotLoss.Manager.IsVisible(),
+        "Losing the shared pivot must cancel the drag and hide the gizmo.");
 }
 
 void TestRapidModeChangesAndReset()
@@ -337,6 +402,7 @@ int main()
     try
     {
         TestModesVisibilityAndImmutableView();
+        TestSharedPivotIsTheOnlyVisualAndInteractiveOrigin();
         TestHoverDragHelpCursorAndAxisLock();
         TestCommonContextBlocking();
         TestCommonCancellationPaths();

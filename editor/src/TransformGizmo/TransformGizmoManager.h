@@ -2,6 +2,7 @@
 
 #include "TransformGizmoInteraction.h"
 #include "TransformGizmoModel.h"
+#include "Transform/TransformPivotManager.h"
 
 #include <cstdint>
 #include <string_view>
@@ -66,7 +67,8 @@ class TransformGizmoManager final
 public:
     TransformGizmoManager(
         TransformGizmoModel& model,
-        TransformGizmoInteraction& interaction) noexcept;
+        TransformGizmoInteraction& interaction,
+        TransformPivotManager& pivotManager) noexcept;
 
     [[nodiscard]] bool UpdateView(
         const TransformGizmoUpdateContext& context) noexcept;
@@ -114,6 +116,7 @@ private:
 
     TransformGizmoModel& model_;
     TransformGizmoInteraction& interaction_;
+    TransformPivotManager& pivotManager_;
     TransformGizmoRuntimeContext context_{};
     TransformGizmoCancellationReason lastCancellationReason_ =
         TransformGizmoCancellationReason::None;

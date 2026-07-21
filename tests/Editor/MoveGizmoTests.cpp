@@ -69,17 +69,14 @@ void Require(const bool condition, const std::string_view message)
     const SelectionBounds bounds =
         SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0}))
 {
-    const Vec3 gridCenter{
-        (static_cast<float>(bounds.Minimum.X + bounds.Maximum.X) + 1.0F) * 0.5F,
-        (static_cast<float>(bounds.Minimum.Y + bounds.Maximum.Y) + 1.0F) * 0.5F,
-        (static_cast<float>(bounds.Minimum.Z + bounds.Maximum.Z) + 1.0F) * 0.5F};
     TransformGizmoUpdateContext context;
     context.DocumentActive = true;
     context.SelectionEmpty = false;
     context.ActiveDocumentGeneration = 9U;
     context.SelectionDocumentGeneration = 9U;
     context.Bounds = bounds;
-    context.ModelCenter = gridCenter;
+    context.PivotValid = true;
+    context.PivotWorldPosition = {};
     context.ActiveTool = ActiveVoxelTool::Move;
     context.CameraPosition = {0.0F, 0.0F, -cameraDepth};
     context.CameraForward = {0.0F, 0.0F, 1.0F};
@@ -225,7 +222,8 @@ void TestPickingMatchesHybridRenderedSegmentsAtEveryDepth()
     previewContext.SelectionDocumentGeneration = 9U;
     previewContext.Bounds =
         SelectionBounds::FromCorners({10, 0, 0}, {10, 0, 0});
-    previewContext.ModelCenter = {0.5F, 0.5F, 0.5F};
+    previewContext.PivotValid = true;
+    previewContext.PivotWorldPosition = {10.0F, 0.0F, 0.0F};
     previewContext.ActiveTool = ActiveVoxelTool::Move;
     previewContext.CameraPosition = {0.0F, 0.0F, -20.0F};
     previewContext.CameraForward = {0.0F, 0.0F, 1.0F};
@@ -290,7 +288,8 @@ void TestArrowHeadsAndPickingUseTheFinalProjection()
     context.ActiveDocumentGeneration = 9U;
     context.SelectionDocumentGeneration = 9U;
     context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0});
-    context.ModelCenter = {0.5F, 0.5F, 0.5F};
+    context.PivotValid = true;
+    context.PivotWorldPosition = {};
     context.ActiveTool = ActiveVoxelTool::Move;
     context.CameraPosition = {0.0F, 0.0F, -20.0F};
     context.CameraForward = {0.0F, 0.0F, 1.0F};
@@ -520,6 +519,8 @@ void TestVisualStateIsPreparedOutsideRenderer()
     context.ActiveDocumentGeneration = 9U;
     context.SelectionDocumentGeneration = 9U;
     context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {2, 2, 2});
+    context.PivotValid = true;
+    context.PivotWorldPosition = {1.5F, 1.5F, 1.5F};
     context.ActiveTool = ActiveVoxelTool::Move;
     context.CameraPosition = {0.0F, 0.0F, -10.0F};
     context.CameraForward = {0.0F, 0.0F, 1.0F};
@@ -556,7 +557,8 @@ void TestProfessionalMoveGizmoStyleAndContextHelp()
     context.ActiveDocumentGeneration = 9U;
     context.SelectionDocumentGeneration = 9U;
     context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {4, 2, 1});
-    context.ModelCenter = {2.5F, 1.5F, 1.0F};
+    context.PivotValid = true;
+    context.PivotWorldPosition = {};
     context.ActiveTool = ActiveVoxelTool::Move;
     context.CameraPosition = {0.0F, 0.0F, -20.0F};
     context.CameraForward = {0.0F, 0.0F, 1.0F};

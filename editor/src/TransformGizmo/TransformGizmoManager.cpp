@@ -5,15 +5,20 @@ namespace VoxelForge::Editor
 
 TransformGizmoManager::TransformGizmoManager(
     TransformGizmoModel& model,
-    TransformGizmoInteraction& interaction) noexcept
-    : model_(model), interaction_(interaction)
+    TransformGizmoInteraction& interaction,
+    TransformPivotManager& pivotManager) noexcept
+    : model_(model), interaction_(interaction), pivotManager_(pivotManager)
 {
 }
 
 bool TransformGizmoManager::UpdateView(
     const TransformGizmoUpdateContext& context) noexcept
 {
-    return model_.Update(context);
+    TransformGizmoUpdateContext resolved = context;
+    resolved.PivotValid = pivotManager_.HasValidPivot();
+    if (resolved.PivotValid)
+        resolved.PivotWorldPosition = pivotManager_.GetPivot().WorldPosition;
+    return model_.Update(resolved);
 }
 
 TransformGizmoCancellation TransformGizmoManager::UpdateContext(
@@ -190,7 +195,8 @@ bool TransformGizmoManager::BaseContextValid() const noexcept
         TransformGizmoModel::ModeForTool(context_.ActiveTool);
     return context_.DocumentOpen && context_.SessionValid &&
         context_.SelectionValid && context_.OperationAvailable &&
-        !context_.Closing && mode != TransformGizmoMode::None;
+        pivotManager_.HasValidPivot() && !context_.Closing &&
+        mode != TransformGizmoMode::None;
 }
 
 bool TransformGizmoManager::DragContextValid() const noexcept

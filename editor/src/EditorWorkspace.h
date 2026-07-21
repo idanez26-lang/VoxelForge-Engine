@@ -381,8 +381,8 @@ private:
     TransformPreviewModel transformPreviewModel_;
     TransformGizmoInteraction transformGizmoInteraction_;
     TransformGizmoModel transformGizmoModel_;
-    TransformGizmoManager transformGizmoManager_;
     TransformPivotManager transformPivotManager_;
+    TransformGizmoManager transformGizmoManager_;
     bool selectionBoxInteriorHovered_ = false;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;

@@ -302,7 +302,9 @@ bool TransformGizmoModel::Update(
         context.ActiveDocumentGeneration == 0U ||
         context.SelectionDocumentGeneration !=
             context.ActiveDocumentGeneration ||
-        !context.Bounds.Valid || mode == TransformGizmoMode::None)
+        !context.Bounds.Valid || !context.PivotValid ||
+        !IsFinite(context.PivotWorldPosition) ||
+        mode == TransformGizmoMode::None)
     {
         const TransformGizmoView hidden = HiddenView();
         if (view_ == hidden) return false;
@@ -310,17 +312,7 @@ bool TransformGizmoModel::Update(
         return true;
     }
 
-    // Voxel bounds are inclusive integer cell coordinates. The spatial box is
-    // [minimum, maximum + 1], then translated by the same model center used by
-    // the viewport mesh and every existing selection overlay.
-    const Vec3 gridCenter{
-        (static_cast<float>(context.Bounds.Minimum.X) +
-         static_cast<float>(context.Bounds.Maximum.X) + 1.0F) * 0.5F,
-        (static_cast<float>(context.Bounds.Minimum.Y) +
-         static_cast<float>(context.Bounds.Maximum.Y) + 1.0F) * 0.5F,
-        (static_cast<float>(context.Bounds.Minimum.Z) +
-         static_cast<float>(context.Bounds.Maximum.Z) + 1.0F) * 0.5F};
-    const Vec3 worldCenter = gridCenter - context.ModelCenter;
+    const Vec3 worldCenter = context.PivotWorldPosition;
     std::array<TransformGizmoSizingResult, 3U> sizings{{
         CalculateSizing(context, worldCenter, TransformGizmoAxis::X),
         CalculateSizing(context, worldCenter, TransformGizmoAxis::Y),

@@ -1,5 +1,6 @@
 #include "TransformGizmo/TransformGizmoModel.h"
 #include "EditorMatrix.h"
+#include "Transform/TransformPivotManager.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
@@ -24,6 +25,17 @@ void Require(const bool condition, const std::string_view message)
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
+void ResolvePivot(
+    TransformGizmoUpdateContext& context,
+    const Vec3 modelCenter = {})
+{
+    TransformPivotManager manager;
+    static_cast<void>(manager.UpdateFromBounds(context.Bounds, modelCenter));
+    context.PivotValid = manager.HasValidPivot();
+    context.PivotWorldPosition = context.PivotValid
+        ? manager.GetPivot().WorldPosition : Vec3{};
+}
+
 [[nodiscard]] bool Near(
     const float left, const float right, const float tolerance = 0.0001F)
 {
@@ -42,6 +54,7 @@ void Require(const bool condition, const std::string_view message)
     context.SelectionDocumentGeneration = 7U;
     context.Bounds = bounds;
     context.ActiveTool = tool;
+    ResolvePivot(context);
     context.CameraPosition = {0.0F, 0.0F, -10.0F};
     context.CameraForward = {0.0F, 0.0F, 1.0F};
     context.VerticalFieldOfViewDegrees = 45.0F;
@@ -114,8 +127,8 @@ void Require(const bool condition, const std::string_view message)
     const float fieldOfView = 45.0F)
 {
     TransformGizmoUpdateContext context = MakeContext();
-    context.ModelCenter = {
-        0.5F - center.X, 0.5F - center.Y, 0.5F - center.Z};
+    context.PivotValid = true;
+    context.PivotWorldPosition = center;
     context.CameraForward = Normalize(forward);
     context.CameraPosition = center - context.CameraForward * depth;
     context.VerticalFieldOfViewDegrees = fieldOfView;
@@ -165,6 +178,10 @@ void TestVisibilityModesAndStateMachine()
     context.SelectionDocumentGeneration = 6U;
     Require(!model.Update(context) && !model.View().Visible,
         "A stale selection generation must keep the gizmo hidden.");
+    context = MakeContext();
+    context.PivotValid = false;
+    Require(!model.Update(context) && !model.View().Visible,
+        "A missing resolved pivot must keep the gizmo hidden.");
 
     for (const auto [tool, mode] : {
              std::pair{ActiveVoxelTool::Move, TransformGizmoMode::Move},
@@ -199,27 +216,32 @@ void TestExactSpatialCentersAndInvalidation()
         "A single voxel must be centered on the cell center.");
 
     context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {1, 1, 1});
+    ResolvePivot(context);
     Require(model.Update(context) && model.View().Center == Vec3{1, 1, 1},
         "Even selection dimensions must use spatial bounds.");
     context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {2, 2, 2});
+    ResolvePivot(context);
     Require(model.Update(context) &&
             model.View().Center == Vec3{1.5F, 1.5F, 1.5F},
         "Odd selection dimensions must use spatial bounds.");
     context.Bounds = SelectionBounds::FromCorners({2, 4, 6}, {7, 8, 10});
-    context.ModelCenter = {3.0F, 2.0F, 1.0F};
+    ResolvePivot(context, {3.0F, 2.0F, 1.0F});
     Require(model.Update(context) &&
             model.View().Center == Vec3{2.0F, 4.5F, 7.5F},
         "Asymmetric bounds must be translated by the viewport model center.");
 
     const Vec3 movedCenter = model.View().Center;
     context.Bounds = SelectionBounds::FromCorners({5, 4, 6}, {10, 8, 10});
+    ResolvePivot(context, {3.0F, 2.0F, 1.0F});
     Require(model.Update(context) &&
             model.View().Center == movedCenter + Vec3{3.0F, 0.0F, 0.0F},
         "Move must update the center from the current bounds.");
     context.Bounds = SelectionBounds::FromCorners({2, 4, 6}, {7, 8, 10});
+    ResolvePivot(context, {3.0F, 2.0F, 1.0F});
     Require(model.Update(context) && model.View().Center == movedCenter,
         "Undo must restore the center from restored bounds.");
     context.Bounds = SelectionBounds::FromCorners({5, 4, 6}, {10, 8, 10});
+    ResolvePivot(context, {3.0F, 2.0F, 1.0F});
     Require(model.Update(context) &&
             model.View().Center == movedCenter + Vec3{3.0F, 0.0F, 0.0F},
         "Redo must restore the moved center.");

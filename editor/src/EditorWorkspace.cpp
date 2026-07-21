@@ -327,7 +327,8 @@ EditorWorkspace::EditorWorkspace(
           : CreateSDLFileDialogService()),
       projectFolderOpener_(CreateSDLProjectFolderOpener()),
       transformGizmoManager_(
-          transformGizmoModel_, transformGizmoInteraction_),
+          transformGizmoModel_, transformGizmoInteraction_,
+          transformPivotManager_),
       consoleMessages_{
           "Console ready",
           "VoxelForge Studio initialized"},
@@ -9631,12 +9632,12 @@ bool EditorWorkspace::RunTransformGizmoFoundationSmokeStep(
             context.ViewportHeightPixels = 720.0F;
             context.Bounds =
                 SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0});
-            context.ModelCenter = {0.5F, 0.5F, 0.5F};
+            context.PivotValid = true;
+            context.PivotWorldPosition = {};
             if (!model.Update(context)) return false;
             const float smallLength = model.View().AxisLength;
             context.Bounds =
                 SelectionBounds::FromCorners({0, 0, 0}, {63, 63, 63});
-            context.ModelCenter = {32.0F, 32.0F, 32.0F};
             static_cast<void>(model.Update(context));
             return model.View().Visible &&
                 model.View().AxisLength > smallLength;
@@ -9882,7 +9883,8 @@ bool EditorWorkspace::RunMoveGizmoSmokeStep(const std::size_t frame)
         context.SelectionDocumentGeneration = 1U;
         context.Bounds =
             SelectionBounds::FromCorners({0, 0, 0}, {0, 0, 0});
-        context.ModelCenter = {0.5F, 0.5F, 0.5F};
+        context.PivotValid = true;
+        context.PivotWorldPosition = {};
         context.ActiveTool = ActiveVoxelTool::Move;
         context.CameraPosition = {0.0F, 0.0F, -depth};
         context.CameraForward = {0.0F, 0.0F, 1.0F};
@@ -9929,7 +9931,8 @@ bool EditorWorkspace::RunMoveGizmoSmokeStep(const std::size_t frame)
         context.ActiveDocumentGeneration = 1U;
         context.SelectionDocumentGeneration = 1U;
         context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {7, 3, 2});
-        context.ModelCenter = {4.0F, 2.0F, 1.5F};
+        context.PivotValid = true;
+        context.PivotWorldPosition = {};
         context.ActiveTool = ActiveVoxelTool::Move;
         context.CameraPosition = {0.0F, 0.0F, -20.0F};
         context.CameraForward = {0.0F, 0.0F, 1.0F};
@@ -10287,7 +10290,8 @@ bool EditorWorkspace::RunRotateGizmoSmokeStep(const std::size_t frame)
         context.ActiveDocumentGeneration = 9U;
         context.SelectionDocumentGeneration = 9U;
         context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {5, 5, 5});
-        context.ModelCenter = {3, 3, 3};
+        context.PivotValid = true;
+        context.PivotWorldPosition = {};
         context.ActiveTool = ActiveVoxelTool::Rotate;
         context.CameraPosition = {0, 0, -20};
         context.CameraForward = {0, 0, 1};
@@ -10436,7 +10440,8 @@ bool EditorWorkspace::RunScaleGizmoSmokeStep(const std::size_t frame)
         context.ActiveDocumentGeneration = 9U;
         context.SelectionDocumentGeneration = 9U;
         context.Bounds = SelectionBounds::FromCorners({0, 0, 0}, {5, 5, 5});
-        context.ModelCenter = {3, 3, 3};
+        context.PivotValid = true;
+        context.PivotWorldPosition = {};
         context.ActiveTool = ActiveVoxelTool::Scale;
         context.CameraPosition = {0, 0, -20};
         context.CameraForward = {0, 0, 1};
@@ -10600,7 +10605,6 @@ bool EditorWorkspace::RunTransformGizmoManagerSmokeStep(
         visual.SelectionDocumentGeneration =
             selectionService_.DocumentGeneration();
         visual.Bounds = bounds;
-        visual.ModelCenter = {3.0F, 2.0F, 2.0F};
         visual.ActiveTool = tool;
         visual.CameraPosition = {0.0F, 0.0F, -20.0F};
         visual.CameraForward = {0.0F, 0.0F, 1.0F};
@@ -10612,6 +10616,8 @@ bool EditorWorkspace::RunTransformGizmoManagerSmokeStep(
         visual.ViewProjection[4] = 0.008F;
         visual.ViewProjection[5] = 0.032F;
         visual.ViewProjection[6] = 0.014F;
+        static_cast<void>(transformPivotManager_.UpdateFromBounds(
+            bounds, {3.0F, 2.0F, 2.0F}));
         if (!transformGizmoManager_.UpdateView(visual) ||
             axisIndex >= transformGizmoManager_.View().Axes.size())
             return false;
@@ -10726,11 +10732,28 @@ bool EditorWorkspace::RunTransformGizmoManagerSmokeStep(
         invalid.ViewportAvailable = false;
         const TransformGizmoCancellation viewportLost =
             transformGizmoManager_.UpdateContext(invalid);
+        const bool pivotBegan =
+            beginInteraction(ActiveVoxelTool::Move, 0U);
+        transformPivotManager_.Invalidate();
+        TransformGizmoRuntimeContext pivotInvalid;
+        pivotInvalid.DocumentOpen = true;
+        pivotInvalid.SessionValid = true;
+        pivotInvalid.SelectionValid = true;
+        pivotInvalid.OperationAvailable = true;
+        pivotInvalid.ViewportAvailable = true;
+        pivotInvalid.PointerOverViewport = true;
+        pivotInvalid.ActiveTool = ActiveVoxelTool::Move;
+        pivotInvalid.DocumentGeneration = voxelDocumentSession_.Generation();
+        pivotInvalid.Bounds = bounds;
+        const TransformGizmoCancellation pivotLost =
+            transformGizmoManager_.UpdateContext(pivotInvalid);
         transformGizmoManagerSmokeInvalidation_ = selectionBegan &&
             selectionLost.Reason ==
                 TransformGizmoCancellationReason::SelectionChanged &&
             viewportBegan && viewportLost.Reason ==
                 TransformGizmoCancellationReason::ViewportUnavailable &&
+            pivotBegan && pivotLost.Reason ==
+                TransformGizmoCancellationReason::ContextInvalid &&
             !transformGizmoManager_.IsDragging() &&
             !transformPreviewModel_.IsActive();
     }
@@ -12982,41 +13005,42 @@ void EditorWorkspace::UpdateTransformGizmo(
 {
     const Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
-    if (document != nullptr && !selectionService_.Empty() &&
-        selectionService_.DocumentGeneration() ==
-            voxelDocumentSession_.Generation())
-    {
-        static_cast<void>(transformPivotManager_.UpdateFromBounds(
-            selectionService_.EditableBounds(), voxelModelCenter_));
-    }
-    else
-    {
-        transformPivotManager_.Invalidate();
-    }
     const SelectionBounds gizmoBounds =
         transformGizmoManager_.IsDragging() &&
             transformPreviewModel_.IsActive()
         ? transformPreviewModel_.PreviewBounds()
         : selectionService_.EditableBounds();
-    const TransformGizmoUpdateContext context{
-        document != nullptr,
-        selectionService_.Empty(),
-        closeRequest_.State() != EditorCloseRequestState::None,
-        voxelDocumentSession_.Generation(),
-        selectionService_.DocumentGeneration(),
-        gizmoBounds,
-        voxelToolState_.ActiveTool(),
-        voxelModelCenter_,
-        viewportCamera_.GetPosition(),
-        viewportCamera_.GetForward(),
-        viewportCamera_.GetFieldOfViewDegrees(),
-        viewportHeightPixels,
-        TransformGizmoProjection::Perspective,
-        0.0F,
-        transformGizmoManager_.State(),
-        transformGizmoManager_.ActiveAxis(),
-        viewportCamera_.GetViewProjection(),
-        currentViewportRectangle_};
+    if (document != nullptr && !selectionService_.Empty() &&
+        selectionService_.DocumentGeneration() ==
+            voxelDocumentSession_.Generation() && gizmoBounds.Valid)
+    {
+        static_cast<void>(transformPivotManager_.UpdateFromBounds(
+            gizmoBounds, voxelModelCenter_));
+    }
+    else
+    {
+        transformPivotManager_.Invalidate();
+    }
+    TransformGizmoUpdateContext context;
+    context.DocumentActive = document != nullptr;
+    context.SelectionEmpty = selectionService_.Empty();
+    context.Closing =
+        closeRequest_.State() != EditorCloseRequestState::None;
+    context.ActiveDocumentGeneration = voxelDocumentSession_.Generation();
+    context.SelectionDocumentGeneration =
+        selectionService_.DocumentGeneration();
+    context.Bounds = gizmoBounds;
+    context.ActiveTool = voxelToolState_.ActiveTool();
+    context.CameraPosition = viewportCamera_.GetPosition();
+    context.CameraForward = viewportCamera_.GetForward();
+    context.VerticalFieldOfViewDegrees =
+        viewportCamera_.GetFieldOfViewDegrees();
+    context.ViewportHeightPixels = viewportHeightPixels;
+    context.Projection = TransformGizmoProjection::Perspective;
+    context.InteractionState = transformGizmoManager_.State();
+    context.ActiveAxis = transformGizmoManager_.ActiveAxis();
+    context.ViewProjection = viewportCamera_.GetViewProjection();
+    context.Viewport = currentViewportRectangle_;
     static_cast<void>(transformGizmoManager_.UpdateView(context));
     const TransformGizmoView& view = transformGizmoManager_.View();
     viewportRenderer_.ConfigureTransformGizmo(view.Visible ? &view : nullptr);
