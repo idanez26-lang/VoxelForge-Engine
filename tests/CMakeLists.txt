@@ -436,6 +436,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorTransformGizmoManagerTests>
 )
 add_executable(
+    VoxelForgeEditorTransformPivotTests
+    Editor/TransformPivotTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorTransformPivotTests
+    PRIVATE VoxelForgeEditorTransformPivot
+)
+vf_configure_test(VoxelForgeEditorTransformPivotTests)
+add_test(
+    NAME VoxelForge.Editor.TransformPivot
+    COMMAND $<TARGET_FILE:VoxelForgeEditorTransformPivotTests>
+)
+add_executable(
     VoxelForgeEditorMoveGizmoTests
     Editor/MoveGizmoTests.cpp
 )
@@ -886,6 +899,7 @@ set_tests_properties(
     VoxelForge.Editor.TransformPreview
     VoxelForge.Editor.TransformGizmo
     VoxelForge.Editor.TransformGizmoManager
+    VoxelForge.Editor.TransformPivot
     VoxelForge.Editor.MoveGizmo
     VoxelForge.Editor.ScaleGizmo
     VoxelForge.Editor.VoxelRotate

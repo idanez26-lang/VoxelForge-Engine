@@ -207,6 +207,28 @@ else()
         VoxelForgeEditorTransformGizmo PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorTransformPivot STATIC)
+target_sources(
+    VoxelForgeEditorTransformPivot
+    PRIVATE src/Transform/TransformPivotManager.cpp
+)
+target_include_directories(
+    VoxelForgeEditorTransformPivot
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorTransformPivot
+    PUBLIC VoxelForgeEditorVoxelSelection
+)
+target_compile_features(VoxelForgeEditorTransformPivot PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorTransformPivot PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorTransformPivot PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorVoxelDocument STATIC)
 target_sources(
     VoxelForgeEditorVoxelDocument
@@ -535,6 +557,7 @@ target_link_libraries(
         VoxelForgeEditorProjectSession
         VoxelForgeEditorPalette
         VoxelForgeEditorTransformGizmo
+        VoxelForgeEditorTransformPivot
         VoxelForgeEditorTransformPreview
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorVoxelDocument

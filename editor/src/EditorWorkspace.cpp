@@ -12982,6 +12982,17 @@ void EditorWorkspace::UpdateTransformGizmo(
 {
     const Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
+    if (document != nullptr && !selectionService_.Empty() &&
+        selectionService_.DocumentGeneration() ==
+            voxelDocumentSession_.Generation())
+    {
+        static_cast<void>(transformPivotManager_.UpdateFromBounds(
+            selectionService_.EditableBounds(), voxelModelCenter_));
+    }
+    else
+    {
+        transformPivotManager_.Invalidate();
+    }
     const SelectionBounds gizmoBounds =
         transformGizmoManager_.IsDragging() &&
             transformPreviewModel_.IsActive()
@@ -13310,6 +13321,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     ++voxelModelGeneration_;
     transformPreviewModel_.Reset();
     transformGizmoManager_.Reset();
+    transformPivotManager_.Invalidate();
     voxelMoveStatusMessage_.clear();
     voxelDuplicateStatusMessage_.clear();
     voxelRotateStatusMessage_.clear();

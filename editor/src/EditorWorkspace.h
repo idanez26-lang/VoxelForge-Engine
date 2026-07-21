@@ -27,6 +27,7 @@
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
 #include "Transform/TransformPreviewModel.h"
+#include "Transform/TransformPivotManager.h"
 #include "TransformGizmo/TransformGizmoInteraction.h"
 #include "TransformGizmo/TransformGizmoManager.h"
 #include "TransformGizmo/TransformGizmoModel.h"
@@ -381,6 +382,7 @@ private:
     TransformGizmoInteraction transformGizmoInteraction_;
     TransformGizmoModel transformGizmoModel_;
     TransformGizmoManager transformGizmoManager_;
+    TransformPivotManager transformPivotManager_;
     bool selectionBoxInteriorHovered_ = false;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
