@@ -188,6 +188,7 @@ target_sources(
     PRIVATE
         src/TransformGizmo/TransformGizmoModel.cpp
         src/TransformGizmo/TransformGizmoInteraction.cpp
+        src/TransformGizmo/TransformGizmoManager.cpp
 )
 target_include_directories(
     VoxelForgeEditorTransformGizmo
