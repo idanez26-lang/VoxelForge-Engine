@@ -125,6 +125,9 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         const std::string_view argument(arguments[index]);
         result.SmokeTest |= argument == "--smoke-test";
         result.SmokeTest |= argument == "--modern-dialogs-smoke-test";
+        result.SmokeTest |= argument == "--welcome-screen-smoke-test";
+        result.SmokeTest |= argument == "--remove-recent-project-smoke-test";
+        result.SmokeTest |= argument == "--safe-project-deletion-smoke-test";
         result.ViewportSmokeTest |= argument == "--viewport-smoke-test";
         result.ViewportVisualTest |= argument == "--viewport-visual-test";
         result.VoxelSelectionSmokeTest |=

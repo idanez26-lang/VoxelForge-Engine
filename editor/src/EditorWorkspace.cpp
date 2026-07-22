@@ -49,6 +49,7 @@ constexpr const char* DirtyConfirmationPopupName = "Unsaved Voxel Model";
 constexpr const char* ImportConfirmationPopupName = "Import Models";
 constexpr const char* ImportCollisionPopupName = "Model Already Exists";
 constexpr const char* OpenImportedModelPopupName = "Open Imported Model";
+constexpr const char* DeleteProjectPopupName = "Delete VoxelForge Project";
 
 bool IsTransformPanelDockedUnderInspector() noexcept
 {
@@ -530,6 +531,20 @@ void EditorWorkspace::Draw()
     HandleCommandShortcuts();
     DrawMainMenuBar();
 
+    if (!WelcomeScreenModel::ShowEditorPanels(
+            projectManager_.HasActiveProject()))
+    {
+        viewportDropRect_ = {};
+        assetBrowserDropRect_ = {};
+        DrawWelcomeScreen();
+        DrawStatusBar();
+        DrawAboutPopup();
+        DrawProjectDialogs();
+        DrawProjectDeletionDialog();
+        CompleteDeferredCloseAfterFrame();
+        return;
+    }
+
     const ImGuiID dockspaceId = ImGui::GetID(WorkspaceDockspaceName);
     const bool layoutMissing =
         ImGui::DockBuilderGetNode(dockspaceId) == nullptr;
@@ -592,6 +607,7 @@ void EditorWorkspace::Draw()
     DrawStatusBar();
     DrawAboutPopup();
     DrawProjectDialogs();
+    DrawProjectDeletionDialog();
     DrawVoxelModelCreationDialogs();
     DrawModelImportDialogs();
     DrawDirtyConfirmationDialog();
@@ -2906,123 +2922,190 @@ void EditorWorkspace::DrawScenePanel()
 
 void EditorWorkspace::DrawWelcomeScreen()
 {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 hostSize(
+        viewport->WorkSize.x,
+        std::max(1.0F, viewport->WorkSize.y - StatusBarHeight));
+    ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(hostSize, ImGuiCond_Always);
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    constexpr ImGuiWindowFlags hostFlags =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoDocking |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.0F, 0.0F));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055F, 0.060F, 0.068F, 1.0F));
+    const bool hostVisible = ImGui::Begin(
+        "##VoxelForgeWelcomeHost", nullptr, hostFlags);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(3);
+    if (!hostVisible)
+    {
+        ImGui::End();
+        return;
+    }
+
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const float contentWidth = std::min(720.0F, std::max(1.0F, available.x));
-    const float horizontalOffset = std::max(
-        0.0F,
-        (available.x - contentWidth) * 0.5F);
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + horizontalOffset);
+    const WelcomeScreenLayout layout =
+        WelcomeScreenModel::CalculateLayout(available.x, available.y);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + layout.TopPadding);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+        std::max(0.0F, (available.x - layout.ContentWidth) * 0.5F));
 
     ImGui::BeginChild(
-        "##VoxelForgeWelcome",
-        ImVec2(contentWidth, available.y),
+        "##VoxelForgeWelcomeContent",
+        ImVec2(layout.ContentWidth,
+            std::max(1.0F, available.y - layout.TopPadding)),
         false);
-    ImGui::Spacing();
 
+    ImGui::SetWindowFontScale(1.45F);
     const char* title = "VoxelForge Studio";
-    const float titleWidth = ImGui::CalcTextSize(title).x;
     ImGui::SetCursorPosX(std::max(
         ImGui::GetCursorPosX(),
-        (contentWidth - titleWidth) * 0.5F));
+        (layout.ContentWidth - ImGui::CalcTextSize(title).x) * 0.5F));
     ImGui::TextUnformatted(title);
+    ImGui::SetWindowFontScale(1.0F);
 
     const char* motto = "Cr\303\251er plus vite. Rester l'artisan.";
-    const float mottoWidth = ImGui::CalcTextSize(motto).x;
     ImGui::SetCursorPosX(std::max(
         ImGui::GetCursorPosX(),
-        (contentWidth - mottoWidth) * 0.5F));
+        (layout.ContentWidth - ImGui::CalcTextSize(motto).x) * 0.5F));
     ImGui::TextDisabled("%s", motto);
-    ImGui::Spacing();
-    ImGui::Spacing();
+    ImGui::Dummy(ImVec2(1.0F, 18.0F));
 
-    constexpr float ActionWidth = 180.0F;
+    constexpr float ActionHeight = 44.0F;
     constexpr float ActionSpacing = 12.0F;
-    const float actionsWidth = ActionWidth * 2.0F + ActionSpacing;
+    const bool stackActions = layout.ContentWidth < 500.0F;
+    const float actionWidth = stackActions
+        ? std::max(1.0F, layout.ContentWidth - 16.0F)
+        : std::min(210.0F, (layout.ContentWidth - ActionSpacing) * 0.5F);
+    const float actionsWidth = stackActions
+        ? actionWidth : actionWidth * 2.0F + ActionSpacing;
     ImGui::SetCursorPosX(std::max(
         ImGui::GetCursorPosX(),
-        (contentWidth - actionsWidth) * 0.5F));
-
-    if (ImGui::Button("New Project", ImVec2(ActionWidth, 42.0F)))
-    {
+        (layout.ContentWidth - actionsWidth) * 0.5F));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18F, 0.46F, 0.76F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.24F, 0.55F, 0.88F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.14F, 0.38F, 0.66F, 1.0F));
+    if (ImGui::Button("New Project", ImVec2(actionWidth, ActionHeight)))
         RequestNewProjectDialog();
-    }
     DrawTooltip("Create a project (Ctrl+N)");
-
-    ImGui::SameLine(0.0F, ActionSpacing);
-
-    if (ImGui::Button("Open Project", ImVec2(ActionWidth, 42.0F)))
+    if (stackActions)
     {
-        RequestOpenProjectDialog();
+        ImGui::SetCursorPosX(std::max(
+            ImGui::GetCursorPosX(),
+            (layout.ContentWidth - actionWidth) * 0.5F));
     }
+    else
+    {
+        ImGui::SameLine(0.0F, ActionSpacing);
+    }
+    if (ImGui::Button("Open Project", ImVec2(actionWidth, ActionHeight)))
+        RequestOpenProjectDialog();
     DrawTooltip("Open a project (Ctrl+O)");
+    ImGui::PopStyleColor(3);
 
-    ImGui::Spacing();
-    ImGui::Spacing();
+    ImGui::Dummy(ImVec2(1.0F, 20.0F));
     ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::SetWindowFontScale(1.12F);
     ImGui::TextUnformatted("Recent Projects");
+    ImGui::SetWindowFontScale(1.0F);
     ImGui::Spacing();
 
     std::optional<std::filesystem::path> recentProjectToOpen;
     std::optional<std::filesystem::path> recentProjectToRemove;
-    bool displayedRecentProject = false;
+    std::optional<std::filesystem::path> recentProjectToDelete;
+    const std::vector<WelcomeProjectEntry> entries =
+        WelcomeScreenModel::BuildEntries(
+            projectManager_.RecentProjectPaths());
 
-    for (const std::filesystem::path& projectPath :
-         projectManager_.RecentProjectPaths())
+    if (entries.empty())
     {
-        if (!IsVisibleRecentProject(projectPath))
-        {
-            continue;
-        }
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,
+            ImVec4(0.075F, 0.080F, 0.090F, 1.0F));
+        ImGui::BeginChild("##EmptyRecentProjects", ImVec2(0.0F, 92.0F), true);
+        ImGui::TextDisabled("No recent projects.");
+        ImGui::TextWrapped(
+            "Create your first project or open an existing project.");
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+    }
 
-        displayedRecentProject = true;
-        const std::string pathText = projectPath.string();
-        const std::string projectName = projectPath.stem().string();
+    for (const WelcomeProjectEntry& entry : entries)
+    {
+        const std::string pathText = entry.ProjectFilePath.string();
         ImGui::PushID(pathText.c_str());
-
-        if (ImGui::Button(projectName.c_str(), ImVec2(220.0F, 0.0F)))
-        {
-            recentProjectToOpen = projectPath;
-        }
-
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,
+            ImVec4(0.075F, 0.080F, 0.090F, 1.0F));
+        ImGui::BeginChild(
+            "##RecentProjectCard",
+            ImVec2(0.0F, layout.CardHeight),
+            true);
+        ImGui::TextUnformatted(entry.Name.c_str());
         ImGui::SameLine();
-
-        if (ImGui::SmallButton("Remove from list"))
+        if (entry.Availability == WelcomeProjectAvailability::Available)
         {
-            recentProjectToRemove = projectPath;
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                ImVec4(0.40F, 0.78F, 0.52F, 1.0F));
+            ImGui::TextUnformatted("Available");
+            ImGui::PopStyleColor();
         }
-
+        else
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                ImVec4(0.90F, 0.62F, 0.30F, 1.0F));
+            ImGui::TextUnformatted("Missing");
+            ImGui::PopStyleColor();
+        }
         ImGui::TextDisabled("%s", pathText.c_str());
         ImGui::Spacing();
+
+        ImGui::BeginDisabled(!entry.CanOpen());
+        if (ImGui::Button("Open", ImVec2(104.0F, 30.0F)))
+            recentProjectToOpen = entry.ProjectFilePath;
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Remove from recent list", ImVec2(190.0F, 30.0F)))
+            recentProjectToRemove = entry.ProjectFilePath;
+        if (entry.CanDelete())
+        {
+            if (layout.ContentWidth < 560.0F)
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.0F);
+            else
+                ImGui::SameLine();
+            if (ImGui::Button("Delete Project...", ImVec2(146.0F, 30.0F)))
+                recentProjectToDelete = entry.ProjectFilePath;
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
         ImGui::PopID();
-    }
-
-    if (!displayedRecentProject)
-    {
-        ImGui::TextDisabled("No recent projects yet.");
-    }
-
-    if (!welcomeError_.empty())
-    {
         ImGui::Spacing();
-        DrawErrorMessage(welcomeError_);
     }
 
-    if (failedRecentProjectPath_ &&
-        ImGui::Button("Remove unavailable project from list"))
+    if (!welcomeNotification_.empty())
     {
-        recentProjectToRemove = *failedRecentProjectPath_;
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImVec4(0.40F, 0.78F, 0.52F, 1.0F));
+        ImGui::TextWrapped("%s", welcomeNotification_.c_str());
+        ImGui::PopStyleColor();
     }
+    if (!welcomeError_.empty()) DrawErrorMessage(welcomeError_);
 
     if (recentProjectToRemove)
-    {
         RemoveRecentProject(*recentProjectToRemove);
-    }
+    else if (recentProjectToDelete)
+        RequestDeleteProject(*recentProjectToDelete);
     else if (recentProjectToOpen)
-    {
         RequestOpenProject(*recentProjectToOpen, true);
-    }
 
     ImGui::EndChild();
+    ImGui::End();
 }
 
 void EditorWorkspace::DrawInspectorPanel()
@@ -3794,6 +3877,63 @@ void EditorWorkspace::DrawProjectDialogs()
 {
     DrawNewProjectDialog();
     DrawOpenProjectDialog();
+}
+
+void EditorWorkspace::DrawProjectDeletionDialog()
+{
+    if (showProjectDeletionPopup_)
+    {
+        ImGui::OpenPopup(DeleteProjectPopupName);
+        showProjectDeletionPopup_ = false;
+    }
+
+    if (pendingProjectDeletionPath_.empty()) return;
+    if (!EditorDialogStyle::BeginPopup(
+            DeleteProjectPopupName,
+            EditorDialogIntent::Destructive,
+            "Delete this project?",
+            "The complete project will be moved to the Windows Recycle Bin."))
+        return;
+
+    ImGui::TextUnformatted("Name");
+    ImGui::TextWrapped("%s",
+        pendingProjectDeletionPath_.stem().string().c_str());
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Location");
+    ImGui::TextWrapped("%s",
+        pendingProjectDeletionPath_.parent_path().string().c_str());
+    ImGui::Spacing();
+    EditorDialogStyle::DrawMessage(
+        "This removes its models, scenes, materials, and local settings.",
+        EditorDialogIntent::Warning);
+    if (!projectDeletionError_.empty())
+        EditorDialogStyle::DrawMessage(
+            projectDeletionError_, EditorDialogIntent::Destructive);
+
+    EditorDialogStyle::BeginActions();
+    const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts(false);
+    const bool cancelRequested =
+        EditorDialogStyle::ActionButton("Cancel", true) ||
+        shortcut == EditorDialogShortcut::Cancel;
+    ImGui::SetItemDefaultFocus();
+    ImGui::SameLine();
+    const bool deleteRequested = EditorDialogStyle::ActionButton(
+        "Move to Recycle Bin", false, true, true);
+
+    if (cancelRequested)
+    {
+        pendingProjectDeletionPath_.clear();
+        projectDeletionError_.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    else if (deleteRequested)
+    {
+        DeletePendingProject();
+        if (pendingProjectDeletionPath_.empty())
+            ImGui::CloseCurrentPopup();
+    }
+
+    EditorDialogStyle::EndPopup();
 }
 
 void EditorWorkspace::DrawModelImportDialogs()
@@ -4577,6 +4717,8 @@ void EditorWorkspace::RemoveRecentProject(
     }
 
     welcomeError_.clear();
+    welcomeNotification_ =
+        "Removed from recent projects. Files on disk were not changed.";
 
     if (failedRecentProjectPath_ &&
         *failedRecentProjectPath_ == projectFilePath)
@@ -4586,6 +4728,91 @@ void EditorWorkspace::RemoveRecentProject(
 
     AddConsoleMessage(
         "Removed from recent projects: " + projectFilePath.string());
+}
+
+void EditorWorkspace::RequestDeleteProject(
+    const std::filesystem::path& projectFilePath)
+{
+    pendingProjectDeletionPath_ = projectFilePath;
+    projectDeletionError_.clear();
+    welcomeError_.clear();
+    welcomeNotification_.clear();
+    showProjectDeletionPopup_ = true;
+}
+
+std::vector<std::filesystem::path>
+EditorWorkspace::ProtectedProjectDeletionRoots() const
+{
+    std::vector<std::filesystem::path> roots;
+    std::error_code error;
+    std::filesystem::path candidate = std::filesystem::current_path(error);
+    if (error) return roots;
+
+    while (!candidate.empty())
+    {
+        const bool repositoryRoot =
+            std::filesystem::is_directory(candidate / "editor", error) &&
+            !error &&
+            std::filesystem::is_directory(candidate / "engine", error) &&
+            !error &&
+            std::filesystem::is_regular_file(candidate / "CMakeLists.txt", error) &&
+            !error;
+        if (repositoryRoot)
+        {
+            roots.push_back(candidate);
+            roots.push_back(candidate / "assets");
+            roots.push_back(candidate / "Assets");
+            break;
+        }
+        const std::filesystem::path parent = candidate.parent_path();
+        if (parent == candidate) break;
+        candidate = parent;
+        error.clear();
+    }
+    return roots;
+}
+
+void EditorWorkspace::DeletePendingProject()
+{
+    if (pendingProjectDeletionPath_.empty()) return;
+
+    ProjectDeletionRequest request;
+    request.ProjectFilePath = pendingProjectDeletionPath_;
+    if (const auto& activeProject = projectManager_.ActiveProject())
+        request.ActiveProjectRoot = activeProject->RootPath();
+    request.ProtectedRoots = ProtectedProjectDeletionRoots();
+    request.Confirmed = true;
+
+    const ProjectDeletionResult result =
+        projectDeletionService_.DeleteProject(request);
+    if (!result.Succeeded())
+    {
+        projectDeletionError_ = result.Message;
+        welcomeError_ = result.Message;
+        AddConsoleMessage("Project deletion refused: " + result.Message);
+        return;
+    }
+
+    const std::filesystem::path deletedProject = pendingProjectDeletionPath_;
+    if (!projectManager_.RemoveRecentProject(deletedProject))
+    {
+        welcomeError_ =
+            "Project moved to the Recycle Bin, but its recent entry could not "
+            "be removed: " + projectManager_.LastError();
+        AddConsoleMessage(welcomeError_);
+    }
+    else
+    {
+        welcomeError_.clear();
+        welcomeNotification_ = "Project moved to the Windows Recycle Bin.";
+        AddConsoleMessage(
+            "Project moved to Recycle Bin: " + result.ProjectRoot.string());
+    }
+    if (failedRecentProjectPath_ &&
+        *failedRecentProjectPath_ == deletedProject)
+        failedRecentProjectPath_.reset();
+    projectDeletionError_.clear();
+    pendingProjectDeletionPath_.clear();
 }
 
 void EditorWorkspace::SaveProject()

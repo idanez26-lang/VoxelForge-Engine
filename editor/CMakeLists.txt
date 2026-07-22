@@ -431,6 +431,32 @@ else()
         VoxelForgeEditorProjectSession PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorWelcome STATIC)
+target_sources(
+    VoxelForgeEditorWelcome
+    PRIVATE
+        src/Welcome/ProjectDeletionService.cpp
+        src/Welcome/WelcomeScreenModel.cpp
+)
+target_include_directories(
+    VoxelForgeEditorWelcome
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorWelcome
+    PUBLIC VoxelForgeProject
+)
+if(WIN32)
+    target_link_libraries(VoxelForgeEditorWelcome PRIVATE Ole32 Shell32)
+endif()
+target_compile_features(VoxelForgeEditorWelcome PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorWelcome PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorWelcome PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorModelImport STATIC)
 target_sources(
     VoxelForgeEditorModelImport
@@ -617,6 +643,7 @@ target_link_libraries(
         VoxelForgeEditorVoxelDocument
         VoxelForgeEditorVoxelCreation
         VoxelForgeEditorVoxelSave
+        VoxelForgeEditorWelcome
         VoxelForgeProject
         VoxelForgeRenderer
         VoxelForgeScene

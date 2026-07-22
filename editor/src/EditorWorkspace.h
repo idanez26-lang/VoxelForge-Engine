@@ -63,6 +63,8 @@
 #include "VoxelTools/VoxelPencilPreview.h"
 #include "VoxelTools/VoxelPencilTool.h"
 #include "VoxelTools/VoxelToolState.h"
+#include "Welcome/ProjectDeletionService.h"
+#include "Welcome/WelcomeScreenModel.h"
 
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
@@ -253,6 +255,7 @@ private:
         DragDropImportTarget target) const;
     void DrawAboutPopup();
     void DrawProjectDialogs();
+    void DrawProjectDeletionDialog();
     void DrawNewProjectDialog();
     void DrawOpenProjectDialog();
     void DrawModelImportDialogs();
@@ -290,6 +293,11 @@ private:
         bool recentProject);
     void RemoveRecentProject(
         const std::filesystem::path& projectFilePath);
+    void RequestDeleteProject(
+        const std::filesystem::path& projectFilePath);
+    void DeletePendingProject();
+    [[nodiscard]] std::vector<std::filesystem::path>
+        ProtectedProjectDeletionRoots() const;
     void SaveProject();
     void CreateVoxelModelNow();
     [[nodiscard]] bool SaveVoxelModel();
@@ -456,6 +464,8 @@ private:
     std::unique_ptr<ProjectFolderOpener> projectFolderOpener_;
     ProjectDialogPreferences projectDialogPreferences_;
     ProjectSessionService projectSessionService_;
+    WindowsProjectRecycleBin projectRecycleBin_;
+    ProjectDeletionService projectDeletionService_{projectRecycleBin_};
     DirtyActionConfirmation dirtyActionConfirmation_;
     std::optional<DestructiveAction> deferredDirtyAction_;
     bool deferredDirtySaveRequested_ = false;
@@ -475,7 +485,10 @@ private:
     std::string voxelModelCreationError_;
     std::string projectDialogError_;
     std::string welcomeError_;
+    std::string welcomeNotification_;
+    std::string projectDeletionError_;
     std::optional<std::filesystem::path> failedRecentProjectPath_;
+    std::filesystem::path pendingProjectDeletionPath_;
     std::vector<std::filesystem::path> selectedImportPaths_;
     std::vector<std::filesystem::path> pendingImportPaths_;
     std::vector<std::filesystem::path> successfulImportPaths_;
@@ -511,6 +524,7 @@ private:
     bool showImportCollisionPopup_ = false;
     bool showOpenImportedModelPopup_ = false;
     bool showDirtyConfirmationPopup_ = false;
+    bool showProjectDeletionPopup_ = false;
     bool resetLayoutRequested_ = false;
     bool transformPanelDockingChecked_ = false;
     bool thumbnailVisualLayoutRequested_ = false;

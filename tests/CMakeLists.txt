@@ -742,6 +742,22 @@ add_test(
     NAME VoxelForge.Editor.NewVoxelModelWorkflow
     COMMAND $<TARGET_FILE:VoxelForgeEditorNewVoxelModelWorkflowTests>
 )
+
+add_executable(
+    VoxelForgeEditorWelcomeExperienceTests
+    Editor/WelcomeExperienceTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorWelcomeExperienceTests
+    PRIVATE
+        VoxelForgeEditorWelcome
+        VoxelForgeProject
+)
+vf_configure_test(VoxelForgeEditorWelcomeExperienceTests)
+add_test(
+    NAME VoxelForge.Editor.WelcomeExperience
+    COMMAND $<TARGET_FILE:VoxelForgeEditorWelcomeExperienceTests>
+)
 add_executable(
     VoxelForgeEditorPaletteServiceTests
     Editor/PaletteServiceTests.cpp
@@ -1130,6 +1146,18 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --modern-dialogs-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.WelcomeScreenSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --welcome-screen-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.RemoveRecentProjectSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --remove-recent-project-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.SafeProjectDeletionSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --safe-project-deletion-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.VoxelMoveSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-move-smoke-test
     )
@@ -1216,6 +1244,9 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.ModernToolbarSmoke
         VoxelForge.Editor.KeyboardShortcutsSmoke
         VoxelForge.Editor.ModernDialogsSmoke
+        VoxelForge.Editor.WelcomeScreenSmoke
+        VoxelForge.Editor.RemoveRecentProjectSmoke
+        VoxelForge.Editor.SafeProjectDeletionSmoke
         VoxelForge.Editor.VoxelMoveSmoke
         VoxelForge.Editor.VoxelDuplicateSmoke
         VoxelForge.Editor.VoxelRotateSmoke
