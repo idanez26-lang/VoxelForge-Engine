@@ -39,6 +39,8 @@
 #include "Transform/RotateVoxelSelectionOperation.h"
 #include "Transform/ScaleVoxelSelectionOperation.h"
 #include "TransformPanel/TransformPanelViewModel.h"
+#include "Tools/ToolContext.h"
+#include "Tools/ToolManager.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportNavigationController.h"
 #include "ViewportRenderer.h"
@@ -420,6 +422,8 @@ private:
     bool selectionBoxInteriorHovered_ = false;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
+    ToolManager toolManager_{voxelToolState_};
+    ToolContext toolContext_{};
     EditorInputService editorInputService_;
     VoxelToolInputController voxelToolInput_;
     VoxelToolInputController voxelToolSmokeInput_;

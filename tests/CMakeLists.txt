@@ -388,6 +388,25 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorToolbarTests>
 )
 add_executable(
+    VoxelForgeProfessionalToolFrameworkSmoke
+    Editor/ToolFrameworkTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Input/EditorInputService.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Tools/ToolManager.cpp
+)
+target_include_directories(
+    VoxelForgeProfessionalToolFrameworkSmoke
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeProfessionalToolFrameworkSmoke
+    PRIVATE VoxelForgeEditorCommands VoxelForgeEditorTransformPivot
+)
+vf_configure_test(VoxelForgeProfessionalToolFrameworkSmoke)
+add_test(
+    NAME VoxelForge.Editor.ProfessionalToolFrameworkSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeProfessionalToolFrameworkSmoke>
+)
+add_executable(
     VoxelForgeEditorInputServiceTests
     Editor/EditorInputServiceTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/Input/EditorInputService.cpp

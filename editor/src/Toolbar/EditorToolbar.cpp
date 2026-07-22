@@ -286,7 +286,7 @@ bool DrawIcon(
         DrawPencilIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Eraser:
         DrawEraserIcon(drawList, minimum, maximum, color, thickness); return true;
-    case EditorToolbarAction::Fill:
+    case EditorToolbarAction::Paint:
         DrawFillIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Box:
         DrawBoxIcon(drawList, minimum, maximum, color, thickness); return true;
@@ -341,10 +341,10 @@ void DrawTooltip(
             ? "Select one or more voxels to use Duplicate."
             : button.Action == EditorToolbarAction::Rotate
             ? "Select one or more voxels to use Rotate."
-            : button.Action == EditorToolbarAction::Mirror
-            ? "Select one or more voxels to use Mirror."
             : button.Action == EditorToolbarAction::Scale
             ? "Select one or more voxels to use Scale."
+            : button.Action == EditorToolbarAction::Mirror
+            ? "Select one or more voxels to use Mirror."
             : button.Action == EditorToolbarAction::Align
             ? "Select one or more voxels to use Align."
             : "Open a voxel model to use this tool.");
@@ -419,7 +419,7 @@ void EditorToolbar::Draw(
 {
     const EditorToolbarLayout layout = EditorToolbarModel::CalculateLayout(
         ImGui::GetContentRegionAvail().x, ImGui::GetFontSize());
-    const auto& buttons = EditorToolbarModel::Buttons();
+    const auto buttons = EditorToolbarModel::PrimaryButtons();
     EditorToolbarGroup previousGroup = buttons.front().Group;
     bool first = true;
     ImGui::PushStyleVar(

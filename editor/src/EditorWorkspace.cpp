@@ -6,6 +6,7 @@
 #include "Layout/PalettePanelLayout.h"
 #include "Dialogs/EditorDialogStyle.h"
 #include "Toolbar/EditorToolbar.h"
+#include "Tools/ToolPanel.h"
 #include "TransformGizmo/GizmoStyle.h"
 
 #include "VoxelForge/Project/Project.h"
@@ -358,6 +359,8 @@ EditorWorkspace::EditorWorkspace(
           "VoxelForge Studio initialized"},
       projectDialogPreferences_(std::move(preferencesFilePath))
 {
+    toolContext_.Constraints = &constraintSettings_;
+    toolContext_.PivotManager = &transformPivotManager_;
     assetBrowser_.SetMessageCallback(
         [this](std::string message)
         {
@@ -1409,7 +1412,7 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool != ActiveVoxelTool::Mirror) CancelVoxelMirror();
     if (tool != ActiveVoxelTool::Scale) CancelVoxelScale();
     if (tool != ActiveVoxelTool::Align) CancelVoxelAlign();
-    voxelToolState_.SetActiveTool(tool);
+    toolManager_.SetActiveTool(tool);
     voxelToolInput_.Reset();
     UpdateVoxelHighlights();
 }
@@ -3524,6 +3527,18 @@ void EditorWorkspace::DrawPalettePanel()
         return;
     }
 
+    toolContext_.HasDocument = voxelDocumentSession_.HasActiveDocument();
+    const float availableHeight = ImGui::GetContentRegionAvail().y;
+    const float toolPanelHeight = std::min(
+        ToolPanel::PreferredHeight(toolManager_.ActiveDescriptor().Panel),
+        std::max(36.0F, availableHeight * 0.35F));
+    ImGui::TextDisabled("Tool Options");
+    if (ImGui::BeginChild(
+            "##ActiveToolPanel", ImVec2(0.0F, toolPanelHeight), false))
+        ToolPanel::Draw(toolManager_, toolContext_);
+    ImGui::EndChild();
+    ImGui::Separator();
+
     const PaletteService::Palette* palette = paletteService_.ActivePalette();
     const std::optional<PaletteColorSelection> active =
         paletteService_.ActiveColor();
@@ -3646,10 +3661,6 @@ void EditorWorkspace::DrawPalettePanel()
     }
     ImGui::EndChild();
     ImGui::Separator();
-    ImGui::TextDisabled("Tool Options");
-    ImGui::SameLine();
-    ImGui::TextDisabled("(coming later)");
-
     if (openColorEditor) ImGui::OpenPopup("Color Editor Preview");
     if (EditorDialogStyle::BeginPopup(
             "Color Editor Preview",

@@ -613,6 +613,14 @@ target_sources(
         src/EditorLayer.cpp
         src/EditorWorkspace.cpp
         src/Input/EditorInputService.cpp
+        src/Tools/ToolManager.cpp
+        src/Tools/ToolPanel.cpp
+        src/Tools/Panels/PencilPanel.cpp
+        src/Tools/Panels/ErasePanel.cpp
+        src/Tools/Panels/PaintPanel.cpp
+        src/Tools/Panels/MovePanel.cpp
+        src/Tools/Panels/RotatePanel.cpp
+        src/Tools/Panels/ScalePanel.cpp
         src/Toolbar/EditorToolbar.cpp
         src/Toolbar/EditorToolbarModel.cpp
         src/ViewportInput/ViewportCameraInput.cpp

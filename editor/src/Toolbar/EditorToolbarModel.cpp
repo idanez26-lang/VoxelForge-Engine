@@ -12,15 +12,27 @@ constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
         {EditorToolbarAction::Save, EditorToolbarGroup::File,
          "Save", "Save the active voxel model", EditorInputCommand::FileSave,
          ActiveVoxelTool::None},
-        {EditorToolbarAction::Pencil, EditorToolbarGroup::DirectEdit,
+        {EditorToolbarAction::Pencil, EditorToolbarGroup::Sculpt,
          "Pencil", "Draw voxels", EditorInputCommand::ToolPencil,
          ActiveVoxelTool::Pencil},
-        {EditorToolbarAction::Eraser, EditorToolbarGroup::DirectEdit,
+        {EditorToolbarAction::Eraser, EditorToolbarGroup::Sculpt,
          "Eraser", "Remove voxels", EditorInputCommand::ToolEraser,
          ActiveVoxelTool::Eraser},
-        {EditorToolbarAction::Fill, EditorToolbarGroup::DirectEdit,
-         "Fill", "Recolor a connected area", EditorInputCommand::ToolFill,
+        {EditorToolbarAction::Paint, EditorToolbarGroup::Sculpt,
+         "Paint", "Recolor a connected area", EditorInputCommand::ToolFill,
          ActiveVoxelTool::Fill},
+        {EditorToolbarAction::Selection, EditorToolbarGroup::Selection,
+         "Selection", "Select voxels", EditorInputCommand::ToolSelection,
+         ActiveVoxelTool::Selection},
+        {EditorToolbarAction::Move, EditorToolbarGroup::Transform,
+         "Move", "Move the selected voxels", EditorInputCommand::ToolMove,
+         ActiveVoxelTool::Move},
+        {EditorToolbarAction::Rotate, EditorToolbarGroup::Transform,
+         "Rotate", "Rotate the selected voxels by 90 degrees",
+         EditorInputCommand::ToolRotate, ActiveVoxelTool::Rotate},
+        {EditorToolbarAction::Scale, EditorToolbarGroup::Transform,
+         "Scale", "Scale the selected voxels by 2",
+         EditorInputCommand::ToolScale, ActiveVoxelTool::Scale},
         {EditorToolbarAction::Box, EditorToolbarGroup::Construction,
          "Box", "Create a filled voxel box", EditorInputCommand::ToolBox,
          ActiveVoxelTool::Box},
@@ -29,30 +41,24 @@ constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
          ActiveVoxelTool::Line},
         {EditorToolbarAction::Sphere, EditorToolbarGroup::Construction,
          "Sphere", "Create a filled voxel sphere",
-         EditorInputCommand::ToolSphere,
-         ActiveVoxelTool::Sphere},
-        {EditorToolbarAction::Selection, EditorToolbarGroup::Manipulation,
-         "Selection", "Select voxels", EditorInputCommand::ToolSelection,
-         ActiveVoxelTool::Selection},
-        {EditorToolbarAction::Move, EditorToolbarGroup::Manipulation,
-         "Move", "Move the selected voxels", EditorInputCommand::ToolMove,
-         ActiveVoxelTool::Move},
+         EditorInputCommand::ToolSphere, ActiveVoxelTool::Sphere},
         {EditorToolbarAction::Duplicate, EditorToolbarGroup::Manipulation,
          "Duplicate", "Duplicate the selected voxels",
          EditorInputCommand::ToolDuplicate, ActiveVoxelTool::Duplicate},
-        {EditorToolbarAction::Rotate, EditorToolbarGroup::Manipulation,
-         "Rotate", "Rotate the selected voxels by 90 degrees",
-         EditorInputCommand::ToolRotate, ActiveVoxelTool::Rotate},
         {EditorToolbarAction::Mirror, EditorToolbarGroup::Manipulation,
          "Mirror", "Mirror the selected voxels on X or Z",
          EditorInputCommand::ToolMirror, ActiveVoxelTool::Mirror},
-        {EditorToolbarAction::Scale, EditorToolbarGroup::Manipulation,
-         "Scale", "Scale the selected voxels by 2",
-         EditorInputCommand::ToolScale, ActiveVoxelTool::Scale},
         {EditorToolbarAction::Align, EditorToolbarGroup::Manipulation,
          "Align", "Align the selected voxels to a model face",
          EditorInputCommand::ToolAlign, ActiveVoxelTool::Align}
     }};
+}
+
+std::span<const EditorToolbarButton, EditorToolbarModel::PrimaryButtonCount>
+EditorToolbarModel::PrimaryButtons() noexcept
+{
+    return std::span<const EditorToolbarButton, PrimaryButtonCount>(
+        ToolbarButtons.data(), PrimaryButtonCount);
 }
 
 const std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>&
@@ -72,10 +78,10 @@ bool EditorToolbarModel::IsEnabled(
         return state.HasDocument && state.CanDuplicateSelection;
     if (button.Action == EditorToolbarAction::Rotate)
         return state.HasDocument && state.CanRotateSelection;
-    if (button.Action == EditorToolbarAction::Mirror)
-        return state.HasDocument && state.CanMirrorSelection;
     if (button.Action == EditorToolbarAction::Scale)
         return state.HasDocument && state.CanScaleSelection;
+    if (button.Action == EditorToolbarAction::Mirror)
+        return state.HasDocument && state.CanMirrorSelection;
     if (button.Action == EditorToolbarAction::Align)
         return state.HasDocument && state.CanAlignSelection;
     return state.HasDocument;
@@ -101,8 +107,8 @@ EditorToolbarLayout EditorToolbarModel::CalculateLayout(
         std::floor(safeFontSize * 0.32F), 4.0F, 7.0F);
     const float groupSpacing = std::clamp(
         std::floor(safeFontSize * 0.75F), 10.0F, 16.0F);
-    const float singleRowWidth = preferredButton * ButtonCount +
-        regularSpacing * static_cast<float>(ButtonCount - 1U) +
+    const float singleRowWidth = preferredButton * PrimaryButtonCount +
+        regularSpacing * static_cast<float>(PrimaryButtonCount - 1U) +
         groupSpacing * 3.0F;
     if (singleRowWidth <= safeWidth)
         return {preferredButton, regularSpacing, groupSpacing, false};

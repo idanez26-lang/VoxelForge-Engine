@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <span>
 #include <string_view>
 
 namespace VoxelForge::Editor
@@ -15,23 +16,25 @@ enum class EditorToolbarAction : std::uint8_t
     Save,
     Pencil,
     Eraser,
-    Fill,
+    Paint,
+    Selection,
+    Move,
+    Rotate,
+    Scale,
     Box,
     Line,
     Sphere,
-    Selection,
-    Move,
     Duplicate,
-    Rotate,
     Mirror,
-    Scale,
     Align
 };
 
 enum class EditorToolbarGroup : std::uint8_t
 {
     File,
-    DirectEdit,
+    Sculpt,
+    Selection,
+    Transform,
     Construction,
     Manipulation
 };
@@ -71,9 +74,12 @@ class EditorToolbarModel final
 {
 public:
     static constexpr std::size_t ButtonCount = 14U;
+    static constexpr std::size_t PrimaryButtonCount = 8U;
 
     [[nodiscard]] static const std::array<EditorToolbarButton, ButtonCount>&
         Buttons() noexcept;
+    [[nodiscard]] static std::span<const EditorToolbarButton,
+        PrimaryButtonCount> PrimaryButtons() noexcept;
     [[nodiscard]] static bool IsEnabled(
         const EditorToolbarButton& button,
         const EditorToolbarState& state) noexcept;
