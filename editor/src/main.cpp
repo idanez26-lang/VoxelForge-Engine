@@ -62,6 +62,7 @@ constexpr std::size_t RotateGizmoSmokeTestFrameCount = 7;
 constexpr std::size_t ScaleGizmoSmokeTestFrameCount = 6;
 constexpr std::size_t TransformGizmoManagerSmokeTestFrameCount = 6;
 constexpr std::size_t TransformGizmoFoundationSmokeTestFrameCount = 16;
+constexpr std::size_t TransformPanelSmokeTestFrameCount = 8;
 constexpr std::size_t SaveOnExitSmokeTestFrameCount = 3;
 constexpr std::size_t QualityOfLifeSmokeTestFrameCount = 8;
 
@@ -111,6 +112,7 @@ struct CommandLine final
     bool ScaleGizmoSmokeTest = false;
     bool TransformGizmoManagerSmokeTest = false;
     bool TransformGizmoFoundationSmokeTest = false;
+    bool TransformPanelSmokeTest = false;
     bool SaveOnExitSmokeTest = false;
     bool QualityOfLifeSmokeTest = false;
 };
@@ -198,6 +200,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--transform-gizmo-manager-smoke-test";
         result.TransformGizmoFoundationSmokeTest |=
             argument == "--transform-gizmo-foundation-smoke-test";
+        result.TransformPanelSmokeTest |=
+            argument == "--transform-panel-smoke-test";
         result.SaveOnExitSmokeTest |= argument == "--save-on-exit-smoke-test";
         result.QualityOfLifeSmokeTest |=
             argument == "--quality-of-life-smoke-test";
@@ -443,6 +447,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.ScaleGizmoSmokeTest ||
             commandLine.TransformGizmoManagerSmokeTest ||
             commandLine.TransformGizmoFoundationSmokeTest ||
+            commandLine.TransformPanelSmokeTest ||
             commandLine.SaveOnExitSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
         const bool isolatedTest = commandLine.SmokeTest || viewportTest;
@@ -479,6 +484,7 @@ int main(const int argumentCount, char* arguments[])
                || commandLine.ScaleGizmoSmokeTest
                || commandLine.TransformGizmoManagerSmokeTest
                || commandLine.TransformGizmoFoundationSmokeTest
+               || commandLine.TransformPanelSmokeTest
               || commandLine.SaveOnExitSmokeTest
                 ? viewportFixture.CreateEmptyProject(projectManager)
                 : viewportFixture.Create(
@@ -590,6 +596,8 @@ int main(const int argumentCount, char* arguments[])
                      ? TransformGizmoManagerSmokeTestFrameCount
                      : commandLine.TransformGizmoFoundationSmokeTest
                      ? TransformGizmoFoundationSmokeTestFrameCount
+                     : commandLine.TransformPanelSmokeTest
+                     ? TransformPanelSmokeTestFrameCount
                      : commandLine.SaveOnExitSmokeTest
                      ? SaveOnExitSmokeTestFrameCount
                     : commandLine.QualityOfLifeSmokeTest
@@ -640,6 +648,7 @@ int main(const int argumentCount, char* arguments[])
                      commandLine.ScaleGizmoSmokeTest ||
                      commandLine.TransformGizmoManagerSmokeTest ||
                      commandLine.TransformGizmoFoundationSmokeTest ||
+                     commandLine.TransformPanelSmokeTest ||
                      commandLine.SaveOnExitSmokeTest,
                 commandLine.VoxelSelectionSmokeTest,
                 commandLine.VoxelSelectionVisualTest,
@@ -688,6 +697,7 @@ int main(const int argumentCount, char* arguments[])
                  commandLine.ScaleGizmoSmokeTest,
                  commandLine.TransformGizmoManagerSmokeTest,
                  commandLine.TransformGizmoFoundationSmokeTest,
+                 commandLine.TransformPanelSmokeTest,
                  commandLine.SaveOnExitSmokeTest,
                  isolatedTest ? viewportFixture.ImGuiIniPath()
                              : std::filesystem::path{});

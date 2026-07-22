@@ -469,6 +469,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorTransformPivotTests>
 )
 add_executable(
+    VoxelForgeEditorTransformPanelTests
+    Editor/TransformPanelViewModelTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorTransformPanelTests
+    PRIVATE VoxelForgeEditorTransformPanel
+)
+vf_configure_test(VoxelForgeEditorTransformPanelTests)
+add_test(
+    NAME VoxelForge.Editor.TransformPanel
+    COMMAND $<TARGET_FILE:VoxelForgeEditorTransformPanelTests>
+)
+add_executable(
     VoxelForgeEditorMoveGizmoTests
     Editor/MoveGizmoTests.cpp
 )
@@ -921,6 +934,7 @@ set_tests_properties(
     VoxelForge.Editor.TransformGizmo
     VoxelForge.Editor.TransformGizmoManager
     VoxelForge.Editor.TransformPivot
+    VoxelForge.Editor.TransformPanel
     VoxelForge.Editor.MoveGizmo
     VoxelForge.Editor.ScaleGizmo
     VoxelForge.Editor.VoxelRotate
@@ -1127,6 +1141,10 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --transform-gizmo-manager-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.TransformPanelSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --transform-panel-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.SaveOnExitSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --save-on-exit-smoke-test
     )
@@ -1175,6 +1193,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.RotateGizmoSmoke
         VoxelForge.Editor.ScaleGizmoSmoke
         VoxelForge.Editor.TransformGizmoManagerSmoke
+        VoxelForge.Editor.TransformPanelSmoke
         VoxelForge.Editor.SaveOnExitSmoke
         PROPERTIES
             TIMEOUT 30

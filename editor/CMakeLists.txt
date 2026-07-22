@@ -345,6 +345,30 @@ else()
         VoxelForgeEditorQualityOfLife PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorTransformPanel STATIC)
+target_sources(
+    VoxelForgeEditorTransformPanel
+    PRIVATE src/TransformPanel/TransformPanelViewModel.cpp
+)
+target_include_directories(
+    VoxelForgeEditorTransformPanel
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorTransformPanel
+    PUBLIC
+        VoxelForgeEditorCommands
+        VoxelForgeEditorTransformPivot
+)
+target_compile_features(VoxelForgeEditorTransformPanel PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorTransformPanel PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorTransformPanel PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorLayout STATIC)
 target_sources(
     VoxelForgeEditorLayout
@@ -563,6 +587,7 @@ target_link_libraries(
         VoxelForgeEditorProjectSession
         VoxelForgeEditorPalette
         VoxelForgeEditorTransformGizmo
+        VoxelForgeEditorTransformPanel
         VoxelForgeEditorTransformPivot
         VoxelForgeEditorTransformPreview
         VoxelForgeEditorVoxelSelection

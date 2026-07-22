@@ -42,11 +42,34 @@ namespace
 constexpr float StatusBarHeight = 26.0F;
 constexpr std::size_t MaximumConsoleMessageCount = 200;
 constexpr const char* WorkspaceDockspaceName = "VoxelForgeStudioDockSpace";
+constexpr const char* InspectorPanelWindowName = "Inspector";
+constexpr const char* TransformPanelWindowName = "Transform";
 constexpr const char* AboutPopupName = "About VoxelForge Studio";
 constexpr const char* DirtyConfirmationPopupName = "Unsaved Voxel Model";
 constexpr const char* ImportConfirmationPopupName = "Import Models";
 constexpr const char* ImportCollisionPopupName = "Model Already Exists";
 constexpr const char* OpenImportedModelPopupName = "Open Imported Model";
+
+bool IsTransformPanelDockedUnderInspector() noexcept
+{
+    const ImGuiWindowSettings* const inspectorSettings =
+        ImGui::FindWindowSettingsByID(ImHashStr(InspectorPanelWindowName));
+    const ImGuiWindowSettings* const transformSettings =
+        ImGui::FindWindowSettingsByID(ImHashStr(TransformPanelWindowName));
+    if (inspectorSettings == nullptr || transformSettings == nullptr ||
+        inspectorSettings->DockId == 0U || transformSettings->DockId == 0U)
+        return false;
+
+    const ImGuiDockNode* const inspectorNode =
+        ImGui::DockBuilderGetNode(inspectorSettings->DockId);
+    const ImGuiDockNode* const transformNode =
+        ImGui::DockBuilderGetNode(transformSettings->DockId);
+    return inspectorNode != nullptr && transformNode != nullptr &&
+        inspectorNode != transformNode && inspectorNode->ParentNode != nullptr &&
+        inspectorNode->ParentNode == transformNode->ParentNode &&
+        inspectorNode->ParentNode->SplitAxis == ImGuiAxis_Y &&
+        transformNode->Pos.y >= inspectorNode->Pos.y + inspectorNode->Size.y;
+}
 
 bool HasProjectExtension(const std::filesystem::path& path)
 {
@@ -505,10 +528,18 @@ void EditorWorkspace::Draw()
     const bool layoutMissing =
         ImGui::DockBuilderGetNode(dockspaceId) == nullptr;
 
+    bool transformDockingNeedsRepair = false;
+    if (!transformPanelDockingChecked_)
+    {
+        transformPanelDockingChecked_ = true;
+        transformDockingNeedsRepair =
+            !IsTransformPanelDockedUnderInspector();
+    }
+
     DrawDockSpace(dockspaceId);
 
     bool layoutRebuilt = false;
-    if (layoutMissing || resetLayoutRequested_)
+    if (layoutMissing || transformDockingNeedsRepair || resetLayoutRequested_)
     {
         if (thumbnailVisualLayoutRequested_)
             BuildThumbnailVisualLayout(dockspaceId);
@@ -525,6 +556,7 @@ void EditorWorkspace::Draw()
     if (showExplorer_) DrawExplorerPanel();
     if (showScene_) DrawScenePanel();
     if (showInspector_ && !thumbnailVisualMode_) DrawInspectorPanel();
+    if (showTransformPanel_ && !thumbnailVisualMode_) DrawTransformPanel();
     if (showPalette_ && !thumbnailVisualMode_) DrawPalettePanel();
     if (showAssetBrowser_)
     {
@@ -835,6 +867,7 @@ void EditorWorkspace::DrawMainMenuBar()
         ImGui::MenuItem("Explorer", nullptr, &showExplorer_);
         ImGui::MenuItem("Scene", nullptr, &showScene_);
         ImGui::MenuItem("Inspector", nullptr, &showInspector_);
+        ImGui::MenuItem("Transform", nullptr, &showTransformPanel_);
         ImGui::MenuItem("Palette", nullptr, &showPalette_);
         ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser_);
         ImGui::MenuItem("Console", nullptr, &showConsole_);
@@ -1571,7 +1604,14 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     const ImGuiID paletteId = ImGui::DockBuilderSplitNode(
         rightId,
         ImGuiDir_Down,
-        0.64F,
+        0.44F,
+        nullptr,
+        &rightId);
+
+    const ImGuiID transformId = ImGui::DockBuilderSplitNode(
+        rightId,
+        ImGuiDir_Down,
+        0.52F,
         nullptr,
         &rightId);
 
@@ -1592,7 +1632,8 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
 
     ImGui::DockBuilderDockWindow("Explorer", leftId);
     ImGui::DockBuilderDockWindow("Scene", topId);
-    ImGui::DockBuilderDockWindow("Inspector", rightId);
+    ImGui::DockBuilderDockWindow(InspectorPanelWindowName, rightId);
+    ImGui::DockBuilderDockWindow(TransformPanelWindowName, transformId);
     ImGui::DockBuilderDockWindow("Palette", paletteId);
     ImGui::DockBuilderDockWindow("Asset Browser", bottomLeftId);
     ImGui::DockBuilderDockWindow("Console", bottomRightId);
@@ -1601,6 +1642,7 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     showExplorer_ = true;
     showScene_ = true;
     showInspector_ = true;
+    showTransformPanel_ = true;
     showPalette_ = true;
     showAssetBrowser_ = true;
     showConsole_ = true;
@@ -3274,6 +3316,105 @@ void EditorWorkspace::DrawInspectorPanel()
         wouldChange
             ? "Paint the selected voxel with the active color"
             : "Select an occupied voxel and choose a different color.");
+    ImGui::End();
+}
+
+void EditorWorkspace::DrawTransformPanel()
+{
+    if (!ImGui::Begin(TransformPanelWindowName, &showTransformPanel_))
+    {
+        ImGui::End();
+        return;
+    }
+
+    const TransformPanelSource source = CurrentTransformPanelSource();
+    const TransformPanelState state = transformPanelViewModel_.Read(source);
+    const bool editable = state.Available && !voxelEditInProgress_ &&
+        !voxelEditHistory_.IsBusy() && !transformGizmoManager_.IsDragging();
+
+    ImGui::TextUnformatted("Selection Transform");
+    ImGui::TextDisabled(
+        "Exact voxel-space values. Press Enter to apply a field.");
+    ImGui::Separator();
+
+    const auto drawVector = [](const char* section, const char* identifier,
+        float* values, const char* format) -> bool
+    {
+        ImGui::TextDisabled("%s", section);
+        constexpr const char* axes[] = {"X", "Y", "Z"};
+        bool committed = false;
+        for (std::size_t index = 0U; index < 3U; ++index)
+        {
+            ImGui::PushID(static_cast<int>(index));
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(axes[index]);
+            ImGui::SameLine(0.0F, 8.0F);
+            ImGui::SetNextItemWidth(-1.0F);
+            committed |= ImGui::InputFloat(
+                identifier, &values[index], 0.0F, 0.0F, format,
+                ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::PopID();
+        }
+        return committed;
+    };
+
+    std::array<float, 3U> position{
+        state.Position.X, state.Position.Y, state.Position.Z};
+    std::array<float, 3U> rotation{
+        state.RotationDegrees.X,
+        state.RotationDegrees.Y,
+        state.RotationDegrees.Z};
+    std::array<float, 3U> scale{
+        state.Scale.X, state.Scale.Y, state.Scale.Z};
+
+    ImGui::BeginDisabled(!editable);
+    if (drawVector("Position", "##TransformPosition", position.data(), "%.3f"))
+        static_cast<void>(ApplyTransformPanelPosition(
+            {position[0], position[1], position[2]}));
+    ImGui::Spacing();
+    if (drawVector("Rotation", "##TransformRotation", rotation.data(), "%.1f"))
+        static_cast<void>(ApplyTransformPanelRotation(
+            {rotation[0], rotation[1], rotation[2]}));
+    ImGui::TextDisabled("90-degree voxel increments");
+    ImGui::Spacing();
+    if (drawVector("Scale", "##TransformScale", scale.data(), "%.3f"))
+        static_cast<void>(ApplyTransformPanelScale(
+            {scale[0], scale[1], scale[2]}));
+    ImGui::Spacing();
+
+    ImGui::TextDisabled("Pivot");
+    const char* currentMode =
+        TransformPanelViewModel::PivotModeName(state.PivotMode);
+    if (ImGui::BeginCombo("##TransformPivot", currentMode))
+    {
+        constexpr std::array modes{
+            TransformPivotMode::Center,
+            TransformPivotMode::Bottom,
+            TransformPivotMode::Top};
+        for (const TransformPivotMode mode : modes)
+        {
+            const bool selected = mode == state.PivotMode;
+            if (ImGui::Selectable(
+                    TransformPanelViewModel::PivotModeName(mode), selected))
+            {
+                static_cast<void>(transformPivotManager_.SetMode(mode));
+                transformPanelStatusMessage_.clear();
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+
+    if (!state.Available)
+        ImGui::TextDisabled("Select one or more voxels to edit transforms.");
+    else if (transformGizmoManager_.IsDragging())
+        ImGui::TextDisabled("Release the gizmo before entering exact values.");
+    if (!transformPanelStatusMessage_.empty())
+    {
+        ImGui::Spacing();
+        DrawErrorMessage(transformPanelStatusMessage_);
+    }
     ImGui::End();
 }
 
@@ -10808,6 +10949,130 @@ bool EditorWorkspace::TransformGizmoManagerSmokePassed() const noexcept
         transformGizmoManagerSmokeCleaned_;
 }
 
+bool EditorWorkspace::RunTransformPanelSmokeStep(const std::size_t frame)
+{
+    using Asset::Voxel::VoxelPosition;
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const std::vector<VoxelPosition> source{
+        {2, 2, 2}, {3, 2, 2}, {2, 3, 2}};
+    const SelectionBounds bounds =
+        SelectionBounds::FromCorners({2, 2, 2}, {3, 3, 2});
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"TransformPanelSmoke", {16U, 16U, 16U}});
+        transformPanelSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Transform Panel Smoke",
+                {{0U, source[0], false, 0U, true, 3U},
+                 {0U, source[1], false, 0U, true, 7U},
+                 {0U, source[2], false, 0U, true, 11U}}});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            source, bounds, SelectionMode::Replace);
+        const TransformPanelState state = transformPanelViewModel_.Read(
+            CurrentTransformPanelSource());
+        transformPanelSmokePrepared_ = seeded && selected &&
+            state.Available && state.PivotMode == TransformPivotMode::Center &&
+            state.RotationDegrees == Vec3{} &&
+            state.Scale == Vec3{1.0F, 1.0F, 1.0F};
+    }
+    else if (frame == 1U)
+    {
+        if (!document || !transformPanelSmokePrepared_) return false;
+        const TransformPanelState before = transformPanelViewModel_.Read(
+            CurrentTransformPanelSource());
+        const Vec3 requested = before.Position + Vec3{2.0F, 1.0F, 0.0F};
+        const std::uint64_t revision = document->GetRevision();
+        transformPanelSmokeMoved_ = ApplyTransformPanelPosition(requested) &&
+            document->GetRevision() == revision + 1U &&
+            transformPanelViewModel_.Read(CurrentTransformPanelSource()).Position ==
+                requested;
+    }
+    else if (frame == 2U)
+    {
+        if (!document || !transformPanelSmokeMoved_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        transformPanelSmokeRotated_ = ApplyTransformPanelRotation(
+                {0.0F, 90.0F, 0.0F}) &&
+            document->GetRevision() == revision + 1U &&
+            transformPanelViewModel_.Read(CurrentTransformPanelSource()).Available;
+    }
+    else if (frame == 3U)
+    {
+        if (!document || !transformPanelSmokeRotated_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        transformPanelSmokeScaled_ = ApplyTransformPanelScale(
+                {1.0F, 2.0F, 1.0F}) &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() > source.size();
+    }
+    else if (frame == 4U)
+    {
+        if (!document || !transformPanelSmokeScaled_) return false;
+        static_cast<void>(transformPivotManager_.SetMode(
+            TransformPivotMode::Bottom));
+        const TransformPanelState bottom = transformPanelViewModel_.Read(
+            CurrentTransformPanelSource());
+        static_cast<void>(transformPivotManager_.SetMode(
+            TransformPivotMode::Top));
+        const TransformPanelState top = transformPanelViewModel_.Read(
+            CurrentTransformPanelSource());
+        static_cast<void>(transformPivotManager_.SetMode(
+            TransformPivotMode::Center));
+        const TransformPanelState center = transformPanelViewModel_.Read(
+            CurrentTransformPanelSource());
+        transformPanelSmokePivot_ = bottom.Available && top.Available &&
+            center.Available && bottom.PivotMode == TransformPivotMode::Bottom &&
+            top.PivotMode == TransformPivotMode::Top &&
+            center.PivotMode == TransformPivotMode::Center &&
+            bottom.Position.Y < center.Position.Y &&
+            center.Position.Y < top.Position.Y;
+    }
+    else if (frame == 5U)
+    {
+        if (!document || !transformPanelSmokePivot_) return false;
+        const std::size_t scaledCount = document->GetVoxelCount();
+        UndoCommand();
+        const bool undone = document->GetVoxelCount() == source.size() &&
+            transformPanelViewModel_.Read(CurrentTransformPanelSource()).Available;
+        RedoCommand();
+        transformPanelSmokeUndoRedo_ = undone &&
+            document->GetVoxelCount() == scaledCount &&
+            transformPanelViewModel_.Read(CurrentTransformPanelSource()).Available;
+    }
+    else if (frame == 6U)
+    {
+        if (!document || !transformPanelSmokeUndoRedo_) return false;
+        const bool saved = SaveVoxelModel();
+        CloseProject();
+        transformPanelSmokeCleaned_ = saved &&
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !transformPreviewModel_.IsActive() &&
+            !transformGizmoManager_.IsDragging() &&
+            !transformPivotManager_.HasValidPivot() &&
+            !std::filesystem::exists(
+                transformPanelSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                transformPanelSmokePath_.string() + ".vfsave.bak");
+    }
+    return TransformPanelSmokePassed();
+}
+
+bool EditorWorkspace::TransformPanelSmokePassed() const noexcept
+{
+    return transformPanelSmokePrepared_ && transformPanelSmokeMoved_ &&
+        transformPanelSmokeRotated_ && transformPanelSmokeScaled_ &&
+        transformPanelSmokePivot_ && transformPanelSmokeUndoRedo_ &&
+        transformPanelSmokeCleaned_;
+}
+
 bool EditorWorkspace::RunSaveOnExitSmokeStep(const std::size_t frame)
 {
     using Asset::Voxel::VoxelPosition;
@@ -11186,7 +11451,10 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
     }
     else if (scenarioFrame == 1U)
     {
-        if (!layoutStabilitySmokeCreated_ || document == nullptr ||
+        layoutStabilitySmokeTransformDocked_ =
+            IsTransformPanelDockedUnderInspector();
+        if (!layoutStabilitySmokeCreated_ ||
+            !layoutStabilitySmokeTransformDocked_ || document == nullptr ||
             !recordRectangle() ||
             voxelPlacementPreview_.Status !=
                 VoxelPlacementPreviewStatus::Valid)
@@ -11273,6 +11541,7 @@ bool EditorWorkspace::LayoutStabilitySmokePassed() const noexcept
 {
     return layoutStabilitySmokeCreated_ && layoutStabilitySmokePencilled_ &&
         layoutStabilitySmokeUndone_ && layoutStabilitySmokeRedone_ &&
+        layoutStabilitySmokeTransformDocked_ &&
         layoutStabilitySmokeRectanglesStable_ &&
         layoutStabilitySmokeReadyForShutdown_;
 }
@@ -11880,6 +12149,149 @@ bool EditorWorkspace::ApplySelectionBounds(
         evaluation.Voxels, clamped, mode);
     UpdateVoxelHighlights();
     return changed;
+}
+
+TransformPanelSource EditorWorkspace::CurrentTransformPanelSource() noexcept
+{
+    TransformPanelSource source;
+    const Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const SelectionBounds selectionBounds = selectionService_.EditableBounds();
+    source.Available = document != nullptr && !selectionService_.Empty() &&
+        selectionBounds.Valid && selectionService_.DocumentGeneration() ==
+            voxelDocumentSession_.Generation();
+    source.SourceBounds = transformPreviewModel_.IsActive()
+        ? transformPreviewModel_.SourceBounds() : selectionBounds;
+    if (!source.Available) return source;
+
+    if (!transformGizmoManager_.IsDragging())
+        static_cast<void>(transformPivotManager_.UpdateFromBounds(
+            selectionBounds, voxelModelCenter_));
+    if (!transformPivotManager_.HasValidPivot())
+    {
+        source.Available = false;
+        return source;
+    }
+    source.Pivot = transformPivotManager_.GetPivot();
+
+    if (transformPreviewModel_.IsActive() &&
+        voxelToolState_.IsRotateActive())
+    {
+        source.RotationPreview = TransformPanelRotation{
+            voxelRotateAxis_, voxelRotateQuarterTurns_};
+    }
+    if (transformPreviewModel_.IsActive() &&
+        voxelToolState_.IsScaleActive())
+    {
+        if (voxelScaleTargetDimensions_)
+            source.ScalePreviewDimensions = *voxelScaleTargetDimensions_;
+        else if (transformGizmoManager_.IsDragging())
+        {
+            const Asset::Voxel::VoxelDimensions dimensions =
+                transformGizmoManager_.TargetDimensions();
+            if (dimensions.X > 0U && dimensions.Y > 0U && dimensions.Z > 0U)
+                source.ScalePreviewDimensions = dimensions;
+        }
+    }
+    return source;
+}
+
+bool EditorWorkspace::ApplyTransformPanelPosition(const Vec3 position)
+{
+    const TransformPanelPositionEdit edit =
+        transformPanelViewModel_.PreparePosition(
+            CurrentTransformPanelSource(), position);
+    if (edit.Code == TransformPanelEditCode::NoChange)
+    {
+        transformPanelStatusMessage_.clear();
+        return true;
+    }
+    if (!edit.Ready())
+    {
+        transformPanelStatusMessage_ = edit.Message;
+        return false;
+    }
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document)
+    {
+        transformPanelStatusMessage_ = "The active document is unavailable.";
+        return false;
+    }
+
+    CancelTransformGizmoInteraction();
+    if (!transformPreviewModel_.BeginPreview(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            0U, TransformPreviewCollisionPolicy::IgnoreSource) ||
+        !transformPreviewModel_.SetDelta(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            edit.Delta) || !ApplyVoxelMove())
+    {
+        transformPanelStatusMessage_ = voxelMoveStatusMessage_.empty()
+            ? "Position could not be applied."
+            : voxelMoveStatusMessage_;
+        return false;
+    }
+    transformPanelStatusMessage_.clear();
+    return true;
+}
+
+bool EditorWorkspace::ApplyTransformPanelRotation(const Vec3 degrees)
+{
+    const TransformPanelRotationEdit edit =
+        transformPanelViewModel_.PrepareRotation(
+            CurrentTransformPanelSource(), degrees);
+    if (edit.Code == TransformPanelEditCode::NoChange)
+    {
+        transformPanelStatusMessage_.clear();
+        return true;
+    }
+    if (!edit.Ready())
+    {
+        transformPanelStatusMessage_ = edit.Message;
+        return false;
+    }
+
+    CancelTransformGizmoInteraction();
+    if (!BeginVoxelRotatePreview(edit.Axis, edit.QuarterTurns) ||
+        !ApplyVoxelRotate())
+    {
+        transformPanelStatusMessage_ = voxelRotateStatusMessage_.empty()
+            ? "Rotation could not be applied."
+            : voxelRotateStatusMessage_;
+        return false;
+    }
+    transformPanelStatusMessage_.clear();
+    return true;
+}
+
+bool EditorWorkspace::ApplyTransformPanelScale(const Vec3 scale)
+{
+    const TransformPanelScaleEdit edit = transformPanelViewModel_.PrepareScale(
+        CurrentTransformPanelSource(), scale);
+    if (edit.Code == TransformPanelEditCode::NoChange)
+    {
+        transformPanelStatusMessage_.clear();
+        return true;
+    }
+    if (!edit.Ready())
+    {
+        transformPanelStatusMessage_ = edit.Message;
+        return false;
+    }
+
+    CancelTransformGizmoInteraction();
+    if (!UpdateVoxelScalePreview(
+            VoxelScaleMode::Uniform, edit.TargetDimensions) ||
+        !ApplyVoxelScale())
+    {
+        transformPanelStatusMessage_ = voxelScaleStatusMessage_.empty()
+            ? "Scale could not be applied."
+            : voxelScaleStatusMessage_;
+        return false;
+    }
+    transformPanelStatusMessage_.clear();
+    return true;
 }
 
 bool EditorWorkspace::ApplyVoxelMove()

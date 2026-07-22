@@ -37,6 +37,7 @@
 #include "Transform/MirrorVoxelSelectionOperation.h"
 #include "Transform/RotateVoxelSelectionOperation.h"
 #include "Transform/ScaleVoxelSelectionOperation.h"
+#include "TransformPanel/TransformPanelViewModel.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportNavigationController.h"
 #include "ViewportRenderer.h"
@@ -204,6 +205,8 @@ public:
     [[nodiscard]] bool ScaleGizmoSmokePassed() const noexcept;
     [[nodiscard]] bool RunTransformGizmoManagerSmokeStep(std::size_t frame);
     [[nodiscard]] bool TransformGizmoManagerSmokePassed() const noexcept;
+    [[nodiscard]] bool RunTransformPanelSmokeStep(std::size_t frame);
+    [[nodiscard]] bool TransformPanelSmokePassed() const noexcept;
     [[nodiscard]] bool RunSaveOnExitSmokeStep(std::size_t frame);
     [[nodiscard]] bool SaveOnExitSmokePassed() const noexcept;
     [[nodiscard]] bool RunQualityOfLifeSmokeStep(
@@ -237,6 +240,7 @@ private:
     void DrawScenePanel();
     void DrawWelcomeScreen();
     void DrawInspectorPanel();
+    void DrawTransformPanel();
     void DrawPalettePanel();
     void DrawAssetBrowserPanel();
     void DrawConsolePanel();
@@ -346,6 +350,10 @@ private:
         SelectionBounds bounds, SelectionMode mode);
     void CancelSelectionInteraction();
     void CancelTransformGizmoInteraction() noexcept;
+    [[nodiscard]] TransformPanelSource CurrentTransformPanelSource() noexcept;
+    [[nodiscard]] bool ApplyTransformPanelPosition(Vec3 position);
+    [[nodiscard]] bool ApplyTransformPanelRotation(Vec3 degrees);
+    [[nodiscard]] bool ApplyTransformPanelScale(Vec3 scale);
     void CancelVoxelBox() noexcept;
     void CancelVoxelLine() noexcept;
     void CancelVoxelSphere() noexcept;
@@ -389,6 +397,7 @@ private:
     TransformGizmoModel transformGizmoModel_;
     TransformPivotManager transformPivotManager_;
     TransformGizmoManager transformGizmoManager_;
+    TransformPanelViewModel transformPanelViewModel_;
     bool selectionBoxInteriorHovered_ = false;
     VoxelSelectionState voxelSelection_;
     VoxelToolState voxelToolState_;
@@ -421,6 +430,7 @@ private:
     std::string voxelScaleStatusMessage_;
     VoxelAlignDirection voxelAlignDirection_ = VoxelAlignDirection::Left;
     std::string voxelAlignStatusMessage_;
+    std::string transformPanelStatusMessage_;
     PaintPaletteSelection paintPaletteSelection_;
     // Commands are scoped to the current project/model session. Clearing the
     // history before replacement prevents future commands from retaining a
@@ -474,6 +484,7 @@ private:
     bool showExplorer_ = true;
     bool showScene_ = true;
     bool showInspector_ = true;
+    bool showTransformPanel_ = true;
     bool showPalette_ = true;
     bool showAssetBrowser_ = true;
     bool showConsole_ = true;
@@ -489,6 +500,7 @@ private:
     bool showOpenImportedModelPopup_ = false;
     bool showDirtyConfirmationPopup_ = false;
     bool resetLayoutRequested_ = false;
+    bool transformPanelDockingChecked_ = false;
     bool thumbnailVisualLayoutRequested_ = false;
     bool thumbnailVisualMode_ = false;
     bool voxelViewportRendered_ = false;
@@ -533,6 +545,7 @@ private:
     bool layoutStabilitySmokeUndone_ = false;
     bool layoutStabilitySmokeRedone_ = false;
     bool layoutStabilitySmokeRectanglesStable_ = false;
+    bool layoutStabilitySmokeTransformDocked_ = false;
     bool layoutStabilitySmokeReadyForShutdown_ = false;
     EditorCameraState doubleClickCameraSmokeReference_{};
     bool doubleClickCameraSmokeGridStable_ = false;
@@ -723,6 +736,14 @@ private:
     bool saveOnExitSmokeRequested_ = false;
     bool saveOnExitSmokeCallbackDeferred_ = false;
     bool saveOnExitSmokePassed_ = false;
+    std::filesystem::path transformPanelSmokePath_;
+    bool transformPanelSmokePrepared_ = false;
+    bool transformPanelSmokeMoved_ = false;
+    bool transformPanelSmokeRotated_ = false;
+    bool transformPanelSmokeScaled_ = false;
+    bool transformPanelSmokePivot_ = false;
+    bool transformPanelSmokeUndoRedo_ = false;
+    bool transformPanelSmokeCleaned_ = false;
     bool eraseSmokeSelected_ = false;
     bool eraseSmokeExecuted_ = false;
     bool eraseSmokeUndone_ = false;

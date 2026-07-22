@@ -79,6 +79,7 @@ public:
         bool scaleGizmoSmokeTest = false,
         bool transformGizmoManagerSmokeTest = false,
         bool transformGizmoFoundationSmokeTest = false,
+        bool transformPanelSmokeTest = false,
         bool saveOnExitSmokeTest = false,
         std::filesystem::path imguiIniPathOverride = {});
 
@@ -166,6 +167,7 @@ private:
     bool scaleGizmoSmokeTest_ = false;
     bool transformGizmoManagerSmokeTest_ = false;
     bool transformGizmoFoundationSmokeTest_ = false;
+    bool transformPanelSmokeTest_ = false;
     bool saveOnExitSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
