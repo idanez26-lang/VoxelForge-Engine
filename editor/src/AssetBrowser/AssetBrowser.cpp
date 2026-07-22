@@ -21,7 +21,6 @@ constexpr const char* RenamePopupName = "Rename Asset Entry";
 constexpr const char* DeletePopupName = "Delete Asset Entry";
 constexpr const char* VoxInspectionPopupName = "VOX Inspection";
 constexpr float DeletePopupContentWidth = 420.0F;
-constexpr float MinimumSearchWidth = 120.0F;
 
 template<std::size_t Size>
 void CopyToBuffer(
@@ -144,6 +143,23 @@ bool IsVoxFile(const AssetEntry& entry)
 {
     return LowercaseExtension(entry) == ".vox";
 }
+
+float FullControlWidth()
+{
+    return std::max(1.0F, ImGui::GetContentRegionAvail().x);
+}
+
+void ContinueOnLineIfItFits(const char* const label)
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float requiredWidth = style.ItemSpacing.x +
+        ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0F;
+    const float contentRight = ImGui::GetWindowPos().x +
+        ImGui::GetWindowContentRegionMax().x;
+    const float remainingWidth = contentRight - ImGui::GetItemRectMax().x;
+    if (remainingWidth >= requiredWidth)
+        ImGui::SameLine();
+}
 }
 
 bool AssetBrowser::SetAssetsRoot(
@@ -213,14 +229,11 @@ void AssetBrowser::Draw(bool* open)
         return;
     }
 
+    DrawWorkspaceHeader();
     DrawToolbar();
-    ImGui::TextUnformatted("Current Folder:");
-    ImGui::SameLine();
-    const std::string currentFolder = DisplayedFolderPath(directory_);
-    ImGui::TextUnformatted(currentFolder.c_str());
     ImGui::Separator();
 
-    DrawEntries();
+    DrawContentRegion();
     ImGui::Separator();
     DrawSelection();
     DrawStatusMessage();
@@ -426,11 +439,24 @@ void AssetBrowser::SetMessageCallback(MessageCallback callback)
     messageCallback_ = std::move(callback);
 }
 
+void AssetBrowser::DrawWorkspaceHeader() const
+{
+    ImGui::TextUnformatted("Project Assets");
+    const std::string currentFolder = DisplayedFolderPath(directory_);
+    ImGui::TextDisabled("%s", currentFolder.c_str());
+    ImGui::Spacing();
+}
+
 void AssetBrowser::DrawToolbar()
 {
-    AssetBrowserViewSettings& settings = viewModel_.Settings();
+    DrawNavigationActions();
+    ImGui::Spacing();
+    DrawViewControls();
+}
 
-    if (ImGui::Button("Assets"))
+void AssetBrowser::DrawNavigationActions()
+{
+    if (ImGui::Button("Root"))
     {
         if (directory_.GoToAssetsRoot())
         {
@@ -444,9 +470,8 @@ void AssetBrowser::DrawToolbar()
         }
     }
 
-    ImGui::SameLine();
+    ContinueOnLineIfItFits("Back");
     ImGui::BeginDisabled(!directory_.CanGoBack());
-
     if (ImGui::Button("Back"))
     {
         if (directory_.Back())
@@ -460,17 +485,19 @@ void AssetBrowser::DrawToolbar()
             SetError(directory_.LastError());
         }
     }
-
     ImGui::EndDisabled();
-    ImGui::SameLine();
 
+    ContinueOnLineIfItFits("New Folder");
     if (ImGui::Button("New Folder"))
-    {
         RequestNewFolder();
-    }
+}
 
-    ImGui::TextUnformatted("View:");
-    ImGui::SameLine();
+void AssetBrowser::DrawViewControls()
+{
+    AssetBrowserViewSettings& settings = viewModel_.Settings();
+
+    ImGui::TextDisabled("View");
+    ContinueOnLineIfItFits("Grid");
 
     if (ImGui::RadioButton(
             "Grid",
@@ -479,7 +506,7 @@ void AssetBrowser::DrawToolbar()
         settings.DisplayMode = AssetBrowserDisplayMode::Grid;
     }
 
-    ImGui::SameLine();
+    ContinueOnLineIfItFits("List");
 
     if (ImGui::RadioButton(
             "List",
@@ -488,13 +515,8 @@ void AssetBrowser::DrawToolbar()
         settings.DisplayMode = AssetBrowserDisplayMode::List;
     }
 
-    ImGui::TextUnformatted("Filter:");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(std::max(
-        1.0F,
-        std::min(
-            std::max(120.0F, ImGui::GetFontSize() * 9.0F),
-            ImGui::GetContentRegionAvail().x)));
+    ImGui::TextDisabled("Filter");
+    ImGui::SetNextItemWidth(FullControlWidth());
 
     if (ImGui::BeginCombo("##AssetFilter", FilterLabel(settings.Filter)))
     {
@@ -525,13 +547,8 @@ void AssetBrowser::DrawToolbar()
         ImGui::EndCombo();
     }
 
-    ImGui::TextUnformatted("Sort by:");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(std::max(
-        1.0F,
-        std::min(
-            std::max(120.0F, ImGui::GetFontSize() * 9.0F),
-            ImGui::GetContentRegionAvail().x)));
+    ImGui::TextDisabled("Sort");
+    ImGui::SetNextItemWidth(FullControlWidth());
 
     if (ImGui::BeginCombo("##AssetSort", SortLabel(settings.SortMode)))
     {
@@ -559,21 +576,19 @@ void AssetBrowser::DrawToolbar()
         ImGui::EndCombo();
     }
 
-    if (ImGui::Button(
-            settings.SortAscending
-                ? "Order: Ascending"
-                : "Order: Descending"))
+    const char* const orderLabel = settings.SortAscending ? "Ascending" :
+        "Descending";
+    if (ImGui::Button(orderLabel, ImVec2(FullControlWidth(), 0.0F)))
     {
         settings.SortAscending = !settings.SortAscending;
     }
 
-    ImGui::TextUnformatted("Search:");
-    ImGui::SameLine();
+    ImGui::TextDisabled("Search");
     const float clearButtonWidth = ImGui::CalcTextSize("Clear").x +
         ImGui::GetStyle().FramePadding.x * 2.0F;
     const float availableWidth = ImGui::GetContentRegionAvail().x;
-    const bool clearOnSameLine =
-        availableWidth >= MinimumSearchWidth + clearButtonWidth +
+    const bool clearOnSameLine = availableWidth >=
+        ImGui::GetFontSize() * 6.0F + clearButtonWidth +
             ImGui::GetStyle().ItemSpacing.x;
     ImGui::SetNextItemWidth(
         clearOnSameLine
@@ -594,6 +609,30 @@ void AssetBrowser::DrawToolbar()
     {
         viewModel_.ClearSearch();
     }
+}
+
+void AssetBrowser::DrawContentRegion()
+{
+    const float availableHeight = ImGui::GetContentRegionAvail().y;
+    const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
+    const float footerLineCount = 2.0F +
+        (statusMessage_.empty() ? 0.0F : 1.0F) +
+        (error_.empty() ? 0.0F : 1.0F);
+    const float footerHeight = footerLineCount * lineHeight +
+        ImGui::GetStyle().ItemSpacing.y * 2.0F;
+    const float contentHeight = std::max(
+        80.0F, availableHeight - footerHeight);
+    const ImGuiWindowFlags contentFlags =
+        viewModel_.Settings().DisplayMode == AssetBrowserDisplayMode::List
+        ? ImGuiWindowFlags_HorizontalScrollbar
+        : ImGuiWindowFlags_None;
+    if (ImGui::BeginChild(
+            "##AssetContentRegion", ImVec2(0.0F, contentHeight), true,
+            contentFlags))
+    {
+        DrawEntries();
+    }
+    ImGui::EndChild();
 }
 
 void AssetBrowser::DrawEntries()

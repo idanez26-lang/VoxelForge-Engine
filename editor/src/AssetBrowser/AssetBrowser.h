@@ -82,7 +82,11 @@ private:
         std::vector<std::string> Warnings;
     };
 
+    void DrawWorkspaceHeader() const;
     void DrawToolbar();
+    void DrawNavigationActions();
+    void DrawViewControls();
+    void DrawContentRegion();
     void DrawEntries();
     void DrawGrid(
         const std::vector<const AssetEntry*>& entries,
