@@ -1109,6 +1109,10 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --layout-stability-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.CreateWorkspaceSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --create-workspace-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.DoubleClickCameraSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --double-click-camera-smoke-test
     )
@@ -1249,6 +1253,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelUndoRedoSmoke
         VoxelForge.Editor.FirstCreationExperienceSmoke
         VoxelForge.Editor.LayoutStabilitySmoke
+        VoxelForge.Editor.CreateWorkspaceSmoke
         VoxelForge.Editor.DoubleClickCameraSmoke
         VoxelForge.Editor.ViewportNavigationSmoke
         VoxelForge.Editor.PersistentWorkplaneSmoke

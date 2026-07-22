@@ -43,6 +43,12 @@ namespace
 constexpr float StatusBarHeight = 26.0F;
 constexpr std::size_t MaximumConsoleMessageCount = 200;
 constexpr const char* WorkspaceDockspaceName = "VoxelForgeStudioDockSpace";
+constexpr const char* ToolsPanelWindowName = "Tools";
+constexpr const char* ToolOptionsPanelWindowName = "Tool Options";
+constexpr const char* StylePanelWindowName = "Style";
+constexpr const char* ViewportPanelWindowName = "Viewport";
+constexpr const char* AssetsPanelWindowName = "Assets";
+constexpr const char* ScenePanelWindowName = "Scene";
 constexpr const char* InspectorPanelWindowName = "Inspector";
 constexpr const char* TransformPanelWindowName = "Transform";
 constexpr const char* AboutPopupName = "About VoxelForge Studio";
@@ -52,25 +58,39 @@ constexpr const char* ImportCollisionPopupName = "Model Already Exists";
 constexpr const char* OpenImportedModelPopupName = "Open Imported Model";
 constexpr const char* DeleteProjectPopupName = "Delete VoxelForge Project";
 
-bool IsTransformPanelDockedUnderInspector() noexcept
+bool HasAllCreateWorkspaceSettings() noexcept
 {
-    const ImGuiWindowSettings* const inspectorSettings =
-        ImGui::FindWindowSettingsByID(ImHashStr(InspectorPanelWindowName));
-    const ImGuiWindowSettings* const transformSettings =
-        ImGui::FindWindowSettingsByID(ImHashStr(TransformPanelWindowName));
-    if (inspectorSettings == nullptr || transformSettings == nullptr ||
-        inspectorSettings->DockId == 0U || transformSettings->DockId == 0U)
-        return false;
+    constexpr std::array<const char*, 9U> officialWindowNames = {
+        ToolsPanelWindowName, ToolOptionsPanelWindowName, StylePanelWindowName,
+        ViewportPanelWindowName, AssetsPanelWindowName, ScenePanelWindowName,
+        InspectorPanelWindowName, TransformPanelWindowName, "Console"};
+    for (const char* const windowName : officialWindowNames)
+    {
+        if (ImGui::FindWindowSettingsByID(ImHashStr(windowName)) == nullptr)
+            return false;
+    }
+    return true;
+}
 
-    const ImGuiDockNode* const inspectorNode =
-        ImGui::DockBuilderGetNode(inspectorSettings->DockId);
-    const ImGuiDockNode* const transformNode =
-        ImGui::DockBuilderGetNode(transformSettings->DockId);
-    return inspectorNode != nullptr && transformNode != nullptr &&
-        inspectorNode != transformNode && inspectorNode->ParentNode != nullptr &&
-        inspectorNode->ParentNode == transformNode->ParentNode &&
-        inspectorNode->ParentNode->SplitAxis == ImGuiAxis_Y &&
-        transformNode->Pos.y >= inspectorNode->Pos.y + inspectorNode->Size.y;
+void LoadLegacyWorkspaceSettingsForSmoke()
+{
+    constexpr const char legacyIni[] =
+        "[Window][Explorer]\n"
+        "Pos=0,0\nSize=260,620\n"
+        "[Window][Scene]\n"
+        "Pos=260,0\nSize=760,620\n"
+        "[Window][Palette]\n"
+        "Pos=1020,0\nSize=260,300\n"
+        "[Window][Asset Browser]\n"
+        "Pos=0,620\nSize=760,180\n"
+        "[Window][Inspector]\n"
+        "Pos=1020,300\nSize=260,240\n"
+        "[Window][Transform]\n"
+        "Pos=1020,540\nSize=260,260\n"
+        "[Window][Console]\n"
+        "Pos=760,620\nSize=520,180\n";
+    ImGui::ClearIniSettings();
+    ImGui::LoadIniSettingsFromMemory(legacyIni, sizeof(legacyIni) - 1U);
 }
 
 bool HasProjectExtension(const std::filesystem::path& path)
@@ -302,7 +322,7 @@ std::string FormatSaveTime(
     return output.str();
 }
 
-void DrawInspectorDiagnostics(const InspectorLayoutModel& model)
+[[maybe_unused]] void DrawInspectorDiagnostics(const InspectorLayoutModel& model)
 {
     ImGui::TextUnformatted("Voxel Diagnostics");
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -549,21 +569,20 @@ void EditorWorkspace::Draw()
     }
 
     const ImGuiID dockspaceId = ImGui::GetID(WorkspaceDockspaceName);
-    const bool layoutMissing =
-        ImGui::DockBuilderGetNode(dockspaceId) == nullptr;
-
-    bool transformDockingNeedsRepair = false;
-    if (!transformPanelDockingChecked_)
-    {
-        transformPanelDockingChecked_ = true;
-        transformDockingNeedsRepair =
-            !IsTransformPanelDockedUnderInspector();
-    }
-
     DrawDockSpace(dockspaceId);
 
     bool layoutRebuilt = false;
-    if (layoutMissing || transformDockingNeedsRepair || resetLayoutRequested_)
+    if (createWorkspaceSmokeSeedLegacy_)
+    {
+        LoadLegacyWorkspaceSettingsForSmoke();
+        createWorkspaceSettingsChecked_ = false;
+        createWorkspaceMigrationApplied_ = false;
+        createWorkspaceSmokeSeedLegacy_ = false;
+    }
+    const bool migrateOldWorkspace = !createWorkspaceSettingsChecked_ &&
+        !HasAllCreateWorkspaceSettings();
+    createWorkspaceSettingsChecked_ = true;
+    if (migrateOldWorkspace || resetLayoutRequested_)
     {
         if (thumbnailVisualLayoutRequested_)
             BuildThumbnailVisualLayout(dockspaceId);
@@ -571,12 +590,15 @@ void EditorWorkspace::Draw()
             BuildDefaultLayout(dockspaceId);
         resetLayoutRequested_ = false;
         thumbnailVisualLayoutRequested_ = false;
+        createWorkspaceMigrationApplied_ |= migrateOldWorkspace;
         layoutRebuilt = true;
     }
 
     if (!showScene_) viewportDropRect_ = {};
     if (!showAssetBrowser_) assetBrowserDropRect_ = {};
 
+    if (showTools_) DrawToolsPanel();
+    if (showToolOptions_) DrawToolOptionsPanel();
     if (showExplorer_) DrawExplorerPanel();
     if (showScene_) DrawScenePanel();
     if (showInspector_ && !thumbnailVisualMode_) DrawInspectorPanel();
@@ -889,12 +911,14 @@ void EditorWorkspace::DrawMainMenuBar()
 
     if (ImGui::BeginMenu("View"))
     {
-        ImGui::MenuItem("Explorer", nullptr, &showExplorer_);
-        ImGui::MenuItem("Scene", nullptr, &showScene_);
+        ImGui::MenuItem("Tools", nullptr, &showTools_);
+        ImGui::MenuItem("Tool Options", nullptr, &showToolOptions_);
+        ImGui::MenuItem("Style", nullptr, &showPalette_);
+        ImGui::MenuItem("Viewport", nullptr, &showScene_);
+        ImGui::MenuItem("Assets", nullptr, &showAssetBrowser_);
+        ImGui::MenuItem("Scene", nullptr, &showExplorer_);
         ImGui::MenuItem("Inspector", nullptr, &showInspector_);
         ImGui::MenuItem("Transform", nullptr, &showTransformPanel_);
-        ImGui::MenuItem("Palette", nullptr, &showPalette_);
-        ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser_);
         ImGui::MenuItem("Console", nullptr, &showConsole_);
         ImGui::MenuItem("Profiler", nullptr, &showProfiler_);
         ImGui::MenuItem("ImGui Demo", nullptr, &showImGuiDemo_);
@@ -1615,59 +1639,81 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     ImGui::DockBuilderAddNode(dockspaceId, dockNodeFlags);
     ImGui::DockBuilderSetNodeSize(dockspaceId, workspaceSize);
 
+    constexpr float PreferredLeftPanelFraction = 0.070F;
+    constexpr float PreferredRightPanelFraction = 0.073F;
+    constexpr float MinimumSidePanelWidth = 140.0F;
+    constexpr float MaximumSidePanelWidth = 220.0F;
+    constexpr float MinimumViewportWidthFraction = 0.75F;
+    constexpr float PreferredConsoleHeightFraction = 0.10F;
+    constexpr float MinimumConsoleHeight = 96.0F;
+    constexpr float MaximumConsoleHeight = 140.0F;
+
+    float leftPanelWidth = std::clamp(
+        workspaceSize.x * PreferredLeftPanelFraction,
+        MinimumSidePanelWidth,
+        MaximumSidePanelWidth);
+    float rightPanelWidth = std::clamp(
+        workspaceSize.x * PreferredRightPanelFraction,
+        MinimumSidePanelWidth,
+        MaximumSidePanelWidth);
+    const float maximumSidePanelTotal = workspaceSize.x *
+        (1.0F - MinimumViewportWidthFraction);
+    const float requestedSidePanelTotal = leftPanelWidth + rightPanelWidth;
+    if (requestedSidePanelTotal > maximumSidePanelTotal &&
+        requestedSidePanelTotal > 0.0F)
+    {
+        const float scale = maximumSidePanelTotal / requestedSidePanelTotal;
+        leftPanelWidth *= scale;
+        rightPanelWidth *= scale;
+    }
+    const float consoleHeight = std::clamp(
+        workspaceSize.y * PreferredConsoleHeightFraction,
+        MinimumConsoleHeight,
+        MaximumConsoleHeight);
+
     ImGuiID topId = dockspaceId;
     const ImGuiID bottomId = ImGui::DockBuilderSplitNode(
         topId,
         ImGuiDir_Down,
-        0.28F,
+        consoleHeight / workspaceSize.y,
         nullptr,
         &topId);
 
     ImGuiID rightId = ImGui::DockBuilderSplitNode(
         topId,
         ImGuiDir_Right,
-        0.22F,
+        rightPanelWidth / workspaceSize.x,
         nullptr,
         &topId);
-
-    const ImGuiID paletteId = ImGui::DockBuilderSplitNode(
-        rightId,
-        ImGuiDir_Down,
-        0.44F,
-        nullptr,
-        &rightId);
-
-    const ImGuiID transformId = ImGui::DockBuilderSplitNode(
-        rightId,
-        ImGuiDir_Down,
-        0.52F,
-        nullptr,
-        &rightId);
 
     const ImGuiID leftId = ImGui::DockBuilderSplitNode(
         topId,
         ImGuiDir_Left,
-        0.26F,
+        leftPanelWidth / (workspaceSize.x - rightPanelWidth),
         nullptr,
         &topId);
 
-    ImGuiID bottomLeftId = bottomId;
-    const ImGuiID bottomRightId = ImGui::DockBuilderSplitNode(
-        bottomLeftId,
-        ImGuiDir_Right,
-        0.40F,
-        nullptr,
-        &bottomLeftId);
+    ImGuiID toolsId = leftId;
+    const ImGuiID styleId = ImGui::DockBuilderSplitNode(
+        toolsId, ImGuiDir_Down, 0.34F, nullptr, &toolsId);
+    const ImGuiID toolOptionsId = ImGui::DockBuilderSplitNode(
+        toolsId, ImGuiDir_Down, 0.50F, nullptr, &toolsId);
 
-    ImGui::DockBuilderDockWindow("Explorer", leftId);
-    ImGui::DockBuilderDockWindow("Scene", topId);
+    ImGui::DockBuilderDockWindow(ToolsPanelWindowName, toolsId);
+    ImGui::DockBuilderDockWindow(ToolOptionsPanelWindowName, toolOptionsId);
+    ImGui::DockBuilderDockWindow(StylePanelWindowName, styleId);
+    ImGui::DockBuilderDockWindow(ViewportPanelWindowName, topId);
+    ImGui::DockBuilderDockWindow(AssetsPanelWindowName, rightId);
+    ImGui::DockBuilderDockWindow(ScenePanelWindowName, rightId);
     ImGui::DockBuilderDockWindow(InspectorPanelWindowName, rightId);
-    ImGui::DockBuilderDockWindow(TransformPanelWindowName, transformId);
-    ImGui::DockBuilderDockWindow("Palette", paletteId);
-    ImGui::DockBuilderDockWindow("Asset Browser", bottomLeftId);
-    ImGui::DockBuilderDockWindow("Console", bottomRightId);
+    ImGui::DockBuilderDockWindow(TransformPanelWindowName, rightId);
+    ImGui::DockBuilderDockWindow("Console", bottomId);
+    if (ImGuiDockNode* const rightNode = ImGui::DockBuilderGetNode(rightId))
+        rightNode->SelectedTabId = ImHashStr(AssetsPanelWindowName);
     ImGui::DockBuilderFinish(dockspaceId);
 
+    showTools_ = true;
+    showToolOptions_ = true;
     showExplorer_ = true;
     showScene_ = true;
     showInspector_ = true;
@@ -1695,7 +1741,7 @@ void EditorWorkspace::BuildThumbnailVisualLayout(const ImGuiID dockspaceId)
     ImGuiID browserId = visibleId;
     const ImGuiID inspectorId = ImGui::DockBuilderSplitNode(
         browserId, ImGuiDir_Right, 0.36F, nullptr, &browserId);
-    ImGui::DockBuilderDockWindow("Asset Browser", browserId);
+    ImGui::DockBuilderDockWindow(AssetsPanelWindowName, browserId);
     ImGui::DockBuilderDockWindow("Inspector", inspectorId);
     ImGui::DockBuilderFinish(dockspaceId);
     showExplorer_ = false;
@@ -1707,8 +1753,8 @@ void EditorWorkspace::BuildThumbnailVisualLayout(const ImGuiID dockspaceId)
 
 void EditorWorkspace::DrawExplorerPanel()
 {
-    ImGui::Begin("Explorer", &showExplorer_);
-    ImGui::TextUnformatted("Project Explorer");
+    ImGui::Begin(ScenePanelWindowName, &showExplorer_);
+    ImGui::TextUnformatted("Scene");
     ImGui::Separator();
 
     const auto& activeProject = projectManager_.ActiveProject();
@@ -1729,12 +1775,48 @@ void EditorWorkspace::DrawExplorerPanel()
     ImGui::End();
 }
 
+void EditorWorkspace::DrawToolsPanel()
+{
+    if (!ImGui::Begin(ToolsPanelWindowName, &showTools_))
+    {
+        ImGui::End();
+        return;
+    }
+
+    const Asset::Voxel::VoxelDocument* activeDocument =
+        voxelDocumentSession_.ActiveDocument();
+    const bool canSave = activeDocument != nullptr &&
+        activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
+    EditorToolbar::Draw(
+        {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
+         CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection(),
+         CanMirrorSelection(), CanScaleSelection(), CanAlignSelection()},
+        editorInputService_,
+        {[this](const EditorInputCommand command)
+         {
+             ExecuteInputCommand(command);
+         }});
+    ImGui::End();
+}
+
+void EditorWorkspace::DrawToolOptionsPanel()
+{
+    if (!ImGui::Begin(ToolOptionsPanelWindowName, &showToolOptions_))
+    {
+        ImGui::End();
+        return;
+    }
+    toolContext_.HasDocument = voxelDocumentSession_.HasActiveDocument();
+    ToolPanel::Draw(toolManager_, toolContext_);
+    ImGui::End();
+}
+
 void EditorWorkspace::DrawScenePanel()
 {
     const bool focusRequested = std::exchange(
         viewportFocusRequested_, false);
     if (focusRequested) ImGui::SetNextWindowFocus();
-    const bool visible = ImGui::Begin("Scene", &showScene_);
+    const bool visible = ImGui::Begin(ViewportPanelWindowName, &showScene_);
     if (focusRequested)
     {
         viewportFocusApplied_ = ImGui::IsWindowFocused(
@@ -1808,20 +1890,6 @@ void EditorWorkspace::DrawScenePanel()
     }
     DrawTooltip("Choose the viewport background");
 
-    const Asset::Voxel::VoxelDocument* activeDocument =
-        voxelDocumentSession_.ActiveDocument();
-    const bool canSave = activeDocument != nullptr &&
-        activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
-    EditorToolbar::Draw(
-        {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
-         CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection(),
-         CanMirrorSelection(), CanScaleSelection(), CanAlignSelection()},
-        editorInputService_,
-        {[this](const EditorInputCommand command)
-         {
-             ExecuteInputCommand(command);
-         }});
-    ImGui::SameLine();
     if (voxelToolState_.IsRotateActive())
     {
         if (ImGui::Button("Left 90"))
@@ -3191,19 +3259,6 @@ void EditorWorkspace::DrawInspectorPanel()
         ImGui::TextUnformatted("Couleur Active: --");
         ImGui::TextUnformatted("Index: --");
     }
-    DrawInspectorDiagnostics(InspectorLayoutModel::Build({
-        document != nullptr,
-        document ? document->SourcePath().filename().string() : std::string{},
-        document ? document->GetRevision() : 0U,
-        voxelSelection_.Hovered(),
-        voxelSelection_.InteractionState(),
-        voxelToolState_.ActiveTool(),
-        paletteService_.ActiveIndex().value_or(0U),
-        voxelPlacementPreview_,
-        lastVoxelToolResult_,
-        lastVoxelEraserResult_}));
-    ImGui::Separator();
-
     static_cast<void>(
         assetInspector_.UpdateSelection(assetBrowser_.SelectedEntry()));
     const AssetInspectorState& assetState = assetInspector_.State();
@@ -3521,23 +3576,11 @@ void EditorWorkspace::DrawTransformPanel()
 
 void EditorWorkspace::DrawPalettePanel()
 {
-    if (!ImGui::Begin("Palette", &showPalette_))
+    if (!ImGui::Begin(StylePanelWindowName, &showPalette_))
     {
         ImGui::End();
         return;
     }
-
-    toolContext_.HasDocument = voxelDocumentSession_.HasActiveDocument();
-    const float availableHeight = ImGui::GetContentRegionAvail().y;
-    const float toolPanelHeight = std::min(
-        ToolPanel::PreferredHeight(toolManager_.ActiveDescriptor().Panel),
-        std::max(36.0F, availableHeight * 0.35F));
-    ImGui::TextDisabled("Tool Options");
-    if (ImGui::BeginChild(
-            "##ActiveToolPanel", ImVec2(0.0F, toolPanelHeight), false))
-        ToolPanel::Draw(toolManager_, toolContext_);
-    ImGui::EndChild();
-    ImGui::Separator();
 
     const PaletteService::Palette* palette = paletteService_.ActivePalette();
     const std::optional<PaletteColorSelection> active =
@@ -3699,7 +3742,7 @@ void EditorWorkspace::DrawAssetBrowserPanel()
     }
 
     assetBrowser_.Draw(&showAssetBrowser_);
-    if (const ImGuiWindow* window = ImGui::FindWindowByName("Asset Browser"))
+    if (const ImGuiWindow* window = ImGui::FindWindowByName(AssetsPanelWindowName))
     {
         assetBrowserDropRect_ = {
             window->Pos.x, window->Pos.y,
@@ -8406,14 +8449,12 @@ bool EditorWorkspace::RunPaletteUiSmokeStep(const std::size_t frame)
     {
         const ImGuiWindow* inspectorWindow =
             ImGui::FindWindowByName("Inspector");
-        const ImGuiWindow* paletteWindow = ImGui::FindWindowByName("Palette");
+        const ImGuiWindow* paletteWindow = ImGui::FindWindowByName(
+            StylePanelWindowName);
         paletteSmokeLayoutValid_ = inspectorWindow != nullptr &&
             paletteWindow != nullptr && inspectorWindow->DockNode != nullptr &&
             paletteWindow->DockNode != nullptr &&
-            inspectorWindow->DockNode != paletteWindow->DockNode &&
-            paletteWindow->Pos.y > inspectorWindow->Pos.y &&
-            std::abs(paletteWindow->Pos.x - inspectorWindow->Pos.x) <= 1.0F &&
-            std::abs(paletteWindow->Size.x - inspectorWindow->Size.x) <= 1.0F;
+            inspectorWindow->DockNode != paletteWindow->DockNode;
         if (!paletteSmokePencilled_ || !SaveVoxelModel()) return false;
         CloseProject();
         paletteSmokeSavedAndClosed_ =
@@ -11762,8 +11803,13 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
     }
     else if (scenarioFrame == 1U)
     {
-        layoutStabilitySmokeTransformDocked_ =
-            IsTransformPanelDockedUnderInspector();
+        const ImGuiWindow* const inspectorWindow =
+            ImGui::FindWindowByName(InspectorPanelWindowName);
+        const ImGuiWindow* const transformWindow =
+            ImGui::FindWindowByName(TransformPanelWindowName);
+        layoutStabilitySmokeTransformDocked_ = inspectorWindow != nullptr &&
+            transformWindow != nullptr && inspectorWindow->DockNode != nullptr &&
+            inspectorWindow->DockNode == transformWindow->DockNode;
         if (!layoutStabilitySmokeCreated_ ||
             !layoutStabilitySmokeTransformDocked_ || document == nullptr ||
             !recordRectangle() ||
@@ -11855,6 +11901,94 @@ bool EditorWorkspace::LayoutStabilitySmokePassed() const noexcept
         layoutStabilitySmokeTransformDocked_ &&
         layoutStabilitySmokeRectanglesStable_ &&
         layoutStabilitySmokeReadyForShutdown_;
+}
+
+bool EditorWorkspace::RunCreateWorkspaceSmokeStep(const std::size_t frame)
+{
+    const auto officialLayoutIsValid = [this]()
+    {
+        const ImGuiWindow* const tools = ImGui::FindWindowByName(
+            ToolsPanelWindowName);
+        const ImGuiWindow* const toolOptions = ImGui::FindWindowByName(
+            ToolOptionsPanelWindowName);
+        const ImGuiWindow* const style = ImGui::FindWindowByName(
+            StylePanelWindowName);
+        const ImGuiWindow* const viewport = ImGui::FindWindowByName(
+            ViewportPanelWindowName);
+        const ImGuiWindow* const assets = ImGui::FindWindowByName(
+            AssetsPanelWindowName);
+        const ImGuiWindow* const scene = ImGui::FindWindowByName(
+            ScenePanelWindowName);
+        const ImGuiWindow* const inspector = ImGui::FindWindowByName(
+            InspectorPanelWindowName);
+        const ImGuiWindow* const transform = ImGui::FindWindowByName(
+            TransformPanelWindowName);
+        const ImGuiWindow* const console = ImGui::FindWindowByName("Console");
+        if (tools == nullptr || toolOptions == nullptr || style == nullptr ||
+            viewport == nullptr || assets == nullptr || scene == nullptr ||
+            inspector == nullptr || transform == nullptr || console == nullptr ||
+            tools->DockNode == nullptr || toolOptions->DockNode == nullptr ||
+            style->DockNode == nullptr || viewport->DockNode == nullptr ||
+            assets->DockNode == nullptr || scene->DockNode == nullptr ||
+            inspector->DockNode == nullptr || transform->DockNode == nullptr ||
+            console->DockNode == nullptr)
+            return false;
+
+        const bool leftStacked = tools->DockNode != toolOptions->DockNode &&
+            toolOptions->DockNode != style->DockNode &&
+            std::abs(tools->Pos.x - toolOptions->Pos.x) <= 1.0F &&
+            std::abs(tools->Pos.x - style->Pos.x) <= 1.0F &&
+            tools->Pos.y < toolOptions->Pos.y &&
+            toolOptions->Pos.y < style->Pos.y;
+        const bool rightTabs = assets->DockNode == scene->DockNode &&
+            assets->DockNode == inspector->DockNode &&
+            assets->DockNode == transform->DockNode &&
+            assets->DockNode->SelectedTabId == ImHashStr(AssetsPanelWindowName);
+        const float upperWidth = tools->Size.x + viewport->Size.x + assets->Size.x;
+        const bool viewportDominant = upperWidth > 0.0F &&
+            viewport->Size.x >= upperWidth * 0.75F - 2.0F;
+        const bool consoleIsBottomOnly = console->DockNode != tools->DockNode &&
+            console->DockNode != viewport->DockNode &&
+            console->DockNode != assets->DockNode &&
+            console->Pos.y >= viewport->Pos.y + viewport->Size.y - 2.0F;
+        return leftStacked && rightTabs && viewportDominant && consoleIsBottomOnly;
+    };
+
+    if (frame == 0U)
+    {
+        createWorkspaceSmokeSeedLegacy_ = true;
+        createWorkspaceSmokeMigrated_ = false;
+        createWorkspaceSmokeReset_ = false;
+        createWorkspaceSmokePassed_ = false;
+        return true;
+    }
+    if (frame == 1U)
+    {
+        return createWorkspaceMigrationApplied_;
+    }
+    if (frame == 2U)
+    {
+        createWorkspaceSmokeMigrated_ = createWorkspaceMigrationApplied_ &&
+            officialLayoutIsValid();
+        resetLayoutRequested_ = true;
+        return createWorkspaceSmokeMigrated_;
+    }
+    if (frame == 3U)
+    {
+        return createWorkspaceSmokeMigrated_;
+    }
+    if (frame == 4U)
+    {
+        createWorkspaceSmokeReset_ = officialLayoutIsValid();
+        createWorkspaceSmokePassed_ = createWorkspaceSmokeMigrated_ &&
+            createWorkspaceSmokeReset_;
+    }
+    return CreateWorkspaceSmokePassed();
+}
+
+bool EditorWorkspace::CreateWorkspaceSmokePassed() const noexcept
+{
+    return createWorkspaceSmokePassed_;
 }
 
 bool EditorWorkspace::RunDoubleClickCameraSmokeStep(const std::size_t frame)

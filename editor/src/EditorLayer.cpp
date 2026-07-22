@@ -70,7 +70,8 @@ EditorLayer::EditorLayer(
     const bool transformGizmoFoundationSmokeTest,
     const bool transformPanelSmokeTest,
     const bool saveOnExitSmokeTest,
-    std::filesystem::path imguiIniPathOverride)
+    std::filesystem::path imguiIniPathOverride,
+    const bool createWorkspaceSmokeTest)
     : Layer("VoxelForge Editor Layer"),
       layoutPersistence_(std::move(imguiIniPathOverride)),
       workspace_(
@@ -167,7 +168,8 @@ EditorLayer::EditorLayer(
       transformGizmoManagerSmokeTest_(transformGizmoManagerSmokeTest),
       transformGizmoFoundationSmokeTest_(transformGizmoFoundationSmokeTest),
       transformPanelSmokeTest_(transformPanelSmokeTest),
-      saveOnExitSmokeTest_(saveOnExitSmokeTest)
+      saveOnExitSmokeTest_(saveOnExitSmokeTest),
+      createWorkspaceSmokeTest_(createWorkspaceSmokeTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -472,6 +474,11 @@ void EditorLayer::OnImGuiRender()
             renderedFrameCount_));
     }
     workspace_.Draw();
+    if (createWorkspaceSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunCreateWorkspaceSmokeStep(
+            renderedFrameCount_));
+    }
     if (voxelRayPickingSmokeTest_)
     {
         static_cast<void>(workspace_.RunVoxelRayPickingSmokeStep(
@@ -520,6 +527,8 @@ void EditorLayer::OnImGuiRender()
             workspace_.FirstCreationExperienceSmokePassed()) ||
         (layoutStabilitySmokeTest_ &&
             workspace_.LayoutStabilitySmokePassed()) ||
+        (createWorkspaceSmokeTest_ &&
+            workspace_.CreateWorkspaceSmokePassed()) ||
         (doubleClickCameraSmokeTest_ &&
             workspace_.DoubleClickCameraSmokePassed()) ||
         (persistentWorkplaneSmokeTest_ &&
@@ -656,6 +665,12 @@ void EditorLayer::OnImGuiRender()
     {
         throw std::runtime_error(
             "Viewport and Inspector layout stability smoke test did not complete.");
+    }
+    if (createWorkspaceSmokeTest_ && smokeTestComplete &&
+        !workspace_.CreateWorkspaceSmokePassed())
+    {
+        throw std::runtime_error(
+            "Create workspace smoke test did not rebuild the official layout.");
     }
     if (doubleClickCameraSmokeTest_ && smokeTestComplete &&
         !workspace_.DoubleClickCameraSmokePassed())

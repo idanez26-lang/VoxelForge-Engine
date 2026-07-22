@@ -40,6 +40,7 @@ constexpr std::size_t VoxelEraserSmokeTestFrameCount = 12;
 constexpr std::size_t VoxelUndoRedoSmokeTestFrameCount = 16;
 constexpr std::size_t FirstCreationExperienceSmokeTestFrameCount = 10;
 constexpr std::size_t LayoutStabilitySmokeTestFrameCount = 11;
+constexpr std::size_t CreateWorkspaceSmokeTestFrameCount = 5;
 constexpr std::size_t DoubleClickCameraSmokeTestFrameCount = 11;
 constexpr std::size_t PersistentWorkplaneSmokeTestFrameCount = 10;
 constexpr std::size_t ProjectSessionRestoreSmokeTestFrameCount = 6;
@@ -90,6 +91,7 @@ struct CommandLine final
     bool VoxelUndoRedoSmokeTest = false;
     bool FirstCreationExperienceSmokeTest = false;
     bool LayoutStabilitySmokeTest = false;
+    bool CreateWorkspaceSmokeTest = false;
     bool DoubleClickCameraSmokeTest = false;
     bool PersistentWorkplaneSmokeTest = false;
     bool ProjectSessionRestoreSmokeTest = false;
@@ -170,6 +172,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--first-creation-experience-smoke-test";
         result.LayoutStabilitySmokeTest |=
             argument == "--layout-stability-smoke-test";
+        result.CreateWorkspaceSmokeTest |=
+            argument == "--create-workspace-smoke-test";
         result.DoubleClickCameraSmokeTest |=
             argument == "--double-click-camera-smoke-test" ||
             argument == "--viewport-navigation-smoke-test";
@@ -454,7 +458,8 @@ int main(const int argumentCount, char* arguments[])
             commandLine.TransformPanelSmokeTest ||
             commandLine.SaveOnExitSmokeTest ||
             commandLine.QualityOfLifeSmokeTest;
-        const bool isolatedTest = commandLine.SmokeTest || viewportTest;
+        const bool isolatedTest = commandLine.SmokeTest || viewportTest ||
+            commandLine.CreateWorkspaceSmokeTest;
         if (isolatedTest && !viewportFixture.Prepare())
         {
             std::cerr << "[FATAL] Unable to prepare viewport test fixture.\n";
@@ -464,9 +469,11 @@ int main(const int argumentCount, char* arguments[])
             isolatedTest
                 ? viewportFixture.RecentProjectsPath()
                 : VoxelForge::Project::RecentProjects::DefaultStorageFilePath());
-        const bool fixtureCreated = !viewportTest ||
+        const bool fixtureCreated =
+            !(viewportTest || commandLine.CreateWorkspaceSmokeTest) ||
             (commandLine.FirstCreationExperienceSmokeTest ||
              commandLine.LayoutStabilitySmokeTest ||
+             commandLine.CreateWorkspaceSmokeTest ||
              commandLine.PersistentWorkplaneSmokeTest ||
              commandLine.ProjectSessionRestoreSmokeTest ||
              commandLine.DirectCreationFlowSmokeTest ||
@@ -556,6 +563,8 @@ int main(const int argumentCount, char* arguments[])
                     ? FirstCreationExperienceSmokeTestFrameCount
                     : commandLine.LayoutStabilitySmokeTest
                     ? LayoutStabilitySmokeTestFrameCount
+                    : commandLine.CreateWorkspaceSmokeTest
+                    ? CreateWorkspaceSmokeTestFrameCount
                     : commandLine.DoubleClickCameraSmokeTest
                     ? DoubleClickCameraSmokeTestFrameCount
                     : commandLine.PersistentWorkplaneSmokeTest
@@ -704,7 +713,8 @@ int main(const int argumentCount, char* arguments[])
                  commandLine.TransformPanelSmokeTest,
                  commandLine.SaveOnExitSmokeTest,
                  isolatedTest ? viewportFixture.ImGuiIniPath()
-                             : std::filesystem::path{});
+                             : std::filesystem::path{},
+                 commandLine.CreateWorkspaceSmokeTest);
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(

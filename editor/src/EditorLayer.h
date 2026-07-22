@@ -81,7 +81,8 @@ public:
         bool transformGizmoFoundationSmokeTest = false,
         bool transformPanelSmokeTest = false,
         bool saveOnExitSmokeTest = false,
-        std::filesystem::path imguiIniPathOverride = {});
+        std::filesystem::path imguiIniPathOverride = {},
+        bool createWorkspaceSmokeTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -169,6 +170,7 @@ private:
     bool transformGizmoFoundationSmokeTest_ = false;
     bool transformPanelSmokeTest_ = false;
     bool saveOnExitSmokeTest_ = false;
+    bool createWorkspaceSmokeTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

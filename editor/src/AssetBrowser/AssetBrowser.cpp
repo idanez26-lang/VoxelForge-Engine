@@ -199,7 +199,7 @@ void AssetBrowser::ClearAssetsRoot() noexcept
 
 void AssetBrowser::Draw(bool* open)
 {
-    if (!ImGui::Begin("Asset Browser", open))
+    if (!ImGui::Begin("Assets", open))
     {
         ImGui::End();
         return;

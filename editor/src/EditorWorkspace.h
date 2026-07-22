@@ -166,6 +166,8 @@ public:
     [[nodiscard]] bool FirstCreationExperienceSmokePassed() const noexcept;
     [[nodiscard]] bool RunLayoutStabilitySmokeStep(std::size_t frame);
     [[nodiscard]] bool LayoutStabilitySmokePassed() const noexcept;
+    [[nodiscard]] bool RunCreateWorkspaceSmokeStep(std::size_t frame);
+    [[nodiscard]] bool CreateWorkspaceSmokePassed() const noexcept;
     [[nodiscard]] bool RunDoubleClickCameraSmokeStep(std::size_t frame);
     [[nodiscard]] bool DoubleClickCameraSmokePassed() const noexcept;
     [[nodiscard]] bool RunPersistentWorkplaneSmokeStep(std::size_t frame);
@@ -243,6 +245,8 @@ private:
     void BuildThumbnailVisualLayout(ImGuiID dockspaceId);
 
     void DrawExplorerPanel();
+    void DrawToolsPanel();
+    void DrawToolOptionsPanel();
     void DrawScenePanel();
     void DrawWelcomeScreen();
     void DrawInspectorPanel();
@@ -510,6 +514,8 @@ private:
     ViewportRectangle currentViewportRectangle_{};
     bool importStartedFromDrop_ = false;
 
+    bool showTools_ = true;
+    bool showToolOptions_ = true;
     bool showExplorer_ = true;
     bool showScene_ = true;
     bool showInspector_ = true;
@@ -530,11 +536,16 @@ private:
     bool showDirtyConfirmationPopup_ = false;
     bool showProjectDeletionPopup_ = false;
     bool resetLayoutRequested_ = false;
-    bool transformPanelDockingChecked_ = false;
+    bool createWorkspaceSettingsChecked_ = false;
+    bool createWorkspaceMigrationApplied_ = false;
     bool thumbnailVisualLayoutRequested_ = false;
     bool thumbnailVisualMode_ = false;
     bool voxelViewportRendered_ = false;
     bool voxelViewportRenderFailed_ = false;
+    bool createWorkspaceSmokeSeedLegacy_ = false;
+    bool createWorkspaceSmokeMigrated_ = false;
+    bool createWorkspaceSmokeReset_ = false;
+    bool createWorkspaceSmokePassed_ = false;
     bool voxelSelectionClickCandidate_ = false;
     std::optional<Asset::Voxel::VoxelPosition> selectionPointerAnchor_;
     SelectionMode selectionPointerMode_ = SelectionMode::Replace;
