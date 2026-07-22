@@ -179,8 +179,10 @@ void TestEmptyAndToolIntegration()
     pencilHit.AdjacentPosition = {1, 0, 0};
     pencilHit.AdjacentWithinBounds = true;
     pencilHit.DocumentRevision = revision;
+    Editor::SmartBrushState brushState;
+    brushState.PaletteIndex = 7U;
     const auto pencil = Editor::VoxelPencilTool::Apply({
-        &session, &document, 0U, pencilHit, 7U, false, &history});
+        &session, &document, 0U, pencilHit, brushState, false, &history});
     Require(pencil.Code == Editor::VoxelToolResultCode::Applied &&
         history.CanUndo() && !history.CanRedo() &&
         history.UndoLabel() == "Add Voxel" &&

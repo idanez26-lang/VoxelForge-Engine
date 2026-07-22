@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <string>
 
 namespace VoxelForge::Editor
 {
@@ -10,15 +11,15 @@ namespace VoxelForge::Editor
 void DrawPencilPanel(ToolContext& context)
 {
     ImGui::TextDisabled("Mode");
-    int mode = static_cast<int>(context.Pencil.Mode);
-    ImGui::RadioButton("Add", &mode, static_cast<int>(PencilMode::Add));
+    int mode = static_cast<int>(context.Pencil.State.Mode);
+    ImGui::RadioButton("Add", &mode, static_cast<int>(SmartBrushMode::Add));
     ImGui::SameLine();
     ImGui::BeginDisabled();
-    ImGui::RadioButton("Remove", &mode, static_cast<int>(PencilMode::Remove));
+    ImGui::RadioButton("Remove", &mode, static_cast<int>(SmartBrushMode::Erase));
     ImGui::SameLine();
-    ImGui::RadioButton("Paint", &mode, static_cast<int>(PencilMode::Paint));
+    ImGui::RadioButton("Paint", &mode, static_cast<int>(SmartBrushMode::Paint));
     ImGui::EndDisabled();
-    context.Pencil.Mode = static_cast<PencilMode>(mode);
+    context.Pencil.State.Mode = static_cast<SmartBrushMode>(mode);
 
     ImGui::TextDisabled("Faces");
     constexpr const char* FaceNames[] = {
@@ -32,21 +33,20 @@ void DrawPencilPanel(ToolContext& context)
     ImGui::EndDisabled();
 
     ImGui::TextDisabled("Brush");
-    int brush = static_cast<int>(context.Pencil.Brush);
+    int brush = static_cast<int>(context.Pencil.State.Shape);
     ImGui::RadioButton("Cube", &brush,
-        static_cast<int>(VoxelBrushShape::Cube));
+        static_cast<int>(SmartBrushShape::Cube));
     ImGui::SameLine();
-    ImGui::BeginDisabled();
     ImGui::RadioButton("Sphere", &brush,
-        static_cast<int>(VoxelBrushShape::Sphere));
-    ImGui::EndDisabled();
-    context.Pencil.Brush = static_cast<VoxelBrushShape>(brush);
+        static_cast<int>(SmartBrushShape::Sphere));
+    context.Pencil.State.Shape = static_cast<SmartBrushShape>(brush);
 
     ImGui::SetNextItemWidth(90.0F);
-    ImGui::BeginDisabled();
-    ImGui::InputInt("Size", &context.Pencil.Size);
-    ImGui::EndDisabled();
-    context.Pencil.Size = std::max(context.Pencil.Size, 1);
+    ImGui::InputInt("Size", &context.Pencil.State.Size);
+    context.Pencil.State.Size = std::clamp(
+        context.Pencil.State.Size, 1, SmartBrushEngine::MaximumSize());
+    ImGui::TextDisabled("%zu voxels estimated",
+        SmartBrushEngine::EstimateTotal(context.Pencil.State));
 }
 
 } // namespace VoxelForge::Editor

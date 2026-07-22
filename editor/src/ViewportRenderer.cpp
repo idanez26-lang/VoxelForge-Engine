@@ -300,6 +300,8 @@ constexpr std::array<float, 4> ValidPlacementPreviewColor{
     0.18F, 1.0F, 0.32F, 1.0F};
 constexpr std::array<float, 4> InvalidPlacementPreviewColor{
     1.0F, 0.15F, 0.12F, 1.0F};
+constexpr std::array<float, 4> OccupiedPlacementPreviewColor{
+    1.0F, 0.68F, 0.12F, 1.0F};
 constexpr std::array<float, 4> EraserPlacementPreviewColor{
     1.0F, 0.24F, 0.05F, 1.0F};
 
@@ -664,6 +666,10 @@ void ViewportRenderer::ConfigureHighlights(
     const SelectionBoxVisualState selectionBoxVisualState,
     std::optional<Asset::Voxel::VoxelPosition> placementPreview,
     const VoxelPlacementPreviewStyle placementPreviewStyle,
+    const std::span<const Asset::Voxel::VoxelPosition> brushPreview,
+    const std::span<const Asset::Voxel::VoxelPosition> brushOccupiedPreview,
+    std::optional<VoxelBoxBounds> brushAggregatePreview,
+    std::optional<VoxelSpherePreview> brushAggregateSpherePreview,
     std::optional<VoxelBoxBounds> boxPreview,
     const std::span<const Asset::Voxel::VoxelPosition> linePreview,
     std::optional<VoxelSpherePreview> spherePreview,
@@ -690,6 +696,10 @@ void ViewportRenderer::ConfigureHighlights(
         selectionBoxVisualState_ == selectionBoxVisualState &&
         placementPreviewHighlight_ == placementPreview &&
         placementPreviewStyle_ == placementPreviewStyle &&
+        equals(brushPreviewHighlights_, brushPreview) &&
+        equals(brushOccupiedPreviewHighlights_, brushOccupiedPreview) &&
+        brushAggregatePreviewHighlight_ == brushAggregatePreview &&
+        brushAggregateSpherePreviewHighlight_ == brushAggregateSpherePreview &&
         boxPreviewHighlight_ == boxPreview &&
         equals(linePreviewHighlights_, linePreview) &&
         spherePreviewHighlight_ == spherePreview &&
@@ -706,6 +716,11 @@ void ViewportRenderer::ConfigureHighlights(
     selectionBoxVisualState_ = selectionBoxVisualState;
     placementPreviewHighlight_ = placementPreview;
     placementPreviewStyle_ = placementPreviewStyle;
+    brushPreviewHighlights_.assign(brushPreview.begin(), brushPreview.end());
+    brushOccupiedPreviewHighlights_.assign(
+        brushOccupiedPreview.begin(), brushOccupiedPreview.end());
+    brushAggregatePreviewHighlight_ = brushAggregatePreview;
+    brushAggregateSpherePreviewHighlight_ = brushAggregateSpherePreview;
     boxPreviewHighlight_ = boxPreview;
     linePreviewHighlights_.assign(linePreview.begin(), linePreview.end());
     spherePreviewHighlight_ = spherePreview;
@@ -715,6 +730,10 @@ void ViewportRenderer::ConfigureHighlights(
         selectionBoundsHighlight_.has_value() ||
         editableSelectionBoundsHighlight_.has_value() ||
         placementPreviewHighlight_.has_value() ||
+        !brushPreviewHighlights_.empty() ||
+        !brushOccupiedPreviewHighlights_.empty() ||
+        brushAggregatePreviewHighlight_.has_value() ||
+        brushAggregateSpherePreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
         spherePreviewHighlight_.has_value() || transformPreview_ != nullptr ||
         transformGizmo_.has_value();
@@ -795,6 +814,9 @@ bool ViewportRenderer::EnsureHighlights()
     indices.clear();
     const std::size_t outlineCount =
         static_cast<std::size_t>(placementPreviewHighlight_.has_value()) +
+        brushPreviewHighlights_.size() +
+        brushOccupiedPreviewHighlights_.size() +
+        static_cast<std::size_t>(brushAggregatePreviewHighlight_.has_value()) +
         static_cast<std::size_t>(boxPreviewHighlight_.has_value()) +
         linePreviewHighlights_.size() +
         static_cast<std::size_t>(hoveredHighlight_.has_value()) +
@@ -823,7 +845,8 @@ bool ViewportRenderer::EnsureHighlights()
     constexpr std::size_t sphereBoxCount = 3U * 48U;
     const std::size_t boxCount =
         (outlineCount + transformOutlineCount) * boxesPerOutline +
-        (spherePreviewHighlight_ ? sphereBoxCount : 0U);
+        (spherePreviewHighlight_ ? sphereBoxCount : 0U) +
+        (brushAggregateSpherePreviewHighlight_ ? sphereBoxCount : 0U);
     vertices.reserve(boxCount * 24U);
     indices.reserve(boxCount * 36U);
     if (placementPreviewHighlight_)
@@ -834,7 +857,41 @@ bool ViewportRenderer::EnsureHighlights()
                 : placementPreviewStyle_ ==
                     VoxelPlacementPreviewStyle::Eraser
                 ? EraserPlacementPreviewColor
+                : placementPreviewStyle_ ==
+                    VoxelPlacementPreviewStyle::PencilOccupied
+                ? OccupiedPlacementPreviewColor
                 : InvalidPlacementPreviewColor);
+    const std::array<float, 4>& brushPreviewColor =
+        placementPreviewStyle_ == VoxelPlacementPreviewStyle::PencilValid
+        ? ValidPlacementPreviewColor
+        : InvalidPlacementPreviewColor;
+    for (const Asset::Voxel::VoxelPosition position : brushPreviewHighlights_)
+        AppendVoxelOutline(
+            vertices, indices, position, modelCenter_, brushPreviewColor);
+    for (const Asset::Voxel::VoxelPosition position :
+         brushOccupiedPreviewHighlights_)
+    {
+        AppendVoxelOutline(
+            vertices, indices, position, modelCenter_,
+            OccupiedPlacementPreviewColor);
+    }
+    if (brushAggregatePreviewHighlight_)
+    {
+        AppendVoxelBoxOutline(
+            vertices, indices, *brushAggregatePreviewHighlight_, modelCenter_,
+            placementPreviewStyle_ == VoxelPlacementPreviewStyle::PencilOccupied
+                ? OccupiedPlacementPreviewColor
+                : brushPreviewColor);
+    }
+    if (brushAggregateSpherePreviewHighlight_)
+    {
+        AppendSphereOutline(
+            vertices, indices, *brushAggregateSpherePreviewHighlight_,
+            modelCenter_,
+            placementPreviewStyle_ == VoxelPlacementPreviewStyle::PencilOccupied
+                ? OccupiedPlacementPreviewColor
+                : brushPreviewColor);
+    }
     if (boxPreviewHighlight_)
         AppendVoxelBoxOutline(
             vertices, indices, *boxPreviewHighlight_, modelCenter_,
@@ -1354,6 +1411,9 @@ void ViewportRenderer::ClearModel() noexcept
         std::nullopt, std::nullopt,
         false, SelectionBoxVisualState::Normal,
         std::nullopt, VoxelPlacementPreviewStyle::PencilInvalid,
+        std::span<const Asset::Voxel::VoxelPosition>{},
+        std::span<const Asset::Voxel::VoxelPosition>{}, std::nullopt,
+        std::nullopt,
         std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
         std::nullopt, {});
     highlightGeometry_.reset();

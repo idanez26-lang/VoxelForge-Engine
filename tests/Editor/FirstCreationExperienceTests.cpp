@@ -249,7 +249,7 @@ void TestFirstVoxelUndoRedoSaveAndReopen(
     Editor::VoxelPencilContext pencil;
     pencil.EditSession = &session;
     pencil.Document = &document;
-    pencil.PaletteIndex = 1U;
+    pencil.State.PaletteIndex = 1U;
     pencil.History = &history;
     pencil.WorkplaneTarget = target;
     const auto pencilled = Editor::VoxelPencilTool::Apply(pencil);

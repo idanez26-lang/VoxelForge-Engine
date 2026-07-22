@@ -1,7 +1,9 @@
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
 #include "VoxelTools/VoxelPencilTool.h"
+#include "VoxelTools/VoxelBrush.h"
 #include "VoxelTools/VoxelToolState.h"
+#include "VoxelHistory/VoxelEditHistory.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
@@ -9,6 +11,8 @@
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
@@ -169,7 +173,13 @@ Editor::VoxelPencilContext Context(
     const std::size_t paletteIndex = 1U,
     const std::size_t modelIndex = 0U)
 {
-    return {&session, &document, modelIndex, hit, paletteIndex, false};
+    Editor::VoxelPencilContext context;
+    context.EditSession = &session;
+    context.Document = &document;
+    context.SubModelIndex = modelIndex;
+    context.Hit = hit;
+    context.State.PaletteIndex = paletteIndex;
+    return context;
 }
 
 void TestToolApplicationAndSynchronization()
@@ -342,6 +352,295 @@ void TestPreview()
         "Placement preview did not follow document revision changes.");
 }
 
+void TestBrushGenerationAndPreview()
+{
+    const Asset::Voxel::VoxelPosition anchor{10, 10, 10};
+    const auto requireUniqueAndSymmetric = [&anchor](
+        const std::vector<Asset::Voxel::VoxelPosition>& positions,
+        const int size)
+    {
+        const int centerOffset = size % 2 == 0 ? 1 : 0;
+        for (std::size_t first = 0U; first < positions.size(); ++first)
+        {
+            for (std::size_t second = first + 1U;
+                 second < positions.size(); ++second)
+            {
+                Require(positions[first] != positions[second],
+                    "Brush generation produced duplicate positions.");
+            }
+            const Asset::Voxel::VoxelPosition reflected{
+                2 * anchor.X + centerOffset - positions[first].X,
+                2 * anchor.Y + centerOffset - positions[first].Y,
+                2 * anchor.Z + centerOffset - positions[first].Z};
+            bool foundReflection = false;
+            for (const Asset::Voxel::VoxelPosition candidate : positions)
+            {
+                if (candidate == reflected)
+                {
+                    foundReflection = true;
+                    break;
+                }
+            }
+            Require(foundReflection,
+                "Brush generation is not symmetric around its doubled centre.");
+        }
+    };
+    for (const int size : {1, 2, 3})
+    {
+        const auto cube = Editor::GenerateVoxelBrush(
+            anchor, Editor::VoxelBrushShape::Cube, size);
+        const std::size_t expected = static_cast<std::size_t>(size * size * size);
+        Require(cube.size() == expected &&
+            Editor::EstimateVoxelBrushVoxelCount(
+                Editor::VoxelBrushShape::Cube, size) == expected,
+            "Cube brush generation or estimate is incorrect.");
+        requireUniqueAndSymmetric(cube, size);
+    }
+    const auto evenCube = Editor::GenerateVoxelBrush(
+        anchor, Editor::VoxelBrushShape::Cube, 4);
+    Require(std::find(evenCube.begin(), evenCube.end(),
+                Asset::Voxel::VoxelPosition{9, 9, 9}) != evenCube.end() &&
+        std::find(evenCube.begin(), evenCube.end(), anchor) != evenCube.end() &&
+        std::find(evenCube.begin(), evenCube.end(),
+                Asset::Voxel::VoxelPosition{12, 12, 12}) != evenCube.end(),
+        "Even brush anchoring does not use the documented lower/positive pair.");
+    constexpr std::array<std::size_t, 5U> sphereCounts{1U, 8U, 19U, 32U, 81U};
+    for (int size = 1; size <= 5; ++size)
+    {
+        const auto sphere = Editor::GenerateVoxelBrush(
+            anchor, Editor::VoxelBrushShape::Sphere, size);
+        Require(sphere.size() == sphereCounts[static_cast<std::size_t>(size - 1)] &&
+            Editor::EstimateVoxelBrushVoxelCount(
+                Editor::VoxelBrushShape::Sphere, size) == sphere.size(),
+            "Sphere brush generation or non-allocating estimate is incorrect.");
+        requireUniqueAndSymmetric(sphere, size);
+    }
+    Require(!Editor::IsVoxelBrushSizeValid(0) &&
+        !Editor::IsVoxelBrushSizeValid(Editor::MaximumVoxelBrushSize + 1) &&
+        Editor::IsVoxelBrushSizeValid(Editor::MaximumVoxelBrushSize) &&
+        Editor::EstimateVoxelBrushVoxelCount(
+            Editor::VoxelBrushShape::Cube,
+            Editor::MaximumVoxelBrushSize) == 4096U &&
+        !Editor::UsesAggregateBrushPreview(256U) &&
+        Editor::UsesAggregateBrushPreview(257U) &&
+        Editor::UsesAggregateBrushPreview(4096U) &&
+        Editor::SelectVoxelBrushPreviewRenderMode(
+            Editor::VoxelBrushShape::Cube, 4096U) ==
+            Editor::VoxelBrushPreviewRenderMode::AggregateBox &&
+        Editor::SelectVoxelBrushPreviewRenderMode(
+            Editor::VoxelBrushShape::Sphere, 4096U) ==
+            Editor::VoxelBrushPreviewRenderMode::AggregateSphere,
+        "Brush size limits are incorrect.");
+
+    auto document = Document({Model(
+        {8U, 8U, 8U}, {{0U, 0U, 0U, 1U}})});
+    const auto valid = Editor::EvaluateVoxelPencilPreview(
+        &document, 0U, std::nullopt, true,
+        Asset::Voxel::VoxelPosition{2, 2, 2},
+        Editor::VoxelBrushShape::Cube, 2);
+    const auto outside = Editor::EvaluateVoxelPencilPreview(
+        &document, 0U, std::nullopt, true,
+        Asset::Voxel::VoxelPosition{20, 2, 2},
+        Editor::VoxelBrushShape::Cube, 4);
+    Require(valid.IsValid() && valid.Positions.size() == 8U &&
+        outside.Status == Editor::VoxelPlacementPreviewStatus::OutOfBounds &&
+        outside.Positions.empty(),
+        "Multi-voxel preview did not expose the generated brush plan.");
+    Require(static_cast<bool>(document.SetVoxel({3, 3, 3}, 2U)),
+        "Unable to set up occupied brush preview test.");
+    const std::uint64_t occupiedPreviewRevision = document.GetRevision();
+    const std::uint64_t occupiedPreviewCount = document.GetVoxelCount();
+    const auto occupied = Editor::EvaluateVoxelPencilPreview(
+        &document, 0U, std::nullopt, true,
+        Asset::Voxel::VoxelPosition{2, 2, 2},
+        Editor::VoxelBrushShape::Cube, 2);
+    Require(occupied.IsValid() && occupied.Positions.size() == 8U &&
+        occupied.AddablePositions.size() == 7U &&
+        occupied.OccupiedPositions.size() == 1U &&
+        document.GetRevision() == occupiedPreviewRevision &&
+        document.GetVoxelCount() == occupiedPreviewCount,
+        "Partially occupied multi-voxel preview did not preserve addable cells.");
+}
+
+void TestAtomicBrushHistory()
+{
+    auto document = Document({Model(
+        {8U, 8U, 8U}, {{0U, 0U, 0U, 1U}})});
+    TestEditSession session(document);
+    Editor::VoxelEditHistory history;
+    const std::uint64_t revision = document.GetRevision();
+    const std::uint64_t count = document.GetVoxelCount();
+    Editor::VoxelPencilContext context = Context(
+        session, document, Hit(0U, 0U, 0U, Editor::VoxelHitFace::PositiveX));
+    context.WorkplaneTarget = {2, 2, 2};
+    context.State.Shape = Editor::SmartBrushShape::Cube;
+    context.State.Size = 2;
+    context.History = &history;
+    const Editor::VoxelToolResult applied = Editor::VoxelPencilTool::Apply(context);
+    Require(applied.Code == Editor::VoxelToolResultCode::Applied &&
+        applied.RevisionBefore == revision &&
+        applied.RevisionAfter == revision + 1U &&
+        document.GetVoxelCount() == count + 8U && history.UndoCount() == 1U &&
+        history.RedoCount() == 0U && session.completedEdits_ == 1U,
+        "A brush was not applied as one atomic history transaction.");
+    Require(history.Undo(session) && document.GetVoxelCount() == count &&
+        history.UndoCount() == 0U && history.RedoCount() == 1U &&
+        history.Redo(session) && document.GetVoxelCount() == count + 8U &&
+        history.UndoCount() == 1U && history.RedoCount() == 0U,
+        "A brush did not undo and redo as one operation.");
+
+    auto overlapDocument = Document({Model(
+        {8U, 8U, 8U}, {{0U, 0U, 0U, 1U}, {3U, 3U, 3U, 2U}})});
+    TestEditSession overlapSession(overlapDocument);
+    Editor::VoxelEditHistory overlapHistory;
+    const std::uint64_t overlapRevision = overlapDocument.GetRevision();
+    const std::uint64_t overlapCount = overlapDocument.GetVoxelCount();
+    Editor::VoxelPencilContext occupied = Context(overlapSession, overlapDocument,
+        Hit(0U, 0U, 0U, Editor::VoxelHitFace::PositiveX));
+    occupied.WorkplaneTarget = {2, 2, 2};
+    occupied.State.Shape = Editor::SmartBrushShape::Cube;
+    occupied.State.Size = 2;
+    occupied.History = &overlapHistory;
+    Require(Editor::VoxelPencilTool::Apply(occupied).Code ==
+            Editor::VoxelToolResultCode::Applied &&
+        overlapDocument.GetRevision() == overlapRevision + 1U &&
+        overlapDocument.GetVoxelCount() == overlapCount + 7U &&
+        overlapDocument.GetVoxel({3, 3, 3})->PaletteIndex == 2U &&
+        overlapHistory.UndoCount() == 1U &&
+        overlapHistory.Undo(overlapSession) &&
+        overlapDocument.GetVoxelCount() == overlapCount &&
+        overlapDocument.GetVoxel({3, 3, 3})->PaletteIndex == 2U,
+        "A partially occupied brush did not preserve existing voxels on undo.");
+
+    std::vector<Asset::Vox::VoxVoxel> occupiedVoxels;
+    for (std::uint8_t z = 2U; z <= 3U; ++z)
+    {
+        for (std::uint8_t y = 2U; y <= 3U; ++y)
+        {
+            for (std::uint8_t x = 2U; x <= 3U; ++x)
+                occupiedVoxels.push_back({x, y, z, 3U});
+        }
+    }
+    auto fullyOccupiedDocument = Document({Model({8U, 8U, 8U}, occupiedVoxels)});
+    TestEditSession fullyOccupiedSession(fullyOccupiedDocument);
+    Editor::VoxelEditHistory fullyOccupiedHistory;
+    const std::uint64_t fullyOccupiedRevision = fullyOccupiedDocument.GetRevision();
+    const std::uint64_t fullyOccupiedCount = fullyOccupiedDocument.GetVoxelCount();
+    Editor::VoxelPencilContext fullyOccupied = Context(
+        fullyOccupiedSession, fullyOccupiedDocument,
+        Hit(2U, 2U, 2U, Editor::VoxelHitFace::PositiveX));
+    fullyOccupied.WorkplaneTarget = {2, 2, 2};
+    fullyOccupied.State.Shape = Editor::SmartBrushShape::Cube;
+    fullyOccupied.State.Size = 2;
+    fullyOccupied.History = &fullyOccupiedHistory;
+    Require(Editor::VoxelPencilTool::Apply(fullyOccupied).Code ==
+            Editor::VoxelToolResultCode::TargetOccupied &&
+        fullyOccupiedDocument.GetRevision() == fullyOccupiedRevision &&
+        fullyOccupiedDocument.GetVoxelCount() == fullyOccupiedCount &&
+        fullyOccupiedHistory.UndoCount() == 0U &&
+        fullyOccupiedSession.completedEdits_ == 0U,
+        "A fully occupied brush was not a no-op.");
+
+    Editor::VoxelPencilContext outside = fullyOccupied;
+    outside.WorkplaneTarget = {20, 2, 2};
+    outside.State.Size = 4;
+    Require(Editor::VoxelPencilTool::Apply(outside).Code ==
+            Editor::VoxelToolResultCode::TargetOutOfBounds &&
+        fullyOccupiedDocument.GetRevision() == fullyOccupiedRevision &&
+        fullyOccupiedDocument.GetVoxelCount() == fullyOccupiedCount &&
+        fullyOccupiedHistory.UndoCount() == 0U &&
+        fullyOccupiedSession.completedEdits_ == 0U,
+        "An out-of-bounds brush target partially mutated the document.");
+}
+
+void TestSurfaceAnchoredBrushes()
+{
+    auto workplaneDocument = Document({Model(
+        {8U, 8U, 8U}, {{0U, 0U, 0U, 1U}})});
+    const auto workplaneCube = Editor::EvaluateVoxelPencilPreview(
+        &workplaneDocument, 0U, std::nullopt, true,
+        Asset::Voxel::VoxelPosition{3, 0, 3},
+        Editor::VoxelBrushShape::Cube, 3);
+    const auto workplaneSphere = Editor::EvaluateVoxelPencilPreview(
+        &workplaneDocument, 0U, std::nullopt, true,
+        Asset::Voxel::VoxelPosition{6, 0, 6},
+        Editor::VoxelBrushShape::Sphere, 3);
+    Require(workplaneCube.IsValid() && workplaneCube.Positions.size() == 27U &&
+        workplaneSphere.IsValid() &&
+        workplaneSphere.Positions.size() == 19U,
+        "Size 3 workplane brushes were not valid at Y=0.");
+    for (const Asset::Voxel::VoxelPosition position : workplaneCube.Positions)
+        Require(position.Y >= 0,
+            "A Size 3 Cube brush extended behind the Y=0 workplane.");
+    for (const Asset::Voxel::VoxelPosition position : workplaneSphere.Positions)
+        Require(position.Y >= 0,
+            "A Size 3 Sphere brush extended behind the Y=0 workplane.");
+
+    TestEditSession workplaneSession(workplaneDocument);
+    Editor::VoxelPencilContext workplaneContext = Context(
+        workplaneSession, workplaneDocument,
+        Hit(0U, 0U, 0U, Editor::VoxelHitFace::PositiveY));
+    workplaneContext.WorkplaneTarget = {3, 0, 3};
+    workplaneContext.State.Shape = Editor::SmartBrushShape::Cube;
+    workplaneContext.State.Size = 3;
+    const std::uint64_t workplaneRevision = workplaneDocument.GetRevision();
+    Require(Editor::VoxelPencilTool::Apply(workplaneContext).Code ==
+            Editor::VoxelToolResultCode::Applied &&
+        workplaneDocument.GetRevision() == workplaneRevision + 1U &&
+        workplaneDocument.GetVoxelCount() == 28U,
+        "A valid Size 3 workplane brush did not apply atomically.");
+
+    auto faceDocument = Document({Model(
+        {8U, 8U, 8U}, {{3U, 3U, 3U, 1U}, {4U, 3U, 3U, 6U}})});
+    TestEditSession faceSession(faceDocument);
+    const auto faceHit = Hit(3U, 3U, 3U, Editor::VoxelHitFace::PositiveX);
+    const auto facePreview = Editor::EvaluateVoxelPencilPreview(
+        &faceDocument, 0U, faceHit, true, std::nullopt,
+        Editor::VoxelBrushShape::Cube, 3);
+    Require(facePreview.IsValid() && facePreview.Positions.size() == 27U &&
+        facePreview.AddablePositions.size() == 26U &&
+        facePreview.OccupiedPositions.size() == 1U &&
+        std::find(facePreview.Positions.begin(), facePreview.Positions.end(),
+            Asset::Voxel::VoxelPosition{3, 3, 3}) == facePreview.Positions.end(),
+        "A Size 3 face brush still overlaps its source voxel.");
+    Editor::VoxelPencilContext faceContext = Context(
+        faceSession, faceDocument, faceHit);
+    faceContext.State.Shape = Editor::SmartBrushShape::Cube;
+    faceContext.State.Size = 3;
+    Require(Editor::VoxelPencilTool::Apply(faceContext).Code ==
+            Editor::VoxelToolResultCode::Applied &&
+        faceDocument.GetVoxelCount() == 28U &&
+        faceDocument.GetVoxel({4, 3, 3})->PaletteIndex == 6U,
+        "A face brush did not preserve an overlapping existing voxel.");
+
+    auto borderDocument = Document({Model(
+        {8U, 8U, 8U}, {{6U, 3U, 3U, 1U}})});
+    TestEditSession borderSession(borderDocument);
+    const auto borderHit = Hit(6U, 3U, 3U, Editor::VoxelHitFace::PositiveX);
+    const auto borderPreview = Editor::EvaluateVoxelPencilPreview(
+        &borderDocument, 0U, borderHit, true, std::nullopt,
+        Editor::VoxelBrushShape::Cube, 3);
+    const std::uint64_t borderRevision = borderDocument.GetRevision();
+    const std::uint64_t borderCount = borderDocument.GetVoxelCount();
+    Editor::VoxelEditHistory borderHistory;
+    Editor::VoxelPencilContext borderContext = Context(
+        borderSession, borderDocument, borderHit);
+    borderContext.State.Shape = Editor::SmartBrushShape::Cube;
+    borderContext.State.Size = 3;
+    borderContext.History = &borderHistory;
+    Require(borderPreview.IsValid() && borderPreview.Statistics.Total == 27U &&
+        borderPreview.Statistics.New == 9U &&
+        borderPreview.Statistics.Clipped == 18U &&
+        Editor::VoxelPencilTool::Apply(borderContext).Code ==
+            Editor::VoxelToolResultCode::Applied &&
+        borderDocument.GetRevision() == borderRevision + 1U &&
+        borderDocument.GetVoxelCount() == borderCount + 9U &&
+        borderHistory.UndoCount() == 1U && borderHistory.Undo(borderSession) &&
+        borderDocument.GetVoxelCount() == borderCount &&
+        borderDocument.HasVoxel({6, 3, 3}),
+        "A boundary face brush did not clip and undo atomically.");
+}
+
 Editor::VoxelPencilInputFrame AllowedInput()
 {
     Editor::VoxelPencilInputFrame frame;
@@ -449,6 +748,9 @@ int main()
         TestToolRefusals();
         TestRollbackAndMultiModel();
         TestPreview();
+        TestBrushGenerationAndPreview();
+        TestAtomicBrushHistory();
+        TestSurfaceAnchoredBrushes();
         TestInputController();
         TestToolState();
         std::cout << "Voxel Pencil tests passed.\n";

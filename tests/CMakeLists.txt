@@ -304,6 +304,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelPencilTests>
 )
 add_executable(
+    VoxelForgeEditorSmartBrushEngineTests
+    Editor/SmartBrushEngineTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartBrushEngineTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorSmartBrushEngineTests)
+add_test(
+    NAME VoxelForge.Editor.SmartBrushEngine
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartBrushEngineTests>
+)
+add_executable(
     VoxelForgeEditorVoxelEraserTests
     Editor/VoxelEraserTests.cpp
 )

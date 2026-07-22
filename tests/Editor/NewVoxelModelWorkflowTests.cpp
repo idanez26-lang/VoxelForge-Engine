@@ -195,8 +195,10 @@ void TestInstantCreationAndEditing()
     EditSession session(*harness.Document);
     VoxelEditHistory history;
     const Asset::Voxel::VoxelPosition firstVoxel{32, 0, 32};
+    SmartBrushState brushState;
+    brushState.PaletteIndex = 1U;
     const VoxelToolResult pencil = VoxelPencilTool::Apply({
-        &session, &*harness.Document, 0U, std::nullopt, 1U, false,
+        &session, &*harness.Document, 0U, std::nullopt, brushState, false,
         &history, firstVoxel});
     Require(pencil.Changed && harness.Document->HasVoxel(firstVoxel) &&
             history.CanUndo() && history.UndoCount() == 1U,

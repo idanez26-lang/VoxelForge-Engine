@@ -435,6 +435,15 @@ private:
     VoxelLineInteraction voxelLineInteraction_;
     VoxelSphereInteraction voxelSphereInteraction_;
     VoxelPlacementPreview voxelPlacementPreview_;
+    const Asset::Voxel::VoxelDocument* pencilPreviewDocument_ = nullptr;
+    std::uint64_t pencilPreviewRevision_ = 0U;
+    std::uint64_t pencilPreviewGeneration_ = 0U;
+    std::optional<Asset::Voxel::VoxelPosition> pencilPreviewAnchor_;
+    VoxelHitFace pencilPreviewFace_ = VoxelHitFace::None;
+    std::size_t pencilPreviewHitSubModelIndex_ = 0U;
+    SmartBrushState pencilPreviewState_{};
+    bool pencilPreviewUsesWorkplane_ = false;
+    bool pencilPreviewCacheValid_ = false;
     std::optional<WorkplaneHit> workplaneHit_;
     VoxelEditHistory voxelEditHistory_;
     std::optional<VoxelToolResult> lastVoxelToolResult_;

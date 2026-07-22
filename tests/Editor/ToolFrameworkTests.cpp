@@ -125,9 +125,9 @@ void TestMetadataAndFutureOrderingFoundation()
 void TestContextDefaults()
 {
     ToolContext context;
-    Require(context.Pencil.Mode == PencilMode::Add &&
-        context.Pencil.Brush == VoxelBrushShape::Cube &&
-        context.Pencil.Size == 1 &&
+    Require(context.Pencil.State.Mode == SmartBrushMode::Add &&
+        context.Pencil.State.Shape == SmartBrushShape::Cube &&
+        context.Pencil.State.Size == 1 &&
         std::all_of(context.Pencil.Faces.begin(), context.Pencil.Faces.end(),
             [](const bool enabled) { return enabled; }) &&
         context.Scale.Uniform && !context.Scale.Snap,

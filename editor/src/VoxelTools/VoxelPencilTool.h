@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Commands/Voxel/VoxelEditSession.h"
+#include "BrushEngine/SmartBrushEngine.h"
 #include "VoxelSelection/VoxelRaycast.h"
 
 #include <cstddef>
@@ -42,7 +43,7 @@ struct VoxelPencilContext final
     Asset::Voxel::VoxelDocument* Document = nullptr;
     std::size_t SubModelIndex = 0U;
     std::optional<VoxelRaycastHit> Hit;
-    std::size_t PaletteIndex = 1U;
+    SmartBrushState State{};
     bool Blocked = false;
     VoxelEditHistory* History = nullptr;
     std::optional<Asset::Voxel::VoxelPosition> WorkplaneTarget;

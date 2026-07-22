@@ -34,6 +34,7 @@ enum class VoxelPlacementPreviewStyle
 {
     PencilValid,
     PencilInvalid,
+    PencilOccupied,
     Eraser
 };
 
@@ -73,6 +74,10 @@ public:
         SelectionBoxVisualState selectionBoxVisualState,
         std::optional<Asset::Voxel::VoxelPosition> placementPreview,
         VoxelPlacementPreviewStyle placementPreviewStyle,
+        std::span<const Asset::Voxel::VoxelPosition> brushPreview,
+        std::span<const Asset::Voxel::VoxelPosition> brushOccupiedPreview,
+        std::optional<VoxelBoxBounds> brushAggregatePreview,
+        std::optional<VoxelSpherePreview> brushAggregateSpherePreview,
         std::optional<VoxelBoxBounds> boxPreview,
         std::span<const Asset::Voxel::VoxelPosition> linePreview,
         std::optional<VoxelSpherePreview> spherePreview,
@@ -170,6 +175,10 @@ private:
     std::optional<Asset::Voxel::VoxelPosition> placementPreviewHighlight_;
     VoxelPlacementPreviewStyle placementPreviewStyle_ =
         VoxelPlacementPreviewStyle::PencilInvalid;
+    std::vector<Asset::Voxel::VoxelPosition> brushPreviewHighlights_;
+    std::vector<Asset::Voxel::VoxelPosition> brushOccupiedPreviewHighlights_;
+    std::optional<VoxelBoxBounds> brushAggregatePreviewHighlight_;
+    std::optional<VoxelSpherePreview> brushAggregateSpherePreviewHighlight_;
     std::optional<VoxelBoxBounds> boxPreviewHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
     std::unique_ptr<HighlightGeometryCache> highlightGeometry_;

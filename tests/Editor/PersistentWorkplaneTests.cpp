@@ -138,7 +138,7 @@ Editor::VoxelToolResult PencilOnWorkplane(
     Editor::VoxelPencilContext context;
     context.EditSession = &session;
     context.Document = &document;
-    context.PaletteIndex = 5U;
+    context.State.PaletteIndex = 5U;
     context.History = &history;
     context.WorkplaneTarget = position;
     return Editor::VoxelPencilTool::Apply(context);
@@ -196,7 +196,7 @@ void TestPersistentWorkplane()
     voxelContext.EditSession = &session;
     voxelContext.Document = &document;
     voxelContext.Hit = voxelHit;
-    voxelContext.PaletteIndex = 7U;
+    voxelContext.State.PaletteIndex = 7U;
     voxelContext.History = &history;
     Require(Editor::VoxelPencilTool::Apply(voxelContext).Code ==
             Editor::VoxelToolResultCode::Applied &&

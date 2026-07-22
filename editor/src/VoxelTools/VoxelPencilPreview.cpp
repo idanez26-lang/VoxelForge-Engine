@@ -1,5 +1,7 @@
 #include "VoxelPencilPreview.h"
 
+#include <utility>
+
 namespace VoxelForge::Editor
 {
 namespace
@@ -35,7 +37,8 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
     const std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit,
     const bool pencilActive,
-    const std::optional<Asset::Voxel::VoxelPosition> workplaneTarget) noexcept
+    const std::optional<Asset::Voxel::VoxelPosition> workplaneTarget,
+    const SmartBrushState state) noexcept
 {
     if (!pencilActive || document == nullptr)
     {
@@ -45,6 +48,7 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
     if (!dimensions) return {};
 
     Asset::Voxel::VoxelPosition adjacent{};
+    Asset::Voxel::VoxelPosition placementNormal{0, 1, 0};
     if (workplaneTarget)
     {
         adjacent = *workplaneTarget;
@@ -58,25 +62,49 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
             CalculateAdjacent(*hit);
         if (hit->AdjacentPosition != expectedAdjacent) return {};
         adjacent = hit->AdjacentPosition;
+        placementNormal = VoxelHitFaceIntegerNormal(hit->Face);
     }
-    const bool inside = adjacent.X >= 0 && adjacent.Y >= 0 && adjacent.Z >= 0 &&
-        static_cast<std::uint32_t>(adjacent.X) < dimensions->X &&
-        static_cast<std::uint32_t>(adjacent.Y) < dimensions->Y &&
-        static_cast<std::uint32_t>(adjacent.Z) < dimensions->Z;
-    if (!inside)
-        return {
-            VoxelPlacementPreviewStatus::OutOfBounds,
-            adjacent,
-            VoxelPreviewTool::Pencil};
-    if (document->HasVoxel(adjacent, subModelIndex))
-        return {
-            VoxelPlacementPreviewStatus::Occupied,
-            adjacent,
-            VoxelPreviewTool::Pencil};
+    SmartBrushResult brush = SmartBrushEngine::Resolve({
+        *dimensions,
+        state,
+        {adjacent, placementNormal},
+        [document, subModelIndex](const Asset::Voxel::VoxelPosition position)
+        {
+            return document->HasVoxel(position, subModelIndex);
+        }});
+    if (brush.Code == SmartBrushResultCode::OutOfBounds)
+        return {VoxelPlacementPreviewStatus::OutOfBounds, adjacent,
+            VoxelPreviewTool::Pencil, std::move(brush.Positions), {}, {},
+            brush.Statistics, std::move(brush.RenderPlan)};
+    if (brush.Code != SmartBrushResultCode::Valid) return {};
     return {
-        VoxelPlacementPreviewStatus::Valid,
+        brush.HasAddablePositions()
+            ? VoxelPlacementPreviewStatus::Valid
+            : VoxelPlacementPreviewStatus::Occupied,
         adjacent,
-        VoxelPreviewTool::Pencil};
+        VoxelPreviewTool::Pencil,
+        std::move(brush.Positions),
+        std::move(brush.AddablePositions),
+        std::move(brush.ExistingPositions),
+        brush.Statistics,
+        std::move(brush.RenderPlan)};
+}
+
+VoxelPlacementPreview EvaluateVoxelPencilPreview(
+    const Asset::Voxel::VoxelDocument* document,
+    const std::size_t subModelIndex,
+    const std::optional<VoxelRaycastHit>& hit,
+    const bool pencilActive,
+    const std::optional<Asset::Voxel::VoxelPosition> workplaneTarget,
+    const VoxelBrushShape brush,
+    const int brushSize) noexcept
+{
+    SmartBrushState state;
+    state.Shape = brush == VoxelBrushShape::Sphere
+        ? SmartBrushShape::Sphere : SmartBrushShape::Cube;
+    state.Size = brushSize;
+    return EvaluateVoxelPencilPreview(
+        document, subModelIndex, hit, pencilActive, workplaneTarget, state);
 }
 
 VoxelPlacementPreview EvaluateVoxelEraserPreview(

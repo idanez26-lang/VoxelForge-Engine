@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Constraints/ConstraintSettings.h"
+#include "BrushEngine/SmartBrushEngine.h"
 #include "Transform/TransformPivotManager.h"
 
 #include <array>
@@ -9,25 +10,10 @@
 namespace VoxelForge::Editor
 {
 
-enum class PencilMode : std::uint8_t
-{
-    Add,
-    Remove,
-    Paint
-};
-
-enum class VoxelBrushShape : std::uint8_t
-{
-    Cube,
-    Sphere
-};
-
 struct PencilToolOptions final
 {
-    PencilMode Mode = PencilMode::Add;
+    SmartBrushState State{};
     std::array<bool, 6U> Faces{{true, true, true, true, true, true}};
-    VoxelBrushShape Brush = VoxelBrushShape::Cube;
-    int Size = 1;
 };
 
 struct ScaleToolOptions final

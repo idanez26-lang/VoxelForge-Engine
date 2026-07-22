@@ -1787,15 +1787,34 @@ void EditorWorkspace::DrawToolsPanel()
         voxelDocumentSession_.ActiveDocument();
     const bool canSave = activeDocument != nullptr &&
         activeDocument->IsDirty() && !voxelDocumentSaveService_.IsBusy();
-    EditorToolbar::Draw(
-        {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
-         CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection(),
-         CanMirrorSelection(), CanScaleSelection(), CanAlignSelection()},
-        editorInputService_,
-        {[this](const EditorInputCommand command)
-         {
-             ExecuteInputCommand(command);
-         }});
+    const ToolDescriptor& activeTool = toolManager_.ActiveDescriptor();
+    ImGui::TextDisabled("CREATE");
+    ImGui::SameLine();
+    ImGui::TextUnformatted("TOOLS");
+    ImGui::TextDisabled("Active");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(
+        activeTool.Name.data(),
+        activeTool.Name.data() + activeTool.Name.size());
+    ImGui::Separator();
+
+    constexpr float MinimumToolbarHeight = 96.0F;
+    const float toolbarHeight = std::max(
+        MinimumToolbarHeight, ImGui::GetContentRegionAvail().y);
+    if (ImGui::BeginChild(
+            "##CreateTools", ImVec2(0.0F, toolbarHeight), true))
+    {
+        EditorToolbar::Draw(
+            {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
+             CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection(),
+             CanMirrorSelection(), CanScaleSelection(), CanAlignSelection()},
+            editorInputService_,
+            {[this](const EditorInputCommand command)
+             {
+                 ExecuteInputCommand(command);
+             }});
+    }
+    ImGui::EndChild();
     ImGui::End();
 }
 
@@ -1806,8 +1825,18 @@ void EditorWorkspace::DrawToolOptionsPanel()
         ImGui::End();
         return;
     }
+    ImGui::TextDisabled("TOOL OPTIONS");
+    ImGui::Separator();
     toolContext_.HasDocument = voxelDocumentSession_.HasActiveDocument();
-    ToolPanel::Draw(toolManager_, toolContext_);
+    constexpr float MinimumToolOptionsHeight = 112.0F;
+    const float optionsHeight = std::max(
+        MinimumToolOptionsHeight, ImGui::GetContentRegionAvail().y);
+    if (ImGui::BeginChild(
+            "##ActiveToolOptions", ImVec2(0.0F, optionsHeight), true))
+    {
+        ToolPanel::Draw(toolManager_, toolContext_);
+    }
+    ImGui::EndChild();
     ImGui::End();
 }
 
@@ -3581,6 +3610,9 @@ void EditorWorkspace::DrawPalettePanel()
         ImGui::End();
         return;
     }
+
+    ImGui::TextDisabled("COLOR STYLE");
+    ImGui::Separator();
 
     const PaletteService::Palette* palette = paletteService_.ActivePalette();
     const std::optional<PaletteColorSelection> active =
@@ -12410,12 +12442,14 @@ bool EditorWorkspace::ApplyVoxelPencil()
         paletteService_.ActiveColor();
     try
     {
+        SmartBrushState brushState = toolContext_.Pencil.State;
+        brushState.PaletteIndex = activeColor ? activeColor->Index : 0U;
         result = VoxelPencilTool::Apply({
             static_cast<VoxelEditSession*>(this),
             voxelDocumentSession_.ActiveDocument(),
             0U,
             voxelSelection_.Hovered(),
-            activeColor ? activeColor->Index : 0U,
+            brushState,
             !voxelToolState_.IsPencilActive(),
             &voxelEditHistory_,
             workplaneHit_ ? workplaneHit_->Position : std::nullopt});
@@ -13830,23 +13864,91 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         selectedCoordinates = legacySelection;
     }
     std::optional<Asset::Voxel::VoxelPosition> placementPosition;
+    std::span<const Asset::Voxel::VoxelPosition> brushPreview;
+    std::span<const Asset::Voxel::VoxelPosition> brushOccupiedPreview;
+    std::optional<VoxelBoxBounds> brushAggregatePreview;
+    std::optional<VoxelSpherePreview> brushAggregateSpherePreview;
     std::optional<VoxelBoxBounds> boxPreview;
     std::vector<Asset::Voxel::VoxelPosition> linePreview;
     std::optional<VoxelSpherePreview> spherePreview;
     VoxelPlacementPreviewStyle placementStyle =
         VoxelPlacementPreviewStyle::PencilInvalid;
+    if (!voxelToolState_.IsPencilActive()) pencilPreviewCacheValid_ = false;
     if (voxelToolState_.IsPencilActive())
     {
-        voxelPlacementPreview_ = EvaluateVoxelPencilPreview(
-            voxelDocumentSession_.ActiveDocument(),
-            0U,
-            voxelSelection_.Hovered(),
-            true,
-            workplaneHit_ ? workplaneHit_->Position : std::nullopt);
-        placementPosition = voxelPlacementPreview_.IsVisible()
-            ? voxelPlacementPreview_.Position : std::nullopt;
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        SmartBrushState previewState = toolContext_.Pencil.State;
+        if (const std::optional<PaletteColorSelection> activeColor =
+                paletteService_.ActiveColor())
+            previewState.PaletteIndex = activeColor->Index;
+        else
+            previewState.PaletteIndex = 0U;
+        const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
+        const bool usesWorkplane = workplaneHit_.has_value();
+        const std::optional<Asset::Voxel::VoxelPosition> anchor = usesWorkplane
+            ? std::optional<Asset::Voxel::VoxelPosition>{workplaneHit_->Position}
+            : hit ? std::optional<Asset::Voxel::VoxelPosition>{
+                hit->AdjacentPosition} : std::nullopt;
+        const VoxelHitFace face = hit ? hit->Face : VoxelHitFace::None;
+        const std::size_t hitSubModelIndex = hit ? hit->SubModelIndex : 0U;
+        const std::uint64_t revision = document ? document->GetRevision() : 0U;
+        const std::uint64_t generation = voxelDocumentSession_.Generation();
+        if (!pencilPreviewCacheValid_ || pencilPreviewDocument_ != document ||
+            pencilPreviewRevision_ != revision ||
+            pencilPreviewGeneration_ != generation ||
+            pencilPreviewAnchor_ != anchor || pencilPreviewFace_ != face ||
+            pencilPreviewHitSubModelIndex_ != hitSubModelIndex ||
+            pencilPreviewState_ != previewState ||
+            pencilPreviewUsesWorkplane_ != usesWorkplane)
+        {
+            voxelPlacementPreview_ = EvaluateVoxelPencilPreview(
+                document,
+                0U,
+                hit,
+                true,
+                usesWorkplane ? anchor : std::nullopt,
+                previewState);
+            pencilPreviewDocument_ = document;
+            pencilPreviewRevision_ = revision;
+            pencilPreviewGeneration_ = generation;
+            pencilPreviewAnchor_ = anchor;
+            pencilPreviewFace_ = face;
+            pencilPreviewHitSubModelIndex_ = hitSubModelIndex;
+            pencilPreviewState_ = previewState;
+            pencilPreviewUsesWorkplane_ = usesWorkplane;
+            pencilPreviewCacheValid_ = true;
+        }
+        if (voxelPlacementPreview_.IsVisible())
+        {
+            if (voxelPlacementPreview_.RenderPlan.Mode ==
+                SmartBrushRenderMode::AggregateBox)
+            {
+                brushAggregatePreview = {
+                    voxelPlacementPreview_.RenderPlan.Bounds.Minimum,
+                    voxelPlacementPreview_.RenderPlan.Bounds.Maximum};
+            }
+            else if (voxelPlacementPreview_.RenderPlan.Mode ==
+                SmartBrushRenderMode::AggregateSphere)
+            {
+                brushAggregateSpherePreview = VoxelSpherePreview{
+                    voxelPlacementPreview_.RenderPlan.SphereCenter,
+                    voxelPlacementPreview_.RenderPlan.SphereRadius};
+            }
+            else
+            {
+                brushPreview = std::span<const Asset::Voxel::VoxelPosition>(
+                    voxelPlacementPreview_.AddablePositions);
+                brushOccupiedPreview =
+                    std::span<const Asset::Voxel::VoxelPosition>(
+                        voxelPlacementPreview_.OccupiedPositions);
+            }
+        }
         placementStyle = voxelPlacementPreview_.IsValid()
             ? VoxelPlacementPreviewStyle::PencilValid
+            : voxelPlacementPreview_.Status ==
+                VoxelPlacementPreviewStatus::Occupied
+            ? VoxelPlacementPreviewStyle::PencilOccupied
             : VoxelPlacementPreviewStyle::PencilInvalid;
     }
     else if (voxelToolState_.IsEraserActive())
@@ -13947,6 +14049,10 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             : SelectionBoxVisualState::Normal,
         placementPosition,
         placementStyle,
+        brushPreview,
+        brushOccupiedPreview,
+        brushAggregatePreview,
+        brushAggregateSpherePreview,
         boxPreview,
         linePreview,
         spherePreview,

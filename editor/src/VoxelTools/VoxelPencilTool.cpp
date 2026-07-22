@@ -7,6 +7,7 @@
 #include "VoxelForge/Voxel/VoxelModel.h"
 
 #include <utility>
+#include <vector>
 
 namespace VoxelForge::Editor
 {
@@ -42,6 +43,7 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
     if (context.Blocked)
         return Refused(VoxelToolResultCode::Blocked, {}, revision);
     Asset::Voxel::VoxelPosition adjacent{};
+    Asset::Voxel::VoxelPosition placementNormal{0, 1, 0};
     if (context.WorkplaneTarget)
     {
         adjacent = *context.WorkplaneTarget;
@@ -59,6 +61,7 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
                 VoxelToolResultCode::Failed, adjacent, revision,
                 "Voxel hit adjacency does not match its detected face.");
         }
+        placementNormal = VoxelHitFaceIntegerNormal(context.Hit->Face);
     }
     if (context.EditSession == nullptr ||
         (!context.WorkplaneTarget &&
@@ -68,29 +71,8 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
         return Refused(
             VoxelToolResultCode::InvalidModel, adjacent, revision);
     }
-    if (context.PaletteIndex == 0U || context.PaletteIndex > 255U)
-    {
-        return Refused(
-            VoxelToolResultCode::InvalidPaletteIndex, adjacent, revision);
-    }
-
-    const auto dimensions = document.GetDimensions(context.SubModelIndex);
-    const bool inside = dimensions && adjacent.X >= 0 && adjacent.Y >= 0 &&
-        adjacent.Z >= 0 &&
-        static_cast<std::uint32_t>(adjacent.X) < dimensions->X &&
-        static_cast<std::uint32_t>(adjacent.Y) < dimensions->Y &&
-        static_cast<std::uint32_t>(adjacent.Z) < dimensions->Z;
-    if (!inside)
-    {
-        return Refused(
-            VoxelToolResultCode::TargetOutOfBounds, adjacent, revision);
-    }
-    if (document.HasVoxel(adjacent, context.SubModelIndex))
-    {
-        return Refused(
-            VoxelToolResultCode::TargetOccupied, adjacent, revision);
-    }
-
+    if (context.State.PaletteIndex == 0U || context.State.PaletteIndex > 255U)
+        return Refused(VoxelToolResultCode::InvalidPaletteIndex, adjacent, revision);
     Voxel::VoxelModel* model = context.EditSession->ActiveVoxelModel();
     Voxel::VoxelGrid* grid = model == nullptr
         ? nullptr : model->GetGrid(context.SubModelIndex);
@@ -101,45 +83,92 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
             VoxelToolResultCode::InvalidModel, adjacent, revision,
             "The editable document and compatibility grid are unavailable.");
     }
-    const auto x = static_cast<std::uint32_t>(adjacent.X);
-    const auto y = static_cast<std::uint32_t>(adjacent.Y);
-    const auto z = static_cast<std::uint32_t>(adjacent.Z);
-    const Voxel::Voxel* compatibilityVoxel = grid->Get(x, y, z);
-    if (compatibilityVoxel == nullptr || compatibilityVoxel->IsOccupied())
+    const auto dimensions = document.GetDimensions(context.SubModelIndex);
+    if (!dimensions)
     {
         return Refused(
             VoxelToolResultCode::Failed, adjacent, revision,
-            "VoxelDocument and the editable compatibility grid diverged.");
+            "The editable document dimensions are unavailable.");
     }
+    const SmartBrushResult brush = SmartBrushEngine::Resolve({
+        *dimensions,
+        context.State,
+        {adjacent, placementNormal},
+        [&document, subModelIndex = context.SubModelIndex](
+            const Asset::Voxel::VoxelPosition position)
+        {
+            return document.HasVoxel(position, subModelIndex);
+        }});
+    if (brush.Code == SmartBrushResultCode::OutOfBounds)
+        return Refused(VoxelToolResultCode::TargetOutOfBounds, adjacent, revision);
+    if (brush.Code == SmartBrushResultCode::Unsupported)
+        return Refused(VoxelToolResultCode::Failed, adjacent, revision, brush.Error);
+    if (brush.Code != SmartBrushResultCode::Valid)
+        return Refused(VoxelToolResultCode::Failed, adjacent, revision, brush.Error);
 
-    const Voxel::Voxel replacement{
-        static_cast<std::uint8_t>(context.PaletteIndex),
-        Voxel::Voxel::OccupiedFlag};
+    std::vector<VoxelChange> changes;
+    changes.reserve(brush.AddablePositions.size());
+    // The engine has already validated the complete plan. Verify that the
+    // compatibility grid agrees before creating one atomic transaction.
+    for (const Asset::Voxel::VoxelPosition position : brush.Positions)
+    {
+        const Voxel::Voxel* compatibilityVoxel = grid->Get(
+            static_cast<std::uint32_t>(position.X),
+            static_cast<std::uint32_t>(position.Y),
+            static_cast<std::uint32_t>(position.Z));
+        if (compatibilityVoxel == nullptr)
+        {
+            return Refused(
+                VoxelToolResultCode::Failed, adjacent, revision,
+                "VoxelDocument and the editable compatibility grid diverged.");
+        }
+        const bool documentOccupied =
+            document.HasVoxel(position, context.SubModelIndex);
+        if (documentOccupied)
+        {
+            if (!compatibilityVoxel->IsOccupied())
+            {
+                return Refused(
+                    VoxelToolResultCode::Failed, adjacent, revision,
+                    "VoxelDocument and the editable compatibility grid diverged.");
+            }
+            continue;
+        }
+        if (compatibilityVoxel->IsOccupied())
+        {
+            return Refused(
+                VoxelToolResultCode::Failed, adjacent, revision,
+                "VoxelDocument and the editable compatibility grid diverged.");
+        }
+    }
+    for (const Asset::Voxel::VoxelPosition position : brush.AddablePositions)
+    {
+        changes.push_back({
+            context.SubModelIndex, position, false, 0U, true,
+            static_cast<std::uint8_t>(context.State.PaletteIndex)});
+    }
+    if (changes.empty())
+        return Refused(VoxelToolResultCode::TargetOccupied, adjacent, revision);
+
     CommandResult applied;
     if (context.History != nullptr)
     {
         const VoxelEditHistoryResult historyResult = context.History->Execute(
             *context.EditSession,
             VoxelEditOperation{
-                "Add Voxel",
-                {VoxelChange{
-                    context.SubModelIndex,
-                    adjacent,
-                    false,
-                    0U,
-                    true,
-                    static_cast<std::uint8_t>(context.PaletteIndex)}}});
+                changes.size() == 1U ? "Add Voxel" : "Add Brush",
+                std::move(changes)});
         applied = historyResult
             ? CommandResult::Success()
             : CommandResult::Failure(historyResult.Message);
     }
     else
     {
-        applied = ApplyVoxelEdit(
+        applied = ApplyVoxelChanges(
             *context.EditSession,
             context.EditSession->VoxelModelGeneration(),
-            x, y, z, *compatibilityVoxel, replacement,
-            context.SubModelIndex);
+            changes,
+            VoxelChangeDirection::Forward);
     }
     if (!applied)
     {
@@ -148,13 +177,20 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
             document.GetRevision(), applied.Message);
     }
 
-    const auto voxel = document.GetVoxel(adjacent, context.SubModelIndex);
-    const Voxel::Voxel* synchronizedVoxel = grid->Get(x, y, z);
     const std::uint64_t revisionAfter = document.GetRevision();
-    if (!voxel || voxel->PaletteIndex != context.PaletteIndex ||
-        synchronizedVoxel == nullptr || !synchronizedVoxel->IsOccupied() ||
-        synchronizedVoxel->ColorIndex != context.PaletteIndex ||
-        revisionAfter != revision + 1U || !document.IsDirty())
+    bool synchronized = revisionAfter == revision + 1U && document.IsDirty();
+    for (const Asset::Voxel::VoxelPosition position : brush.AddablePositions)
+    {
+        const auto voxel = document.GetVoxel(position, context.SubModelIndex);
+        const Voxel::Voxel* compatibilityVoxel = grid->Get(
+            static_cast<std::uint32_t>(position.X),
+            static_cast<std::uint32_t>(position.Y),
+            static_cast<std::uint32_t>(position.Z));
+        synchronized &= voxel && voxel->PaletteIndex == context.State.PaletteIndex &&
+            compatibilityVoxel != nullptr && compatibilityVoxel->IsOccupied() &&
+            compatibilityVoxel->ColorIndex == context.State.PaletteIndex;
+    }
+    if (!synchronized)
     {
         return {
             VoxelToolResultCode::Failed,

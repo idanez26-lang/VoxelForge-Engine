@@ -315,8 +315,10 @@ target_sources(
         src/VoxelHistory/VoxelEditHistory.cpp
         src/VoxelHistory/VoxelEditOperation.cpp
         src/VoxelHistory/VoxelHistoryInput.cpp
+        src/BrushEngine/SmartBrushEngine.cpp
         src/VoxelTools/VoxelEraserTool.cpp
         src/VoxelTools/VoxelBoxService.cpp
+        src/VoxelTools/VoxelBrush.cpp
         src/VoxelTools/VoxelFillService.cpp
         src/VoxelTools/VoxelLineService.cpp
         src/VoxelTools/VoxelSphereService.cpp
