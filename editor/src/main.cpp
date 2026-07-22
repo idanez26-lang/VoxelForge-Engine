@@ -43,7 +43,7 @@ constexpr std::size_t LayoutStabilitySmokeTestFrameCount = 11;
 constexpr std::size_t DoubleClickCameraSmokeTestFrameCount = 11;
 constexpr std::size_t PersistentWorkplaneSmokeTestFrameCount = 10;
 constexpr std::size_t ProjectSessionRestoreSmokeTestFrameCount = 6;
-constexpr std::size_t DirectCreationFlowSmokeTestFrameCount = 6;
+constexpr std::size_t DirectCreationFlowSmokeTestFrameCount = 8;
 constexpr std::size_t PaletteUiSmokeTestFrameCount = 6;
 constexpr std::size_t VoxelFillSmokeTestFrameCount = 6;
 constexpr std::size_t VoxelBoxSmokeTestFrameCount = 6;
@@ -175,7 +175,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.ProjectSessionRestoreSmokeTest |=
             argument == "--project-session-restore-smoke-test";
         result.DirectCreationFlowSmokeTest |=
-            argument == "--direct-creation-flow-smoke-test";
+            argument == "--direct-creation-flow-smoke-test" ||
+            argument == "--instant-new-model-smoke-test";
         result.PaletteUiSmokeTest |= argument == "--palette-ui-smoke-test";
         result.VoxelFillSmokeTest |= argument == "--voxel-fill-smoke-test";
         result.VoxelBoxSmokeTest |= argument == "--voxel-box-smoke-test";

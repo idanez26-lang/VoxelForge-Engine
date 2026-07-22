@@ -423,13 +423,19 @@ EditorWorkspace::EditorWorkspace(
     directCreationFlowService_.SetPencilActivationCallback(
         [this](const std::filesystem::path&)
         {
+            if (!paletteService_.ActiveColor())
+            {
+                static_cast<void>(paletteService_.SelectColor(
+                    PaletteService::FirstSelectableIndex));
+            }
             voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
             voxelToolInput_.Reset();
             UpdateVoxelHighlights();
-            return DirectCreationStepResult{
-                voxelToolState_.IsPencilActive(),
-                voxelToolState_.IsPencilActive()
-                    ? std::string{} : "Pencil could not be activated."};
+            const bool ready = voxelToolState_.IsPencilActive() &&
+                paletteService_.ActiveColor().has_value();
+            return DirectCreationStepResult{ready,
+                ready ? std::string{}
+                      : "Pencil or its active color could not be prepared."};
         });
     directCreationFlowService_.SetWorkplanePreparationCallback(
         [this](const std::filesystem::path&)
@@ -633,12 +639,12 @@ void EditorWorkspace::DrawMainMenuBar()
 
         const bool hasActiveProject = projectManager_.HasActiveProject();
         if (ImGui::MenuItem(
-                "New Voxel Model...", "Ctrl+Shift+N", false,
+                "New Model", "Ctrl+Shift+N", false,
                 hasActiveProject))
         {
-            RequestNewVoxelModelDialog();
+            RequestInstantNewVoxelModel();
         }
-        DrawTooltip("Create an empty voxel model in Assets/Models");
+        DrawTooltip("Create and open a new voxel model instantly");
 
         if (ImGui::MenuItem(
                 "Import Model...", "Ctrl+I", false, hasActiveProject))
@@ -1126,7 +1132,17 @@ void EditorWorkspace::HandleCommandShortcuts()
     if (inputFrame.IsBlocked()) return;
 
     constexpr ImGuiInputFlags shortcutFlags = ImGuiInputFlags_RouteGlobal;
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, shortcutFlags) &&
+    const bool newModelShortcut = io.KeyCtrl && io.KeyShift &&
+        !io.KeyAlt && !io.KeySuper &&
+        ImGui::IsKeyPressed(ImGuiKey_N, false);
+    // ImGui's generic Ctrl+N route may also match while Shift is held. Guard
+    // the modifiers explicitly so New Model can never become New Project.
+    if (newModelShortcut && context.HasProject)
+    {
+        RequestInstantNewVoxelModel();
+    }
+    else if (!io.KeyShift &&
+        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, shortcutFlags) &&
         CanRunProjectShortcut(ProjectShortcut::NewProject, context))
     {
         RequestNewProjectDialog();
@@ -1140,12 +1156,6 @@ void EditorWorkspace::HandleCommandShortcuts()
              context.HasProject)
     {
         RequestImportModelDialog();
-    }
-    else if (ImGui::Shortcut(
-                 ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N,
-                 shortcutFlags) && context.HasProject)
-    {
-        RequestNewVoxelModelDialog();
     }
     else if (ImGui::Shortcut(
                  ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S,
@@ -4008,6 +4018,7 @@ void EditorWorkspace::DrawDirtyConfirmationDialog()
         pendingVoxelModelCreation_ = {};
         pendingVoxelModelCollisionAction_ =
             VoxelModelCreationCollisionAction::Ask;
+        pendingInstantVoxelModelCreation_ = false;
         ImGui::CloseCurrentPopup();
     }
     ImGui::SameLine();
@@ -4429,11 +4440,35 @@ void EditorWorkspace::RequestNewVoxelModelDialog()
     showNewVoxelModelPopup_ = true;
 }
 
+void EditorWorkspace::RequestInstantNewVoxelModel()
+{
+    if (!projectManager_.HasActiveProject())
+    {
+        AddConsoleMessage("Voxel model creation failed: no project is loaded.");
+        return;
+    }
+    if (dirtyActionConfirmation_.IsPending()) return;
+
+    pendingVoxelModelCreation_ = NewVoxelModelWorkflow::DefaultRequest();
+    pendingVoxelModelCollisionAction_ =
+        VoxelModelCreationCollisionAction::Rename;
+    pendingInstantVoxelModelCreation_ = true;
+    if (!dirtyActionConfirmation_.Request(
+            DestructiveAction::CreateVoxelModel,
+            HasUnsavedVoxelChanges()))
+    {
+        showDirtyConfirmationPopup_ = true;
+        return;
+    }
+    CreateVoxelModelNow();
+}
+
 void EditorWorkspace::RequestCreateVoxelModel(
     VoxelModelCreationRequest request,
     const VoxelModelCreationCollisionAction collisionAction)
 {
     if (dirtyActionConfirmation_.IsPending()) return;
+    pendingInstantVoxelModelCreation_ = false;
     pendingVoxelModelCreation_ = std::move(request);
     pendingVoxelModelCollisionAction_ = collisionAction;
     if (!dirtyActionConfirmation_.Request(
@@ -4487,6 +4522,9 @@ void EditorWorkspace::CreateProjectNow()
     newProjectName_.fill('\0');
     newProjectParentPath_.fill('\0');
     UpdateWindowTitle();
+    // A new project is an immediately usable workshop: create and open its
+    // first empty model without requiring a second user command.
+    RequestInstantNewVoxelModel();
 }
 
 bool EditorWorkspace::OpenProject(
@@ -4565,8 +4603,11 @@ void EditorWorkspace::SaveProject()
 
 void EditorWorkspace::CreateVoxelModelNow()
 {
-    const DirectCreationFlowResult flow =
-        directCreationFlowService_.Create(
+    const bool instant = pendingInstantVoxelModelCreation_;
+    const DirectCreationFlowResult flow = instant
+        ? newVoxelModelWorkflow_.Create(
+            voxelModelCreationService_, directCreationFlowService_)
+        : directCreationFlowService_.Create(
             voxelModelCreationService_,
             pendingVoxelModelCreation_, pendingVoxelModelCollisionAction_);
     const VoxelModelCreationResult& result = flow.Creation;
@@ -4582,6 +4623,13 @@ void EditorWorkspace::CreateVoxelModelNow()
             voxelModelCreationError_ = result.Message;
             AddConsoleMessage(
                 "Voxel model creation failed: " + result.Message);
+        }
+        if (instant)
+        {
+            pendingVoxelModelCreation_ = {};
+            pendingVoxelModelCollisionAction_ =
+                VoxelModelCreationCollisionAction::Ask;
+            pendingInstantVoxelModelCreation_ = false;
         }
         return;
     }
@@ -4603,6 +4651,7 @@ void EditorWorkspace::CreateVoxelModelNow()
     pendingVoxelModelCreation_ = {};
     pendingVoxelModelCollisionAction_ =
         VoxelModelCreationCollisionAction::Ask;
+    pendingInstantVoxelModelCreation_ = false;
     voxelModelCreationError_.clear();
 }
 
@@ -7978,16 +8027,16 @@ bool EditorWorkspace::RunDirectCreationFlowSmokeStep(
     {
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Eraser);
         const std::size_t refreshBaseline = assetBrowser_.RefreshCount();
-        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
-            voxelModelCreationService_,
-            {"DirectCreation", {16U, 16U, 16U}});
+        const DirectCreationFlowResult flow = newVoxelModelWorkflow_.Create(
+            voxelModelCreationService_, directCreationFlowService_);
         document = voxelDocumentSession_.ActiveDocument();
         directCreationSmokePath_ = flow.Creation.ModelPath;
-        directCreationSmokeTarget_ = {8, 0, 8};
+        directCreationSmokeTarget_ = {32, 0, 32};
         EditorCamera expectedCamera;
-        expectedCamera.Frame(16.0F, 16.0F, 16.0F);
+        expectedCamera.Frame(64.0F, 64.0F, 64.0F);
         directCreationSmokeCreated_ = flow.Ready() &&
             flow.Creation.ThumbnailGenerated && document != nullptr &&
+            directCreationSmokePath_.filename() == "New Model.vox" &&
             document->SourcePath().lexically_normal() ==
                 directCreationSmokePath_.lexically_normal() &&
             document->GetVoxelCount() == 0U && !document->IsDirty() &&
@@ -7997,7 +8046,7 @@ bool EditorWorkspace::RunDirectCreationFlowSmokeStep(
             viewportCamera_.CaptureState() == expectedCamera.CaptureState() &&
             assetBrowser_.SelectedRelativePath() ==
                 std::optional<std::filesystem::path>(
-                    "Models/DirectCreation.vox") &&
+                    "Models/New Model.vox") &&
             assetBrowser_.RefreshCount() == refreshBaseline + 1U &&
             viewportFocusRequested_ &&
             std::filesystem::is_regular_file(directCreationSmokePath_) &&
@@ -8022,11 +8071,29 @@ bool EditorWorkspace::RunDirectCreationFlowSmokeStep(
     {
         document = voxelDocumentSession_.ActiveDocument();
         if (!directCreationSmokePencilled_ || document == nullptr) return false;
+        UndoCommand();
+        directCreationSmokeUndone_ = document->GetVoxelCount() == 0U &&
+            !document->HasVoxel(directCreationSmokeTarget_) &&
+            voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 3U)
+    {
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!directCreationSmokeUndone_ || document == nullptr) return false;
+        RedoCommand();
+        directCreationSmokeRedone_ = document->GetVoxelCount() == 1U &&
+            document->HasVoxel(directCreationSmokeTarget_) &&
+            !voxelEditHistory_.CanRedo();
+    }
+    else if (frame == 4U)
+    {
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!directCreationSmokeRedone_ || document == nullptr) return false;
         const std::uint64_t revision = document->GetRevision();
         directCreationSmokeSaved_ = SaveVoxelModel() &&
             !document->IsDirty() && document->GetRevision() == revision;
     }
-    else if (frame == 3U)
+    else if (frame == 5U)
     {
         if (!directCreationSmokeSaved_) return false;
         CloseProject();
@@ -8054,7 +8121,8 @@ bool EditorWorkspace::RunDirectCreationFlowSmokeStep(
 bool EditorWorkspace::DirectCreationFlowSmokePassed() const noexcept
 {
     return directCreationSmokeCreated_ && directCreationSmokeFocused_ &&
-        directCreationSmokePencilled_ && directCreationSmokeSaved_ &&
+        directCreationSmokePencilled_ && directCreationSmokeUndone_ &&
+        directCreationSmokeRedone_ && directCreationSmokeSaved_ &&
         directCreationSmokeCleaned_;
 }
 
@@ -11712,7 +11780,16 @@ bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     {
         ConsumeFileDialogResult();
         CreateProjectNow();
-        if (!projectManager_.HasActiveProject()) return false;
+        const Asset::Voxel::VoxelDocument* createdDocument =
+            voxelDocumentSession_.ActiveDocument();
+        if (!projectManager_.HasActiveProject() || createdDocument == nullptr ||
+            createdDocument->SourcePath().filename() != "New Model.vox" ||
+            createdDocument->GetVoxelCount() != 0U ||
+            !voxelToolState_.IsPencilActive() ||
+            !paletteService_.ActiveColor().has_value() ||
+            !workplaneService_.Grid(*createdDocument).has_value() ||
+            !viewportFocusRequested_)
+            return false;
         const std::filesystem::path projectFile =
             projectManager_.ActiveProject()->ProjectFilePath();
         RequestOpenProjectDialog();
@@ -11728,15 +11805,24 @@ bool EditorWorkspace::RunQualityOfLifeSmokeStep(
     {
         ConsumeFileDialogResult();
         RequestOpenProject(openProjectFilePath_.data(), false);
-        if (!projectManager_.HasActiveProject()) return false;
-        voxelSaveState_.MarkModified();
+        Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (!projectManager_.HasActiveProject() || document == nullptr)
+            return false;
+        workplaneHit_ = WorkplaneHit{
+            WorkplaneHitStatus::Valid,
+            Asset::Voxel::VoxelPosition{0, 0, 0}, 1.0F};
+        if (!ApplyVoxelPencil() || !document->IsDirty()) return false;
         RequestCloseProject();
         if (!dirtyActionConfirmation_.IsPending()) return false;
     }
     else if (frame == 3U)
     {
         dirtyActionConfirmation_.Cancel();
-        if (!projectManager_.HasActiveProject() || !voxelSaveState_.IsDirty())
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (!projectManager_.HasActiveProject() || document == nullptr ||
+            !document->IsDirty())
             return false;
         RequestCloseProject();
         if (!dirtyActionConfirmation_.IsPending()) return false;
@@ -11747,7 +11833,8 @@ bool EditorWorkspace::RunQualityOfLifeSmokeStep(
         if (!action) return false;
         ExecutePendingDirtyAction(*action);
         qualityOfLifeSmokePassed_ =
-            !projectManager_.HasActiveProject() && !voxelSaveState_.IsDirty();
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument();
     }
     return qualityOfLifeSmokePassed_;
 }

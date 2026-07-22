@@ -726,6 +726,22 @@ add_test(
     NAME VoxelForge.Editor.DirectCreationFlow
     COMMAND $<TARGET_FILE:VoxelForgeEditorDirectCreationFlowTests>
 )
+
+add_executable(
+    VoxelForgeEditorNewVoxelModelWorkflowTests
+    Editor/NewVoxelModelWorkflowTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorNewVoxelModelWorkflowTests
+    PRIVATE
+        VoxelForgeEditorVoxelCreation
+        VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorNewVoxelModelWorkflowTests)
+add_test(
+    NAME VoxelForge.Editor.NewVoxelModelWorkflow
+    COMMAND $<TARGET_FILE:VoxelForgeEditorNewVoxelModelWorkflowTests>
+)
 add_executable(
     VoxelForgeEditorPaletteServiceTests
     Editor/PaletteServiceTests.cpp
@@ -1078,6 +1094,10 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --direct-creation-flow-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.InstantNewModelSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --instant-new-model-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.PaletteUiSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --palette-ui-smoke-test
     )
@@ -1187,6 +1207,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.PersistentWorkplaneSmoke
         VoxelForge.Editor.ProjectSessionRestoreSmoke
         VoxelForge.Editor.DirectCreationFlowSmoke
+        VoxelForge.Editor.InstantNewModelSmoke
         VoxelForge.Editor.PaletteUiSmoke
         VoxelForge.Editor.VoxelFillSmoke
         VoxelForge.Editor.VoxelBoxSmoke

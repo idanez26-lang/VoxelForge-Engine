@@ -484,6 +484,7 @@ target_sources(
     PRIVATE
         src/VoxelCreation/DirectCreationFlowService.cpp
         src/VoxelCreation/FirstCreationExperience.cpp
+        src/VoxelCreation/NewVoxelModelWorkflow.cpp
         src/VoxelCreation/VoxelConstructionPlane.cpp
         src/VoxelCreation/VoxelModelCreationService.cpp
         src/VoxelCreation/WorkplaneService.cpp

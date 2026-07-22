@@ -47,6 +47,7 @@
 #include "VoxelSave/VoxelDocumentSaveService.h"
 #include "VoxelCreation/FirstCreationExperience.h"
 #include "VoxelCreation/DirectCreationFlowService.h"
+#include "VoxelCreation/NewVoxelModelWorkflow.h"
 #include "VoxelCreation/VoxelModelCreationService.h"
 #include "VoxelCreation/WorkplaneService.h"
 #include "VoxelSelection/VoxelSelectionState.h"
@@ -267,6 +268,7 @@ private:
     void RequestOpenProjectDialog();
     void RequestImportModelDialog();
     void RequestNewVoxelModelDialog();
+    void RequestInstantNewVoxelModel();
     void RequestCreateVoxelModel(
         VoxelModelCreationRequest request,
         VoxelModelCreationCollisionAction collisionAction);
@@ -392,6 +394,7 @@ private:
     VoxelDocumentSaveService voxelDocumentSaveService_;
     VoxelModelCreationService voxelModelCreationService_;
     DirectCreationFlowService directCreationFlowService_;
+    NewVoxelModelWorkflow newVoxelModelWorkflow_;
     FirstCreationExperience firstCreationExperience_;
     WorkplaneService workplaneService_;
     SelectionService selectionService_;
@@ -461,6 +464,7 @@ private:
     VoxelModelCreationRequest pendingVoxelModelCreation_{};
     VoxelModelCreationCollisionAction pendingVoxelModelCollisionAction_ =
         VoxelModelCreationCollisionAction::Ask;
+    bool pendingInstantVoxelModelCreation_ = false;
     bool pendingRecentProject_ = false;
 
     std::array<char, 128> newProjectName_{};
@@ -589,6 +593,8 @@ private:
     bool directCreationSmokeCreated_ = false;
     bool directCreationSmokeFocused_ = false;
     bool directCreationSmokePencilled_ = false;
+    bool directCreationSmokeUndone_ = false;
+    bool directCreationSmokeRedone_ = false;
     bool directCreationSmokeSaved_ = false;
     bool directCreationSmokeCleaned_ = false;
     std::filesystem::path paletteSmokeProjectFile_;
