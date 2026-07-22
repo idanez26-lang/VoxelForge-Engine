@@ -165,13 +165,16 @@ void TestRingGeometryAndHybridSizing()
                 base[0] < 0.95F && base[1] < 0.95F && base[2] < 0.95F,
             "Idle colors must use the centralized soft axis palette.");
     }
-    constexpr float previousRadiusTarget = 6.0F *
-        TransformGizmoModel::SelectionRelativeFactor;
     Require(GizmoStyle::RotateRadiusMultiplier == 1.30F &&
-            view.Axes[0].RotationRingRadius > previousRadiusTarget &&
-            view.Axes[1].RotationRingRadius > previousRadiusTarget &&
-            view.Axes[2].RotationRingRadius > previousRadiusTarget,
-        "Rotate radius must exceed the old 0.35-extent target before the existing screen cap.");
+            view.Axes[0].RotationRingRadius ==
+                view.Axes[1].RotationRingRadius &&
+            view.Axes[1].RotationRingRadius ==
+                view.Axes[2].RotationRingRadius &&
+            view.Axes[0].ProjectedLengthPixels >=
+                TransformGizmoModel::MinimumRotateRadiusPixels &&
+            view.Axes[0].ProjectedLengthPixels <=
+                TransformGizmoModel::MaximumRotateRadiusPixels,
+        "Rotate rings must share one stable hybrid screen radius.");
     const float representativeLength =
         (view.Axes[0].RotationRingRadius + view.Axes[1].RotationRingRadius +
          view.Axes[2].RotationRingRadius) / 3.0F;
@@ -208,8 +211,14 @@ void TestRingGeometryAndHybridSizing()
     Require(nearModel.Update(nearContext) && farModel.Update(farContext) &&
             nearModel.View().AxisLength <=
                 TransformGizmoModel::MaximumWorldLength &&
-            farModel.View().AxisLength > 0.0F,
-        "Rotate rings must remain finite near and visible far away.");
+            farModel.View().AxisLength > 0.0F &&
+            farModel.View().Axes[0].ProjectedLengthPixels >=
+                TransformGizmoModel::MinimumRotateRadiusPixels &&
+            farModel.View().Axes[1].ProjectedLengthPixels >=
+                TransformGizmoModel::MinimumRotateRadiusPixels &&
+            farModel.View().Axes[2].ProjectedLengthPixels >=
+                TransformGizmoModel::MinimumRotateRadiusPixels,
+        "Rotate rings must retain a usable screen radius near and far away.");
 
     auto hover = Context();
     hover.InteractionState = TransformGizmoInteractionState::Hover;

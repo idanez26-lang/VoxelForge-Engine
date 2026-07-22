@@ -44,6 +44,33 @@ constexpr float Pi = 3.14159265358979323846F;
              {center.X + halfWidth, center.Y + halfWidth, center.Z},
              {center.X - halfWidth, center.Y + halfWidth, center.Z}}};
 }
+
+[[nodiscard]] std::optional<float> WorldUnitsPerPixel(
+    const TransformGizmoUpdateContext& context,
+    const float cameraDepth) noexcept
+{
+    if (!std::isfinite(context.ViewportHeightPixels) ||
+        context.ViewportHeightPixels <= 0.0F)
+        return std::nullopt;
+    if (context.Projection == TransformGizmoProjection::Orthographic)
+    {
+        if (!std::isfinite(context.OrthographicWorldHeight) ||
+            context.OrthographicWorldHeight <= 0.0F)
+            return std::nullopt;
+        return context.OrthographicWorldHeight / context.ViewportHeightPixels;
+    }
+    if (!std::isfinite(cameraDepth) || cameraDepth <= 0.0F ||
+        !std::isfinite(context.VerticalFieldOfViewDegrees) ||
+        context.VerticalFieldOfViewDegrees <= 1.0F ||
+        context.VerticalFieldOfViewDegrees >= 179.0F)
+        return std::nullopt;
+    const float halfFov = DegreesToRadians(
+        context.VerticalFieldOfViewDegrees) * 0.5F;
+    const float worldHeight = cameraDepth * 2.0F * std::tan(halfFov);
+    if (!std::isfinite(worldHeight) || worldHeight <= 0.0F)
+        return std::nullopt;
+    return worldHeight / context.ViewportHeightPixels;
+}
 }
 
 TransformGizmoMode TransformGizmoModel::ModeForTool(
@@ -335,25 +362,33 @@ bool TransformGizmoModel::Update(
         const float requestedRadius = 0.5F * GizmoStyle::RotateRadiusMultiplier *
             std::sqrt(extentX * extentX + extentY * extentY +
                 extentZ * extentZ);
+        const auto worldPerPixel = WorldUnitsPerPixel(
+            context, sizings[0].CameraDepth);
+        float sharedRadius = std::clamp(
+            requestedRadius, MinimumScreenCappedWorldLength,
+            MaximumScreenMaintainedWorldLength);
+        float sharedProjectedRadius = 0.0F;
+        if (worldPerPixel && std::isfinite(*worldPerPixel) &&
+            *worldPerPixel > 0.0F)
+        {
+            const float minimumWorldRadius =
+                *worldPerPixel * MinimumRotateRadiusPixels;
+            const float maximumWorldRadius =
+                *worldPerPixel * MaximumRotateRadiusPixels;
+            sharedRadius = std::clamp(
+                requestedRadius, minimumWorldRadius, maximumWorldRadius);
+            sharedRadius = std::clamp(
+                sharedRadius, MinimumScreenCappedWorldLength,
+                MaximumScreenMaintainedWorldLength);
+            sharedProjectedRadius = sharedRadius / *worldPerPixel;
+        }
         for (TransformGizmoSizingResult& sizing : sizings)
         {
-            const float previousWorld = sizing.WorldLength;
-            if (previousWorld <= 0.0F ||
-                sizing.UnclampedWorldLength <= 0.0F)
-                continue;
-            sizing.WorldLength = std::clamp(
-                previousWorld * requestedRadius /
-                    sizing.UnclampedWorldLength,
-                MinimumScreenCappedWorldLength, MaximumWorldLength);
-            sizing.ProjectedLengthPixels *=
-                sizing.WorldLength / previousWorld;
-            if (sizing.ProjectedLengthPixels > MaximumAxisLengthPixels)
-            {
-                const float correction = AxisCeilingTargetPixels /
-                    sizing.ProjectedLengthPixels;
-                sizing.WorldLength *= correction;
-                sizing.ProjectedLengthPixels *= correction;
-            }
+            sizing.MinimumClampApplied = sharedRadius > requestedRadius;
+            sizing.MaximumClampApplied = sharedRadius < requestedRadius;
+            sizing.WorldLength = sharedRadius;
+            if (sharedProjectedRadius > 0.0F)
+                sizing.ProjectedLengthPixels = sharedProjectedRadius;
         }
     }
 

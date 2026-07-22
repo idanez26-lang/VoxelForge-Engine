@@ -182,6 +182,27 @@ else()
         VoxelForgeEditorTransformPreview PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorConstraints STATIC)
+target_sources(
+    VoxelForgeEditorConstraints
+    PRIVATE
+        src/Constraints/ConstraintEngine.cpp
+        src/Constraints/Constraints/GridConstraint.cpp
+        src/Constraints/Constraints/RotationConstraint.cpp
+)
+target_include_directories(
+    VoxelForgeEditorConstraints
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_features(VoxelForgeEditorConstraints PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorConstraints PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorConstraints PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorTransformGizmo STATIC)
 target_sources(
     VoxelForgeEditorTransformGizmo
@@ -581,6 +602,7 @@ target_link_libraries(
         VoxelForgeEditorDialogs
         VoxelForgeEditorAssetInspector
         VoxelForgeEditorCommands
+        VoxelForgeEditorConstraints
         VoxelForgeEditorModelImport
         VoxelForgeEditorQualityOfLife
         VoxelForgeEditorLayout

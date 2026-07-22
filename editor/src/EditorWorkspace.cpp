@@ -2228,7 +2228,7 @@ void EditorWorkspace::DrawScenePanel()
                 static_cast<void>(transformPreviewModel_.SetDelta(
                     *document, selectionService_,
                     voxelDocumentSession_.Generation(),
-                    transformGizmoManager_.Delta()));
+                    ConstrainMoveDelta(transformGizmoManager_.Delta())));
             else if (transformGizmoManager_.Mode() ==
                      TransformGizmoMode::Rotate)
             {
@@ -2738,10 +2738,15 @@ void EditorWorkspace::DrawScenePanel()
                     selectionInteraction_.MoveContent(*pointerWorld);
                 if (selectionChanged)
                 {
+                    Asset::Voxel::VoxelPosition delta =
+                        selectionInteraction_.MoveDelta();
+                    if (selectionInteraction_.Mode() ==
+                        SelectionInteractionMode::MovingContent)
+                        delta = ConstrainMoveDelta(delta);
                     static_cast<void>(transformPreviewModel_.SetDelta(
                         *document, selectionService_,
                         voxelDocumentSession_.Generation(),
-                        selectionInteraction_.MoveDelta()));
+                        delta));
                 }
             }
             else
@@ -12225,7 +12230,7 @@ bool EditorWorkspace::ApplyTransformPanelPosition(const Vec3 position)
             0U, TransformPreviewCollisionPolicy::IgnoreSource) ||
         !transformPreviewModel_.SetDelta(
             *document, selectionService_, voxelDocumentSession_.Generation(),
-            edit.Delta) || !ApplyVoxelMove())
+            ConstrainMoveDelta(edit.Delta)) || !ApplyVoxelMove())
     {
         transformPanelStatusMessage_ = voxelMoveStatusMessage_.empty()
             ? "Position could not be applied."
@@ -12294,6 +12299,43 @@ bool EditorWorkspace::ApplyTransformPanelScale(const Vec3 scale)
     return true;
 }
 
+Asset::Voxel::VoxelPosition EditorWorkspace::ConstrainMoveDelta(
+    const Asset::Voxel::VoxelPosition delta) const noexcept
+{
+    ConstraintRequest request;
+    request.Transform.Position = {
+        static_cast<float>(delta.X),
+        static_cast<float>(delta.Y),
+        static_cast<float>(delta.Z)};
+    request.Settings = constraintSettings_;
+    const Vec3 constrained = ConstraintEngine::Solve(request).Transform.Position;
+    return {
+        static_cast<std::int32_t>(std::lround(constrained.X)),
+        static_cast<std::int32_t>(std::lround(constrained.Y)),
+        static_cast<std::int32_t>(std::lround(constrained.Z))};
+}
+
+std::int32_t EditorWorkspace::ConstrainRotationQuarterTurns(
+    const VoxelRotationAxis axis,
+    const std::int32_t quarterTurns) const noexcept
+{
+    ConstraintRequest request;
+    const float degrees = static_cast<float>(quarterTurns) * 90.0F;
+    if (axis == VoxelRotationAxis::X)
+        request.Transform.RotationDegrees.X = degrees;
+    else if (axis == VoxelRotationAxis::Y)
+        request.Transform.RotationDegrees.Y = degrees;
+    else
+        request.Transform.RotationDegrees.Z = degrees;
+    request.Settings = constraintSettings_;
+    const Vec3 constrained =
+        ConstraintEngine::Solve(request).Transform.RotationDegrees;
+    const float axisDegrees = axis == VoxelRotationAxis::X
+        ? constrained.X
+        : axis == VoxelRotationAxis::Y ? constrained.Y : constrained.Z;
+    return static_cast<std::int32_t>(std::lround(axisDegrees / 90.0F));
+}
+
 bool EditorWorkspace::ApplyVoxelMove()
 {
     Asset::Voxel::VoxelDocument* document =
@@ -12302,6 +12344,19 @@ bool EditorWorkspace::ApplyVoxelMove()
         voxelEditHistory_.IsBusy())
     {
         static_cast<void>(transformPreviewModel_.CancelPreview());
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    const Asset::Voxel::VoxelPosition constrainedDelta =
+        ConstrainMoveDelta(transformPreviewModel_.Delta());
+    if (constrainedDelta != transformPreviewModel_.Delta() &&
+        !transformPreviewModel_.SetDelta(
+            *document, selectionService_, voxelDocumentSession_.Generation(),
+            constrainedDelta))
+    {
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+        voxelMoveStatusMessage_ = "Move constraint could not be applied.";
         UpdateVoxelHighlights();
         return false;
     }
@@ -12402,10 +12457,13 @@ bool EditorWorkspace::BeginVoxelRotatePreview(
         return false;
     }
 
+    const std::int32_t constrainedQuarterTurns =
+        ConstrainRotationQuarterTurns(axis, quarterTurns);
+
     const std::uint64_t generation = voxelDocumentSession_.Generation();
     if (voxelToolState_.IsRotateActive() &&
         voxelRotateAxis_ == axis &&
-        voxelRotateQuarterTurns_ == quarterTurns &&
+        voxelRotateQuarterTurns_ == constrainedQuarterTurns &&
         transformPreviewModel_.IsValidFor(
             *document, selectionService_, generation) &&
         transformPreviewModel_.HasExplicitDestinations())
@@ -12421,7 +12479,7 @@ bool EditorWorkspace::BeginVoxelRotatePreview(
     const VoxelRotationGeometry geometry =
         RotateVoxelSelectionOperation::BuildGeometry(
             selectionService_.Voxels(), selectionService_.EditableBounds(),
-            axis, quarterTurns);
+            axis, constrainedQuarterTurns);
     if (!geometry.Valid() ||
         !transformPreviewModel_.SetExplicitDestinations(
             *document, selectionService_, generation, geometry.Destinations))
@@ -12433,8 +12491,8 @@ bool EditorWorkspace::BeginVoxelRotatePreview(
         return false;
     }
     voxelRotateAxis_ = axis;
-    voxelRotateQuarterTurns_ = quarterTurns;
-    voxelRotateDirection_ = quarterTurns < 0
+    voxelRotateQuarterTurns_ = constrainedQuarterTurns;
+    voxelRotateDirection_ = constrainedQuarterTurns < 0
         ? VoxelRotationDirection::CounterClockwise
         : VoxelRotationDirection::Clockwise;
     voxelRotateStatusMessage_.clear();

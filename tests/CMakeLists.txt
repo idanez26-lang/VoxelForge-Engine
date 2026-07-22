@@ -482,6 +482,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorTransformPanelTests>
 )
 add_executable(
+    VoxelForgeEditorConstraintEngineTests
+    Editor/ConstraintEngineTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorConstraintEngineTests
+    PRIVATE VoxelForgeEditorConstraints
+)
+vf_configure_test(VoxelForgeEditorConstraintEngineTests)
+add_test(
+    NAME VoxelForge.Editor.ConstraintEngine
+    COMMAND $<TARGET_FILE:VoxelForgeEditorConstraintEngineTests>
+)
+add_executable(
     VoxelForgeEditorMoveGizmoTests
     Editor/MoveGizmoTests.cpp
 )

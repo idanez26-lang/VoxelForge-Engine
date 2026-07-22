@@ -8,6 +8,7 @@
 #include "Commands/Voxel/EraseVoxelCommand.h"
 #include "Commands/Voxel/PaintPaletteSelection.h"
 #include "Commands/Voxel/PaintVoxelCommand.h"
+#include "Constraints/ConstraintEngine.h"
 #include "EditorCamera.h"
 #include "EditorCloseRequest.h"
 #include "EditorExitRequest.h"
@@ -322,6 +323,10 @@ private:
     [[nodiscard]] bool ApplyVoxelBox();
     [[nodiscard]] bool ApplyVoxelLine();
     [[nodiscard]] bool ApplyVoxelSphere();
+    [[nodiscard]] Asset::Voxel::VoxelPosition ConstrainMoveDelta(
+        Asset::Voxel::VoxelPosition delta) const noexcept;
+    [[nodiscard]] std::int32_t ConstrainRotationQuarterTurns(
+        VoxelRotationAxis axis, std::int32_t quarterTurns) const noexcept;
     [[nodiscard]] bool ApplyVoxelMove();
     [[nodiscard]] bool ApplyVoxelDuplicate();
     [[nodiscard]] bool BeginVoxelRotatePreview(
@@ -392,6 +397,9 @@ private:
     SelectionService selectionService_;
     SelectionVolumeCache selectionVolumeCache_;
     SelectionInteraction selectionInteraction_;
+    ConstraintSettings constraintSettings_{
+        true, GridConstraintStep::One,
+        true, RotationConstraintStep::Degrees90};
     TransformPreviewModel transformPreviewModel_;
     TransformGizmoInteraction transformGizmoInteraction_;
     TransformGizmoModel transformGizmoModel_;

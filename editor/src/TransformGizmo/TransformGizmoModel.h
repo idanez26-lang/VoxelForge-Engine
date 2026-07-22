@@ -147,6 +147,9 @@ public:
     static constexpr float SelectionRelativeFactor = 0.35F;
     static constexpr float AxisCeilingTargetPixels = 100.0F;
     static constexpr float MaximumAxisLengthPixels = 110.0F;
+    static constexpr float MinimumRotateRadiusPixels = 52.0F;
+    static constexpr float MaximumRotateRadiusPixels = 100.0F;
+    static constexpr float MaximumScreenMaintainedWorldLength = 4096.0F;
     static constexpr float MinimumPositiveDepth = 0.0001F;
     static constexpr float MinimumWorldLength = 0.75F;
     static constexpr float MaximumWorldLength = 18.0F;
