@@ -26,7 +26,9 @@ enum class EditorToolbarAction : std::uint8_t
     Sphere,
     Duplicate,
     Mirror,
-    Align
+    Align,
+    Face,
+    Transform
 };
 
 enum class EditorToolbarGroup : std::uint8_t
@@ -73,8 +75,8 @@ struct EditorToolbarLayout final
 class EditorToolbarModel final
 {
 public:
-    static constexpr std::size_t ButtonCount = 14U;
-    static constexpr std::size_t PrimaryButtonCount = 8U;
+    static constexpr std::size_t ButtonCount = 6U;
+    static constexpr std::size_t PrimaryButtonCount = 6U;
 
     [[nodiscard]] static const std::array<EditorToolbarButton, ButtonCount>&
         Buttons() noexcept;

@@ -937,15 +937,22 @@ void EditorWorkspace::DrawMainMenuBar()
         const bool hasDocument = voxelDocumentSession_.HasActiveDocument();
         if (ImGui::MenuItem(
                 "Pencil", shortcut(EditorInputCommand::ToolPencil),
-                voxelToolState_.IsPencilActive(), hasDocument))
+                voxelToolState_.IsPencilActive() &&
+                    toolContext_.Smart.Action() == SmartAction::Add,
+                hasDocument))
             ExecuteInputCommand(EditorInputCommand::ToolPencil);
         if (ImGui::MenuItem(
-                "Eraser", shortcut(EditorInputCommand::ToolEraser),
-                voxelToolState_.IsEraserActive(), hasDocument))
+                "Pencil Action: Erase (Coming Soon)",
+                shortcut(EditorInputCommand::ToolEraser),
+                voxelToolState_.IsPencilActive() &&
+                    toolContext_.Smart.Action() == SmartAction::Erase,
+                hasDocument))
             ExecuteInputCommand(EditorInputCommand::ToolEraser);
         if (ImGui::MenuItem(
-                "Fill", shortcut(EditorInputCommand::ToolFill),
-                voxelToolState_.IsFillActive(), hasDocument))
+                "Pencil Action: Paint", shortcut(EditorInputCommand::ToolFill),
+                voxelToolState_.IsPencilActive() &&
+                    toolContext_.Smart.Action() == SmartAction::Paint,
+                hasDocument))
             ExecuteInputCommand(EditorInputCommand::ToolFill);
         if (ImGui::MenuItem(
                 "Box", shortcut(EditorInputCommand::ToolBox),
@@ -1295,11 +1302,17 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
     switch (command)
     {
     case EditorInputCommand::ToolPencil:
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetAction(SmartAction::Add);
         SelectVoxelTool(ActiveVoxelTool::Pencil); break;
     case EditorInputCommand::ToolEraser:
-        SelectVoxelTool(ActiveVoxelTool::Eraser); break;
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetAction(SmartAction::Erase);
+        SelectVoxelTool(ActiveVoxelTool::Pencil); break;
     case EditorInputCommand::ToolFill:
-        SelectVoxelTool(ActiveVoxelTool::Fill); break;
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetAction(SmartAction::Paint);
+        SelectVoxelTool(ActiveVoxelTool::Pencil); break;
     case EditorInputCommand::ToolBox:
         SelectVoxelTool(ActiveVoxelTool::Box); break;
     case EditorInputCommand::ToolLine:
@@ -2644,9 +2657,16 @@ void EditorWorkspace::DrawScenePanel()
         if (!doubleClickFocus && toolDecision == VoxelToolInputDecision::Apply)
         {
             if (voxelToolState_.IsPencilActive())
-                static_cast<void>(ApplyVoxelPencil());
+            {
+                if (toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+                    toolContext_.Smart.Action() == SmartAction::Add)
+                    static_cast<void>(ApplyVoxelPencil());
+                else if (toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+                    toolContext_.Smart.Action() == SmartAction::Paint)
+                    static_cast<void>(ApplyVoxelPaintBrush());
+            }
             else if (voxelToolState_.IsEraserActive())
-                static_cast<void>(ApplyVoxelEraser());
+                static_cast<void>(0); // Legacy direct service remains available.
             else if (voxelToolState_.IsFillActive())
                 static_cast<void>(ApplyVoxelPaintBrush());
             else if (voxelToolState_.IsBoxActive())
@@ -5279,7 +5299,14 @@ bool EditorWorkspace::SaveActiveProjectSession()
         camera.Distance,
         ToSessionVector(camera.Target),
         ToSessionView(camera.View)};
-    session.ActiveTool = voxelToolState_.IsEraserActive()
+    session.ActiveTool =
+        (voxelToolState_.IsPencilActive() &&
+         toolContext_.Smart.Action() == SmartAction::Erase)
+        ? ProjectSessionTool::Eraser
+        : (voxelToolState_.IsPencilActive() &&
+           toolContext_.Smart.Action() == SmartAction::Paint)
+        ? ProjectSessionTool::Fill
+        : voxelToolState_.IsEraserActive()
         ? ProjectSessionTool::Eraser
         : voxelToolState_.IsFillActive()
         ? ProjectSessionTool::Fill
@@ -5316,11 +5343,17 @@ void EditorWorkspace::RestoreActiveProjectSession()
         return;
     }
 
-    voxelToolState_.SetActiveTool(
+    toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+    toolContext_.Smart.SetAction(
         loaded.Session.ActiveTool == ProjectSessionTool::Eraser
-            ? ActiveVoxelTool::Eraser
+            ? SmartAction::Erase
             : loaded.Session.ActiveTool == ProjectSessionTool::Fill
-            ? ActiveVoxelTool::Fill
+            ? SmartAction::Paint
+            : SmartAction::Add);
+    voxelToolState_.SetActiveTool(
+        loaded.Session.ActiveTool == ProjectSessionTool::Eraser ||
+        loaded.Session.ActiveTool == ProjectSessionTool::Fill
+            ? ActiveVoxelTool::Pencil
             : loaded.Session.ActiveTool == ProjectSessionTool::Box
             ? ActiveVoxelTool::Box
             : loaded.Session.ActiveTool == ProjectSessionTool::Line
@@ -8264,7 +8297,9 @@ bool EditorWorkspace::RunProjectSessionRestoreSmokeStep(
         viewportCamera_.Pan(17.0F, -8.0F, 720.0F);
         viewportCamera_.Zoom(2.0F);
         projectSessionSmokeCamera_ = viewportCamera_.CaptureState();
-        voxelToolState_.SetActiveTool(ActiveVoxelTool::Eraser);
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetAction(SmartAction::Erase);
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
         projectSessionSmokeRevision_ = document
             ? document->GetRevision() : 0U;
         projectSessionSmokeRefreshCount_ = assetBrowser_.RefreshCount();
@@ -8295,7 +8330,9 @@ bool EditorWorkspace::RunProjectSessionRestoreSmokeStep(
             document->SourcePath().lexically_normal() ==
                 projectSessionSmokeModelPath_.lexically_normal() &&
             viewportCamera_.CaptureState() == projectSessionSmokeCamera_ &&
-            voxelToolState_.IsEraserActive() && !document->IsDirty() &&
+            voxelToolState_.IsPencilActive() &&
+            toolContext_.Smart.Action() == SmartAction::Erase &&
+            !document->IsDirty() &&
             document->GetRevision() == projectSessionSmokeRevision_ &&
             !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
             assetBrowser_.SelectedRelativePath() ==
@@ -8900,7 +8937,7 @@ bool EditorWorkspace::RunVoxelMoveSmokeStep(const std::size_t frame)
             EditorToolbarModel::Buttons().end(),
             [](const EditorToolbarButton& button)
             {
-                return button.Action == EditorToolbarAction::Move;
+                return button.Action == EditorToolbarAction::Transform;
             });
         const bool toolbarReady =
             moveButton != EditorToolbarModel::Buttons().end() &&
@@ -9123,7 +9160,7 @@ bool EditorWorkspace::RunVoxelDuplicateSmokeStep(const std::size_t frame)
             EditorToolbarModel::Buttons().end(),
             [](const EditorToolbarButton& button)
             {
-                return button.Action == EditorToolbarAction::Duplicate;
+                return button.Action == EditorToolbarAction::Transform;
             });
         const bool toolbarReady =
             duplicateButton != EditorToolbarModel::Buttons().end() &&
@@ -9313,7 +9350,7 @@ bool EditorWorkspace::RunVoxelRotateSmokeStep(const std::size_t frame)
             EditorToolbarModel::Buttons().end(),
             [](const EditorToolbarButton& button)
             {
-                return button.Action == EditorToolbarAction::Rotate;
+                return button.Action == EditorToolbarAction::Transform;
             });
         const bool toolbarReady =
             rotateButton != EditorToolbarModel::Buttons().end() &&
@@ -9502,7 +9539,7 @@ bool EditorWorkspace::RunVoxelMirrorSmokeStep(const std::size_t frame)
             EditorToolbarModel::Buttons().end(),
             [](const EditorToolbarButton& button)
             {
-                return button.Action == EditorToolbarAction::Mirror;
+                return button.Action == EditorToolbarAction::Transform;
             });
         const bool toolbarReady =
             mirrorButton != EditorToolbarModel::Buttons().end() &&
@@ -9724,7 +9761,7 @@ bool EditorWorkspace::RunVoxelScaleSmokeStep(const std::size_t frame)
             EditorToolbarModel::Buttons().end(),
             [](const EditorToolbarButton& button)
             {
-                return button.Action == EditorToolbarAction::Scale;
+                return button.Action == EditorToolbarAction::Transform;
             });
         const bool toolbarReady =
             scaleButton != EditorToolbarModel::Buttons().end() &&
@@ -9939,7 +9976,7 @@ bool EditorWorkspace::RunVoxelAlignSmokeStep(const std::size_t frame)
             EditorToolbarModel::Buttons().end(),
             [](const EditorToolbarButton& button)
             {
-                return button.Action == EditorToolbarAction::Align;
+                return button.Action == EditorToolbarAction::Transform;
             });
         const bool toolbarReady =
             alignButton != EditorToolbarModel::Buttons().end() &&
@@ -11581,29 +11618,30 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
             voxelDocumentSession_.ActiveDocument();
         modernToolbarSmokeToolsEnabled_ = flow.Ready() && document != nullptr &&
             std::all_of(
-                EditorToolbarModel::Buttons().begin() + 1,
+                EditorToolbarModel::Buttons().begin(),
                 EditorToolbarModel::Buttons().end(),
                 [state = toolbarState()](const EditorToolbarButton& button)
                 {
-                    return button.Action == EditorToolbarAction::Move ||
-                        button.Action == EditorToolbarAction::Duplicate ||
-                        button.Action == EditorToolbarAction::Rotate ||
-                        button.Action == EditorToolbarAction::Mirror ||
-                        button.Action == EditorToolbarAction::Scale ||
-                        button.Action == EditorToolbarAction::Align
-                        ? !EditorToolbarModel::IsEnabled(button, state)
-                        : EditorToolbarModel::IsEnabled(button, state);
+                    const bool expectedEnabled =
+                        button.Action == EditorToolbarAction::Pencil ||
+                        button.Action == EditorToolbarAction::Selection;
+                    return EditorToolbarModel::IsEnabled(button, state) ==
+                        expectedEnabled;
                 });
         if (!modernToolbarSmokeToolsEnabled_) return false;
 
         modernToolbarSmokeSingleActive_ = true;
         for (const EditorToolbarButton& button : EditorToolbarModel::Buttons())
         {
-            if (button.Tool == ActiveVoxelTool::None) continue;
+            if (!EditorToolbarModel::IsEnabled(button, toolbarState()) ||
+                button.Tool == ActiveVoxelTool::None)
+                continue;
             voxelToolState_.SetActiveTool(button.Tool);
             modernToolbarSmokeSingleActive_ &=
                 activeToolCount(toolbarState()) == 1;
         }
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetAction(SmartAction::Add);
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
         workplaneHit_ = WorkplaneHit{
             WorkplaneHitStatus::Valid,
@@ -11618,9 +11656,7 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
         Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
         modernToolbarSmokeSaved_ = modernToolbarSmokeSingleActive_ &&
-            document != nullptr && SaveVoxelModel() && !document->IsDirty() &&
-            !EditorToolbarModel::IsEnabled(
-                EditorToolbarModel::Buttons().front(), toolbarState());
+            document != nullptr && SaveVoxelModel() && !document->IsDirty();
     }
     else if (frame == 3U)
     {
@@ -12442,9 +12478,10 @@ bool EditorWorkspace::ApplyVoxelPencil()
         paletteService_.ActiveColor();
     try
     {
-        SmartBrushState brushState = toolContext_.Brush;
-        brushState.Mode = toolContext_.Pencil.Mode;
-        brushState.PaletteIndex = activeColor ? activeColor->Index : 0U;
+        toolContext_.Smart.Brush().PaletteIndex =
+            activeColor ? activeColor->Index : 0U;
+        SmartBrushState brushState = toolContext_.Smart.Brush();
+        brushState.Mode = SmartBrushMode::Add;
         result = VoxelPencilTool::Apply({
             static_cast<VoxelEditSession*>(this),
             voxelDocumentSession_.ActiveDocument(),
@@ -12553,16 +12590,20 @@ bool EditorWorkspace::ApplyVoxelPaintBrush()
         paletteService_.ActiveColor();
     try
     {
-        SmartBrushState brushState = toolContext_.Brush;
+        toolContext_.Smart.Brush().PaletteIndex =
+            activeColor ? activeColor->Index : 0U;
+        SmartBrushState brushState = toolContext_.Smart.Brush();
         brushState.Mode = SmartBrushMode::Paint;
-        brushState.PaletteIndex = activeColor ? activeColor->Index : 0U;
         result = VoxelPaintBrushTool::Apply({
             static_cast<VoxelEditSession*>(this),
             voxelDocumentSession_.ActiveDocument(),
             0U,
             voxelSelection_.Hovered(),
             brushState,
-            !voxelToolState_.IsFillActive(),
+            !(voxelToolState_.IsFillActive() ||
+              (voxelToolState_.IsPencilActive() &&
+               toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+               toolContext_.Smart.Action() == SmartAction::Paint)),
             &voxelEditHistory_});
     }
     catch (const std::exception& exception)
@@ -12577,7 +12618,9 @@ bool EditorWorkspace::ApplyVoxelPaintBrush()
     }
     voxelEditInProgress_ = false;
     lastVoxelPaintBrushResult_ = result;
-    toolContext_.Paint.Statistics = result.Statistics;
+    toolContext_.Smart.SetStatistics(result.Statistics.Total,
+        result.Statistics.Painted, result.Statistics.Ignored,
+        result.Statistics.Clipped);
 
     if (result.Code == VoxelPaintBrushResultCode::Applied)
     {
@@ -13921,23 +13964,33 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<VoxelSpherePreview> spherePreview;
     VoxelPlacementPreviewStyle placementStyle =
         VoxelPlacementPreviewStyle::PencilInvalid;
-    if (!voxelToolState_.IsPencilActive())
+    const bool smartAddActive = voxelToolState_.IsPencilActive() &&
+        toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+        toolContext_.Smart.Action() == SmartAction::Add;
+    const bool smartPaintActive = voxelToolState_.IsPencilActive() &&
+        toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+        toolContext_.Smart.Action() == SmartAction::Paint;
+    if (!smartAddActive) pencilPreviewCacheValid_ = false;
+    if (!smartPaintActive && !voxelToolState_.IsFillActive())
+        paintPreviewCacheValid_ = false;
+    if (!smartAddActive && !smartPaintActive &&
+        !voxelToolState_.IsFillActive())
     {
-        pencilPreviewCacheValid_ = false;
-        toolContext_.Pencil.Statistics.reset();
+        toolContext_.Smart.SetPreview(SmartToolPreviewState::Unavailable);
+        toolContext_.Smart.ClearStatistics();
     }
-    if (!voxelToolState_.IsFillActive()) paintPreviewCacheValid_ = false;
-    if (voxelToolState_.IsPencilActive())
+    if (smartAddActive)
     {
         const Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
-        SmartBrushState previewState = toolContext_.Brush;
-        previewState.Mode = toolContext_.Pencil.Mode;
+        SmartBrushState previewState = toolContext_.Smart.Brush();
+        previewState.Mode = SmartBrushMode::Add;
         if (const std::optional<PaletteColorSelection> activeColor =
                 paletteService_.ActiveColor())
-            previewState.PaletteIndex = activeColor->Index;
+            toolContext_.Smart.Brush().PaletteIndex = activeColor->Index;
         else
-            previewState.PaletteIndex = 0U;
+            toolContext_.Smart.Brush().PaletteIndex = 0U;
+        previewState.PaletteIndex = toolContext_.Smart.Brush().PaletteIndex;
         const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
         const bool usesWorkplane = workplaneHit_.has_value();
         const std::optional<Asset::Voxel::VoxelPosition> anchor = usesWorkplane
@@ -13974,9 +14027,14 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             pencilPreviewCacheValid_ = true;
         }
         if (voxelPlacementPreview_.IsVisible())
-            toolContext_.Pencil.Statistics = voxelPlacementPreview_.Statistics;
-        else
-            toolContext_.Pencil.Statistics.reset();
+        {
+            toolContext_.Smart.SetPreview(SmartToolPreviewState::Valid,
+                voxelPlacementPreview_.RenderPlan);
+            toolContext_.Smart.SetStatistics(voxelPlacementPreview_.Statistics.Total,
+                voxelPlacementPreview_.Statistics.New,
+                voxelPlacementPreview_.Statistics.Existing,
+                voxelPlacementPreview_.Statistics.Clipped);
+        }
         if (voxelPlacementPreview_.IsVisible())
         {
             if (voxelPlacementPreview_.RenderPlan.Mode ==
@@ -14027,17 +14085,18 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         placementStyle = VoxelPlacementPreviewStyle::Eraser;
         if (placementPosition) hoveredCoordinates.reset();
     }
-    else if (voxelToolState_.IsFillActive())
+    else if (smartPaintActive || voxelToolState_.IsFillActive())
     {
         Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
-        SmartBrushState previewState = toolContext_.Brush;
+        SmartBrushState previewState = toolContext_.Smart.Brush();
         previewState.Mode = SmartBrushMode::Paint;
         if (const std::optional<PaletteColorSelection> activeColor =
                 paletteService_.ActiveColor())
-            previewState.PaletteIndex = activeColor->Index;
+            toolContext_.Smart.Brush().PaletteIndex = activeColor->Index;
         else
-            previewState.PaletteIndex = 0U;
+            toolContext_.Smart.Brush().PaletteIndex = 0U;
+        previewState.PaletteIndex = toolContext_.Smart.Brush().PaletteIndex;
         const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
         const std::optional<VoxelCoordinates> hitCoordinates = hit
             ? std::optional<VoxelCoordinates>{hit->Coordinates}
@@ -14078,7 +14137,20 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             paintPreviewState_ = previewState;
             paintPreviewCacheValid_ = true;
         }
-        toolContext_.Paint.Statistics = paintPreviewEvaluation_.Statistics;
+        toolContext_.Smart.SetStatistics(
+            paintPreviewEvaluation_.Statistics.Total,
+            paintPreviewEvaluation_.Statistics.Painted,
+            paintPreviewEvaluation_.Statistics.Ignored,
+            paintPreviewEvaluation_.Statistics.Clipped);
+        toolContext_.Smart.SetPreview(
+            paintPreviewEvaluation_.Code == VoxelPaintBrushResultCode::Applied
+                ? SmartToolPreviewState::Valid
+                : paintPreviewEvaluation_.Code == VoxelPaintBrushResultCode::NoChange
+                ? SmartToolPreviewState::NoChange
+                : paintPreviewEvaluation_.Code == VoxelPaintBrushResultCode::TargetOutOfBounds
+                ? SmartToolPreviewState::OutOfBounds
+                : SmartToolPreviewState::Unavailable,
+            paintPreviewEvaluation_.RenderPlan);
         voxelPlacementPreview_ = {};
         const bool hasPaintPlan =
             paintPreviewEvaluation_.Code == VoxelPaintBrushResultCode::Applied ||

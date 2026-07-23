@@ -8,11 +8,11 @@ namespace
 {
 constexpr std::array<ToolDescriptor, ToolManager::ToolCount> ToolDefinitions{{
     {ActiveVoxelTool::Pencil, "Pencil", EditorInputCommand::ToolPencil,
-        ToolPanelKind::Pencil, ToolCursor::Crosshair},
+        ToolPanelKind::Smart, ToolCursor::Crosshair},
     {ActiveVoxelTool::Eraser, "Erase", EditorInputCommand::ToolEraser,
-        ToolPanelKind::Erase, ToolCursor::Eraser},
+        ToolPanelKind::Smart, ToolCursor::Crosshair},
     {ActiveVoxelTool::Fill, "Paint", EditorInputCommand::ToolFill,
-        ToolPanelKind::Paint, ToolCursor::Paint},
+        ToolPanelKind::Smart, ToolCursor::Crosshair},
     {ActiveVoxelTool::Selection, "Select", EditorInputCommand::ToolSelection,
         ToolPanelKind::Selection, ToolCursor::Selection},
     {ActiveVoxelTool::Move, "Move", EditorInputCommand::ToolMove,
@@ -42,12 +42,11 @@ constexpr std::array<ToolDescriptor, ToolManager::ToolCount> ToolDefinitions{{
 constexpr std::array<ActiveVoxelTool, ToolManager::PrimaryToolCount>
     PrimaryOrder{{
         ActiveVoxelTool::Pencil,
-        ActiveVoxelTool::Eraser,
-        ActiveVoxelTool::Fill,
+        ActiveVoxelTool::Box,
+        ActiveVoxelTool::Line,
         ActiveVoxelTool::Selection,
         ActiveVoxelTool::Move,
-        ActiveVoxelTool::Rotate,
-        ActiveVoxelTool::Scale
+        ActiveVoxelTool::Rotate
     }};
 }
 

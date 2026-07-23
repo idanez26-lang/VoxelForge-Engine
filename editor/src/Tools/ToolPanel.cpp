@@ -1,9 +1,7 @@
 #include "ToolPanel.h"
 
-#include "Panels/ErasePanel.h"
 #include "Panels/MovePanel.h"
-#include "Panels/PaintPanel.h"
-#include "Panels/PencilPanel.h"
+#include "Panels/SmartToolPanel.h"
 #include "Panels/RotatePanel.h"
 #include "Panels/ScalePanel.h"
 
@@ -24,9 +22,7 @@ void ToolPanel::Draw(const ToolManager& manager, ToolContext& context)
     ImGui::BeginDisabled(!context.HasDocument);
     switch (descriptor.Panel)
     {
-    case ToolPanelKind::Pencil: DrawPencilPanel(context); break;
-    case ToolPanelKind::Erase: DrawErasePanel(context); break;
-    case ToolPanelKind::Paint: DrawPaintPanel(context); break;
+    case ToolPanelKind::Smart: DrawSmartToolPanel(context); break;
     case ToolPanelKind::Move: DrawMovePanel(context); break;
     case ToolPanelKind::Rotate: DrawRotatePanel(context); break;
     case ToolPanelKind::Scale: DrawScalePanel(context); break;
@@ -47,7 +43,7 @@ float ToolPanel::PreferredHeight(const ToolPanelKind panel) noexcept
 {
     switch (panel)
     {
-    case ToolPanelKind::Pencil: return 205.0F;
+    case ToolPanelKind::Smart: return 330.0F;
     case ToolPanelKind::Move:
     case ToolPanelKind::Rotate: return 128.0F;
     case ToolPanelKind::Scale: return 112.0F;

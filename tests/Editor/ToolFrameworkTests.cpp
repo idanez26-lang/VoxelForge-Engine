@@ -22,17 +22,19 @@ void TestOfficialToolbarOrder()
 {
     constexpr ActiveVoxelTool expected[] = {
         ActiveVoxelTool::Pencil,
-        ActiveVoxelTool::Eraser,
-        ActiveVoxelTool::Fill,
+        ActiveVoxelTool::Box,
+        ActiveVoxelTool::Line,
         ActiveVoxelTool::Selection,
         ActiveVoxelTool::Move,
-        ActiveVoxelTool::Rotate,
-        ActiveVoxelTool::Scale};
+        ActiveVoxelTool::Rotate};
     const auto order = ToolManager::PrimaryToolOrder();
     Require(std::equal(order.begin(), order.end(), std::begin(expected)),
         "The professional toolbar order is not data-driven or is incomplete.");
-    Require(ToolManager::Descriptor(ActiveVoxelTool::Fill).Name == "Paint",
-        "The existing connected-color tool is not presented as Paint.");
+    Require(ToolManager::Descriptor(ActiveVoxelTool::Fill).Panel ==
+            ToolPanelKind::Smart &&
+        ToolManager::Descriptor(ActiveVoxelTool::Eraser).Panel ==
+            ToolPanelKind::Smart,
+        "Legacy Paint and Erase did not converge on the Smart panel.");
 }
 
 void TestSingleActiveToolTransitionsAndPanelSelection()
@@ -40,7 +42,7 @@ void TestSingleActiveToolTransitionsAndPanelSelection()
     VoxelToolState state;
     ToolManager manager(state);
     Require(manager.ActiveTool() == ActiveVoxelTool::Pencil &&
-        manager.ActiveDescriptor().Panel == ToolPanelKind::Pencil,
+        manager.ActiveDescriptor().Panel == ToolPanelKind::Smart,
         "ToolManager did not initialize the Pencil tool and panel.");
 
     manager.SetActiveTool(ActiveVoxelTool::Move);
@@ -125,14 +127,12 @@ void TestMetadataAndFutureOrderingFoundation()
 void TestContextDefaults()
 {
     ToolContext context;
-    Require(context.Pencil.Mode == SmartBrushMode::Add &&
-        context.Brush.Shape == SmartBrushShape::Cube &&
-        context.Brush.Dimension == SmartBrushDimension::Volume3D &&
-        context.Brush.Orientation == SmartBrushOrientation::Auto &&
-        context.Brush.Size == 1 && !context.Pencil.Statistics &&
-        !context.Paint.Statistics &&
-        std::all_of(context.Pencil.Faces.begin(), context.Pencil.Faces.end(),
-            [](const bool enabled) { return enabled; }) &&
+    Require(context.Smart.Geometry() == SmartGeometry::Pencil &&
+        context.Smart.Action() == SmartAction::Add &&
+        context.Smart.Brush().Shape == SmartBrushShape::Cube &&
+        context.Smart.Brush().Dimension == SmartBrushDimension::Volume3D &&
+        context.Smart.Brush().Orientation == SmartBrushOrientation::Auto &&
+        context.Smart.Brush().Size == 1 && !context.Smart.Statistics().Available &&
         context.Scale.Uniform && !context.Scale.Snap,
         "Professional tool option defaults are invalid.");
 }
@@ -142,25 +142,25 @@ void TestSmartBrushStatePersistsAcrossToolChanges()
     ToolContext context;
     VoxelToolState state;
     ToolManager manager(state);
-    context.Brush.Shape = SmartBrushShape::Sphere;
-    context.Brush.Dimension = SmartBrushDimension::Surface2D;
-    context.Brush.Orientation = SmartBrushOrientation::Z;
-    context.Brush.Size = 12;
+    context.Smart.Brush().Shape = SmartBrushShape::Sphere;
+    context.Smart.Brush().Dimension = SmartBrushDimension::Surface2D;
+    context.Smart.Brush().Orientation = SmartBrushOrientation::Z;
+    context.Smart.Brush().Size = 12;
 
     manager.SetActiveTool(ActiveVoxelTool::Fill);
-    Require(manager.ActiveDescriptor().Panel == ToolPanelKind::Paint &&
-        context.Brush.Shape == SmartBrushShape::Sphere &&
-        context.Brush.Dimension == SmartBrushDimension::Surface2D &&
-        context.Brush.Orientation == SmartBrushOrientation::Z &&
-        context.Brush.Size == 12,
+    Require(manager.ActiveDescriptor().Panel == ToolPanelKind::Smart &&
+        context.Smart.Brush().Shape == SmartBrushShape::Sphere &&
+        context.Smart.Brush().Dimension == SmartBrushDimension::Surface2D &&
+        context.Smart.Brush().Orientation == SmartBrushOrientation::Z &&
+        context.Smart.Brush().Size == 12,
         "Paint did not use the shared Smart Brush options.");
     manager.SetActiveTool(ActiveVoxelTool::Pencil);
-    Require(manager.ActiveDescriptor().Panel == ToolPanelKind::Pencil &&
-        context.Brush.Shape == SmartBrushShape::Sphere &&
-        context.Brush.Dimension == SmartBrushDimension::Surface2D &&
-        context.Brush.Orientation == SmartBrushOrientation::Z &&
-        context.Brush.Size == 12 &&
-        context.Pencil.Mode == SmartBrushMode::Add,
+    Require(manager.ActiveDescriptor().Panel == ToolPanelKind::Smart &&
+        context.Smart.Brush().Shape == SmartBrushShape::Sphere &&
+        context.Smart.Brush().Dimension == SmartBrushDimension::Surface2D &&
+        context.Smart.Brush().Orientation == SmartBrushOrientation::Z &&
+        context.Smart.Brush().Size == 12 &&
+        context.Smart.Action() == SmartAction::Add,
         "Shared Smart Brush options did not persist back to Pencil.");
 }
 }

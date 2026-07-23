@@ -419,6 +419,13 @@ add_executable(
     ${PROJECT_SOURCE_DIR}/editor/src/Input/EditorInputService.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/Tools/ToolManager.cpp
 )
+add_executable(
+    VoxelForgeEditorSmartToolTests
+    Editor/SmartToolTests.cpp
+)
+target_link_libraries(VoxelForgeEditorSmartToolTests PRIVATE VoxelForgeEditorCommands)
+vf_configure_test(VoxelForgeEditorSmartToolTests)
+add_test(NAME VoxelForge.Editor.SmartTool COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolTests>)
 target_include_directories(
     VoxelForgeProfessionalToolFrameworkSmoke
     PRIVATE ${PROJECT_SOURCE_DIR}/editor/src

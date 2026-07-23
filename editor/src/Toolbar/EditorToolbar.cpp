@@ -284,6 +284,8 @@ bool DrawIcon(
         DrawSaveIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Pencil:
         DrawPencilIcon(drawList, minimum, maximum, color, thickness); return true;
+    case EditorToolbarAction::Face:
+        DrawPencilIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Eraser:
         DrawEraserIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Paint:
@@ -298,6 +300,8 @@ bool DrawIcon(
         DrawSelectionIcon(drawList, minimum, maximum, color, thickness);
         return true;
     case EditorToolbarAction::Move:
+        DrawMoveIcon(drawList, minimum, maximum, color, thickness); return true;
+    case EditorToolbarAction::Transform:
         DrawMoveIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Duplicate:
         DrawDuplicateIcon(drawList, minimum, maximum, color, thickness);

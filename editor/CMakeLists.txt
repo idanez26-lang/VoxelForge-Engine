@@ -316,6 +316,7 @@ target_sources(
         src/VoxelHistory/VoxelEditOperation.cpp
         src/VoxelHistory/VoxelHistoryInput.cpp
         src/BrushEngine/SmartBrushEngine.cpp
+        src/SmartTools/SmartTool.cpp
         src/VoxelTools/VoxelEraserTool.cpp
         src/VoxelTools/VoxelBoxService.cpp
         src/VoxelTools/VoxelBrush.cpp
@@ -619,9 +620,7 @@ target_sources(
         src/Tools/ToolManager.cpp
         src/Tools/ToolPanel.cpp
         src/Tools/Panels/SmartBrushOptions.cpp
-        src/Tools/Panels/PencilPanel.cpp
-        src/Tools/Panels/ErasePanel.cpp
-        src/Tools/Panels/PaintPanel.cpp
+        src/Tools/Panels/SmartToolPanel.cpp
         src/Tools/Panels/MovePanel.cpp
         src/Tools/Panels/RotatePanel.cpp
         src/Tools/Panels/ScalePanel.cpp

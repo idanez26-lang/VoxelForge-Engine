@@ -13,9 +13,7 @@ namespace VoxelForge::Editor
 
 enum class ToolPanelKind : std::uint8_t
 {
-    Pencil,
-    Erase,
-    Paint,
+    Smart,
     Selection,
     Move,
     Rotate,
@@ -48,7 +46,7 @@ class ToolManager final
 {
 public:
     static constexpr std::size_t ToolCount = 14U;
-    static constexpr std::size_t PrimaryToolCount = 7U;
+    static constexpr std::size_t PrimaryToolCount = 6U;
 
     explicit ToolManager(VoxelToolState& state) noexcept;
 
