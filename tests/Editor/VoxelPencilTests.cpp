@@ -641,6 +641,61 @@ void TestSurfaceAnchoredBrushes()
         "A boundary face brush did not clip and undo atomically.");
 }
 
+void TestSmartEraseBrushHistoryAndPreview()
+{
+    std::vector<Asset::Vox::VoxVoxel> voxels;
+    for (std::uint8_t z = 2U; z <= 3U; ++z)
+        for (std::uint8_t y = 2U; y <= 3U; ++y)
+            for (std::uint8_t x = 2U; x <= 3U; ++x)
+                voxels.push_back({x, y, z,
+                    static_cast<std::uint8_t>(x + y + z)});
+    auto document = Document({Model({8U, 8U, 8U}, voxels)});
+    TestEditSession session(document);
+    Editor::VoxelEditHistory history;
+    auto hit = Hit(2U, 2U, 2U, Editor::VoxelHitFace::PositiveX);
+    hit.DocumentRevision = document.GetRevision();
+    Editor::SmartBrushState state;
+    state.Mode = Editor::SmartBrushMode::Erase;
+    state.Size = 2;
+    const auto preview = Editor::EvaluateVoxelPencilPreview(
+        &document, 0U, hit, true, std::nullopt, state);
+    Editor::VoxelPencilContext context = Context(session, document, hit);
+    context.State = state;
+    context.History = &history;
+    const std::uint64_t revision = document.GetRevision();
+    Require(preview.IsValid() && preview.OccupiedPositions.size() == 8U &&
+        preview.AddablePositions.empty() && preview.Statistics.Total == 8U &&
+        preview.Statistics.Existing == 8U && preview.Statistics.New == 0U &&
+        Editor::VoxelPencilTool::Apply(context).Code ==
+            Editor::VoxelToolResultCode::Applied &&
+        document.GetVoxelCount() == 0U && document.GetRevision() == revision + 1U &&
+        history.UndoCount() == 1U && history.UndoLabel() == "Remove Brush",
+        "Smart Erase did not apply the exact preview as one history operation.");
+    Require(history.Undo(session) && document.GetVoxelCount() == 8U &&
+        document.GetVoxel({2, 2, 2})->PaletteIndex == 6U &&
+        document.GetVoxel({3, 3, 3})->PaletteIndex == 9U &&
+        history.Redo(session) && document.GetVoxelCount() == 0U,
+        "Smart Erase Undo/Redo did not restore every palette index.");
+
+    auto emptyHit = Hit(0U, 0U, 0U, Editor::VoxelHitFace::PositiveX);
+    emptyHit.DocumentRevision = document.GetRevision();
+    const auto emptyPreview = Editor::EvaluateVoxelPencilPreview(
+        &document, 0U, emptyHit, true, std::nullopt, state);
+    context.Hit = emptyHit;
+    context.State.Size = 1;
+    Require(emptyPreview.Status == Editor::VoxelPlacementPreviewStatus::Occupied &&
+        emptyPreview.OccupiedPositions.empty() &&
+        Editor::VoxelPencilTool::Apply(context).Code ==
+            Editor::VoxelToolResultCode::TargetEmpty && history.UndoCount() == 1U,
+        "Smart Erase empty preview did not remain a no-op.");
+
+    context.Hit.reset();
+    context.WorkplaneTarget = {2, 2, 2};
+    Require(Editor::VoxelPencilTool::Apply(context).Code ==
+            Editor::VoxelToolResultCode::NoHit && history.UndoCount() == 1U,
+        "Smart Erase accepted a workplane target without a hit voxel.");
+}
+
 Editor::VoxelPencilInputFrame AllowedInput()
 {
     Editor::VoxelPencilInputFrame frame;
@@ -751,6 +806,7 @@ int main()
         TestBrushGenerationAndPreview();
         TestAtomicBrushHistory();
         TestSurfaceAnchoredBrushes();
+        TestSmartEraseBrushHistoryAndPreview();
         TestInputController();
         TestToolState();
         std::cout << "Voxel Pencil tests passed.\n";

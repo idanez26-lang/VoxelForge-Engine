@@ -49,7 +49,10 @@ void SmartTool::ClearStatistics() noexcept { statistics_ = {}; }
 
 bool SmartTool::IsOperational() const noexcept
 {
-    return geometry_ == SmartGeometry::Pencil &&
-        (action_ == SmartAction::Add || action_ == SmartAction::Paint);
+    return (geometry_ == SmartGeometry::Pencil ||
+            geometry_ == SmartGeometry::Cube ||
+            geometry_ == SmartGeometry::Sphere) &&
+        (action_ == SmartAction::Add || action_ == SmartAction::Erase ||
+         action_ == SmartAction::Paint);
 }
 } // namespace VoxelForge::Editor

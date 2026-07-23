@@ -28,6 +28,12 @@ bool IsKnownOrientation(const SmartBrushOrientation orientation) noexcept
         orientation == SmartBrushOrientation::Z;
 }
 
+bool IsKnownMode(const SmartBrushMode mode) noexcept
+{
+    return mode == SmartBrushMode::Add || mode == SmartBrushMode::Erase ||
+        mode == SmartBrushMode::Paint;
+}
+
 bool IsInside(
     const Asset::Voxel::VoxelPosition position,
     const Asset::Voxel::VoxelDimensions dimensions) noexcept
@@ -148,7 +154,7 @@ std::size_t SmartBrushEngine::EstimateTotal(
     if (!IsSupportedShape(state.Shape) || !IsVoxelBrushSizeValid(state.Size) ||
         !IsKnownDimension(state.Dimension) ||
         !IsKnownOrientation(state.Orientation) ||
-        state.Mode != SmartBrushMode::Add ||
+        !IsKnownMode(state.Mode) ||
         state.PreviewMode != SmartBrushPreviewMode::Adaptive)
     {
         return 0U;
@@ -180,14 +186,11 @@ SmartBrushResult SmartBrushEngine::Resolve(const SmartBrushRequest& request)
         result.Error = "The selected Smart Brush shape is not implemented.";
         return result;
     }
-    if (request.State.Mode != SmartBrushMode::Add)
-    {
-        result.Code = SmartBrushResultCode::Unsupported;
-        result.Error = "The selected Smart Brush mode is not implemented.";
-        return result;
-    }
     if (!IsVoxelBrushSizeValid(request.State.Size) ||
-        request.State.PaletteIndex == 0U || request.State.PaletteIndex > 255U ||
+        ((request.State.Mode == SmartBrushMode::Add ||
+          request.State.Mode == SmartBrushMode::Paint) &&
+         (request.State.PaletteIndex == 0U || request.State.PaletteIndex > 255U)) ||
+        !IsKnownMode(request.State.Mode) ||
         !IsKnownDimension(request.State.Dimension) ||
         !IsKnownOrientation(request.State.Orientation) ||
         request.State.PreviewMode != SmartBrushPreviewMode::Adaptive ||
@@ -247,7 +250,12 @@ SmartBrushResult SmartBrushEngine::Resolve(const SmartBrushRequest& request)
             return result;
         }
         result.RenderPlan.Bounds = CalculateBounds(result.Positions);
-        result.RenderPlan.Mode = request.State.Shape == SmartBrushShape::Sphere &&
+        // Erase previews show only occupied cells, so an aggregate outline
+        // would claim empty cells are removable. Keep the render plan detailed
+        // to make the preview exactly match the transaction.
+        result.RenderPlan.Mode = request.State.Mode == SmartBrushMode::Erase
+            ? SmartBrushRenderMode::DetailedCells
+            : request.State.Shape == SmartBrushShape::Sphere &&
                 result.Statistics.Total > MaximumDetailedBrushPreviewVoxelCount
             ? SmartBrushRenderMode::AggregateSphere
             : result.Positions.size() <= MaximumDetailedBrushPreviewVoxelCount

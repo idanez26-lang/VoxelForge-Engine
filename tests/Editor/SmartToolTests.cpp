@@ -31,8 +31,17 @@ int main()
             throw std::runtime_error("paint transition");
 
         tool.SetAction(SmartAction::Erase);
-        if (tool.IsOperational() || tool.Brush().Size != 7)
-            throw std::runtime_error("future action");
+        if (!tool.IsOperational() || tool.Brush().Size != 7)
+            throw std::runtime_error("erase transition");
+
+        tool.SetGeometry(SmartGeometry::Cube);
+        if (!tool.IsOperational() || ResolveSmartBrushShape(
+                tool.Geometry(), tool.Brush().Shape) != SmartBrushShape::Cube)
+            throw std::runtime_error("cube geometry");
+        tool.SetGeometry(SmartGeometry::Sphere);
+        if (!tool.IsOperational() || ResolveSmartBrushShape(
+                tool.Geometry(), tool.Brush().Shape) != SmartBrushShape::Sphere)
+            throw std::runtime_error("sphere geometry");
 
         tool.SetGeometry(SmartGeometry::Face);
         if (tool.IsOperational() || tool.Geometry() != SmartGeometry::Face)

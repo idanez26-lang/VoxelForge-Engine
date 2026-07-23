@@ -942,7 +942,7 @@ void EditorWorkspace::DrawMainMenuBar()
                 hasDocument))
             ExecuteInputCommand(EditorInputCommand::ToolPencil);
         if (ImGui::MenuItem(
-                "Pencil Action: Erase (Coming Soon)",
+                "Pencil Action: Erase",
                 shortcut(EditorInputCommand::ToolEraser),
                 voxelToolState_.IsPencilActive() &&
                     toolContext_.Smart.Action() == SmartAction::Erase,
@@ -1397,6 +1397,13 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
 
 void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
 {
+    if (tool == ActiveVoxelTool::Eraser)
+    {
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetAction(SmartAction::Erase);
+        SelectVoxelTool(ActiveVoxelTool::Pencil);
+        return;
+    }
     if (tool == ActiveVoxelTool::Move && !CanMoveSelection()) return;
     if (tool == ActiveVoxelTool::Duplicate && !CanDuplicateSelection()) return;
     if (tool == ActiveVoxelTool::Rotate && !CanRotateSelection()) return;
@@ -2241,7 +2248,7 @@ void EditorWorkspace::DrawScenePanel()
             VoxelPickingInteractionState::Unavailable;
         if (!imageHovered)
             pickingState = VoxelPickingInteractionState::OutsideViewport;
-        else if (inputBlocked || !sceneFocused)
+        else if (inputBlocked || dragDropActive || !sceneFocused)
             pickingState = VoxelPickingInteractionState::Blocked;
         else if (cameraControl)
             pickingState = VoxelPickingInteractionState::CameraInteraction;
@@ -2658,15 +2665,23 @@ void EditorWorkspace::DrawScenePanel()
         {
             if (voxelToolState_.IsPencilActive())
             {
-                if (toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+                if (toolContext_.Smart.IsOperational() &&
                     toolContext_.Smart.Action() == SmartAction::Add)
                     static_cast<void>(ApplyVoxelPencil());
-                else if (toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+                else if (toolContext_.Smart.IsOperational() &&
+                    toolContext_.Smart.Action() == SmartAction::Erase)
+                    static_cast<void>(ApplyVoxelPencil());
+                else if (toolContext_.Smart.IsOperational() &&
                     toolContext_.Smart.Action() == SmartAction::Paint)
                     static_cast<void>(ApplyVoxelPaintBrush());
             }
             else if (voxelToolState_.IsEraserActive())
-                static_cast<void>(0); // Legacy direct service remains available.
+            {
+                toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+                toolContext_.Smart.SetAction(SmartAction::Erase);
+                SelectVoxelTool(ActiveVoxelTool::Pencil);
+                static_cast<void>(ApplyVoxelPencil());
+            }
             else if (voxelToolState_.IsFillActive())
                 static_cast<void>(ApplyVoxelPaintBrush());
             else if (voxelToolState_.IsBoxActive())
@@ -5320,6 +5335,17 @@ bool EditorWorkspace::SaveActiveProjectSession()
     session.ActivePaletteIndex =
         paletteService_.ActiveIndex().value_or(
             PaletteService::FirstSelectableIndex);
+    session.SmartGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Cube
+        ? ProjectSessionSmartGeometry::Cube
+        : toolContext_.Smart.Geometry() == SmartGeometry::Sphere
+        ? ProjectSessionSmartGeometry::Sphere
+        : ProjectSessionSmartGeometry::Pencil;
+    session.SmartAction = toolContext_.Smart.Action() == SmartAction::Erase
+        ? ProjectSessionSmartAction::Erase
+        : toolContext_.Smart.Action() == SmartAction::Paint
+        ? ProjectSessionSmartAction::Paint
+        : ProjectSessionSmartAction::Add;
+    session.SmartBrushSize = toolContext_.Smart.Brush().Size;
 
     std::string error;
     if (!projectSessionService_.Save(session, error))
@@ -5343,13 +5369,18 @@ void EditorWorkspace::RestoreActiveProjectSession()
         return;
     }
 
-    toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+    toolContext_.Smart.SetGeometry(
+        loaded.Session.SmartGeometry == ProjectSessionSmartGeometry::Cube
+            ? SmartGeometry::Cube
+            : loaded.Session.SmartGeometry == ProjectSessionSmartGeometry::Sphere
+            ? SmartGeometry::Sphere : SmartGeometry::Pencil);
     toolContext_.Smart.SetAction(
-        loaded.Session.ActiveTool == ProjectSessionTool::Eraser
+        loaded.Session.SmartAction == ProjectSessionSmartAction::Erase
             ? SmartAction::Erase
-            : loaded.Session.ActiveTool == ProjectSessionTool::Fill
+            : loaded.Session.SmartAction == ProjectSessionSmartAction::Paint
             ? SmartAction::Paint
             : SmartAction::Add);
+    toolContext_.Smart.Brush().Size = loaded.Session.SmartBrushSize;
     voxelToolState_.SetActiveTool(
         loaded.Session.ActiveTool == ProjectSessionTool::Eraser ||
         loaded.Session.ActiveTool == ProjectSessionTool::Fill
@@ -12478,19 +12509,28 @@ bool EditorWorkspace::ApplyVoxelPencil()
         paletteService_.ActiveColor();
     try
     {
-        toolContext_.Smart.Brush().PaletteIndex =
-            activeColor ? activeColor->Index : 0U;
         SmartBrushState brushState = toolContext_.Smart.Brush();
-        brushState.Mode = SmartBrushMode::Add;
+        const bool erasing = toolContext_.Smart.IsOperational() &&
+            toolContext_.Smart.Action() == SmartAction::Erase;
+        if (!erasing)
+            toolContext_.Smart.Brush().PaletteIndex =
+                activeColor ? activeColor->Index : 0U;
+        brushState = toolContext_.Smart.Brush();
+        brushState.Shape = ResolveSmartBrushShape(
+            toolContext_.Smart.Geometry(), brushState.Shape);
+        brushState.Mode = erasing ? SmartBrushMode::Erase : SmartBrushMode::Add;
         result = VoxelPencilTool::Apply({
             static_cast<VoxelEditSession*>(this),
             voxelDocumentSession_.ActiveDocument(),
             0U,
             voxelSelection_.Hovered(),
             brushState,
-            !voxelToolState_.IsPencilActive(),
+            !voxelToolState_.IsPencilActive() ||
+                !toolContext_.Smart.IsOperational() ||
+                (toolContext_.Smart.Action() != SmartAction::Add &&
+                 toolContext_.Smart.Action() != SmartAction::Erase),
             &voxelEditHistory_,
-            workplaneHit_ ? workplaneHit_->Position : std::nullopt});
+            !erasing && workplaneHit_ ? workplaneHit_->Position : std::nullopt});
     }
     catch (const std::exception& exception)
     {
@@ -12509,23 +12549,28 @@ bool EditorWorkspace::ApplyVoxelPencil()
 
     if (result.Code == VoxelToolResultCode::Applied)
     {
-        static_cast<void>(paletteService_.RecordActiveColorUsage());
+        if (toolContext_.Smart.Action() == SmartAction::Add)
+            static_cast<void>(paletteService_.RecordActiveColorUsage());
         workplaneHit_.reset();
         if (voxelCountBefore == 0U)
             firstCreationExperience_.OnFirstVoxelCreated();
         AddConsoleMessage(
-            "[Edit] Added voxel at (" +
+            std::string(toolContext_.Smart.Action() == SmartAction::Erase
+                ? "[Edit] Erased voxel at (" : "[Edit] Added voxel at (") +
             std::to_string(result.Position.X) + ", " +
             std::to_string(result.Position.Y) + ", " +
             std::to_string(result.Position.Z) +
-            ") using palette index " +
-            std::to_string(activeColor ? activeColor->Index : 0U) + ".");
+            (toolContext_.Smart.Action() == SmartAction::Erase ? ")." :
+                ") using palette index " +
+                std::to_string(activeColor ? activeColor->Index : 0U) + "."));
         return true;
     }
     if (result.Code == VoxelToolResultCode::Failed)
     {
         AddConsoleMessage(
-            "[Edit] Failed to add voxel at (" +
+            std::string(toolContext_.Smart.Action() == SmartAction::Erase
+                ? "[Edit] Failed to erase voxel at (" :
+                  "[Edit] Failed to add voxel at (") +
             std::to_string(result.Position.X) + ", " +
             std::to_string(result.Position.Y) + ", " +
             std::to_string(result.Position.Z) + "): " + result.Error);
@@ -12593,6 +12638,8 @@ bool EditorWorkspace::ApplyVoxelPaintBrush()
         toolContext_.Smart.Brush().PaletteIndex =
             activeColor ? activeColor->Index : 0U;
         SmartBrushState brushState = toolContext_.Smart.Brush();
+        brushState.Shape = ResolveSmartBrushShape(
+            toolContext_.Smart.Geometry(), brushState.Shape);
         brushState.Mode = SmartBrushMode::Paint;
         result = VoxelPaintBrushTool::Apply({
             static_cast<VoxelEditSession*>(this),
@@ -12602,7 +12649,7 @@ bool EditorWorkspace::ApplyVoxelPaintBrush()
             brushState,
             !(voxelToolState_.IsFillActive() ||
               (voxelToolState_.IsPencilActive() &&
-               toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+               toolContext_.Smart.IsOperational() &&
                toolContext_.Smart.Action() == SmartAction::Paint)),
             &voxelEditHistory_});
     }
@@ -13964,27 +14011,32 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<VoxelSpherePreview> spherePreview;
     VoxelPlacementPreviewStyle placementStyle =
         VoxelPlacementPreviewStyle::PencilInvalid;
-    const bool smartAddActive = voxelToolState_.IsPencilActive() &&
-        toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+    const bool smartGeometryActive = voxelToolState_.IsPencilActive() &&
+        toolContext_.Smart.IsOperational();
+    const bool smartAddActive = smartGeometryActive &&
         toolContext_.Smart.Action() == SmartAction::Add;
-    const bool smartPaintActive = voxelToolState_.IsPencilActive() &&
-        toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+    const bool smartPaintActive = smartGeometryActive &&
         toolContext_.Smart.Action() == SmartAction::Paint;
-    if (!smartAddActive) pencilPreviewCacheValid_ = false;
+    const bool smartEraseActive = smartGeometryActive &&
+        toolContext_.Smart.Action() == SmartAction::Erase;
+    if (!smartAddActive && !smartEraseActive) pencilPreviewCacheValid_ = false;
     if (!smartPaintActive && !voxelToolState_.IsFillActive())
         paintPreviewCacheValid_ = false;
-    if (!smartAddActive && !smartPaintActive &&
+    if (!smartAddActive && !smartEraseActive && !smartPaintActive &&
         !voxelToolState_.IsFillActive())
     {
         toolContext_.Smart.SetPreview(SmartToolPreviewState::Unavailable);
         toolContext_.Smart.ClearStatistics();
     }
-    if (smartAddActive)
+    if (smartAddActive || smartEraseActive)
     {
         const Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
         SmartBrushState previewState = toolContext_.Smart.Brush();
-        previewState.Mode = SmartBrushMode::Add;
+        previewState.Shape = ResolveSmartBrushShape(
+            toolContext_.Smart.Geometry(), previewState.Shape);
+        previewState.Mode = smartEraseActive ? SmartBrushMode::Erase :
+            SmartBrushMode::Add;
         if (const std::optional<PaletteColorSelection> activeColor =
                 paletteService_.ActiveColor())
             toolContext_.Smart.Brush().PaletteIndex = activeColor->Index;
@@ -13992,11 +14044,16 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             toolContext_.Smart.Brush().PaletteIndex = 0U;
         previewState.PaletteIndex = toolContext_.Smart.Brush().PaletteIndex;
         const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
-        const bool usesWorkplane = workplaneHit_.has_value();
+        const bool usesWorkplane = !smartEraseActive && workplaneHit_.has_value();
         const std::optional<Asset::Voxel::VoxelPosition> anchor = usesWorkplane
             ? std::optional<Asset::Voxel::VoxelPosition>{workplaneHit_->Position}
-            : hit ? std::optional<Asset::Voxel::VoxelPosition>{
-                hit->AdjacentPosition} : std::nullopt;
+            : hit ? smartEraseActive
+                ? std::optional<Asset::Voxel::VoxelPosition>{{
+                    static_cast<std::int32_t>(hit->Coordinates.X),
+                    static_cast<std::int32_t>(hit->Coordinates.Y),
+                    static_cast<std::int32_t>(hit->Coordinates.Z)}}
+                : std::optional<Asset::Voxel::VoxelPosition>{
+                    hit->AdjacentPosition} : std::nullopt;
         const VoxelHitFace face = hit ? hit->Face : VoxelHitFace::None;
         const std::size_t hitSubModelIndex = hit ? hit->SubModelIndex : 0U;
         const std::uint64_t revision = document ? document->GetRevision() : 0U;
@@ -14028,12 +14085,23 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         }
         if (voxelPlacementPreview_.IsVisible())
         {
-            toolContext_.Smart.SetPreview(SmartToolPreviewState::Valid,
+            toolContext_.Smart.SetPreview(
+                smartEraseActive && voxelPlacementPreview_.Status ==
+                    VoxelPlacementPreviewStatus::Occupied
+                    ? SmartToolPreviewState::NoChange
+                    : SmartToolPreviewState::Valid,
                 voxelPlacementPreview_.RenderPlan);
             toolContext_.Smart.SetStatistics(voxelPlacementPreview_.Statistics.Total,
-                voxelPlacementPreview_.Statistics.New,
-                voxelPlacementPreview_.Statistics.Existing,
+                smartEraseActive ? voxelPlacementPreview_.Statistics.Existing :
+                    voxelPlacementPreview_.Statistics.New,
+                smartEraseActive ? voxelPlacementPreview_.Statistics.New :
+                    voxelPlacementPreview_.Statistics.Existing,
                 voxelPlacementPreview_.Statistics.Clipped);
+        }
+        else
+        {
+            toolContext_.Smart.SetPreview(SmartToolPreviewState::Unavailable);
+            toolContext_.Smart.ClearStatistics();
         }
         if (voxelPlacementPreview_.IsVisible())
         {
@@ -14054,13 +14122,16 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             else
             {
                 brushPreview = std::span<const Asset::Voxel::VoxelPosition>(
-                    voxelPlacementPreview_.AddablePositions);
-                brushOccupiedPreview =
-                    std::span<const Asset::Voxel::VoxelPosition>(
-                        voxelPlacementPreview_.OccupiedPositions);
+                    smartEraseActive ? voxelPlacementPreview_.OccupiedPositions :
+                        voxelPlacementPreview_.AddablePositions);
+                if (!smartEraseActive)
+                    brushOccupiedPreview =
+                        std::span<const Asset::Voxel::VoxelPosition>(
+                            voxelPlacementPreview_.OccupiedPositions);
             }
         }
-        placementStyle = voxelPlacementPreview_.IsValid()
+        placementStyle = smartEraseActive ? VoxelPlacementPreviewStyle::Eraser :
+            voxelPlacementPreview_.IsValid()
             ? VoxelPlacementPreviewStyle::PencilValid
             : voxelPlacementPreview_.Status ==
                 VoxelPlacementPreviewStatus::Occupied
@@ -14090,6 +14161,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
         SmartBrushState previewState = toolContext_.Smart.Brush();
+        previewState.Shape = ResolveSmartBrushShape(
+            toolContext_.Smart.Geometry(), previewState.Shape);
         previewState.Mode = SmartBrushMode::Paint;
         if (const std::optional<PaletteColorSelection> activeColor =
                 paletteService_.ActiveColor())

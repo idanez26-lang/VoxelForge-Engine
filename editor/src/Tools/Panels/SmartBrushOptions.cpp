@@ -31,16 +31,19 @@ bool FitsOnOneLine(const std::array<const char*, Count>& labels)
 }
 }
 
-void DrawSmartBrushOptions(SmartBrushState& state)
+void DrawSmartBrushOptions(SmartBrushState& state, const bool allowShape)
 {
-    ImGui::TextDisabled("Shape");
-    int shape = static_cast<int>(state.Shape);
-    ImGui::RadioButton("Cube", &shape,
-        static_cast<int>(SmartBrushShape::Cube));
-    ImGui::SameLine();
-    ImGui::RadioButton("Sphere", &shape,
-        static_cast<int>(SmartBrushShape::Sphere));
-    state.Shape = static_cast<SmartBrushShape>(shape);
+    if (allowShape)
+    {
+        ImGui::TextDisabled("Shape");
+        int shape = static_cast<int>(state.Shape);
+        ImGui::RadioButton("Cube", &shape,
+            static_cast<int>(SmartBrushShape::Cube));
+        ImGui::SameLine();
+        ImGui::RadioButton("Sphere", &shape,
+            static_cast<int>(SmartBrushShape::Sphere));
+        state.Shape = static_cast<SmartBrushShape>(shape);
+    }
 
     ImGui::TextDisabled("Dimension");
     int dimension = static_cast<int>(state.Dimension);

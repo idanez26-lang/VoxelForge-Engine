@@ -135,9 +135,16 @@ void TestRefusalsAndAdaptivePlan()
         "Prepared unsupported shape was not refused.");
     state.Shape = Editor::SmartBrushShape::Cube;
     state.Mode = Editor::SmartBrushMode::Erase;
-    Require(Resolve(state, {{3, 3, 3}, {0, 1, 0}}).Code ==
-            Editor::SmartBrushResultCode::Unsupported,
-        "Prepared unsupported mode was not refused.");
+    const auto erase = Resolve(state, {{3, 3, 3}, {0, 1, 0}},
+        {8U, 8U, 8U}, [](const Position position)
+        {
+            return position == Position{3, 3, 3};
+        });
+    Require(erase.Code == Editor::SmartBrushResultCode::Valid &&
+        erase.ExistingPositions == std::vector<Position>{{3, 3, 3}} &&
+        erase.AddablePositions.size() == erase.Statistics.Total - 1U &&
+        erase.RenderPlan.Mode == Editor::SmartBrushRenderMode::DetailedCells,
+        "Erase did not resolve the same occupied-cell geometry as preview.");
     state.Mode = Editor::SmartBrushMode::Add;
     state.Dimension = static_cast<Editor::SmartBrushDimension>(99);
     Require(Resolve(state, {{3, 3, 3}, {0, 1, 0}}).Code ==
@@ -197,6 +204,24 @@ void TestBoundaryClipping()
         "Boundary Sphere clipping statistics are incorrect.");
     RequireUnique(sphere.Positions);
 }
+
+void TestEraseStatistics()
+{
+    Editor::SmartBrushState state;
+    state.Mode = Editor::SmartBrushMode::Erase;
+    state.Size = 3;
+    const auto result = Resolve(state, {{0, 0, 0}, {0, 1, 0}},
+        {3U, 3U, 3U}, [](const Position position)
+        {
+            return position == Position{0, 0, 0};
+        });
+    Require(result.Code == Editor::SmartBrushResultCode::Valid &&
+        result.Statistics.Total == 27U && result.Statistics.Existing == 1U &&
+        result.Statistics.New == 11U && result.Statistics.Clipped == 15U &&
+        result.Statistics.Total == result.Statistics.Existing +
+            result.Statistics.New + result.Statistics.Clipped,
+        "Smart Erase Total/Erased/Ignored/Clipped statistics are inconsistent.");
+}
 }
 
 int main()
@@ -207,6 +232,7 @@ int main()
         TestSurfaceOrientations();
         TestRefusalsAndAdaptivePlan();
         TestBoundaryClipping();
+        TestEraseStatistics();
         std::cout << "Smart Brush Engine tests passed.\n";
         return 0;
     }

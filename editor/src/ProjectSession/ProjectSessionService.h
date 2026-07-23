@@ -51,6 +51,9 @@ enum class ProjectSessionTool : std::uint8_t
     Sphere
 };
 
+enum class ProjectSessionSmartGeometry : std::uint8_t { Pencil, Cube, Sphere };
+enum class ProjectSessionSmartAction : std::uint8_t { Add, Erase, Paint };
+
 struct ProjectSessionData final
 {
     static constexpr std::uint32_t FormatVersion = 1U;
@@ -59,6 +62,9 @@ struct ProjectSessionData final
     ProjectSessionCamera Camera{};
     ProjectSessionTool ActiveTool = ProjectSessionTool::Pencil;
     std::size_t ActivePaletteIndex = 1U;
+    ProjectSessionSmartGeometry SmartGeometry = ProjectSessionSmartGeometry::Pencil;
+    ProjectSessionSmartAction SmartAction = ProjectSessionSmartAction::Add;
+    int SmartBrushSize = 1;
 };
 
 enum class ProjectSessionLoadStatus : std::uint8_t

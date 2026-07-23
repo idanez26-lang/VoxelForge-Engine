@@ -13,6 +13,11 @@ void DrawSmartToolPanel(ToolContext& context)
     int geometry = static_cast<int>(tool.Geometry());
     ImGui::RadioButton(
         "Pencil", &geometry, static_cast<int>(SmartGeometry::Pencil));
+    ImGui::SameLine();
+    ImGui::RadioButton("Cube", &geometry, static_cast<int>(SmartGeometry::Cube));
+    ImGui::SameLine();
+    ImGui::RadioButton("Sphere", &geometry,
+        static_cast<int>(SmartGeometry::Sphere));
     ImGui::BeginDisabled();
     ImGui::RadioButton("Face", &geometry, static_cast<int>(SmartGeometry::Face));
     ImGui::RadioButton("Box", &geometry, static_cast<int>(SmartGeometry::Box));
@@ -25,15 +30,17 @@ void DrawSmartToolPanel(ToolContext& context)
     ImGui::RadioButton("Add", &action, static_cast<int>(SmartAction::Add));
     ImGui::SameLine();
     ImGui::RadioButton("Paint", &action, static_cast<int>(SmartAction::Paint));
-    ImGui::BeginDisabled();
+    ImGui::SameLine();
     ImGui::RadioButton("Erase", &action, static_cast<int>(SmartAction::Erase));
+    ImGui::BeginDisabled();
     ImGui::SameLine();
     ImGui::RadioButton(
         "Replace", &action, static_cast<int>(SmartAction::Replace));
     ImGui::EndDisabled();
     tool.SetAction(static_cast<SmartAction>(action));
 
-    DrawSmartBrushOptions(tool.Brush());
+    DrawSmartBrushOptions(tool.Brush(),
+        tool.Geometry() == SmartGeometry::Pencil);
     ImGui::TextDisabled("Advanced");
     ImGui::BeginDisabled();
     ImGui::TextUnformatted("More controls coming soon");
@@ -43,10 +50,12 @@ void DrawSmartToolPanel(ToolContext& context)
     if (tool.Statistics().Available)
     {
         const auto& stats = tool.Statistics();
+        const bool erasing = tool.Action() == SmartAction::Erase;
+        const bool painting = tool.Action() == SmartAction::Paint;
         DrawSmartBrushStatistics(
-            tool.Action() == SmartAction::Paint ? "Painted" : "New",
+            erasing ? "Erased" : painting ? "Painted" : "New",
             stats.Changed,
-            tool.Action() == SmartAction::Paint ? "Ignored" : "Existing",
+            erasing || painting ? "Ignored" : "Existing",
             stats.Unchanged,
             stats.Total,
             stats.Clipped);

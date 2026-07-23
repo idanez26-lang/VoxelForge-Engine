@@ -232,6 +232,40 @@ ProjectSessionLoadResult ProjectSessionService::Load() const
         : activeTool == "Sphere"
         ? ProjectSessionTool::Sphere
         : ProjectSessionTool::Pencil;
+    // These optional v1 extensions preserve the original session format for
+    // older files. Legacy Eraser/Fill remain Pencil actions when absent.
+    if (const auto geometry = values.find("smart_geometry");
+        geometry != values.end())
+    {
+        session.SmartGeometry = geometry->second == "Cube"
+            ? ProjectSessionSmartGeometry::Cube
+            : geometry->second == "Sphere"
+            ? ProjectSessionSmartGeometry::Sphere
+            : ProjectSessionSmartGeometry::Pencil;
+    }
+    if (const auto action = values.find("smart_action"); action != values.end())
+    {
+        session.SmartAction = action->second == "Erase"
+            ? ProjectSessionSmartAction::Erase
+            : action->second == "Paint"
+            ? ProjectSessionSmartAction::Paint
+            : ProjectSessionSmartAction::Add;
+    }
+    else
+    {
+        session.SmartAction = session.ActiveTool == ProjectSessionTool::Eraser
+            ? ProjectSessionSmartAction::Erase
+            : session.ActiveTool == ProjectSessionTool::Fill
+            ? ProjectSessionSmartAction::Paint
+            : ProjectSessionSmartAction::Add;
+    }
+    if (const auto size = values.find("smart_brush_size"); size != values.end())
+    {
+        std::uint32_t parsedSize = 0U;
+        if (ParseUnsigned(size->second, parsedSize) && parsedSize >= 1U &&
+            parsedSize <= 16U)
+            session.SmartBrushSize = static_cast<int>(parsedSize);
+    }
     const auto paletteIndex = values.find("active_palette_index");
     if (paletteIndex != values.end())
     {
@@ -313,7 +347,18 @@ bool ProjectSessionService::Save(
         << "active_palette_index="
         << (session.ActivePaletteIndex >= 1U &&
                 session.ActivePaletteIndex <= 255U
-            ? session.ActivePaletteIndex : 1U) << '\n';
+            ? session.ActivePaletteIndex : 1U) << '\n'
+        << "smart_geometry="
+        << (session.SmartGeometry == ProjectSessionSmartGeometry::Cube ? "Cube"
+            : session.SmartGeometry == ProjectSessionSmartGeometry::Sphere
+            ? "Sphere" : "Pencil") << '\n'
+        << "smart_action="
+        << (session.SmartAction == ProjectSessionSmartAction::Erase ? "Erase"
+            : session.SmartAction == ProjectSessionSmartAction::Paint
+            ? "Paint" : "Add") << '\n'
+        << "smart_brush_size="
+        << (session.SmartBrushSize >= 1 && session.SmartBrushSize <= 16
+            ? session.SmartBrushSize : 1) << '\n';
     output.flush();
     output.close();
     if (!output)

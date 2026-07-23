@@ -238,6 +238,45 @@ void TestSphereToolPersistence()
         "Sphere tool was not restored from the project session.");
 }
 
+void TestSmartGeometryPersistenceAndLegacyFallback()
+{
+    TemporaryProject project;
+    ProjectSessionService service;
+    Require(service.SetProjectRoot(project.Root()), "Smart session root failed.");
+    ProjectSessionData session = ValidSession();
+    session.SmartGeometry = ProjectSessionSmartGeometry::Sphere;
+    session.SmartAction = ProjectSessionSmartAction::Paint;
+    session.SmartBrushSize = 5;
+    std::string error;
+    Require(service.Save(session, error), "Smart session save failed: " + error);
+    const auto restored = service.Load();
+    Require(restored.Loaded() && restored.Session.SmartGeometry ==
+            ProjectSessionSmartGeometry::Sphere && restored.Session.SmartAction ==
+            ProjectSessionSmartAction::Paint && restored.Session.SmartBrushSize == 5,
+        "Smart Geometry/Action/Size were not persisted.");
+
+    project.WriteSession(
+        "format_version=1\nlast_model=\ncamera_position=0,0,10\n"
+        "camera_rotation=0,0,0\ncamera_target=0,0,0\ncamera_distance=10\n"
+        "camera_view=Perspective\nactive_tool=Eraser\n");
+    const auto legacy = service.Load();
+    Require(legacy.Loaded() && legacy.Session.SmartGeometry ==
+            ProjectSessionSmartGeometry::Pencil && legacy.Session.SmartAction ==
+            ProjectSessionSmartAction::Erase && legacy.Session.SmartBrushSize == 1,
+        "Legacy Eraser session did not migrate to Pencil + Erase.");
+
+    project.WriteSession(
+        "format_version=1\nlast_model=\ncamera_position=0,0,10\n"
+        "camera_rotation=0,0,0\ncamera_target=0,0,0\ncamera_distance=10\n"
+        "camera_view=Perspective\nactive_tool=Pencil\nsmart_geometry=Unknown\n"
+        "smart_action=Unknown\nsmart_brush_size=99\n");
+    const auto invalid = service.Load();
+    Require(invalid.Loaded() && invalid.Session.SmartGeometry ==
+            ProjectSessionSmartGeometry::Pencil && invalid.Session.SmartAction ==
+            ProjectSessionSmartAction::Add && invalid.Session.SmartBrushSize == 1,
+        "Invalid Smart session fields did not safely fall back.");
+}
+
 void TestProjectSwitchAndClose()
 {
     TemporaryProject first;
@@ -269,6 +308,7 @@ int main()
         TestBoxToolPersistence();
         TestLineToolPersistence();
         TestSphereToolPersistence();
+        TestSmartGeometryPersistenceAndLegacyFallback();
         TestProjectSwitchAndClose();
         std::cout << "Project session tests passed.\n";
         return 0;

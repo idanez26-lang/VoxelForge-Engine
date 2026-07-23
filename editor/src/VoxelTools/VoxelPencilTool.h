@@ -21,6 +21,7 @@ enum class VoxelToolResultCode
     NoHit,
     TargetOutOfBounds,
     TargetOccupied,
+    TargetEmpty,
     InvalidModel,
     InvalidPaletteIndex,
     Blocked,

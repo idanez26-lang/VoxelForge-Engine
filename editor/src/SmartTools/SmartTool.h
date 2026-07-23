@@ -10,6 +10,10 @@ namespace VoxelForge::Editor
 enum class SmartGeometry : std::uint8_t
 {
     Pencil,
+    // Cube and Sphere are local Smart Brush volumes. They intentionally do
+    // not replace the legacy Box/Sphere construction tools below.
+    Cube,
+    Sphere,
     Face,
     Box,
     Line,
@@ -19,6 +23,15 @@ enum class SmartGeometry : std::uint8_t
     Scatter,
     Custom
 };
+
+[[nodiscard]] constexpr SmartBrushShape ResolveSmartBrushShape(
+    const SmartGeometry geometry,
+    const SmartBrushShape pencilShape) noexcept
+{
+    return geometry == SmartGeometry::Cube ? SmartBrushShape::Cube
+        : geometry == SmartGeometry::Sphere ? SmartBrushShape::Sphere
+        : pencilShape;
+}
 
 enum class SmartAction : std::uint8_t
 {

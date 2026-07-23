@@ -42,26 +42,46 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
     const std::uint64_t revision = document.GetRevision();
     if (context.Blocked)
         return Refused(VoxelToolResultCode::Blocked, {}, revision);
+    const bool erasing = context.State.Mode == SmartBrushMode::Erase;
+    if (!erasing && context.State.Mode != SmartBrushMode::Add)
+        return Refused(VoxelToolResultCode::Failed, {}, revision,
+            "VoxelPencilTool only applies Add and Erase actions.");
     Asset::Voxel::VoxelPosition adjacent{};
     Asset::Voxel::VoxelPosition placementNormal{0, 1, 0};
     if (context.WorkplaneTarget)
     {
+        if (erasing)
+            return Refused(VoxelToolResultCode::NoHit, {}, revision);
         adjacent = *context.WorkplaneTarget;
     }
     else
     {
         if (!context.Hit || context.Hit->Face == VoxelHitFace::None)
             return Refused(VoxelToolResultCode::NoHit, {}, revision);
-        const Asset::Voxel::VoxelPosition expectedAdjacent =
-            CalculateAdjacent(*context.Hit);
-        adjacent = context.Hit->AdjacentPosition;
-        if (adjacent != expectedAdjacent)
+        if (erasing)
         {
-            return Refused(
-                VoxelToolResultCode::Failed, adjacent, revision,
-                "Voxel hit adjacency does not match its detected face.");
+            if (context.Hit->DocumentRevision != revision)
+                return Refused(VoxelToolResultCode::NoHit, {}, revision,
+                    "The Smart Erase target belongs to an older document revision.");
+            adjacent = {
+                static_cast<std::int32_t>(context.Hit->Coordinates.X),
+                static_cast<std::int32_t>(context.Hit->Coordinates.Y),
+                static_cast<std::int32_t>(context.Hit->Coordinates.Z)};
+            placementNormal = VoxelHitFaceIntegerNormal(context.Hit->Face);
         }
-        placementNormal = VoxelHitFaceIntegerNormal(context.Hit->Face);
+        else
+        {
+            const Asset::Voxel::VoxelPosition expectedAdjacent =
+                CalculateAdjacent(*context.Hit);
+            adjacent = context.Hit->AdjacentPosition;
+            if (adjacent != expectedAdjacent)
+            {
+                return Refused(
+                    VoxelToolResultCode::Failed, adjacent, revision,
+                    "Voxel hit adjacency does not match its detected face.");
+            }
+            placementNormal = VoxelHitFaceIntegerNormal(context.Hit->Face);
+        }
     }
     if (context.EditSession == nullptr ||
         (!context.WorkplaneTarget &&
@@ -71,7 +91,8 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
         return Refused(
             VoxelToolResultCode::InvalidModel, adjacent, revision);
     }
-    if (context.State.PaletteIndex == 0U || context.State.PaletteIndex > 255U)
+    if (!erasing && (context.State.PaletteIndex == 0U ||
+        context.State.PaletteIndex > 255U))
         return Refused(VoxelToolResultCode::InvalidPaletteIndex, adjacent, revision);
     Voxel::VoxelModel* model = context.EditSession->ActiveVoxelModel();
     Voxel::VoxelGrid* grid = model == nullptr
@@ -107,7 +128,8 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
         return Refused(VoxelToolResultCode::Failed, adjacent, revision, brush.Error);
 
     std::vector<VoxelChange> changes;
-    changes.reserve(brush.AddablePositions.size());
+    changes.reserve(erasing ? brush.ExistingPositions.size() :
+        brush.AddablePositions.size());
     // The engine has already validated the complete plan. Verify that the
     // compatibility grid agrees before creating one atomic transaction.
     for (const Asset::Voxel::VoxelPosition position : brush.Positions)
@@ -141,14 +163,28 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
                 "VoxelDocument and the editable compatibility grid diverged.");
         }
     }
-    for (const Asset::Voxel::VoxelPosition position : brush.AddablePositions)
+    const std::vector<Asset::Voxel::VoxelPosition>& changedPositions = erasing
+        ? brush.ExistingPositions : brush.AddablePositions;
+    for (const Asset::Voxel::VoxelPosition position : changedPositions)
     {
-        changes.push_back({
-            context.SubModelIndex, position, false, 0U, true,
-            static_cast<std::uint8_t>(context.State.PaletteIndex)});
+        if (erasing)
+        {
+            const auto voxel = document.GetVoxel(position, context.SubModelIndex);
+            if (!voxel)
+                return Refused(VoxelToolResultCode::Failed, adjacent, revision,
+                    "The Smart Brush erase plan changed during validation.");
+            changes.push_back({context.SubModelIndex, position, true,
+                voxel->PaletteIndex, false, 0U});
+        }
+        else
+        {
+            changes.push_back({context.SubModelIndex, position, false, 0U, true,
+                static_cast<std::uint8_t>(context.State.PaletteIndex)});
+        }
     }
     if (changes.empty())
-        return Refused(VoxelToolResultCode::TargetOccupied, adjacent, revision);
+        return Refused(erasing ? VoxelToolResultCode::TargetEmpty :
+            VoxelToolResultCode::TargetOccupied, adjacent, revision);
 
     CommandResult applied;
     if (context.History != nullptr)
@@ -156,7 +192,9 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
         const VoxelEditHistoryResult historyResult = context.History->Execute(
             *context.EditSession,
             VoxelEditOperation{
-                changes.size() == 1U ? "Add Voxel" : "Add Brush",
+                erasing ? (changes.size() == 1U ? "Remove Voxel" :
+                    "Remove Brush") : (changes.size() == 1U ? "Add Voxel" :
+                    "Add Brush"),
                 std::move(changes)});
         applied = historyResult
             ? CommandResult::Success()
@@ -179,16 +217,19 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
 
     const std::uint64_t revisionAfter = document.GetRevision();
     bool synchronized = revisionAfter == revision + 1U && document.IsDirty();
-    for (const Asset::Voxel::VoxelPosition position : brush.AddablePositions)
+    for (const Asset::Voxel::VoxelPosition position : changedPositions)
     {
         const auto voxel = document.GetVoxel(position, context.SubModelIndex);
         const Voxel::Voxel* compatibilityVoxel = grid->Get(
             static_cast<std::uint32_t>(position.X),
             static_cast<std::uint32_t>(position.Y),
             static_cast<std::uint32_t>(position.Z));
-        synchronized &= voxel && voxel->PaletteIndex == context.State.PaletteIndex &&
-            compatibilityVoxel != nullptr && compatibilityVoxel->IsOccupied() &&
-            compatibilityVoxel->ColorIndex == context.State.PaletteIndex;
+        synchronized &= erasing
+            ? !voxel && compatibilityVoxel != nullptr &&
+                !compatibilityVoxel->IsOccupied()
+            : voxel && voxel->PaletteIndex == context.State.PaletteIndex &&
+                compatibilityVoxel != nullptr && compatibilityVoxel->IsOccupied() &&
+                compatibilityVoxel->ColorIndex == context.State.PaletteIndex;
     }
     if (!synchronized)
     {
@@ -198,7 +239,8 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
             adjacent,
             revision,
             revisionAfter,
-            "The applied Pencil edit failed its consistency check."};
+            erasing ? "The applied Smart Erase edit failed its consistency check."
+                    : "The applied Pencil edit failed its consistency check."};
     }
     return {
         VoxelToolResultCode::Applied,
@@ -218,6 +260,7 @@ const char* VoxelToolResultCodeName(const VoxelToolResultCode code) noexcept
     case VoxelToolResultCode::NoHit: return "No hit";
     case VoxelToolResultCode::TargetOutOfBounds: return "Out of bounds";
     case VoxelToolResultCode::TargetOccupied: return "Occupied";
+    case VoxelToolResultCode::TargetEmpty: return "Empty";
     case VoxelToolResultCode::InvalidModel: return "Invalid model";
     case VoxelToolResultCode::InvalidPaletteIndex: return "Invalid palette";
     case VoxelToolResultCode::Blocked: return "Blocked";

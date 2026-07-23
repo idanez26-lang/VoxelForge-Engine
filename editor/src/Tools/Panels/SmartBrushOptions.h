@@ -8,7 +8,7 @@ namespace VoxelForge::Editor
 {
 
 // Shared, mode-neutral brush controls used by every Smart Brush tool.
-void DrawSmartBrushOptions(SmartBrushState& state);
+void DrawSmartBrushOptions(SmartBrushState& state, bool allowShape = true);
 
 // Keeps preview metrics readable in narrow tool columns.
 void DrawSmartBrushStatistics(

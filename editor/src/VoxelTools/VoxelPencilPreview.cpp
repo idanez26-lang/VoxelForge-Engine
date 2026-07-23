@@ -47,10 +47,12 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
     const auto dimensions = document->GetDimensions(subModelIndex);
     if (!dimensions) return {};
 
+    const bool erasing = state.Mode == SmartBrushMode::Erase;
     Asset::Voxel::VoxelPosition adjacent{};
     Asset::Voxel::VoxelPosition placementNormal{0, 1, 0};
     if (workplaneTarget)
     {
+        if (erasing) return {};
         adjacent = *workplaneTarget;
     }
     else
@@ -58,10 +60,21 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
         if (!hit || hit->Face == VoxelHitFace::None ||
             hit->SubModelIndex != subModelIndex)
             return {};
-        const Asset::Voxel::VoxelPosition expectedAdjacent =
-            CalculateAdjacent(*hit);
-        if (hit->AdjacentPosition != expectedAdjacent) return {};
-        adjacent = hit->AdjacentPosition;
+        if (erasing)
+        {
+            if (hit->DocumentRevision != document->GetRevision()) return {};
+            adjacent = {
+                static_cast<std::int32_t>(hit->Coordinates.X),
+                static_cast<std::int32_t>(hit->Coordinates.Y),
+                static_cast<std::int32_t>(hit->Coordinates.Z)};
+        }
+        else
+        {
+            const Asset::Voxel::VoxelPosition expectedAdjacent =
+                CalculateAdjacent(*hit);
+            if (hit->AdjacentPosition != expectedAdjacent) return {};
+            adjacent = hit->AdjacentPosition;
+        }
         placementNormal = VoxelHitFaceIntegerNormal(hit->Face);
     }
     SmartBrushResult brush = SmartBrushEngine::Resolve({
@@ -78,9 +91,13 @@ VoxelPlacementPreview EvaluateVoxelPencilPreview(
             brush.Statistics, std::move(brush.RenderPlan)};
     if (brush.Code != SmartBrushResultCode::Valid) return {};
     return {
-        brush.HasAddablePositions()
-            ? VoxelPlacementPreviewStatus::Valid
-            : VoxelPlacementPreviewStatus::Occupied,
+        erasing
+            ? (!brush.ExistingPositions.empty()
+                ? VoxelPlacementPreviewStatus::Valid
+                : VoxelPlacementPreviewStatus::Occupied)
+            : (brush.HasAddablePositions()
+                ? VoxelPlacementPreviewStatus::Valid
+                : VoxelPlacementPreviewStatus::Occupied),
         adjacent,
         VoxelPreviewTool::Pencil,
         std::move(brush.Positions),
