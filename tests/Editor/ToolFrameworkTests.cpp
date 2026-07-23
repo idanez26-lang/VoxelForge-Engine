@@ -22,15 +22,14 @@ void TestOfficialToolbarOrder()
 {
     constexpr ActiveVoxelTool expected[] = {
         ActiveVoxelTool::Pencil,
-        ActiveVoxelTool::Box,
-        ActiveVoxelTool::Line,
         ActiveVoxelTool::Selection,
-        ActiveVoxelTool::Move,
-        ActiveVoxelTool::Rotate};
+        ActiveVoxelTool::Move};
     const auto order = ToolManager::PrimaryToolOrder();
     Require(std::equal(order.begin(), order.end(), std::begin(expected)),
         "The professional toolbar order is not data-driven or is incomplete.");
-    Require(ToolManager::Descriptor(ActiveVoxelTool::Fill).Panel ==
+    Require(ToolManager::Descriptor(ActiveVoxelTool::Pencil).Name ==
+            "Smart Tool" &&
+        ToolManager::Descriptor(ActiveVoxelTool::Fill).Panel ==
             ToolPanelKind::Smart &&
         ToolManager::Descriptor(ActiveVoxelTool::Eraser).Panel ==
             ToolPanelKind::Smart,

@@ -10,8 +10,9 @@
 namespace VoxelForge::Editor
 {
 
-void ToolPanel::Draw(const ToolManager& manager, ToolContext& context)
+bool ToolPanel::Draw(const ToolManager& manager, ToolContext& context)
 {
+    bool changed = false;
     const ToolDescriptor& descriptor = manager.ActiveDescriptor();
     ImGui::TextDisabled("Tool");
     ImGui::SameLine();
@@ -22,7 +23,7 @@ void ToolPanel::Draw(const ToolManager& manager, ToolContext& context)
     ImGui::BeginDisabled(!context.HasDocument);
     switch (descriptor.Panel)
     {
-    case ToolPanelKind::Smart: DrawSmartToolPanel(context); break;
+    case ToolPanelKind::Smart: changed = DrawSmartToolPanel(context); break;
     case ToolPanelKind::Move: DrawMovePanel(context); break;
     case ToolPanelKind::Rotate: DrawRotatePanel(context); break;
     case ToolPanelKind::Scale: DrawScalePanel(context); break;
@@ -37,6 +38,7 @@ void ToolPanel::Draw(const ToolManager& manager, ToolContext& context)
     ImGui::EndDisabled();
     if (!context.HasDocument)
         ImGui::TextDisabled("Open a voxel model to use tool options.");
+    return changed;
 }
 
 float ToolPanel::PreferredHeight(const ToolPanelKind panel) noexcept

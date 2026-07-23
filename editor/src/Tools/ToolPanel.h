@@ -22,7 +22,8 @@ public:
     {
         return ToolPanelHost::IntegratedWorkspace;
     }
-    static void Draw(const ToolManager& manager, ToolContext& context);
+    [[nodiscard]] static bool Draw(
+        const ToolManager& manager, ToolContext& context);
     [[nodiscard]] static float PreferredHeight(
         ToolPanelKind panel) noexcept;
 };

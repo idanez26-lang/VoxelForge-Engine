@@ -5,42 +5,56 @@
 
 namespace VoxelForge::Editor
 {
-void DrawSmartToolPanel(ToolContext& context)
+bool DrawSmartToolPanel(ToolContext& context)
 {
     SmartTool& tool = context.Smart;
+    bool changed = false;
+    if (tool.Geometry() == SmartGeometry::Cube ||
+        tool.Geometry() == SmartGeometry::Sphere)
+    {
+        tool.Brush().Shape = ResolveSmartBrushShape(
+            tool.Geometry(), tool.Brush().Shape);
+        tool.SetGeometry(SmartGeometry::Pencil);
+        changed = true;
+    }
     ImGui::TextDisabled("SMART TOOL");
     ImGui::TextDisabled("Geometry");
-    int geometry = static_cast<int>(tool.Geometry());
-    ImGui::RadioButton(
+    ImGui::PushID("Geometry");
+    int geometry = static_cast<int>(SmartGeometry::Pencil);
+    changed |= ImGui::RadioButton(
         "Pencil", &geometry, static_cast<int>(SmartGeometry::Pencil));
-    ImGui::SameLine();
-    ImGui::RadioButton("Cube", &geometry, static_cast<int>(SmartGeometry::Cube));
-    ImGui::SameLine();
-    ImGui::RadioButton("Sphere", &geometry,
-        static_cast<int>(SmartGeometry::Sphere));
     ImGui::BeginDisabled();
     ImGui::RadioButton("Face", &geometry, static_cast<int>(SmartGeometry::Face));
     ImGui::RadioButton("Box", &geometry, static_cast<int>(SmartGeometry::Box));
     ImGui::RadioButton("Line", &geometry, static_cast<int>(SmartGeometry::Line));
     ImGui::EndDisabled();
+    ImGui::PopID();
+    const SmartGeometry geometryBefore = tool.Geometry();
     tool.SetGeometry(static_cast<SmartGeometry>(geometry));
+    changed |= tool.Geometry() != geometryBefore;
 
     ImGui::TextDisabled("Action");
+    ImGui::PushID("Action");
     int action = static_cast<int>(tool.Action());
-    ImGui::RadioButton("Add", &action, static_cast<int>(SmartAction::Add));
+    changed |= ImGui::RadioButton(
+        "Add", &action, static_cast<int>(SmartAction::Add));
     ImGui::SameLine();
-    ImGui::RadioButton("Paint", &action, static_cast<int>(SmartAction::Paint));
+    changed |= ImGui::RadioButton(
+        "Paint", &action, static_cast<int>(SmartAction::Paint));
     ImGui::SameLine();
-    ImGui::RadioButton("Erase", &action, static_cast<int>(SmartAction::Erase));
+    changed |= ImGui::RadioButton(
+        "Erase", &action, static_cast<int>(SmartAction::Erase));
     ImGui::BeginDisabled();
     ImGui::SameLine();
     ImGui::RadioButton(
         "Replace", &action, static_cast<int>(SmartAction::Replace));
     ImGui::EndDisabled();
+    ImGui::PopID();
+    const SmartAction actionBefore = tool.Action();
     tool.SetAction(static_cast<SmartAction>(action));
+    changed |= tool.Action() != actionBefore;
 
-    DrawSmartBrushOptions(tool.Brush(),
-        tool.Geometry() == SmartGeometry::Pencil);
+    changed |= DrawSmartBrushOptions(tool.Brush());
     ImGui::TextDisabled("Advanced");
     ImGui::BeginDisabled();
     ImGui::TextUnformatted("More controls coming soon");
@@ -60,5 +74,6 @@ void DrawSmartToolPanel(ToolContext& context)
             stats.Total,
             stats.Clipped);
     }
+    return changed;
 }
 } // namespace VoxelForge::Editor

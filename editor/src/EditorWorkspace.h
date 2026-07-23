@@ -430,6 +430,8 @@ private:
     VoxelToolState voxelToolState_;
     ToolManager toolManager_{voxelToolState_};
     ToolContext toolContext_{};
+    SmartBrushSizeFeedback smartBrushSizeFeedback_{};
+    bool smartBrushPreviewRefreshRequested_ = false;
     EditorInputService editorInputService_;
     VoxelToolInputController voxelToolInput_;
     VoxelToolInputController voxelToolSmokeInput_;

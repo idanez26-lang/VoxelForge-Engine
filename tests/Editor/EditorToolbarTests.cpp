@@ -1,4 +1,5 @@
 #include "Toolbar/EditorToolbarModel.h"
+#include "SmartTools/SmartTool.h"
 
 #include <algorithm>
 #include <cmath>
@@ -22,13 +23,10 @@ void TestOrderGroupsAndTooltips()
     const auto buttons = EditorToolbarModel::PrimaryButtons();
     constexpr EditorToolbarAction expected[] = {
         EditorToolbarAction::Pencil,
-        EditorToolbarAction::Face,
-        EditorToolbarAction::Box,
-        EditorToolbarAction::Line,
         EditorToolbarAction::Selection,
         EditorToolbarAction::Transform};
     Require(buttons.size() == std::size(expected),
-        "Toolbar does not expose the six Smart Tool entries.");
+        "Toolbar does not expose exactly Smart Tool, Selection, and Transform.");
     for (std::size_t index = 0U; index < buttons.size(); ++index)
     {
         Require(buttons[index].Action == expected[index],
@@ -37,18 +35,14 @@ void TestOrderGroupsAndTooltips()
             !buttons[index].Description.empty(),
             "A Toolbar action has no usable tooltip text.");
     }
-    Require(buttons[0].Group == EditorToolbarGroup::Sculpt &&
-        buttons[1].Group == EditorToolbarGroup::Construction &&
-        buttons[2].Group == EditorToolbarGroup::Construction &&
-        buttons[3].Group == EditorToolbarGroup::Construction &&
-        buttons[4].Group == EditorToolbarGroup::Selection &&
-        buttons[5].Group == EditorToolbarGroup::Transform,
+    Require(buttons[0].Name == "Smart Tool" &&
+        buttons[0].Group == EditorToolbarGroup::Sculpt &&
+        buttons[1].Group == EditorToolbarGroup::Selection &&
+        buttons[2].Group == EditorToolbarGroup::Transform,
         "Toolbar visual groups are incorrect.");
     Require(inputService.ShortcutLabel(buttons[0].Command) == "P" &&
-        inputService.ShortcutLabel(buttons[2].Command) == "B" &&
-        inputService.ShortcutLabel(buttons[3].Command) == "L" &&
-        inputService.ShortcutLabel(buttons[4].Command) == "V" &&
-        inputService.ShortcutLabel(buttons[5].Command) == "M",
+        inputService.ShortcutLabel(buttons[1].Command) == "V" &&
+        inputService.ShortcutLabel(buttons[2].Command) == "M",
         "Toolbar does not use the centralized shortcut bindings.");
 }
 
@@ -65,11 +59,8 @@ void TestAvailabilityAndSingleActiveTool()
 
     EditorToolbarState cleanDocument{true, false, ActiveVoxelTool::Pencil};
     Require(EditorToolbarModel::IsEnabled(buttons[0], cleanDocument) &&
-        !EditorToolbarModel::IsEnabled(buttons[1], cleanDocument) &&
-        !EditorToolbarModel::IsEnabled(buttons[2], cleanDocument) &&
-        !EditorToolbarModel::IsEnabled(buttons[3], cleanDocument) &&
-        EditorToolbarModel::IsEnabled(buttons[4], cleanDocument) &&
-        !EditorToolbarModel::IsEnabled(buttons[5], cleanDocument),
+        EditorToolbarModel::IsEnabled(buttons[1], cleanDocument) &&
+        !EditorToolbarModel::IsEnabled(buttons[2], cleanDocument),
         "Smart toolbar availability is incorrect.");
     const auto activeCount = std::count_if(buttons.begin(), buttons.end(),
         [&cleanDocument](const EditorToolbarButton& button)
@@ -79,14 +70,95 @@ void TestAvailabilityAndSingleActiveTool()
     Require(activeCount == 1,
         "Toolbar does not expose exactly one active tool.");
 
+    SmartTool smartTool;
+    const auto requireSmartToolOnly = [&buttons, &smartTool](
+        const SmartGeometry geometry,
+        const SmartAction action,
+        const std::string_view description)
+    {
+        smartTool.SetGeometry(geometry);
+        smartTool.SetAction(action);
+        const EditorToolbarState smartState{
+            true, false, ActiveVoxelTool::Pencil};
+        const auto active = std::count_if(buttons.begin(), buttons.end(),
+            [&smartState](const EditorToolbarButton& button)
+            {
+                return EditorToolbarModel::IsActive(button, smartState);
+            });
+        Require(smartTool.IsOperational() &&
+            EditorToolbarModel::IsActive(buttons[0], smartState) &&
+            !EditorToolbarModel::IsActive(buttons[1], smartState) &&
+            !EditorToolbarModel::IsActive(buttons[2], smartState) && active == 1,
+            description);
+    };
+    constexpr SmartGeometry smartGeometries[] = {
+        SmartGeometry::Pencil, SmartGeometry::Cube, SmartGeometry::Sphere};
+    constexpr SmartAction smartActions[] = {
+        SmartAction::Add, SmartAction::Erase, SmartAction::Paint};
+    for (const SmartGeometry geometry : smartGeometries)
+    {
+        for (const SmartAction action : smartActions)
+        {
+            requireSmartToolOnly(geometry, action,
+                "Smart Tool is not exclusively active for a supported configuration.");
+        }
+    }
+
+    const EditorToolbarState selectionState{
+        true, false, ActiveVoxelTool::Selection};
+    Require(!EditorToolbarModel::IsActive(buttons[0], selectionState) &&
+        EditorToolbarModel::IsActive(buttons[1], selectionState) &&
+        !EditorToolbarModel::IsActive(buttons[2], selectionState),
+        "Selection is not the only active toolbar button for Selection.");
+
     cleanDocument.CanMoveSelection = true;
-    cleanDocument.CanDuplicateSelection = true;
-    cleanDocument.CanRotateSelection = true;
-    cleanDocument.CanMirrorSelection = true;
-    cleanDocument.CanScaleSelection = true;
-    cleanDocument.CanAlignSelection = true;
-    Require(EditorToolbarModel::IsEnabled(buttons[5], cleanDocument),
+    Require(EditorToolbarModel::IsEnabled(buttons[2], cleanDocument),
         "Transform is disabled with a valid selection.");
+
+    constexpr ActiveVoxelTool transformTools[] = {
+        ActiveVoxelTool::Move, ActiveVoxelTool::Duplicate,
+        ActiveVoxelTool::Rotate, ActiveVoxelTool::Mirror,
+        ActiveVoxelTool::Scale, ActiveVoxelTool::Align};
+    for (const ActiveVoxelTool tool : transformTools)
+    {
+        cleanDocument.ActiveTool = tool;
+        Require(EditorToolbarModel::IsActive(buttons[2], cleanDocument) &&
+            !EditorToolbarModel::IsActive(buttons[0], cleanDocument) &&
+            !EditorToolbarModel::IsActive(buttons[1], cleanDocument),
+            "Transform is not the only active button for a transform-family tool.");
+    }
+}
+
+void TestHiddenToolbarActionsAndLegacyShortcuts()
+{
+    const auto buttons = EditorToolbarModel::PrimaryButtons();
+    constexpr EditorToolbarAction hiddenActions[] = {
+        EditorToolbarAction::Eraser, EditorToolbarAction::Paint,
+        EditorToolbarAction::Face, EditorToolbarAction::Box,
+        EditorToolbarAction::Line, EditorToolbarAction::Sphere};
+    for (const EditorToolbarAction action : hiddenActions)
+    {
+        Require(std::none_of(buttons.begin(), buttons.end(),
+            [action](const EditorToolbarButton& button)
+            {
+                return button.Action == action;
+            }), "A hidden legacy action remains in PrimaryButtons.");
+    }
+
+    const EditorInputService inputService;
+    const EditorCommandAvailability available{true};
+    const auto resolve = [&inputService, &available](
+        const EditorInputKey key, const bool shift = false)
+    {
+        EditorInputFrame frame;
+        frame.SetPressed(key);
+        frame.Shift = shift;
+        return inputService.Resolve(frame, available);
+    };
+    Require(resolve(EditorInputKey::P) == EditorInputCommand::ToolPencil &&
+        resolve(EditorInputKey::E) == EditorInputCommand::ToolEraser &&
+        resolve(EditorInputKey::F, true) == EditorInputCommand::ToolFill,
+        "Legacy Pencil, Eraser, or Paint shortcuts no longer resolve.");
 }
 
 void TestVoxelToolStatePipeline()
@@ -139,6 +211,7 @@ int main()
     {
         TestOrderGroupsAndTooltips();
         TestAvailabilityAndSingleActiveTool();
+        TestHiddenToolbarActionsAndLegacyShortcuts();
         TestVoxelToolStatePipeline();
         TestResponsiveLayout();
         std::cout << "Modern Toolbar tests passed.\n";

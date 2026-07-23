@@ -34,6 +34,16 @@ int main()
         if (!tool.IsOperational() || tool.Brush().Size != 7)
             throw std::runtime_error("erase transition");
 
+        tool.SetGeometry(SmartGeometry::Pencil);
+        tool.Brush().Shape = SmartBrushShape::Cube;
+        if (ResolveSmartBrushShape(tool.Geometry(), tool.Brush().Shape) !=
+            SmartBrushShape::Cube)
+            throw std::runtime_error("cube shape");
+        tool.Brush().Shape = SmartBrushShape::Sphere;
+        if (ResolveSmartBrushShape(tool.Geometry(), tool.Brush().Shape) !=
+            SmartBrushShape::Sphere)
+            throw std::runtime_error("sphere shape");
+
         tool.SetGeometry(SmartGeometry::Cube);
         if (!tool.IsOperational() || ResolveSmartBrushShape(
                 tool.Geometry(), tool.Brush().Shape) != SmartBrushShape::Cube)
@@ -42,6 +52,21 @@ int main()
         if (!tool.IsOperational() || ResolveSmartBrushShape(
                 tool.Geometry(), tool.Brush().Shape) != SmartBrushShape::Sphere)
             throw std::runtime_error("sphere geometry");
+
+        SmartBrushSizeFeedback feedback;
+        if (feedback.IsVisible(0U))
+            throw std::runtime_error("feedback initial visibility");
+        feedback.Rearm(6, SmartBrushShape::Cube, SmartAction::Paint, 100U);
+        if (!feedback.IsVisible(100U) || !feedback.IsVisible(1349U) ||
+            feedback.IsVisible(1350U) || feedback.Size() != 6 ||
+            feedback.Shape() != SmartBrushShape::Cube ||
+            feedback.Action() != SmartAction::Paint)
+            throw std::runtime_error("feedback timing or metadata");
+        feedback.Rearm(9, SmartBrushShape::Sphere, SmartAction::Erase, 900U);
+        if (!feedback.IsVisible(2149U) || feedback.IsVisible(2150U) ||
+            feedback.Size() != 9 || feedback.Shape() != SmartBrushShape::Sphere ||
+            feedback.Action() != SmartAction::Erase)
+            throw std::runtime_error("feedback rearm");
 
         tool.SetGeometry(SmartGeometry::Face);
         if (tool.IsOperational() || tool.Geometry() != SmartGeometry::Face)

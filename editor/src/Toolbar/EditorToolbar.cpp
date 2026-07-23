@@ -50,6 +50,33 @@ void DrawPencilIcon(ImDrawList& drawList, const ImVec2 minimum,
         {minimum.x + 1.0F, maximum.y - 5.0F}, color);
 }
 
+void DrawSmartToolIcon(ImDrawList& drawList, const ImVec2 minimum,
+    const ImVec2 maximum, const ImU32 color, const float thickness)
+{
+    const float width = maximum.x - minimum.x;
+    const ImVec2 handle{minimum.x + width * 0.20F, maximum.y - width * 0.20F};
+    const ImVec2 tip{minimum.x + width * 0.62F, minimum.y + width * 0.38F};
+    drawList.AddLine(handle, tip, color, thickness * 1.8F);
+    drawList.AddCircleFilled(handle, width * 0.12F, color, 8);
+    drawList.AddTriangleFilled(
+        {tip.x - width * 0.05F, tip.y + width * 0.05F},
+        {tip.x + width * 0.11F, tip.y - width * 0.11F},
+        {tip.x + width * 0.05F, tip.y + width * 0.11F}, color);
+
+    const ImVec2 sparkle{minimum.x + width * 0.80F, minimum.y + width * 0.20F};
+    const float ray = width * 0.13F;
+    drawList.AddLine({sparkle.x, sparkle.y - ray},
+        {sparkle.x, sparkle.y + ray}, color, thickness);
+    drawList.AddLine({sparkle.x - ray, sparkle.y},
+        {sparkle.x + ray, sparkle.y}, color, thickness);
+    drawList.AddLine({sparkle.x - ray * 0.68F, sparkle.y - ray * 0.68F},
+        {sparkle.x + ray * 0.68F, sparkle.y + ray * 0.68F}, color,
+        thickness * 0.75F);
+    drawList.AddLine({sparkle.x - ray * 0.68F, sparkle.y + ray * 0.68F},
+        {sparkle.x + ray * 0.68F, sparkle.y - ray * 0.68F}, color,
+        thickness * 0.75F);
+}
+
 void DrawEraserIcon(ImDrawList& drawList, const ImVec2 minimum,
     const ImVec2 maximum, const ImU32 color, const float thickness)
 {
@@ -283,7 +310,7 @@ bool DrawIcon(
     case EditorToolbarAction::Save:
         DrawSaveIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Pencil:
-        DrawPencilIcon(drawList, minimum, maximum, color, thickness); return true;
+        DrawSmartToolIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Face:
         DrawPencilIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Eraser:

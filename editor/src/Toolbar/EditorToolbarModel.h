@@ -75,8 +75,8 @@ struct EditorToolbarLayout final
 class EditorToolbarModel final
 {
 public:
-    static constexpr std::size_t ButtonCount = 6U;
-    static constexpr std::size_t PrimaryButtonCount = 6U;
+    static constexpr std::size_t ButtonCount = 3U;
+    static constexpr std::size_t PrimaryButtonCount = 3U;
 
     [[nodiscard]] static const std::array<EditorToolbarButton, ButtonCount>&
         Buttons() noexcept;

@@ -31,51 +31,64 @@ bool FitsOnOneLine(const std::array<const char*, Count>& labels)
 }
 }
 
-void DrawSmartBrushOptions(SmartBrushState& state, const bool allowShape)
+bool DrawSmartBrushOptions(SmartBrushState& state, const bool allowShape)
 {
+    bool changed = false;
     if (allowShape)
     {
         ImGui::TextDisabled("Shape");
+        ImGui::PushID("Shape");
         int shape = static_cast<int>(state.Shape);
-        ImGui::RadioButton("Cube", &shape,
+        changed |= ImGui::RadioButton("Cube", &shape,
             static_cast<int>(SmartBrushShape::Cube));
         ImGui::SameLine();
-        ImGui::RadioButton("Sphere", &shape,
+        changed |= ImGui::RadioButton("Sphere", &shape,
             static_cast<int>(SmartBrushShape::Sphere));
         state.Shape = static_cast<SmartBrushShape>(shape);
+        ImGui::PopID();
     }
 
     ImGui::TextDisabled("Dimension");
+    ImGui::PushID("Dimension");
     int dimension = static_cast<int>(state.Dimension);
     const bool dimensionsFit = FitsOnOneLine(
         std::array{"3D Volume", "2D Surface"});
-    ImGui::RadioButton("3D Volume", &dimension,
+    changed |= ImGui::RadioButton("3D Volume", &dimension,
         static_cast<int>(SmartBrushDimension::Volume3D));
     if (dimensionsFit) ImGui::SameLine();
-    ImGui::RadioButton("2D Surface", &dimension,
+    changed |= ImGui::RadioButton("2D Surface", &dimension,
         static_cast<int>(SmartBrushDimension::Surface2D));
     state.Dimension = static_cast<SmartBrushDimension>(dimension);
+    ImGui::PopID();
 
     ImGui::TextDisabled("Orientation");
+    ImGui::PushID("Orientation");
     int orientation = static_cast<int>(state.Orientation);
     const bool orientationsFit = FitsOnOneLine(
         std::array{"Auto", "X", "Y", "Z"});
-    ImGui::RadioButton("Auto", &orientation,
+    changed |= ImGui::RadioButton("Auto", &orientation,
         static_cast<int>(SmartBrushOrientation::Auto));
     if (orientationsFit) ImGui::SameLine();
-    ImGui::RadioButton("X", &orientation,
+    changed |= ImGui::RadioButton("X", &orientation,
         static_cast<int>(SmartBrushOrientation::X));
     if (orientationsFit) ImGui::SameLine();
-    ImGui::RadioButton("Y", &orientation,
+    changed |= ImGui::RadioButton("Y", &orientation,
         static_cast<int>(SmartBrushOrientation::Y));
     if (orientationsFit) ImGui::SameLine();
-    ImGui::RadioButton("Z", &orientation,
+    changed |= ImGui::RadioButton("Z", &orientation,
         static_cast<int>(SmartBrushOrientation::Z));
     state.Orientation = static_cast<SmartBrushOrientation>(orientation);
+    ImGui::PopID();
 
+    ImGui::PushID("Size");
+    const int sizeBefore = state.Size;
     ImGui::SetNextItemWidth(90.0F);
-    ImGui::InputInt("Size", &state.Size);
+    changed |= ImGui::InputInt("Size", &state.Size);
     state.Size = std::clamp(state.Size, 1, SmartBrushEngine::MaximumSize());
+    changed |= state.Size != sizeBefore;
+    ImGui::PopID();
+    ImGui::TextDisabled("1-16 voxels");
+    return changed;
 }
 
 void DrawSmartBrushStatistics(

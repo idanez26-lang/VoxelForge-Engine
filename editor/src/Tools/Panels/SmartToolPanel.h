@@ -4,5 +4,5 @@
 
 namespace VoxelForge::Editor
 {
-void DrawSmartToolPanel(ToolContext& context);
+[[nodiscard]] bool DrawSmartToolPanel(ToolContext& context);
 }

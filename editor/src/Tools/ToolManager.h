@@ -46,7 +46,7 @@ class ToolManager final
 {
 public:
     static constexpr std::size_t ToolCount = 14U;
-    static constexpr std::size_t PrimaryToolCount = 6U;
+    static constexpr std::size_t PrimaryToolCount = 3U;
 
     explicit ToolManager(VoxelToolState& state) noexcept;
 

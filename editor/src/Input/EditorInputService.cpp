@@ -1,6 +1,7 @@
 #include "EditorInputService.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace VoxelForge::Editor
 {
@@ -197,6 +198,26 @@ const std::array<EditorInputBinding, EditorInputService::BindingCount>&
 EditorInputService::Bindings() const noexcept
 {
     return bindings_;
+}
+
+SmartBrushSizeInputResult EditorInputService::ResolveSmartBrushSize(
+    const SmartBrushSizeInputFrame& frame) noexcept
+{
+    SmartBrushSizeInputResult result;
+    result.Size = std::clamp(frame.CurrentSize, 1, 16);
+    const bool control = frame.LeftControl || frame.RightControl;
+    const bool allowed = control && frame.Wheel != 0.0F && frame.HasDocument &&
+        frame.SmartToolActive && frame.ViewportHovered && frame.ViewportFocused &&
+        !frame.MouseCapturedByOtherWidget && !frame.ModalOpen &&
+        !frame.DragDropActive && !frame.IncompatibleInteraction;
+    if (!allowed) return result;
+    result.ConsumeWheel = true;
+    const int units = std::max(1, static_cast<int>(std::lround(
+        std::abs(frame.Wheel))));
+    const int delta = frame.Wheel > 0.0F ? units : -units;
+    result.Size = std::clamp(result.Size + delta, 1, 16);
+    result.Changed = result.Size != std::clamp(frame.CurrentSize, 1, 16);
+    return result;
 }
 
 } // namespace VoxelForge::Editor

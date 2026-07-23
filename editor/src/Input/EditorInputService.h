@@ -118,6 +118,29 @@ struct EditorCommandAvailability final
     bool CanApplyTransform = false;
 };
 
+struct SmartBrushSizeInputFrame final
+{
+    float Wheel = 0.0F;
+    bool LeftControl = false;
+    bool RightControl = false;
+    bool HasDocument = false;
+    bool SmartToolActive = false;
+    bool ViewportHovered = false;
+    bool ViewportFocused = false;
+    bool MouseCapturedByOtherWidget = false;
+    bool ModalOpen = false;
+    bool DragDropActive = false;
+    bool IncompatibleInteraction = false;
+    int CurrentSize = 1;
+};
+
+struct SmartBrushSizeInputResult final
+{
+    int Size = 1;
+    bool Changed = false;
+    bool ConsumeWheel = false;
+};
+
 class EditorInputService final
 {
 public:
@@ -136,6 +159,8 @@ public:
     [[nodiscard]] bool HasBindingConflicts() const noexcept;
     [[nodiscard]] const std::array<EditorInputBinding, BindingCount>&
         Bindings() const noexcept;
+    [[nodiscard]] static SmartBrushSizeInputResult ResolveSmartBrushSize(
+        const SmartBrushSizeInputFrame& frame) noexcept;
 
 private:
     std::array<EditorInputBinding, BindingCount> bindings_{{

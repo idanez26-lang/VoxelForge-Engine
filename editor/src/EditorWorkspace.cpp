@@ -1854,7 +1854,9 @@ void EditorWorkspace::DrawToolOptionsPanel()
     if (ImGui::BeginChild(
             "##ActiveToolOptions", ImVec2(0.0F, optionsHeight), true))
     {
-        ToolPanel::Draw(toolManager_, toolContext_);
+        smartBrushPreviewRefreshRequested_ =
+            ToolPanel::Draw(toolManager_, toolContext_) ||
+            smartBrushPreviewRefreshRequested_;
     }
     ImGui::EndChild();
     ImGui::End();
@@ -2213,7 +2215,7 @@ void EditorWorkspace::DrawScenePanel()
                 ? VoxelCameraInteraction::Orbit
                 : ImGui::IsMouseDown(ImGuiMouseButton_Middle)
                 ? VoxelCameraInteraction::Pan
-                : (imageHovered && io.MouseWheel != 0.0F)
+                : (imageHovered && io.MouseWheel != 0.0F && !io.KeyCtrl)
                 ? VoxelCameraInteraction::Zoom
                 : VoxelCameraInteraction::None;
         const bool cameraControl =
@@ -2236,6 +2238,29 @@ void EditorWorkspace::DrawScenePanel()
             (ImGui::IsAnyItemActive() && !selectionPointerTracking &&
              !gizmoPointerTracking) ||
             io.WantTextInput || incompatiblePopupOpen;
+        const bool smartBrushOptionsChanged = std::exchange(
+            smartBrushPreviewRefreshRequested_, false);
+        const SmartBrushSizeInputResult brushSizeInput =
+            EditorInputService::ResolveSmartBrushSize({
+                io.MouseWheel,
+                ImGui::IsKeyDown(ImGuiKey_LeftCtrl),
+                ImGui::IsKeyDown(ImGuiKey_RightCtrl),
+                voxelDocumentSession_.HasActiveDocument(),
+                voxelToolState_.IsPencilActive() && toolContext_.Smart.IsOperational(),
+                imageHovered,
+                sceneFocused,
+                inputBlocked || (io.WantCaptureMouse && !imageHovered),
+                incompatiblePopupOpen,
+                dragDropActive,
+                selectionPointerTracking || gizmoPointerTracking || cameraControl,
+                toolContext_.Smart.Brush().Size});
+        if (brushSizeInput.Changed)
+        {
+            toolContext_.Smart.Brush().Size = brushSizeInput.Size;
+            smartBrushSizeFeedback_.Rearm(brushSizeInput.Size,
+                toolContext_.Smart.Brush().Shape, toolContext_.Smart.Action(),
+                static_cast<std::uint64_t>(ImGui::GetTime() * 1000.0));
+        }
         const bool selectionInputAvailable = imageHovered && sceneFocused &&
             !inputBlocked && !cameraControl;
         const Asset::Voxel::VoxelDocument* document =
@@ -2296,7 +2321,8 @@ void EditorWorkspace::DrawScenePanel()
                 : std::nullopt;
         }
         if (voxelSelection_.SetHovered(pickingState, std::move(hoveredHit)) ||
-            previousWorkplaneHit != workplaneHit_)
+            previousWorkplaneHit != workplaneHit_ || brushSizeInput.Changed ||
+            smartBrushOptionsChanged)
         {
             UpdateVoxelHighlights();
         }
@@ -3017,8 +3043,33 @@ void EditorWorkspace::DrawScenePanel()
             if (ImGui::IsMouseDown(ImGuiMouseButton_Middle))
                 viewportNavigation_.Pan(
                     io.MouseDelta.x, io.MouseDelta.y, available.y);
-            if (io.MouseWheel != 0.0F)
+            if (io.MouseWheel != 0.0F && !brushSizeInput.ConsumeWheel)
                 viewportNavigation_.Zoom(io.MouseWheel);
+        }
+        const std::uint64_t feedbackNow = static_cast<std::uint64_t>(
+            ImGui::GetTime() * 1000.0);
+        if (smartBrushSizeFeedback_.IsVisible(feedbackNow))
+        {
+            const char* const shape = smartBrushSizeFeedback_.Shape() ==
+                    SmartBrushShape::Sphere ? "Sphere" : "Cube";
+            const char* const action = smartBrushSizeFeedback_.Action() ==
+                    SmartAction::Erase ? "Erase"
+                : smartBrushSizeFeedback_.Action() == SmartAction::Paint
+                    ? "Paint" : "Add";
+            const std::string label = "Brush Size: " + std::to_string(
+                smartBrushSizeFeedback_.Size()) + "\n" + shape +
+                " - " + action;
+            const ImVec2 minimum{imageOrigin.x + 12.0F, imageOrigin.y + 42.0F};
+            const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
+            const ImVec2 maximum{minimum.x + textSize.x + 16.0F,
+                minimum.y + textSize.y + 12.0F};
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                minimum, maximum, IM_COL32(8, 13, 20, 220), 4.0F);
+            ImGui::GetWindowDrawList()->AddRect(
+                minimum, maximum, IM_COL32(70, 190, 235, 235), 4.0F);
+            ImGui::GetWindowDrawList()->AddText(
+                {minimum.x + 8.0F, minimum.y + 6.0F},
+                IM_COL32(232, 244, 255, 255), label.c_str());
         }
         const bool sceneActive = imageHovered || sceneFocused;
         const bool shortcutsEnabled = sceneActive &&
@@ -5335,9 +5386,11 @@ bool EditorWorkspace::SaveActiveProjectSession()
     session.ActivePaletteIndex =
         paletteService_.ActiveIndex().value_or(
             PaletteService::FirstSelectableIndex);
-    session.SmartGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Cube
+    const SmartBrushShape sessionShape = ResolveSmartBrushShape(
+        toolContext_.Smart.Geometry(), toolContext_.Smart.Brush().Shape);
+    session.SmartGeometry = sessionShape == SmartBrushShape::Cube
         ? ProjectSessionSmartGeometry::Cube
-        : toolContext_.Smart.Geometry() == SmartGeometry::Sphere
+        : sessionShape == SmartBrushShape::Sphere
         ? ProjectSessionSmartGeometry::Sphere
         : ProjectSessionSmartGeometry::Pencil;
     session.SmartAction = toolContext_.Smart.Action() == SmartAction::Erase
@@ -5369,11 +5422,14 @@ void EditorWorkspace::RestoreActiveProjectSession()
         return;
     }
 
-    toolContext_.Smart.SetGeometry(
-        loaded.Session.SmartGeometry == ProjectSessionSmartGeometry::Cube
-            ? SmartGeometry::Cube
-            : loaded.Session.SmartGeometry == ProjectSessionSmartGeometry::Sphere
-            ? SmartGeometry::Sphere : SmartGeometry::Pencil);
+    // Cube and Sphere were stored as SmartGeometry before Shape became the
+    // sole active geometry selector. Preserve the legacy brush volume while
+    // normalizing the live tool to Pencil for the current UI.
+    toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+    if (loaded.Session.SmartGeometry == ProjectSessionSmartGeometry::Cube)
+        toolContext_.Smart.Brush().Shape = SmartBrushShape::Cube;
+    else if (loaded.Session.SmartGeometry == ProjectSessionSmartGeometry::Sphere)
+        toolContext_.Smart.Brush().Shape = SmartBrushShape::Sphere;
     toolContext_.Smart.SetAction(
         loaded.Session.SmartAction == ProjectSessionSmartAction::Erase
             ? SmartAction::Erase
@@ -11648,6 +11704,7 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
         Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
         modernToolbarSmokeToolsEnabled_ = flow.Ready() && document != nullptr &&
+            EditorToolbarModel::Buttons().size() == 3U &&
             std::all_of(
                 EditorToolbarModel::Buttons().begin(),
                 EditorToolbarModel::Buttons().end(),

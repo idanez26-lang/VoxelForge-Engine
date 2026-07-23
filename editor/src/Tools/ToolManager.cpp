@@ -7,7 +7,7 @@ namespace VoxelForge::Editor
 namespace
 {
 constexpr std::array<ToolDescriptor, ToolManager::ToolCount> ToolDefinitions{{
-    {ActiveVoxelTool::Pencil, "Pencil", EditorInputCommand::ToolPencil,
+    {ActiveVoxelTool::Pencil, "Smart Tool", EditorInputCommand::ToolPencil,
         ToolPanelKind::Smart, ToolCursor::Crosshair},
     {ActiveVoxelTool::Eraser, "Erase", EditorInputCommand::ToolEraser,
         ToolPanelKind::Smart, ToolCursor::Crosshair},
@@ -42,11 +42,8 @@ constexpr std::array<ToolDescriptor, ToolManager::ToolCount> ToolDefinitions{{
 constexpr std::array<ActiveVoxelTool, ToolManager::PrimaryToolCount>
     PrimaryOrder{{
         ActiveVoxelTool::Pencil,
-        ActiveVoxelTool::Box,
-        ActiveVoxelTool::Line,
         ActiveVoxelTool::Selection,
-        ActiveVoxelTool::Move,
-        ActiveVoxelTool::Rotate
+        ActiveVoxelTool::Move
     }};
 }
 

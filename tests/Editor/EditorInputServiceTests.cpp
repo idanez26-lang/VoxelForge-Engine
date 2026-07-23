@@ -260,6 +260,84 @@ void TestAvailabilityAndUnknownCommands()
             EditorInputCommand::TransformApply,
         "Transform Apply stayed unavailable for a valid preview.");
 }
+
+void TestSmartBrushSizeResolver()
+{
+    SmartBrushSizeInputFrame frame;
+    frame.Wheel = 1.0F;
+    frame.LeftControl = true;
+    frame.HasDocument = true;
+    frame.SmartToolActive = true;
+    frame.ViewportHovered = true;
+    frame.ViewportFocused = true;
+    frame.CurrentSize = 1;
+
+    SmartBrushSizeInputResult result =
+        EditorInputService::ResolveSmartBrushSize(frame);
+    Require(result.Size == 2 && result.Changed && result.ConsumeWheel,
+        "Size 1 plus positive Ctrl+wheel did not resolve to size 2.");
+
+    frame.CurrentSize = 2;
+    frame.Wheel = -1.0F;
+    result = EditorInputService::ResolveSmartBrushSize(frame);
+    Require(result.Size == 1 && result.Changed && result.ConsumeWheel,
+        "Size 2 plus negative Ctrl+wheel did not resolve to size 1.");
+
+    frame.LeftControl = false;
+    frame.RightControl = true;
+    frame.CurrentSize = 4;
+    frame.Wheel = -3.0F;
+    result = EditorInputService::ResolveSmartBrushSize(frame);
+    Require(result.Size == 1 && result.Changed && result.ConsumeWheel,
+        "Right Ctrl or multi-step wheel input resolves incorrectly.");
+
+    frame.CurrentSize = 16;
+    frame.Wheel = 1.0F;
+    result = EditorInputService::ResolveSmartBrushSize(frame);
+    Require(result.Size == 16 && !result.Changed && result.ConsumeWheel,
+        "A size limit must still consume an accepted Ctrl+wheel input.");
+
+    frame.CurrentSize = 1;
+    frame.Wheel = -1.0F;
+    result = EditorInputService::ResolveSmartBrushSize(frame);
+    Require(result.Size == 1 && !result.Changed && result.ConsumeWheel,
+        "The lower size limit must still consume an accepted Ctrl+wheel input.");
+
+    const auto requireBlocked = [&frame](const std::string_view message)
+    {
+        const SmartBrushSizeInputResult blocked =
+            EditorInputService::ResolveSmartBrushSize(frame);
+        Require(blocked.Size == 1 && !blocked.Changed && !blocked.ConsumeWheel,
+            message);
+    };
+    frame.RightControl = false;
+    requireBlocked("Wheel input without Ctrl was incorrectly consumed.");
+    frame.RightControl = true;
+
+    frame.HasDocument = false;
+    requireBlocked("A missing document enabled brush size input.");
+    frame.HasDocument = true;
+    frame.SmartToolActive = false;
+    requireBlocked("An inactive Smart tool enabled brush size input.");
+    frame.SmartToolActive = true;
+    frame.ViewportHovered = false;
+    requireBlocked("A non-hovered viewport enabled brush size input.");
+    frame.ViewportHovered = true;
+    frame.ViewportFocused = false;
+    requireBlocked("A non-focused viewport enabled brush size input.");
+    frame.ViewportFocused = true;
+    frame.MouseCapturedByOtherWidget = true;
+    requireBlocked("Another ImGui widget capture was ignored.");
+    frame.MouseCapturedByOtherWidget = false;
+    frame.ModalOpen = true;
+    requireBlocked("A modal did not block brush size input.");
+    frame.ModalOpen = false;
+    frame.DragDropActive = true;
+    requireBlocked("Drag and drop did not block brush size input.");
+    frame.DragDropActive = false;
+    frame.IncompatibleInteraction = true;
+    requireBlocked("An incompatible interaction did not block brush size input.");
+}
 }
 
 int main()
@@ -271,6 +349,7 @@ int main()
         TestSaveUndoRedoAndCancel();
         TestProtectedInputContexts();
         TestAvailabilityAndUnknownCommands();
+        TestSmartBrushSizeResolver();
         std::cout << "Editor input service tests passed.\n";
         return 0;
     }

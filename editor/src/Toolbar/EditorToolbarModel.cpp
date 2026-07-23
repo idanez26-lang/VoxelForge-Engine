@@ -10,14 +10,8 @@ namespace
 constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
     ToolbarButtons{{
         {EditorToolbarAction::Pencil, EditorToolbarGroup::Sculpt,
-         "Pencil", "Draw voxels", EditorInputCommand::ToolPencil,
+         "Smart Tool", "Edit voxels with Smart Brush", EditorInputCommand::ToolPencil,
          ActiveVoxelTool::Pencil},
-        {EditorToolbarAction::Face, EditorToolbarGroup::Construction,
-         "Face", "Coming soon", EditorInputCommand::None, ActiveVoxelTool::None},
-        {EditorToolbarAction::Box, EditorToolbarGroup::Construction,
-         "Box", "Coming soon", EditorInputCommand::ToolBox, ActiveVoxelTool::Box},
-        {EditorToolbarAction::Line, EditorToolbarGroup::Construction,
-         "Line", "Coming soon", EditorInputCommand::ToolLine, ActiveVoxelTool::Line},
         {EditorToolbarAction::Selection, EditorToolbarGroup::Selection,
          "Selection", "Select voxels", EditorInputCommand::ToolSelection,
          ActiveVoxelTool::Selection},
@@ -46,10 +40,6 @@ bool EditorToolbarModel::IsEnabled(
 {
     if (button.Action == EditorToolbarAction::Transform)
         return state.HasDocument && state.CanMoveSelection;
-    if (button.Action == EditorToolbarAction::Face ||
-        button.Action == EditorToolbarAction::Box ||
-        button.Action == EditorToolbarAction::Line)
-        return false;
     if (button.Action == EditorToolbarAction::Duplicate)
         return state.HasDocument && state.CanDuplicateSelection;
     if (button.Action == EditorToolbarAction::Rotate)
@@ -67,7 +57,17 @@ bool EditorToolbarModel::IsActive(
     const EditorToolbarButton& button,
     const EditorToolbarState& state) noexcept
 {
-    return state.HasDocument && button.Tool != ActiveVoxelTool::None &&
+    if (!state.HasDocument) return false;
+    if (button.Action == EditorToolbarAction::Pencil)
+        return state.ActiveTool == ActiveVoxelTool::Pencil;
+    if (button.Action == EditorToolbarAction::Transform)
+        return state.ActiveTool == ActiveVoxelTool::Move ||
+            state.ActiveTool == ActiveVoxelTool::Duplicate ||
+            state.ActiveTool == ActiveVoxelTool::Rotate ||
+            state.ActiveTool == ActiveVoxelTool::Mirror ||
+            state.ActiveTool == ActiveVoxelTool::Scale ||
+            state.ActiveTool == ActiveVoxelTool::Align;
+    return button.Tool != ActiveVoxelTool::None &&
         button.Tool == state.ActiveTool;
 }
 
