@@ -2648,7 +2648,7 @@ void EditorWorkspace::DrawScenePanel()
             else if (voxelToolState_.IsEraserActive())
                 static_cast<void>(ApplyVoxelEraser());
             else if (voxelToolState_.IsFillActive())
-                static_cast<void>(ApplyVoxelFill());
+                static_cast<void>(ApplyVoxelPaintBrush());
             else if (voxelToolState_.IsBoxActive())
             {
                 const auto target = CurrentTwoPointToolTarget();
@@ -12442,7 +12442,8 @@ bool EditorWorkspace::ApplyVoxelPencil()
         paletteService_.ActiveColor();
     try
     {
-        SmartBrushState brushState = toolContext_.Pencil.State;
+        SmartBrushState brushState = toolContext_.Brush;
+        brushState.Mode = toolContext_.Pencil.Mode;
         brushState.PaletteIndex = activeColor ? activeColor->Index : 0U;
         result = VoxelPencilTool::Apply({
             static_cast<VoxelEditSession*>(this),
@@ -12540,6 +12541,53 @@ bool EditorWorkspace::ApplyVoxelEraser()
             std::to_string(result.Position.Y) + ", " +
             std::to_string(result.Position.Z) + "): " + result.Error);
     }
+    return false;
+}
+
+bool EditorWorkspace::ApplyVoxelPaintBrush()
+{
+    if (voxelEditInProgress_) return false;
+    voxelEditInProgress_ = true;
+    VoxelPaintBrushResult result;
+    const std::optional<PaletteColorSelection> activeColor =
+        paletteService_.ActiveColor();
+    try
+    {
+        SmartBrushState brushState = toolContext_.Brush;
+        brushState.Mode = SmartBrushMode::Paint;
+        brushState.PaletteIndex = activeColor ? activeColor->Index : 0U;
+        result = VoxelPaintBrushTool::Apply({
+            static_cast<VoxelEditSession*>(this),
+            voxelDocumentSession_.ActiveDocument(),
+            0U,
+            voxelSelection_.Hovered(),
+            brushState,
+            !voxelToolState_.IsFillActive(),
+            &voxelEditHistory_});
+    }
+    catch (const std::exception& exception)
+    {
+        result.Code = VoxelPaintBrushResultCode::Failed;
+        result.Error = exception.what();
+    }
+    catch (...)
+    {
+        result.Code = VoxelPaintBrushResultCode::Failed;
+        result.Error = "Unknown Paint Brush failure.";
+    }
+    voxelEditInProgress_ = false;
+    lastVoxelPaintBrushResult_ = result;
+    toolContext_.Paint.Statistics = result.Statistics;
+
+    if (result.Code == VoxelPaintBrushResultCode::Applied)
+    {
+        static_cast<void>(paletteService_.RecordActiveColorUsage());
+        AddConsoleMessage("[Edit] Painted " +
+            std::to_string(result.Statistics.Painted) + " voxel(s).");
+        return true;
+    }
+    if (result.Code == VoxelPaintBrushResultCode::Failed)
+        AddConsoleMessage("[Edit] Paint Brush failed: " + result.Error);
     return false;
 }
 
@@ -13873,12 +13921,18 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<VoxelSpherePreview> spherePreview;
     VoxelPlacementPreviewStyle placementStyle =
         VoxelPlacementPreviewStyle::PencilInvalid;
-    if (!voxelToolState_.IsPencilActive()) pencilPreviewCacheValid_ = false;
+    if (!voxelToolState_.IsPencilActive())
+    {
+        pencilPreviewCacheValid_ = false;
+        toolContext_.Pencil.Statistics.reset();
+    }
+    if (!voxelToolState_.IsFillActive()) paintPreviewCacheValid_ = false;
     if (voxelToolState_.IsPencilActive())
     {
         const Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
-        SmartBrushState previewState = toolContext_.Pencil.State;
+        SmartBrushState previewState = toolContext_.Brush;
+        previewState.Mode = toolContext_.Pencil.Mode;
         if (const std::optional<PaletteColorSelection> activeColor =
                 paletteService_.ActiveColor())
             previewState.PaletteIndex = activeColor->Index;
@@ -13919,6 +13973,10 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             pencilPreviewUsesWorkplane_ = usesWorkplane;
             pencilPreviewCacheValid_ = true;
         }
+        if (voxelPlacementPreview_.IsVisible())
+            toolContext_.Pencil.Statistics = voxelPlacementPreview_.Statistics;
+        else
+            toolContext_.Pencil.Statistics.reset();
         if (voxelPlacementPreview_.IsVisible())
         {
             if (voxelPlacementPreview_.RenderPlan.Mode ==
@@ -13971,7 +14029,89 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     }
     else if (voxelToolState_.IsFillActive())
     {
+        Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        SmartBrushState previewState = toolContext_.Brush;
+        previewState.Mode = SmartBrushMode::Paint;
+        if (const std::optional<PaletteColorSelection> activeColor =
+                paletteService_.ActiveColor())
+            previewState.PaletteIndex = activeColor->Index;
+        else
+            previewState.PaletteIndex = 0U;
+        const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
+        const std::optional<VoxelCoordinates> hitCoordinates = hit
+            ? std::optional<VoxelCoordinates>{hit->Coordinates}
+            : std::nullopt;
+        const VoxelHitFace face = hit ? hit->Face : VoxelHitFace::None;
+        const std::size_t hitSubModelIndex = hit ? hit->SubModelIndex : 0U;
+        const std::uint64_t revision = document ? document->GetRevision() : 0U;
+        const std::uint64_t generation = voxelDocumentSession_.Generation();
+        if (!paintPreviewCacheValid_ || paintPreviewDocument_ != document ||
+            paintPreviewRevision_ != revision ||
+            paintPreviewGeneration_ != generation ||
+            paintPreviewCoordinates_ != hitCoordinates ||
+            paintPreviewFace_ != face ||
+            paintPreviewHitSubModelIndex_ != hitSubModelIndex ||
+            paintPreviewState_ != previewState)
+        {
+            try
+            {
+                paintPreviewEvaluation_ = VoxelPaintBrushTool::Evaluate({
+                    nullptr,
+                    document,
+                    0U,
+                    hit,
+                    previewState,
+                    false,
+                    nullptr});
+            }
+            catch (...)
+            {
+                paintPreviewEvaluation_ = {};
+            }
+            paintPreviewDocument_ = document;
+            paintPreviewRevision_ = revision;
+            paintPreviewGeneration_ = generation;
+            paintPreviewCoordinates_ = hitCoordinates;
+            paintPreviewFace_ = face;
+            paintPreviewHitSubModelIndex_ = hitSubModelIndex;
+            paintPreviewState_ = previewState;
+            paintPreviewCacheValid_ = true;
+        }
+        toolContext_.Paint.Statistics = paintPreviewEvaluation_.Statistics;
         voxelPlacementPreview_ = {};
+        const bool hasPaintPlan =
+            paintPreviewEvaluation_.Code == VoxelPaintBrushResultCode::Applied ||
+            paintPreviewEvaluation_.Code == VoxelPaintBrushResultCode::NoChange;
+        if (hasPaintPlan)
+        {
+            if (paintPreviewEvaluation_.RenderPlan.Mode ==
+                SmartBrushRenderMode::AggregateBox)
+            {
+                brushAggregatePreview = {
+                    paintPreviewEvaluation_.RenderPlan.Bounds.Minimum,
+                    paintPreviewEvaluation_.RenderPlan.Bounds.Maximum};
+            }
+            else if (paintPreviewEvaluation_.RenderPlan.Mode ==
+                SmartBrushRenderMode::AggregateSphere)
+            {
+                brushAggregateSpherePreview = VoxelSpherePreview{
+                    paintPreviewEvaluation_.RenderPlan.SphereCenter,
+                    paintPreviewEvaluation_.RenderPlan.SphereRadius};
+            }
+            else
+            {
+                brushPreview = std::span<const Asset::Voxel::VoxelPosition>(
+                    paintPreviewEvaluation_.PaintablePositions);
+                brushOccupiedPreview =
+                    std::span<const Asset::Voxel::VoxelPosition>(
+                        paintPreviewEvaluation_.IgnoredPositions);
+            }
+            placementStyle = paintPreviewEvaluation_.Code ==
+                VoxelPaintBrushResultCode::Applied
+                ? VoxelPlacementPreviewStyle::PencilValid
+                : VoxelPlacementPreviewStyle::PencilOccupied;
+        }
     }
     else if (voxelToolState_.IsBoxActive())
     {

@@ -343,6 +343,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelFillTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelPaintBrushTests
+    Editor/VoxelPaintBrushTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelPaintBrushTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorVoxelPaintBrushTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelPaintBrush
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelPaintBrushTests>
+)
+add_executable(
     VoxelForgeEditorVoxelBoxTests
     Editor/VoxelBoxTests.cpp
 )

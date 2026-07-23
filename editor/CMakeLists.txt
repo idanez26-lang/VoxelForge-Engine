@@ -320,6 +320,7 @@ target_sources(
         src/VoxelTools/VoxelBoxService.cpp
         src/VoxelTools/VoxelBrush.cpp
         src/VoxelTools/VoxelFillService.cpp
+        src/VoxelTools/VoxelPaintBrushTool.cpp
         src/VoxelTools/VoxelLineService.cpp
         src/VoxelTools/VoxelSphereService.cpp
         src/VoxelTools/VoxelPencilInput.cpp
@@ -617,6 +618,7 @@ target_sources(
         src/Input/EditorInputService.cpp
         src/Tools/ToolManager.cpp
         src/Tools/ToolPanel.cpp
+        src/Tools/Panels/SmartBrushOptions.cpp
         src/Tools/Panels/PencilPanel.cpp
         src/Tools/Panels/ErasePanel.cpp
         src/Tools/Panels/PaintPanel.cpp

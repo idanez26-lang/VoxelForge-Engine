@@ -125,13 +125,43 @@ void TestMetadataAndFutureOrderingFoundation()
 void TestContextDefaults()
 {
     ToolContext context;
-    Require(context.Pencil.State.Mode == SmartBrushMode::Add &&
-        context.Pencil.State.Shape == SmartBrushShape::Cube &&
-        context.Pencil.State.Size == 1 &&
+    Require(context.Pencil.Mode == SmartBrushMode::Add &&
+        context.Brush.Shape == SmartBrushShape::Cube &&
+        context.Brush.Dimension == SmartBrushDimension::Volume3D &&
+        context.Brush.Orientation == SmartBrushOrientation::Auto &&
+        context.Brush.Size == 1 && !context.Pencil.Statistics &&
+        !context.Paint.Statistics &&
         std::all_of(context.Pencil.Faces.begin(), context.Pencil.Faces.end(),
             [](const bool enabled) { return enabled; }) &&
         context.Scale.Uniform && !context.Scale.Snap,
         "Professional tool option defaults are invalid.");
+}
+
+void TestSmartBrushStatePersistsAcrossToolChanges()
+{
+    ToolContext context;
+    VoxelToolState state;
+    ToolManager manager(state);
+    context.Brush.Shape = SmartBrushShape::Sphere;
+    context.Brush.Dimension = SmartBrushDimension::Surface2D;
+    context.Brush.Orientation = SmartBrushOrientation::Z;
+    context.Brush.Size = 12;
+
+    manager.SetActiveTool(ActiveVoxelTool::Fill);
+    Require(manager.ActiveDescriptor().Panel == ToolPanelKind::Paint &&
+        context.Brush.Shape == SmartBrushShape::Sphere &&
+        context.Brush.Dimension == SmartBrushDimension::Surface2D &&
+        context.Brush.Orientation == SmartBrushOrientation::Z &&
+        context.Brush.Size == 12,
+        "Paint did not use the shared Smart Brush options.");
+    manager.SetActiveTool(ActiveVoxelTool::Pencil);
+    Require(manager.ActiveDescriptor().Panel == ToolPanelKind::Pencil &&
+        context.Brush.Shape == SmartBrushShape::Sphere &&
+        context.Brush.Dimension == SmartBrushDimension::Surface2D &&
+        context.Brush.Orientation == SmartBrushOrientation::Z &&
+        context.Brush.Size == 12 &&
+        context.Pencil.Mode == SmartBrushMode::Add,
+        "Shared Smart Brush options did not persist back to Pencil.");
 }
 }
 
@@ -144,6 +174,7 @@ int main()
         TestExistingStateAndLegacyShortcutsArePreserved();
         TestMetadataAndFutureOrderingFoundation();
         TestContextDefaults();
+        TestSmartBrushStatePersistsAcrossToolChanges();
         std::cout << "Professional tool framework tests passed.\n";
         return 0;
     }

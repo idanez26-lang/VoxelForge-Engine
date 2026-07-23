@@ -60,6 +60,7 @@
 #include "VoxelTools/VoxelBoxService.h"
 #include "VoxelTools/VoxelFillService.h"
 #include "VoxelTools/VoxelLineService.h"
+#include "VoxelTools/VoxelPaintBrushTool.h"
 #include "VoxelTools/VoxelSphereService.h"
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
@@ -335,6 +336,7 @@ private:
     [[nodiscard]] bool AddAdjacentVoxel();
     [[nodiscard]] bool ApplyVoxelPencil();
     [[nodiscard]] bool ApplyVoxelEraser();
+    [[nodiscard]] bool ApplyVoxelPaintBrush();
     [[nodiscard]] bool ApplyVoxelFill();
     [[nodiscard]] bool ApplyVoxelBox();
     [[nodiscard]] bool ApplyVoxelLine();
@@ -444,10 +446,20 @@ private:
     SmartBrushState pencilPreviewState_{};
     bool pencilPreviewUsesWorkplane_ = false;
     bool pencilPreviewCacheValid_ = false;
+    VoxelPaintBrushEvaluation paintPreviewEvaluation_;
+    const Asset::Voxel::VoxelDocument* paintPreviewDocument_ = nullptr;
+    std::uint64_t paintPreviewRevision_ = 0U;
+    std::uint64_t paintPreviewGeneration_ = 0U;
+    std::optional<VoxelCoordinates> paintPreviewCoordinates_;
+    VoxelHitFace paintPreviewFace_ = VoxelHitFace::None;
+    std::size_t paintPreviewHitSubModelIndex_ = 0U;
+    SmartBrushState paintPreviewState_{};
+    bool paintPreviewCacheValid_ = false;
     std::optional<WorkplaneHit> workplaneHit_;
     VoxelEditHistory voxelEditHistory_;
     std::optional<VoxelToolResult> lastVoxelToolResult_;
     std::optional<VoxelEraserResult> lastVoxelEraserResult_;
+    std::optional<VoxelPaintBrushResult> lastVoxelPaintBrushResult_;
     std::optional<VoxelFillResult> lastVoxelFillResult_;
     std::optional<VoxelBoxResult> lastVoxelBoxResult_;
     std::optional<VoxelLineResult> lastVoxelLineResult_;
