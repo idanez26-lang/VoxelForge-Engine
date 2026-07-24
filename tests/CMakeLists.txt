@@ -1379,3 +1379,31 @@ add_test(
     NAME VoxelForge.Editor.VfstampValidation
     COMMAND $<TARGET_FILE:VoxelForgeEditorVfstampValidationTests>
 )
+
+add_executable(
+    VoxelForgeEditorStampCaptureTests
+    Editor/StampCaptureTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampCaptureTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorStampCaptureTests)
+add_test(
+    NAME VoxelForge.Editor.StampCapture
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampCaptureTests>
+)
+
+add_executable(
+    VoxelForgeEditorStampAutoPivotTests
+    Editor/StampAutoPivotTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampAutoPivotTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorStampAutoPivotTests)
+add_test(
+    NAME VoxelForge.Editor.StampAutoPivot
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampAutoPivotTests>
+)

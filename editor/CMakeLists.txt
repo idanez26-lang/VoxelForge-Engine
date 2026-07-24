@@ -300,6 +300,8 @@ target_sources(
     VoxelForgeEditorVoxelStamps
     PRIVATE
         src/VoxelStamps/StampResourceLimits.cpp
+        src/VoxelStamps/Capture/StampCaptureService.cpp
+        src/VoxelStamps/Capture/StampAutoPivotResolver.cpp
         src/VoxelStamps/Format/VfstampReader.cpp
         src/VoxelStamps/Format/VfstampWriter.cpp
         src/VoxelStamps/Validation/StampValidationService.cpp
@@ -310,7 +312,7 @@ target_include_directories(
 )
 target_link_libraries(
     VoxelForgeEditorVoxelStamps
-    PUBLIC VoxelForgeAsset VoxelForgeCore
+    PUBLIC VoxelForgeAsset VoxelForgeCore VoxelForgeEditorVoxelSelection
 )
 target_compile_features(VoxelForgeEditorVoxelStamps PUBLIC cxx_std_20)
 if(MSVC)
