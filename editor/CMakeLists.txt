@@ -304,6 +304,7 @@ target_sources(
         src/VoxelStamps/Capture/StampAutoPivotResolver.cpp
         src/VoxelStamps/Format/VfstampReader.cpp
         src/VoxelStamps/Format/VfstampWriter.cpp
+        src/VoxelStamps/Library/StampProjectLibraryRepository.cpp
         src/VoxelStamps/Validation/StampValidationService.cpp
 )
 target_include_directories(

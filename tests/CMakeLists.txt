@@ -1407,3 +1407,17 @@ add_test(
     NAME VoxelForge.Editor.StampAutoPivot
     COMMAND $<TARGET_FILE:VoxelForgeEditorStampAutoPivotTests>
 )
+
+add_executable(
+    VoxelForgeEditorStampProjectLibraryTests
+    Editor/StampProjectLibraryTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampProjectLibraryTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorStampProjectLibraryTests)
+add_test(
+    NAME VoxelForge.Editor.StampProjectLibrary
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampProjectLibraryTests>
+)
