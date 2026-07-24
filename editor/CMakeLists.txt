@@ -295,6 +295,32 @@ else()
         VoxelForgeEditorPalette PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorVoxelStamps STATIC)
+target_sources(
+    VoxelForgeEditorVoxelStamps
+    PRIVATE
+        src/VoxelStamps/StampResourceLimits.cpp
+        src/VoxelStamps/Format/VfstampReader.cpp
+        src/VoxelStamps/Format/VfstampWriter.cpp
+        src/VoxelStamps/Validation/StampValidationService.cpp
+)
+target_include_directories(
+    VoxelForgeEditorVoxelStamps
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelStamps
+    PUBLIC VoxelForgeAsset VoxelForgeCore
+)
+target_compile_features(VoxelForgeEditorVoxelStamps PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorVoxelStamps PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorVoxelStamps PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorCommands STATIC)
 target_sources(
     VoxelForgeEditorCommands

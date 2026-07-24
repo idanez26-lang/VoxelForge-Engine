@@ -1337,3 +1337,45 @@ if(TARGET VoxelForgeEditor)
                 "VOXELFORGE_RECENT_PROJECTS_FILE=${CMAKE_CURRENT_BINARY_DIR}/smoke-recent-projects.txt;VOXELFORGE_PREFERENCES_FILE=${CMAKE_CURRENT_BINARY_DIR}/smoke-preferences.ini"
     )
 endif()
+
+add_executable(
+    VoxelForgeEditorVoxelStampDomainTests
+    Editor/VoxelStampDomainTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelStampDomainTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorVoxelStampDomainTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelStampDomain
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelStampDomainTests>
+)
+
+add_executable(
+    VoxelForgeEditorVfstampFormatTests
+    Editor/VfstampFormatTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVfstampFormatTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorVfstampFormatTests)
+add_test(
+    NAME VoxelForge.Editor.VfstampFormat
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVfstampFormatTests>
+)
+
+add_executable(
+    VoxelForgeEditorVfstampValidationTests
+    Editor/VfstampValidationTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVfstampValidationTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorVfstampValidationTests)
+add_test(
+    NAME VoxelForge.Editor.VfstampValidation
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVfstampValidationTests>
+)
