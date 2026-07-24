@@ -27,6 +27,7 @@
 #include "Selection/SelectionHandleModel.h"
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
+#include "SmartTools/SmartBrushPreviewResolver.h"
 #include "Transform/TransformPreviewModel.h"
 #include "Transform/TransformPivotManager.h"
 #include "TransformGizmo/TransformGizmoInteraction.h"
@@ -448,6 +449,8 @@ private:
     SmartBrushState pencilPreviewState_{};
     bool pencilPreviewUsesWorkplane_ = false;
     bool pencilPreviewCacheValid_ = false;
+    SmartBrushPreviewCache smartBrushGhostPreviewCache_;
+    const SmartBrushPreviewResult* smartBrushGhostPreview_ = nullptr;
     VoxelPaintBrushEvaluation paintPreviewEvaluation_;
     const Asset::Voxel::VoxelDocument* paintPreviewDocument_ = nullptr;
     std::uint64_t paintPreviewRevision_ = 0U;

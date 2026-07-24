@@ -235,11 +235,13 @@ SmartBrushResult SmartBrushEngine::Resolve(const SmartBrushRequest& request)
             std::move(result.Positions);
         const SmartBrushBounds rawBounds = CalculateBounds(rawPositions);
         result.Positions.reserve(rawPositions.size());
+        result.ClippedPositions.reserve(rawPositions.size());
         for (const Asset::Voxel::VoxelPosition position : rawPositions)
         {
             if (!IsInside(position, request.Dimensions))
             {
                 ++result.Statistics.Clipped;
+                result.ClippedPositions.push_back(position);
                 continue;
             }
             result.Positions.push_back(position);

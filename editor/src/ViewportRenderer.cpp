@@ -154,6 +154,33 @@ void AppendVoxelOutline(
                 {x + thickness, y + thickness, z1}, color);
 }
 
+void AppendGhostVoxel(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const GhostVoxel& ghost,
+    const Vec3 center,
+    const bool drawIndividualOutline)
+{
+    constexpr float expansion = 0.010F;
+    const Vec3 minimum = VoxelGridToViewport(
+        {static_cast<float>(ghost.Position.X),
+         static_cast<float>(ghost.Position.Y),
+         static_cast<float>(ghost.Position.Z)}, center);
+    std::array<float, 4> fillColor = ghost.Color;
+    fillColor[3] = std::clamp(ghost.Alpha, 0.0F, 1.0F);
+    AppendBox(vertices, indices,
+        {minimum.X - expansion, minimum.Y - expansion, minimum.Z - expansion},
+        {minimum.X + 1.0F + expansion, minimum.Y + 1.0F + expansion,
+         minimum.Z + 1.0F + expansion}, fillColor);
+
+    if (!drawIndividualOutline) return;
+    // Keep a fine, slightly stronger edge on the translucent volume so the
+    // individual cells remain readable when a large brush overlaps the mesh.
+    std::array<float, 4> outlineColor = ghost.Color;
+    outlineColor[3] = std::clamp(ghost.Alpha + 0.20F, 0.0F, 1.0F);
+    AppendVoxelOutline(vertices, indices, ghost.Position, center, outlineColor);
+}
+
 void AppendVoxelBoxOutline(
     std::vector<GPUVertex>& vertices,
     std::vector<std::uint32_t>& indices,
@@ -374,7 +401,8 @@ ViewportRenderer::~ViewportRenderer()
 
 bool ViewportRenderer::EnsurePipeline()
 {
-    if (pipeline_ != nullptr && transformGizmoVisiblePipeline_ != nullptr &&
+    if (pipeline_ != nullptr && smartBrushGhostPipeline_ != nullptr &&
+        transformGizmoVisiblePipeline_ != nullptr &&
         transformGizmoOccludedPipeline_ != nullptr)
     {
         return true;
@@ -438,6 +466,26 @@ bool ViewportRenderer::EnsurePipeline()
     pipelineInfo.depth_stencil_state.enable_depth_write = true;
     pipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &pipelineInfo);
 
+    // Ghost voxels are an editor overlay: depth-test them against the model,
+    // but never write depth and blend their own alpha over the model pass.
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pipelineInfo.depth_stencil_state.enable_depth_test = true;
+    pipelineInfo.depth_stencil_state.enable_depth_write = false;
+    colorDescription.blend_state.src_color_blendfactor =
+        SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    colorDescription.blend_state.dst_color_blendfactor =
+        SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    colorDescription.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    colorDescription.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    colorDescription.blend_state.dst_alpha_blendfactor =
+        SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    colorDescription.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    colorDescription.blend_state.enable_blend = true;
+    smartBrushGhostPipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &pipelineInfo);
+
+    // The regular visible gizmo remains an opaque editor overlay.
+    colorDescription.blend_state.enable_blend = false;
     pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
     pipelineInfo.depth_stencil_state.enable_depth_test =
@@ -447,16 +495,6 @@ bool ViewportRenderer::EnsurePipeline()
     transformGizmoVisiblePipeline_ =
         SDL_CreateGPUGraphicsPipeline(device_, &pipelineInfo);
 
-    colorDescription.blend_state.src_color_blendfactor =
-        SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-    colorDescription.blend_state.dst_color_blendfactor =
-        SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    colorDescription.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    colorDescription.blend_state.src_alpha_blendfactor =
-        SDL_GPU_BLENDFACTOR_ONE;
-    colorDescription.blend_state.dst_alpha_blendfactor =
-        SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    colorDescription.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
     colorDescription.blend_state.enable_blend = true;
     pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER;
     pipelineInfo.depth_stencil_state.enable_depth_test =
@@ -468,11 +506,14 @@ bool ViewportRenderer::EnsurePipeline()
 
     SDL_ReleaseGPUShader(device_, vertexShader);
     SDL_ReleaseGPUShader(device_, fragmentShader);
-    if (pipeline_ == nullptr || transformGizmoVisiblePipeline_ == nullptr ||
+    if (pipeline_ == nullptr || smartBrushGhostPipeline_ == nullptr ||
+        transformGizmoVisiblePipeline_ == nullptr ||
         transformGizmoOccludedPipeline_ == nullptr)
     {
         if (pipeline_ != nullptr)
             SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
+        if (smartBrushGhostPipeline_ != nullptr)
+            SDL_ReleaseGPUGraphicsPipeline(device_, smartBrushGhostPipeline_);
         if (transformGizmoVisiblePipeline_ != nullptr)
             SDL_ReleaseGPUGraphicsPipeline(
                 device_, transformGizmoVisiblePipeline_);
@@ -480,6 +521,7 @@ bool ViewportRenderer::EnsurePipeline()
             SDL_ReleaseGPUGraphicsPipeline(
                 device_, transformGizmoOccludedPipeline_);
         pipeline_ = nullptr;
+        smartBrushGhostPipeline_ = nullptr;
         transformGizmoVisiblePipeline_ = nullptr;
         transformGizmoOccludedPipeline_ = nullptr;
         SetError(std::string("Unable to create viewport pipelines: ") +
@@ -673,6 +715,7 @@ void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelBoxBounds> boxPreview,
     const std::span<const Asset::Voxel::VoxelPosition> linePreview,
     std::optional<VoxelSpherePreview> spherePreview,
+    const std::span<const GhostVoxel> smartBrushGhostPreview,
     const Vec3 modelCenter) noexcept
 {
     if (hovered)
@@ -703,6 +746,15 @@ void ViewportRenderer::ConfigureHighlights(
         boxPreviewHighlight_ == boxPreview &&
         equals(linePreviewHighlights_, linePreview) &&
         spherePreviewHighlight_ == spherePreview &&
+        smartBrushGhostPreview_.size() == smartBrushGhostPreview.size() &&
+        std::equal(smartBrushGhostPreview_.begin(), smartBrushGhostPreview_.end(),
+            smartBrushGhostPreview.begin(), smartBrushGhostPreview.end(),
+            [](const GhostVoxel& stored, const GhostVoxel& incoming)
+            {
+                return stored.Position == incoming.Position &&
+                    stored.State == incoming.State && stored.Color == incoming.Color &&
+                    stored.Alpha == incoming.Alpha;
+            }) &&
         modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
         modelCenter_.Z == modelCenter.Z)
     {
@@ -724,6 +776,8 @@ void ViewportRenderer::ConfigureHighlights(
     boxPreviewHighlight_ = boxPreview;
     linePreviewHighlights_.assign(linePreview.begin(), linePreview.end());
     spherePreviewHighlight_ = spherePreview;
+    smartBrushGhostPreview_.assign(
+        smartBrushGhostPreview.begin(), smartBrushGhostPreview.end());
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
         !selectedHighlights_.empty() ||
@@ -735,7 +789,8 @@ void ViewportRenderer::ConfigureHighlights(
         brushAggregatePreviewHighlight_.has_value() ||
         brushAggregateSpherePreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
-        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr ||
+        spherePreviewHighlight_.has_value() || !smartBrushGhostPreview_.empty() ||
+        transformPreview_ != nullptr ||
         transformGizmo_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
 }
@@ -778,7 +833,8 @@ void ViewportRenderer::ConfigureTransformPreview(
         editableSelectionBoundsHighlight_.has_value() ||
         placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
-        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr ||
+        spherePreviewHighlight_.has_value() || !smartBrushGhostPreview_.empty() ||
+        transformPreview_ != nullptr ||
         transformGizmo_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
 }
@@ -798,7 +854,8 @@ void ViewportRenderer::ConfigureTransformGizmo(
         editableSelectionBoundsHighlight_.has_value() ||
         placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
-        spherePreviewHighlight_.has_value() || transformPreview_ != nullptr ||
+        spherePreviewHighlight_.has_value() || !smartBrushGhostPreview_.empty() ||
+        transformPreview_ != nullptr ||
         transformGizmo_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
 }
@@ -1033,6 +1090,70 @@ bool ViewportRenderer::EnsureHighlights()
     else
     {
         highlightIndexCount_ = static_cast<std::uint32_t>(indices.size());
+    }
+
+    if (!smartBrushGhostGeometry_)
+        smartBrushGhostGeometry_ = std::make_unique<HighlightGeometryCache>();
+    std::vector<GPUVertex>& ghostVertices = smartBrushGhostGeometry_->Vertices;
+    std::vector<std::uint32_t>& ghostIndices = smartBrushGhostGeometry_->Indices;
+    ghostVertices.clear();
+    ghostIndices.clear();
+    // An individual outline is useful for a normal brush. For a very large
+    // brush, retain every filled ghost cell but replace thousands of repeated
+    // edge boxes with one aggregate outline around the rendered coordinates.
+    constexpr std::size_t IndividualGhostOutlineLimit = 128U;
+    const bool drawIndividualGhostOutlines =
+        smartBrushGhostPreview_.size() <= IndividualGhostOutlineLimit;
+    const std::size_t ghostBoxCount = smartBrushGhostPreview_.size() *
+        (drawIndividualGhostOutlines ? 13U : 1U) +
+        (drawIndividualGhostOutlines || smartBrushGhostPreview_.empty() ? 0U : 12U);
+    ghostVertices.reserve(ghostBoxCount * 24U);
+    ghostIndices.reserve(ghostBoxCount * 36U);
+    for (const GhostVoxel& ghost : smartBrushGhostPreview_)
+        AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
+            drawIndividualGhostOutlines);
+    if (!drawIndividualGhostOutlines && !smartBrushGhostPreview_.empty())
+    {
+        Asset::Voxel::VoxelPosition minimum =
+            smartBrushGhostPreview_.front().Position;
+        Asset::Voxel::VoxelPosition maximum = minimum;
+        for (const GhostVoxel& ghost : smartBrushGhostPreview_)
+        {
+            minimum.X = std::min(minimum.X, ghost.Position.X);
+            minimum.Y = std::min(minimum.Y, ghost.Position.Y);
+            minimum.Z = std::min(minimum.Z, ghost.Position.Z);
+            maximum.X = std::max(maximum.X, ghost.Position.X);
+            maximum.Y = std::max(maximum.Y, ghost.Position.Y);
+            maximum.Z = std::max(maximum.Z, ghost.Position.Z);
+        }
+        AppendVoxelBoxOutline(ghostVertices, ghostIndices, {minimum, maximum},
+            modelCenter_, {0.92F, 0.96F, 1.0F, 0.72F}, 0.024F, 0.022F);
+    }
+    if (ghostIndices.empty())
+    {
+        if (device_ != nullptr)
+        {
+            if (smartBrushGhostVertexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(device_, smartBrushGhostVertexBuffer_);
+            if (smartBrushGhostIndexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(device_, smartBrushGhostIndexBuffer_);
+        }
+        smartBrushGhostVertexBuffer_ = nullptr;
+        smartBrushGhostIndexBuffer_ = nullptr;
+        smartBrushGhostIndexCount_ = 0U;
+    }
+    else if (!UploadBufferPair(
+            ghostVertices.data(), ghostVertices.size() * sizeof(GPUVertex),
+            ghostIndices.data(), ghostIndices.size() * sizeof(std::uint32_t),
+            smartBrushGhostVertexBuffer_, smartBrushGhostIndexBuffer_,
+            "Smart Brush Ghost Preview"))
+    {
+        return false;
+    }
+    else
+    {
+        smartBrushGhostIndexCount_ =
+            static_cast<std::uint32_t>(ghostIndices.size());
     }
 
     const auto releaseGizmoGeometry = [this]()
@@ -1347,6 +1468,22 @@ bool ViewportRenderer::Render(
         SDL_DrawGPUIndexedPrimitives(pass, indexCount_, 1U, 0U, 0, 0U);
         ++modelRenderCount_;
     }
+    if (smartBrushGhostIndexCount_ > 0U)
+    {
+        SDL_BindGPUGraphicsPipeline(pass, smartBrushGhostPipeline_);
+        const SDL_GPUBufferBinding vertexBinding{
+            smartBrushGhostVertexBuffer_, 0U};
+        const SDL_GPUBufferBinding indexBinding{
+            smartBrushGhostIndexBuffer_, 0U};
+        SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+        SDL_BindGPUIndexBuffer(
+            pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        SDL_DrawGPUIndexedPrimitives(
+            pass, smartBrushGhostIndexCount_, 1U, 0U, 0, 0U);
+        // The conventional highlights remain opaque and use the unchanged
+        // model pipeline.
+        SDL_BindGPUGraphicsPipeline(pass, pipeline_);
+    }
     if (highlightIndexCount_ > 0U)
     {
         const SDL_GPUBufferBinding vertexBinding{highlightVertexBuffer_, 0U};
@@ -1415,8 +1552,9 @@ void ViewportRenderer::ClearModel() noexcept
         std::span<const Asset::Voxel::VoxelPosition>{}, std::nullopt,
         std::nullopt,
         std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
-        std::nullopt, {});
+        std::nullopt, std::span<const GhostVoxel>{}, {});
     highlightGeometry_.reset();
+    smartBrushGhostGeometry_.reset();
 }
 
 void ViewportRenderer::ReleaseHighlights() noexcept
@@ -1427,6 +1565,10 @@ void ViewportRenderer::ReleaseHighlights() noexcept
             SDL_ReleaseGPUBuffer(device_, highlightVertexBuffer_);
         if (highlightIndexBuffer_ != nullptr)
             SDL_ReleaseGPUBuffer(device_, highlightIndexBuffer_);
+        if (smartBrushGhostVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, smartBrushGhostVertexBuffer_);
+        if (smartBrushGhostIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, smartBrushGhostIndexBuffer_);
         if (transformGizmoVisibleVertexBuffer_ != nullptr)
             SDL_ReleaseGPUBuffer(
                 device_, transformGizmoVisibleVertexBuffer_);
@@ -1442,7 +1584,10 @@ void ViewportRenderer::ReleaseHighlights() noexcept
     }
     highlightVertexBuffer_ = nullptr;
     highlightIndexBuffer_ = nullptr;
+    smartBrushGhostVertexBuffer_ = nullptr;
+    smartBrushGhostIndexBuffer_ = nullptr;
     highlightIndexCount_ = 0U;
+    smartBrushGhostIndexCount_ = 0U;
     transformGizmoVisibleVertexBuffer_ = nullptr;
     transformGizmoVisibleIndexBuffer_ = nullptr;
     transformGizmoOccludedVertexBuffer_ = nullptr;
@@ -1491,6 +1636,8 @@ void ViewportRenderer::Shutdown() noexcept
     {
         SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
     }
+    if (device_ != nullptr && smartBrushGhostPipeline_ != nullptr)
+        SDL_ReleaseGPUGraphicsPipeline(device_, smartBrushGhostPipeline_);
     if (device_ != nullptr && transformGizmoVisiblePipeline_ != nullptr)
         SDL_ReleaseGPUGraphicsPipeline(
             device_, transformGizmoVisiblePipeline_);
@@ -1498,6 +1645,7 @@ void ViewportRenderer::Shutdown() noexcept
         SDL_ReleaseGPUGraphicsPipeline(
             device_, transformGizmoOccludedPipeline_);
     pipeline_ = nullptr;
+    smartBrushGhostPipeline_ = nullptr;
     transformGizmoVisiblePipeline_ = nullptr;
     transformGizmoOccludedPipeline_ = nullptr;
     device_ = nullptr;

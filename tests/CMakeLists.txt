@@ -426,6 +426,19 @@ add_executable(
 target_link_libraries(VoxelForgeEditorSmartToolTests PRIVATE VoxelForgeEditorCommands)
 vf_configure_test(VoxelForgeEditorSmartToolTests)
 add_test(NAME VoxelForge.Editor.SmartTool COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolTests>)
+add_executable(
+    VoxelForgeEditorProfessionalGhostPreviewSmoke
+    Editor/ProfessionalGhostPreviewSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorProfessionalGhostPreviewSmoke
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorProfessionalGhostPreviewSmoke)
+add_test(
+    NAME VoxelForge.Editor.ProfessionalGhostPreviewSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorProfessionalGhostPreviewSmoke>
+)
 target_include_directories(
     VoxelForgeProfessionalToolFrameworkSmoke
     PRIVATE ${PROJECT_SOURCE_DIR}/editor/src

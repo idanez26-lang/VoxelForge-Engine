@@ -2,6 +2,7 @@
 
 #include "EditorCamera.h"
 #include "Selection/SelectionService.h"
+#include "SmartTools/SmartBrushPreviewResolver.h"
 #include "Transform/TransformPreviewModel.h"
 #include "TransformGizmo/TransformGizmoModel.h"
 #include "VoxelSelection/VoxelRaycast.h"
@@ -81,6 +82,7 @@ public:
         std::optional<VoxelBoxBounds> boxPreview,
         std::span<const Asset::Voxel::VoxelPosition> linePreview,
         std::optional<VoxelSpherePreview> spherePreview,
+        std::span<const GhostVoxel> smartBrushGhostPreview,
         Vec3 modelCenter) noexcept;
     void ConfigureTransformPreview(
         const TransformPreviewRenderData* preview) noexcept;
@@ -138,6 +140,7 @@ private:
 
     SDL_GPUDevice* device_ = nullptr;
     SDL_GPUGraphicsPipeline* pipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* smartBrushGhostPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* transformGizmoVisiblePipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* transformGizmoOccludedPipeline_ = nullptr;
     SDL_GPUBuffer* vertexBuffer_ = nullptr;
@@ -146,6 +149,8 @@ private:
     SDL_GPUBuffer* guideIndexBuffer_ = nullptr;
     SDL_GPUBuffer* highlightVertexBuffer_ = nullptr;
     SDL_GPUBuffer* highlightIndexBuffer_ = nullptr;
+    SDL_GPUBuffer* smartBrushGhostVertexBuffer_ = nullptr;
+    SDL_GPUBuffer* smartBrushGhostIndexBuffer_ = nullptr;
     SDL_GPUBuffer* transformGizmoVisibleVertexBuffer_ = nullptr;
     SDL_GPUBuffer* transformGizmoVisibleIndexBuffer_ = nullptr;
     SDL_GPUBuffer* transformGizmoOccludedVertexBuffer_ = nullptr;
@@ -158,6 +163,7 @@ private:
     std::uint32_t gridIndexCount_ = 0;
     std::uint32_t axesIndexCount_ = 0;
     std::uint32_t highlightIndexCount_ = 0;
+    std::uint32_t smartBrushGhostIndexCount_ = 0;
     std::uint32_t transformGizmoVisibleIndexCount_ = 0;
     std::uint32_t transformGizmoOccludedIndexCount_ = 0;
     float guideWidth_ = 0.0F;
@@ -181,7 +187,9 @@ private:
     std::optional<VoxelSpherePreview> brushAggregateSpherePreviewHighlight_;
     std::optional<VoxelBoxBounds> boxPreviewHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
+    std::vector<GhostVoxel> smartBrushGhostPreview_;
     std::unique_ptr<HighlightGeometryCache> highlightGeometry_;
+    std::unique_ptr<HighlightGeometryCache> smartBrushGhostGeometry_;
     std::unique_ptr<TransformPreviewSnapshot> transformPreview_;
     std::optional<TransformGizmoView> transformGizmo_;
     std::optional<VoxelSpherePreview> spherePreviewHighlight_;

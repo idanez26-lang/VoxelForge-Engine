@@ -190,9 +190,11 @@ void TestBoundaryClipping()
     Require(cube.Code == Editor::SmartBrushResultCode::Valid &&
         cube.Statistics.Total == 27U && cube.Statistics.New == 12U &&
         cube.Statistics.Existing == 0U && cube.Statistics.Clipped == 15U &&
-        cube.Positions.size() == cube.Statistics.New,
+        cube.Positions.size() == cube.Statistics.New &&
+        cube.ClippedPositions.size() == cube.Statistics.Clipped,
         "Boundary Cube clipping statistics are incorrect.");
     RequireUnique(cube.Positions);
+    RequireUnique(cube.ClippedPositions);
 
     state.Shape = Editor::SmartBrushShape::Sphere;
     const auto sphere = Resolve(state, {{0, 0, 0}, {0, 1, 0}});
@@ -200,7 +202,8 @@ void TestBoundaryClipping()
         sphere.Statistics.Total == 19U && sphere.Statistics.Clipped > 0U &&
         sphere.Statistics.Total == sphere.Statistics.New +
             sphere.Statistics.Existing + sphere.Statistics.Clipped &&
-        sphere.Positions.size() == sphere.Statistics.New,
+        sphere.Positions.size() == sphere.Statistics.New &&
+        sphere.ClippedPositions.size() == sphere.Statistics.Clipped,
         "Boundary Sphere clipping statistics are incorrect.");
     RequireUnique(sphere.Positions);
 }

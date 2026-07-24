@@ -100,6 +100,7 @@ struct SmartBrushResult final
     SmartBrushResultCode Code = SmartBrushResultCode::InvalidRequest;
     SmartBrushStatistics Statistics{};
     std::vector<Asset::Voxel::VoxelPosition> Positions;
+    std::vector<Asset::Voxel::VoxelPosition> ClippedPositions;
     std::vector<Asset::Voxel::VoxelPosition> AddablePositions;
     std::vector<Asset::Voxel::VoxelPosition> ExistingPositions;
     SmartBrushRenderPlan RenderPlan{};
