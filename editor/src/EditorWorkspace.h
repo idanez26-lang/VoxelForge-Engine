@@ -22,6 +22,7 @@
 #include "Project/ProjectDialogPreferences.h"
 #include "Project/QualityOfLifeLogic.h"
 #include "ProjectSession/ProjectSessionService.h"
+#include "Preview/VoxelPreview.h"
 #include "Selection/SelectionService.h"
 #include "Selection/SelectionInteraction.h"
 #include "Selection/SelectionHandleModel.h"
@@ -59,6 +60,7 @@
 #include "VoxelStamps/Library/StampJsonCatalogStore.h"
 #include "VoxelStamps/Library/StampProjectLibraryRepository.h"
 #include "VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.h"
+#include "VoxelStamps/Preview/StampLivePreviewBuilder.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelTools/VoxelEraserTool.h"
@@ -79,6 +81,7 @@
 #include "VoxelForge/Mesh/VoxelDocumentMeshCache.h"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -227,6 +230,7 @@ public:
         std::size_t frame,
         const std::filesystem::path& parentDirectory);
     [[nodiscard]] bool QualityOfLifeSmokePassed() const noexcept;
+    [[nodiscard]] bool RunStampLivePreviewVisualStep(std::size_t frame);
     [[nodiscard]] std::size_t VoxelHighlightUploadCount() const noexcept;
     [[nodiscard]] std::size_t VoxelHighlightRenderCount() const noexcept;
 
@@ -276,6 +280,9 @@ private:
     void DrawDirtyConfirmationDialog();
     void DrawSaveSelectionAsStampDialog();
     void BeginSaveSelectionAsStamp();
+    void BeginLatestStampPreview();
+    void MoveLatestStampPreview(std::int32_t x, std::int32_t y, std::int32_t z);
+    void ClearLatestStampPreview() noexcept;
     void ConsumeFileDialogResult();
     [[nodiscard]] bool DrawPathInput(
         const char* label,
@@ -425,6 +432,15 @@ private:
     Stamps::StampJsonCatalogStore stampJsonCatalogStore_;
     Stamps::SaveSelectionAsStampWorkflow saveSelectionAsStampWorkflow_{
         stampProjectLibraryRepository_, stampJsonCatalogStore_};
+    VoxelPreviewSession liveStampPreviewSession_;
+    std::optional<Stamps::VoxelStamp> liveStampPreviewStamp_;
+    Stamps::StampFixedPoint liveStampPreviewTarget_{};
+    std::uint64_t stampLivePreviewVisualDocumentRevision_ = 0U;
+    std::optional<std::chrono::steady_clock::time_point>
+        stampLivePreviewVisualStartedAt_;
+    bool stampLivePreviewVisualValid_ = false;
+    bool stampLivePreviewVisualOverlap_ = false;
+    bool stampLivePreviewVisualClear_ = false;
     std::array<char, 256> saveSelectionAsStampName_{};
     std::string saveSelectionAsStampMessage_;
     bool showSaveSelectionAsStampPopup_ = false;

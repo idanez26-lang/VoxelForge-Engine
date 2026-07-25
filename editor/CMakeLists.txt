@@ -295,6 +295,16 @@ else()
         VoxelForgeEditorPalette PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_library(VoxelForgeEditorVoxelPreview STATIC src/Preview/VoxelPreview.cpp)
+target_include_directories(VoxelForgeEditorVoxelPreview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(VoxelForgeEditorVoxelPreview PUBLIC VoxelForgeAsset VoxelForgeCore)
+target_compile_features(VoxelForgeEditorVoxelPreview PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(VoxelForgeEditorVoxelPreview PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(VoxelForgeEditorVoxelPreview PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorVoxelStamps STATIC)
 target_sources(
     VoxelForgeEditorVoxelStamps
@@ -308,6 +318,7 @@ target_sources(
         src/VoxelStamps/Library/StampJsonCatalogStore.cpp
         src/VoxelStamps/Library/StampCatalogService.cpp
         src/VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.cpp
+        src/VoxelStamps/Preview/StampLivePreviewBuilder.cpp
         src/VoxelStamps/Validation/StampValidationService.cpp
 )
 target_include_directories(
@@ -317,6 +328,7 @@ target_include_directories(
 target_link_libraries(
     VoxelForgeEditorVoxelStamps
     PUBLIC VoxelForgeAsset VoxelForgeCore VoxelForgeEditorVoxelSelection
+        VoxelForgeEditorVoxelPreview
 )
 target_compile_features(VoxelForgeEditorVoxelStamps PUBLIC cxx_std_20)
 if(MSVC)

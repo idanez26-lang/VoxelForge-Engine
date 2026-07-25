@@ -1453,3 +1453,31 @@ add_test(
     NAME VoxelForge.Editor.SaveSelectionAsStampSmoke
     COMMAND $<TARGET_FILE:VoxelForgeEditorSaveSelectionAsStampSmokeTests>
 )
+
+add_executable(
+    VoxelForgeEditorStampLivePreviewTests
+    Editor/StampLivePreviewTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampLivePreviewTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampLivePreviewTests)
+add_test(
+    NAME VoxelForge.Editor.StampLivePreview
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampLivePreviewTests>
+)
+
+add_executable(
+    VoxelForgeEditorStampLivePreviewSmokeTests
+    Editor/StampLivePreviewSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampLivePreviewSmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampLivePreviewSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.StampLivePreviewSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampLivePreviewSmokeTests>
+)

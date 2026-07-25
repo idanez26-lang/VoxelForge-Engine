@@ -72,6 +72,7 @@ struct CommandLine final
     bool SmokeTest = false;
     bool ViewportSmokeTest = false;
     bool ViewportVisualTest = false;
+    bool StampLivePreviewVisualTest = false;
     bool VoxelSelectionSmokeTest = false;
     bool VoxelSelectionVisualTest = false;
     bool EraseVoxelSmokeTest = false;
@@ -132,6 +133,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.SmokeTest |= argument == "--safe-project-deletion-smoke-test";
         result.ViewportSmokeTest |= argument == "--viewport-smoke-test";
         result.ViewportVisualTest |= argument == "--viewport-visual-test";
+        result.StampLivePreviewVisualTest |=
+            argument == "--stamp-live-preview-visual-test";
         result.VoxelSelectionSmokeTest |=
             argument == "--voxel-selection-smoke-test" ||
             argument == "--selection-system-smoke-test" ||
@@ -414,6 +417,7 @@ int main(const int argumentCount, char* arguments[])
         ViewportTestFixture viewportFixture;
         const bool viewportTest =
             commandLine.ViewportSmokeTest || commandLine.ViewportVisualTest ||
+            commandLine.StampLivePreviewVisualTest ||
             commandLine.VoxelSelectionSmokeTest ||
             commandLine.VoxelSelectionVisualTest ||
             commandLine.EraseVoxelSmokeTest ||
@@ -501,6 +505,7 @@ int main(const int argumentCount, char* arguments[])
                 : viewportFixture.Create(
                     projectManager,
                     commandLine.AddVoxelSmokeTest ||
+                        commandLine.StampLivePreviewVisualTest ||
                         commandLine.VoxelPencilSmokeTest ||
                         commandLine.VoxelEraserSmokeTest ||
                         commandLine.VoxelUndoRedoSmokeTest,
@@ -714,7 +719,8 @@ int main(const int argumentCount, char* arguments[])
                  commandLine.SaveOnExitSmokeTest,
                  isolatedTest ? viewportFixture.ImGuiIniPath()
                              : std::filesystem::path{},
-                 commandLine.CreateWorkspaceSmokeTest);
+                 commandLine.CreateWorkspaceSmokeTest,
+                 commandLine.StampLivePreviewVisualTest);
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(

@@ -30,6 +30,7 @@
 #include <iomanip>
 #include <optional>
 #include <memory>
+#include <limits>
 #include <string_view>
 #include <sstream>
 #include <span>
@@ -883,6 +884,57 @@ void EditorWorkspace::DrawMainMenuBar()
     {
         const bool hasActiveProject = projectManager_.HasActiveProject();
         if (ImGui::MenuItem(
+                "Preview Latest Stamp (Developer)",
+                nullptr,
+                false,
+                hasActiveProject))
+        {
+            BeginLatestStampPreview();
+        }
+
+        const bool liveStampPreviewActive = liveStampPreviewSession_.Current() != nullptr;
+        if (ImGui::MenuItem(
+                "Move Stamp Preview +X", nullptr, false, liveStampPreviewActive))
+        {
+            MoveLatestStampPreview(1, 0, 0);
+        }
+
+        if (ImGui::MenuItem(
+                "Move Stamp Preview -X", nullptr, false, liveStampPreviewActive))
+        {
+            MoveLatestStampPreview(-1, 0, 0);
+        }
+
+        if (ImGui::MenuItem(
+                "Move Stamp Preview +Y", nullptr, false, liveStampPreviewActive))
+        {
+            MoveLatestStampPreview(0, 1, 0);
+        }
+
+        if (ImGui::MenuItem(
+                "Move Stamp Preview -Y", nullptr, false, liveStampPreviewActive))
+        {
+            MoveLatestStampPreview(0, -1, 0);
+        }
+
+        if (ImGui::MenuItem(
+                "Move Stamp Preview +Z", nullptr, false, liveStampPreviewActive))
+        {
+            MoveLatestStampPreview(0, 0, 1);
+        }
+
+        if (ImGui::MenuItem(
+                "Move Stamp Preview -Z", nullptr, false, liveStampPreviewActive))
+        {
+            MoveLatestStampPreview(0, 0, -1);
+        }
+
+        if (ImGui::MenuItem("Clear Stamp Preview", "Esc", false, liveStampPreviewActive))
+        {
+            ClearLatestStampPreview();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem(
                 "Rebuild Model Metadata", nullptr, false, hasActiveProject))
         {
             const MetadataRebuildReport report =
@@ -1472,6 +1524,11 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
 
 void EditorWorkspace::CancelActiveInteraction()
 {
+    if (liveStampPreviewSession_.Current() != nullptr)
+    {
+        ClearLatestStampPreview();
+        return;
+    }
     if (voxelBoxInteraction_.IsActive()) CancelVoxelBox();
     if (voxelLineInteraction_.IsActive()) CancelVoxelLine();
     if (voxelSphereInteraction_.IsActive()) CancelVoxelSphere();
@@ -4112,6 +4169,205 @@ void EditorWorkspace::BeginSaveSelectionAsStamp()
     else AddConsoleMessage("Save Selection As: " + result.Message);
 }
 
+void EditorWorkspace::BeginLatestStampPreview()
+{
+    const Stamps::StampCatalogResult catalogue = stampJsonCatalogStore_.LoadCatalogue();
+    if (!catalogue.Succeeded() || catalogue.Catalog.Entries.empty())
+    {
+        AddConsoleMessage("Live Stamp Preview: no Project Library Stamp is available.");
+        return;
+    }
+    const Stamps::StampCatalogEntry& entry = catalogue.Catalog.Entries.back();
+    Stamps::StampLibraryResult loaded = stampProjectLibraryRepository_.Read(entry.Reference);
+    if (!loaded.Succeeded() || !loaded.Stamp)
+    {
+        AddConsoleMessage("Live Stamp Preview: " + loaded.Message);
+        return;
+    }
+    liveStampPreviewStamp_ = std::move(*loaded.Stamp);
+    liveStampPreviewTarget_ = liveStampPreviewStamp_->Pivot().LocalPosition;
+    MoveLatestStampPreview(0, 0, 0);
+}
+
+void EditorWorkspace::MoveLatestStampPreview(
+    const std::int32_t x, const std::int32_t y, const std::int32_t z)
+{
+    if (!liveStampPreviewStamp_)
+    {
+        return;
+    }
+
+    constexpr std::int32_t units = Stamps::StampFixedPoint::UnitsPerVoxel;
+    const auto translated = [units](
+                                const std::int32_t target,
+                                const std::int32_t delta,
+                                std::int32_t& output) noexcept
+    {
+        const std::int64_t value = static_cast<std::int64_t>(target) +
+            static_cast<std::int64_t>(delta) * units;
+        if (value < std::numeric_limits<std::int32_t>::min() ||
+            value > std::numeric_limits<std::int32_t>::max())
+        {
+            return false;
+        }
+
+        output = static_cast<std::int32_t>(value);
+        return true;
+    };
+
+    Stamps::StampFixedPoint translatedTarget{};
+    if (!translated(liveStampPreviewTarget_.X, x, translatedTarget.X) ||
+        !translated(liveStampPreviewTarget_.Y, y, translatedTarget.Y) ||
+        !translated(liveStampPreviewTarget_.Z, z, translatedTarget.Z))
+    {
+        AddConsoleMessage("Live Stamp Preview: target exceeds fixed-point bounds.");
+        return;
+    }
+
+    liveStampPreviewTarget_ = translatedTarget;
+
+    const VoxelPreviewData preview = Stamps::StampLivePreviewBuilder::Build({
+        .Stamp = &*liveStampPreviewStamp_,
+        .Document = voxelDocumentSession_.ActiveDocument(),
+        .SubModelIndex = 0U,
+        .TargetPivot = liveStampPreviewTarget_});
+    if (!preview.IsActive())
+    {
+        AddConsoleMessage("Live Stamp Preview: target is not representable on the voxel grid.");
+        return;
+    }
+    const bool changed = liveStampPreviewSession_.Activate(preview);
+    if (changed)
+    {
+        UpdateVoxelHighlights();
+    }
+
+    AddConsoleMessage(preview.State == VoxelPreviewState::Overlap
+        ? "Live Stamp Preview: overlap is allowed."
+        : "Live Stamp Preview: valid preview active.");
+}
+
+void EditorWorkspace::ClearLatestStampPreview() noexcept
+{
+    const bool changed = liveStampPreviewSession_.Clear();
+    liveStampPreviewStamp_.reset();
+    if (changed)
+    {
+        UpdateVoxelHighlights();
+    }
+}
+
+bool EditorWorkspace::RunStampLivePreviewVisualStep(const std::size_t)
+{
+    const Asset::Voxel::VoxelDocument* const document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document == nullptr)
+    {
+        return false;
+    }
+
+    if (!stampLivePreviewVisualStartedAt_)
+    {
+        const Stamps::StampBounds bounds{{0, 0, 0}, {2, 0, 2}, {3U, 1U, 3U}};
+        const Stamps::StampPivot pivot{
+            .RequestedMode = Stamps::StampPivotMode::Center,
+            .ResolvedMode = Stamps::StampPivotMode::Center,
+            .LocalPosition = {0, 0, 0}};
+        const std::vector<Stamps::StampPaletteEntry> palette{
+            {0U, {255U, 82U, 82U, 255U}},
+            {1U, {255U, 210U, 64U, 255U}},
+            {2U, {88U, 188U, 255U, 255U}}};
+        const std::vector<Stamps::StampVoxel> voxels{
+            {{0, 0, 0}, 0U}, {{1, 0, 0}, 1U}, {{2, 0, 0}, 2U},
+            {{0, 0, 1}, 1U}, {{1, 0, 1}, 2U}, {{2, 0, 1}, 0U},
+            {{0, 0, 2}, 2U}, {{1, 0, 2}, 0U}, {{2, 0, 2}, 1U}};
+        Stamps::StampValidationResult validation{};
+        const std::optional<Stamps::VoxelStamp> fixture =
+            Stamps::VoxelStamp::TryCreate(
+                {.Id = Core::UUID{0x5354414d503039ULL},
+                 .ContentHash = "stamp-live-preview-visual-v1"},
+                bounds,
+                pivot,
+                {},
+                palette,
+                voxels,
+                Stamps::DefaultStampResourceLimits(),
+                &validation);
+        if (!fixture || !validation.IsValid())
+        {
+            AddConsoleMessage("Stamp live preview visual test: fixture creation failed.");
+            return false;
+        }
+
+        liveStampPreviewStamp_ = *fixture;
+        liveStampPreviewTarget_ = {0, 0, 0};
+        // The viewport can still be settling its final docked extent on the
+        // first visual-test frame. Frame generously so the fixture remains
+        // wholly visible even in a maximized, high-DPI workspace.
+        viewportCamera_.Frame(20.0F, 20.0F, 20.0F);
+        viewportCamera_.SetView(EditorCameraView::Perspective);
+        const VoxelPreviewData preview = Stamps::StampLivePreviewBuilder::Build({
+            .Stamp = &*liveStampPreviewStamp_,
+            .Document = document,
+            .SubModelIndex = 0U,
+            .TargetPivot = liveStampPreviewTarget_});
+        stampLivePreviewVisualDocumentRevision_ = document->GetRevision();
+        stampLivePreviewVisualValid_ = preview.IsActive() &&
+            preview.State == VoxelPreviewState::Valid &&
+            liveStampPreviewSession_.Activate(preview);
+        if (stampLivePreviewVisualValid_)
+        {
+            UpdateVoxelHighlights();
+        }
+
+        stampLivePreviewVisualStartedAt_ = std::chrono::steady_clock::now();
+        AddConsoleMessage(stampLivePreviewVisualValid_
+            ? "Stamp live preview visual test: valid state."
+            : "Stamp live preview visual test: valid state failed.");
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - *stampLivePreviewVisualStartedAt_);
+    if (elapsed >= std::chrono::seconds{12} && !stampLivePreviewVisualClear_)
+    {
+        ClearLatestStampPreview();
+        stampLivePreviewVisualClear_ = stampLivePreviewVisualOverlap_ &&
+            liveStampPreviewSession_.Current() == nullptr &&
+            document->GetRevision() == stampLivePreviewVisualDocumentRevision_ &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo();
+        AddConsoleMessage(stampLivePreviewVisualClear_
+            ? "Stamp live preview visual test: clear state."
+            : "Stamp live preview visual test: clear state failed.");
+    }
+    else if (elapsed >= std::chrono::seconds{6} &&
+             !stampLivePreviewVisualOverlap_ && liveStampPreviewStamp_)
+    {
+        liveStampPreviewTarget_ = {
+            0,
+            Stamps::StampFixedPoint::UnitsPerVoxel,
+            0};
+        const VoxelPreviewData preview = Stamps::StampLivePreviewBuilder::Build({
+            .Stamp = &*liveStampPreviewStamp_,
+            .Document = document,
+            .SubModelIndex = 0U,
+            .TargetPivot = liveStampPreviewTarget_});
+        stampLivePreviewVisualOverlap_ = stampLivePreviewVisualValid_ &&
+            preview.IsActive() && preview.State == VoxelPreviewState::Overlap &&
+            liveStampPreviewSession_.Activate(preview) &&
+            document->GetRevision() == stampLivePreviewVisualDocumentRevision_ &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo();
+        if (stampLivePreviewVisualOverlap_)
+        {
+            UpdateVoxelHighlights();
+        }
+
+        AddConsoleMessage(stampLivePreviewVisualOverlap_
+            ? "Stamp live preview visual test: overlap state."
+            : "Stamp live preview visual test: overlap state failed.");
+    }
+    return stampLivePreviewVisualValid_ ||
+        stampLivePreviewVisualOverlap_ || stampLivePreviewVisualClear_;
+}
+
 void EditorWorkspace::DrawSaveSelectionAsStampDialog()
 {
     constexpr const char* popupName = "Save Selection As...";
@@ -4183,7 +4439,6 @@ void EditorWorkspace::DrawSaveSelectionAsStampDialog()
     }
     EditorDialogStyle::EndPopup();
 }
-
 
 void EditorWorkspace::DrawProjectDeletionDialog()
 {
@@ -5370,6 +5625,7 @@ void EditorWorkspace::CompleteDeferredCloseAfterFrame()
 
 void EditorWorkspace::PrepareForApplicationClose()
 {
+    ClearLatestStampPreview();
     voxelBoxInteraction_.Cancel();
     voxelLineInteraction_.Cancel();
     voxelSphereInteraction_.Cancel();
@@ -5425,6 +5681,9 @@ void EditorWorkspace::CloseProject()
 
 void EditorWorkspace::SynchronizeProjectAssets()
 {
+    // Every project transition invalidates the immutable preview source,
+    // including active-project to active-project switches.
+    ClearLatestStampPreview();
     const auto& project = projectManager_.ActiveProject();
     if (!project)
     {
@@ -5449,6 +5708,7 @@ void EditorWorkspace::SynchronizeProjectAssets()
         stampProjectLibraryRepository_.ClearProjectRoot();
         stampJsonCatalogStore_.ClearProjectRoot();
         static_cast<void>(saveSelectionAsStampWorkflow_.Cancel());
+        ClearLatestStampPreview();
         assetBrowser_.ClearAssetsRoot();
         assetInspector_.ClearProject();
         return;
@@ -14607,6 +14867,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         spherePreview,
         smartBrushGhostPreview,
         voxelModelCenter_);
+    viewportRenderer_.ConfigureVoxelPreview(liveStampPreviewSession_.Current());
     const Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
     if (document && transformPreviewModel_.IsValidFor(

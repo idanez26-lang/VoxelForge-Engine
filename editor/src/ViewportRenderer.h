@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorCamera.h"
+#include "Preview/VoxelPreview.h"
 #include "Selection/SelectionService.h"
 #include "SmartTools/SmartBrushPreviewResolver.h"
 #include "Transform/TransformPreviewModel.h"
@@ -86,6 +87,9 @@ public:
         Vec3 modelCenter) noexcept;
     void ConfigureTransformPreview(
         const TransformPreviewRenderData* preview) noexcept;
+    /// Consumes a prepared generic snapshot. It never receives a document or
+    /// participates in picking, history, or asset mutation.
+    void ConfigureVoxelPreview(const VoxelPreviewData* preview) noexcept;
     void ConfigureTransformGizmo(
         const TransformGizmoView* gizmo) noexcept;
     void ClearModel() noexcept;
@@ -188,6 +192,8 @@ private:
     std::optional<VoxelBoxBounds> boxPreviewHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
     std::vector<GhostVoxel> smartBrushGhostPreview_;
+    std::vector<GhostVoxel> voxelPreviewGhosts_;
+    std::uint64_t voxelPreviewRevision_ = 0U;
     std::unique_ptr<HighlightGeometryCache> highlightGeometry_;
     std::unique_ptr<HighlightGeometryCache> smartBrushGhostGeometry_;
     std::unique_ptr<TransformPreviewSnapshot> transformPreview_;

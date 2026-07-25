@@ -790,6 +790,7 @@ void ViewportRenderer::ConfigureHighlights(
         brushAggregateSpherePreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
         spherePreviewHighlight_.has_value() || !smartBrushGhostPreview_.empty() ||
+        !voxelPreviewGhosts_.empty() ||
         transformPreview_ != nullptr ||
         transformGizmo_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
@@ -834,9 +835,56 @@ void ViewportRenderer::ConfigureTransformPreview(
         placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
         spherePreviewHighlight_.has_value() || !smartBrushGhostPreview_.empty() ||
+        !voxelPreviewGhosts_.empty() ||
         transformPreview_ != nullptr ||
         transformGizmo_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
+}
+
+void ViewportRenderer::ConfigureVoxelPreview(const VoxelPreviewData* preview) noexcept
+{
+    if (preview == nullptr || !preview->IsActive())
+    {
+        if (voxelPreviewGhosts_.empty()) return;
+        voxelPreviewGhosts_.clear();
+        voxelPreviewRevision_ = 0U;
+        highlightsDirty_ = true;
+        return;
+    }
+    if (voxelPreviewRevision_ == preview->Revision) return;
+    try
+    {
+        voxelPreviewGhosts_.clear();
+        voxelPreviewGhosts_.reserve(preview->Voxels.size());
+        const std::array<float, 4> stateTint = preview->State == VoxelPreviewState::Overlap
+            ? std::array<float, 4>{1.0F, 0.50F, 0.12F, 1.0F}
+            : preview->State == VoxelPreviewState::Invalid
+            ? std::array<float, 4>{0.95F, 0.16F, 0.18F, 1.0F}
+            : std::array<float, 4>{0.22F, 0.90F, 0.38F, 1.0F};
+        constexpr float colorScale = 1.0F / 255.0F;
+        for (const VoxelPreviewVoxel& voxel : preview->Voxels)
+        {
+            const std::array<float, 4> source{voxel.Color.Red * colorScale,
+                voxel.Color.Green * colorScale, voxel.Color.Blue * colorScale,
+                voxel.Color.Alpha * colorScale};
+            const bool overlap = voxel.OverlapsExisting;
+            const std::array<float, 4>& tint = overlap
+                ? std::array<float, 4>{1.0F, 0.50F, 0.12F, 1.0F} : stateTint;
+            std::array<float, 4> color{};
+            for (std::size_t index = 0U; index < 3U; ++index)
+                color[index] = source[index] * 0.78F + tint[index] * 0.22F;
+            color[3] = 1.0F;
+            voxelPreviewGhosts_.push_back({voxel.Position, GhostVoxelState::Added, color, 0.52F});
+        }
+        voxelPreviewRevision_ = preview->Revision;
+        highlightsDirty_ = true;
+    }
+    catch (const std::bad_alloc&)
+    {
+        voxelPreviewGhosts_.clear();
+        voxelPreviewRevision_ = 0U;
+        highlightsDirty_ = true;
+    }
 }
 
 void ViewportRenderer::ConfigureTransformGizmo(
@@ -855,6 +903,7 @@ void ViewportRenderer::ConfigureTransformGizmo(
         placementPreviewHighlight_.has_value() ||
         boxPreviewHighlight_.has_value() || !linePreviewHighlights_.empty() ||
         spherePreviewHighlight_.has_value() || !smartBrushGhostPreview_.empty() ||
+        !voxelPreviewGhosts_.empty() ||
         transformPreview_ != nullptr ||
         transformGizmo_.has_value();
     if (!highlightsDirty_) ReleaseHighlights();
@@ -1102,22 +1151,29 @@ bool ViewportRenderer::EnsureHighlights()
     // brush, retain every filled ghost cell but replace thousands of repeated
     // edge boxes with one aggregate outline around the rendered coordinates.
     constexpr std::size_t IndividualGhostOutlineLimit = 128U;
+    const std::size_t ghostPreviewCount = smartBrushGhostPreview_.size() +
+        voxelPreviewGhosts_.size();
     const bool drawIndividualGhostOutlines =
-        smartBrushGhostPreview_.size() <= IndividualGhostOutlineLimit;
-    const std::size_t ghostBoxCount = smartBrushGhostPreview_.size() *
+        ghostPreviewCount <= IndividualGhostOutlineLimit;
+    const std::size_t ghostBoxCount = ghostPreviewCount *
         (drawIndividualGhostOutlines ? 13U : 1U) +
-        (drawIndividualGhostOutlines || smartBrushGhostPreview_.empty() ? 0U : 12U);
+        (drawIndividualGhostOutlines || ghostPreviewCount == 0U ? 0U : 12U);
     ghostVertices.reserve(ghostBoxCount * 24U);
     ghostIndices.reserve(ghostBoxCount * 36U);
     for (const GhostVoxel& ghost : smartBrushGhostPreview_)
         AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
             drawIndividualGhostOutlines);
-    if (!drawIndividualGhostOutlines && !smartBrushGhostPreview_.empty())
+    for (const GhostVoxel& ghost : voxelPreviewGhosts_)
+        AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
+            drawIndividualGhostOutlines);
+    if (!drawIndividualGhostOutlines && ghostPreviewCount != 0U)
     {
-        Asset::Voxel::VoxelPosition minimum =
-            smartBrushGhostPreview_.front().Position;
+        const GhostVoxel* first = !smartBrushGhostPreview_.empty()
+            ? &smartBrushGhostPreview_.front()
+            : &voxelPreviewGhosts_.front();
+        Asset::Voxel::VoxelPosition minimum = first->Position;
         Asset::Voxel::VoxelPosition maximum = minimum;
-        for (const GhostVoxel& ghost : smartBrushGhostPreview_)
+        const auto extendBounds = [&minimum, &maximum](const GhostVoxel& ghost)
         {
             minimum.X = std::min(minimum.X, ghost.Position.X);
             minimum.Y = std::min(minimum.Y, ghost.Position.Y);
@@ -1125,7 +1181,9 @@ bool ViewportRenderer::EnsureHighlights()
             maximum.X = std::max(maximum.X, ghost.Position.X);
             maximum.Y = std::max(maximum.Y, ghost.Position.Y);
             maximum.Z = std::max(maximum.Z, ghost.Position.Z);
-        }
+        };
+        for (const GhostVoxel& ghost : smartBrushGhostPreview_) extendBounds(ghost);
+        for (const GhostVoxel& ghost : voxelPreviewGhosts_) extendBounds(ghost);
         AppendVoxelBoxOutline(ghostVertices, ghostIndices, {minimum, maximum},
             modelCenter_, {0.92F, 0.96F, 1.0F, 0.72F}, 0.024F, 0.022F);
     }
@@ -1541,6 +1599,7 @@ void ViewportRenderer::ClearModel() noexcept
     vertexBuffer_ = nullptr;
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
+    ConfigureVoxelPreview(nullptr);
     ConfigureTransformPreview(nullptr);
     ConfigureTransformGizmo(nullptr);
     ConfigureHighlights(

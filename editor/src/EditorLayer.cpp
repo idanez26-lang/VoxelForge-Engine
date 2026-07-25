@@ -71,7 +71,8 @@ EditorLayer::EditorLayer(
     const bool transformPanelSmokeTest,
     const bool saveOnExitSmokeTest,
     std::filesystem::path imguiIniPathOverride,
-    const bool createWorkspaceSmokeTest)
+    const bool createWorkspaceSmokeTest,
+    const bool stampLivePreviewVisualTest)
     : Layer("VoxelForge Editor Layer"),
       layoutPersistence_(std::move(imguiIniPathOverride)),
       workspace_(
@@ -95,7 +96,7 @@ EditorLayer::EditorLayer(
               transformGizmoManagerSmokeTest ||
               transformGizmoFoundationSmokeTest ||
               transformPanelSmokeTest ||
-              saveOnExitSmokeTest
+              saveOnExitSmokeTest || stampLivePreviewVisualTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -118,7 +119,7 @@ EditorLayer::EditorLayer(
               transformGizmoManagerSmokeTest ||
               transformGizmoFoundationSmokeTest ||
               transformPanelSmokeTest ||
-              saveOnExitSmokeTest),
+              saveOnExitSmokeTest || stampLivePreviewVisualTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -169,7 +170,8 @@ EditorLayer::EditorLayer(
       transformGizmoFoundationSmokeTest_(transformGizmoFoundationSmokeTest),
       transformPanelSmokeTest_(transformPanelSmokeTest),
       saveOnExitSmokeTest_(saveOnExitSmokeTest),
-      createWorkspaceSmokeTest_(createWorkspaceSmokeTest)
+      createWorkspaceSmokeTest_(createWorkspaceSmokeTest),
+      stampLivePreviewVisualTest_(stampLivePreviewVisualTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -471,6 +473,11 @@ void EditorLayer::OnImGuiRender()
     if (saveOnExitSmokeTest_)
     {
         static_cast<void>(workspace_.RunSaveOnExitSmokeStep(
+            renderedFrameCount_));
+    }
+    if (stampLivePreviewVisualTest_)
+    {
+        static_cast<void>(workspace_.RunStampLivePreviewVisualStep(
             renderedFrameCount_));
     }
     workspace_.Draw();

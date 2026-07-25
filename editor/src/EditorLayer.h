@@ -82,7 +82,8 @@ public:
         bool transformPanelSmokeTest = false,
         bool saveOnExitSmokeTest = false,
         std::filesystem::path imguiIniPathOverride = {},
-        bool createWorkspaceSmokeTest = false);
+        bool createWorkspaceSmokeTest = false,
+        bool stampLivePreviewVisualTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -171,6 +172,7 @@ private:
     bool transformPanelSmokeTest_ = false;
     bool saveOnExitSmokeTest_ = false;
     bool createWorkspaceSmokeTest_ = false;
+    bool stampLivePreviewVisualTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 
