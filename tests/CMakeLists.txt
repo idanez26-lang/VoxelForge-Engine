@@ -1421,3 +1421,8 @@ add_test(
     NAME VoxelForge.Editor.StampProjectLibrary
     COMMAND $<TARGET_FILE:VoxelForgeEditorStampProjectLibraryTests>
 )
+
+add_executable(VoxelForgeEditorStampCatalogTests Editor/StampCatalogTests.cpp)
+target_link_libraries(VoxelForgeEditorStampCatalogTests PRIVATE VoxelForgeEditorVoxelStamps)
+vf_configure_test(VoxelForgeEditorStampCatalogTests)
+add_test(NAME VoxelForge.Editor.StampCatalog COMMAND $<TARGET_FILE:VoxelForgeEditorStampCatalogTests>)

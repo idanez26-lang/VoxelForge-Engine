@@ -305,6 +305,8 @@ target_sources(
         src/VoxelStamps/Format/VfstampReader.cpp
         src/VoxelStamps/Format/VfstampWriter.cpp
         src/VoxelStamps/Library/StampProjectLibraryRepository.cpp
+        src/VoxelStamps/Library/StampJsonCatalogStore.cpp
+        src/VoxelStamps/Library/StampCatalogService.cpp
         src/VoxelStamps/Validation/StampValidationService.cpp
 )
 target_include_directories(
