@@ -694,6 +694,15 @@ void EditorWorkspace::DrawMainMenuBar()
         }
         DrawTooltip("Import one or more .vox models into Assets/Models");
 
+        const bool canSaveSelectionAsStamp = hasActiveProject &&
+            voxelDocumentSession_.HasActiveDocument() && !selectionService_.Empty();
+        if (ImGui::MenuItem(
+                "Save Selection As...", nullptr, false, canSaveSelectionAsStamp))
+        {
+            BeginSaveSelectionAsStamp();
+        }
+        DrawTooltip("Capture the current voxel selection as a reusable Project Library Stamp");
+
         std::optional<std::filesystem::path> recentImportToOpen;
         if (ImGui::BeginMenu("Recent Imports"))
         {
@@ -4080,7 +4089,101 @@ void EditorWorkspace::DrawProjectDialogs()
 {
     DrawNewProjectDialog();
     DrawOpenProjectDialog();
+    DrawSaveSelectionAsStampDialog();
 }
+
+void EditorWorkspace::BeginSaveSelectionAsStamp()
+{
+    const auto& project = projectManager_.ActiveProject();
+    const Asset::Voxel::VoxelDocument* document = voxelDocumentSession_.ActiveDocument();
+    if (!project || document == nullptr || selectionService_.Empty()) return;
+    const Stamps::SaveSelectionAsStampResult result = saveSelectionAsStampWorkflow_.Begin({
+        .ProjectRoot = project->RootPath(),
+        .Document = document,
+        .Selection = &selectionService_,
+        .DocumentGeneration = voxelDocumentSession_.Generation(),
+        .DocumentRevision = document->GetRevision()});
+    saveSelectionAsStampMessage_ = result.Message;
+    if (result.Status == Stamps::SaveSelectionAsStampStatus::Ready)
+    {
+        saveSelectionAsStampName_.fill('\0');
+        showSaveSelectionAsStampPopup_ = true;
+    }
+    else AddConsoleMessage("Save Selection As: " + result.Message);
+}
+
+void EditorWorkspace::DrawSaveSelectionAsStampDialog()
+{
+    constexpr const char* popupName = "Save Selection As...";
+    if (showSaveSelectionAsStampPopup_)
+    {
+        ImGui::OpenPopup(popupName);
+        showSaveSelectionAsStampPopup_ = false;
+    }
+    if (!EditorDialogStyle::BeginPopup(
+            popupName,
+            EditorDialogIntent::Save,
+            "Save selection as Stamp",
+            "Capture the current selection and add it to this project's Forge Library.",
+            true))
+        return;
+
+    ImGui::TextUnformatted("Stamp Name");
+    EditorDialogStyle::FullWidthField();
+    ImGui::InputText(
+        "##StampName", saveSelectionAsStampName_.data(), saveSelectionAsStampName_.size());
+    ImGui::TextDisabled("Destination: Project Library");
+
+    const bool saveAnyway = saveSelectionAsStampWorkflow_.RequiresSoftLimitConfirmation();
+    const Stamps::SaveSelectionAsStampResult validation =
+        saveSelectionAsStampWorkflow_.ValidateDraft({
+            .Name = saveSelectionAsStampName_.data(),
+            .ConfirmSoftLimit = saveAnyway});
+    if (saveAnyway)
+        EditorDialogStyle::DrawMessage(
+            "This selection exceeds a soft Stamp limit. Save Anyway confirms the capture.",
+            EditorDialogIntent::Warning);
+    else if (validation.Status != Stamps::SaveSelectionAsStampStatus::Ready)
+        EditorDialogStyle::DrawMessage(validation.Message, EditorDialogIntent::Warning);
+    else if (!saveSelectionAsStampMessage_.empty() &&
+             saveSelectionAsStampMessage_ != "Selection snapshot is ready to save.")
+        EditorDialogStyle::DrawMessage(saveSelectionAsStampMessage_, EditorDialogIntent::Information);
+
+    const bool canSave = validation.Status == Stamps::SaveSelectionAsStampStatus::Ready;
+    const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts(canSave);
+    EditorDialogStyle::BeginActions();
+    if (EditorDialogStyle::ActionButton("Cancel", false) ||
+        shortcut == EditorDialogShortcut::Cancel)
+    {
+        static_cast<void>(saveSelectionAsStampWorkflow_.Cancel());
+        saveSelectionAsStampMessage_.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (EditorDialogStyle::ActionButton(
+            saveAnyway ? "Save Anyway" : "Save", true, canSave) ||
+        shortcut == EditorDialogShortcut::Confirm)
+    {
+        const auto& project = projectManager_.ActiveProject();
+        const Asset::Voxel::VoxelDocument* document = voxelDocumentSession_.ActiveDocument();
+        Stamps::SaveSelectionAsStampCurrentContext current{};
+        if (project) current.ProjectRoot = project->RootPath();
+        current.Document = document;
+        current.Selection = &selectionService_;
+        current.DocumentGeneration = voxelDocumentSession_.Generation();
+        current.DocumentRevision = document ? document->GetRevision() : 0U;
+        const Stamps::SaveSelectionAsStampResult result = saveSelectionAsStampWorkflow_.Save(
+            {.Name = saveSelectionAsStampName_.data(), .ConfirmSoftLimit = saveAnyway}, current);
+        saveSelectionAsStampMessage_ = result.Message;
+        if (result.IsSuccess())
+        {
+            AddConsoleMessage("Save Selection As: " + result.Message);
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    EditorDialogStyle::EndPopup();
+}
+
 
 void EditorWorkspace::DrawProjectDeletionDialog()
 {
@@ -5343,6 +5446,9 @@ void EditorWorkspace::SynchronizeProjectAssets()
         voxelDocumentSaveService_.ClearProject();
         voxelModelCreationService_.ClearProject();
         projectSessionService_.ClearProject();
+        stampProjectLibraryRepository_.ClearProjectRoot();
+        stampJsonCatalogStore_.ClearProjectRoot();
+        static_cast<void>(saveSelectionAsStampWorkflow_.Cancel());
         assetBrowser_.ClearAssetsRoot();
         assetInspector_.ClearProject();
         return;
@@ -5368,6 +5474,9 @@ void EditorWorkspace::SynchronizeProjectAssets()
             voxelModelCreationService_.LastError());
     if (!projectSessionService_.SetProjectRoot(project->RootPath()))
         AddConsoleMessage("Project session setup failed.");
+    if (!stampProjectLibraryRepository_.SetProjectRoot(project->RootPath()) ||
+        !stampJsonCatalogStore_.SetProjectRoot(project->RootPath()))
+        AddConsoleMessage("Project Stamp Library setup failed.");
 }
 
 bool EditorWorkspace::SaveActiveProjectSession()

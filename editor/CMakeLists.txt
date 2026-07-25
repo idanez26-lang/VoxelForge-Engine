@@ -307,6 +307,7 @@ target_sources(
         src/VoxelStamps/Library/StampProjectLibraryRepository.cpp
         src/VoxelStamps/Library/StampJsonCatalogStore.cpp
         src/VoxelStamps/Library/StampCatalogService.cpp
+        src/VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.cpp
         src/VoxelStamps/Validation/StampValidationService.cpp
 )
 target_include_directories(
@@ -685,6 +686,7 @@ target_link_libraries(
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorVoxelDocument
         VoxelForgeEditorVoxelCreation
+        VoxelForgeEditorVoxelStamps
         VoxelForgeEditorVoxelSave
         VoxelForgeEditorWelcome
         VoxelForgeProject

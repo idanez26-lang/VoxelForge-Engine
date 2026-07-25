@@ -1426,3 +1426,30 @@ add_executable(VoxelForgeEditorStampCatalogTests Editor/StampCatalogTests.cpp)
 target_link_libraries(VoxelForgeEditorStampCatalogTests PRIVATE VoxelForgeEditorVoxelStamps)
 vf_configure_test(VoxelForgeEditorStampCatalogTests)
 add_test(NAME VoxelForge.Editor.StampCatalog COMMAND $<TARGET_FILE:VoxelForgeEditorStampCatalogTests>)
+
+add_executable(
+    VoxelForgeEditorSaveSelectionAsStampTests
+    Editor/SaveSelectionAsStampTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSaveSelectionAsStampTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorSaveSelectionAsStampTests)
+add_test(
+    NAME VoxelForge.Editor.SaveSelectionAsStamp
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSaveSelectionAsStampTests>
+)
+add_executable(
+    VoxelForgeEditorSaveSelectionAsStampSmokeTests
+    Editor/SaveSelectionAsStampSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSaveSelectionAsStampSmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorSaveSelectionAsStampSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.SaveSelectionAsStampSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSaveSelectionAsStampSmokeTests>
+)

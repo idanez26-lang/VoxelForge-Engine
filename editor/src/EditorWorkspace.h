@@ -55,6 +55,10 @@
 #include "VoxelCreation/WorkplaneService.h"
 #include "VoxelSelection/VoxelSelectionState.h"
 #include "VoxelSelection/ViewportRayBuilder.h"
+#include "VoxelStamps/Library/StampCatalogService.h"
+#include "VoxelStamps/Library/StampJsonCatalogStore.h"
+#include "VoxelStamps/Library/StampProjectLibraryRepository.h"
+#include "VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelTools/VoxelEraserTool.h"
@@ -270,6 +274,8 @@ private:
     void DrawVoxelModelCreationDialogs();
     void DrawFirstCreationOverlay();
     void DrawDirtyConfirmationDialog();
+    void DrawSaveSelectionAsStampDialog();
+    void BeginSaveSelectionAsStamp();
     void ConsumeFileDialogResult();
     [[nodiscard]] bool DrawPathInput(
         const char* label,
@@ -415,6 +421,13 @@ private:
     FirstCreationExperience firstCreationExperience_;
     WorkplaneService workplaneService_;
     SelectionService selectionService_;
+    Stamps::StampProjectLibraryRepository stampProjectLibraryRepository_;
+    Stamps::StampJsonCatalogStore stampJsonCatalogStore_;
+    Stamps::SaveSelectionAsStampWorkflow saveSelectionAsStampWorkflow_{
+        stampProjectLibraryRepository_, stampJsonCatalogStore_};
+    std::array<char, 256> saveSelectionAsStampName_{};
+    std::string saveSelectionAsStampMessage_;
+    bool showSaveSelectionAsStampPopup_ = false;
     SelectionVolumeCache selectionVolumeCache_;
     SelectionInteraction selectionInteraction_;
     ConstraintSettings constraintSettings_{

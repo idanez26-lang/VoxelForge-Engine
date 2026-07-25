@@ -134,8 +134,24 @@ void TestCanonicalInstallReadUniqueAndRemove(TemporaryProject& project)
         MakeStamp(42U, 20U), {.PreferredFileStem = "stone-wall"});
     Require(second.Succeeded() && second.Reference.RelativePath.filename() == "stone-wall-2.vfstamp",
         "Duplicate preferred names must choose deterministic unique filenames.");
+    const std::string utf8Name{"rocher-\xC3\xA9"};
+    const std::string expectedUtf8Bytes = utf8Name + ".vfstamp";
+    const std::u8string expectedUtf8File(
+        reinterpret_cast<const char8_t*>(expectedUtf8Bytes.data()),
+        reinterpret_cast<const char8_t*>(expectedUtf8Bytes.data()) + expectedUtf8Bytes.size());
+    const StampLibraryResult unicode = repository.Install(
+        MakeStamp(43U, 30U), {.PreferredFileStem = utf8Name});
+    if (!(unicode.Succeeded() && unicode.Reference.RelativePath.filename().u8string() == expectedUtf8File &&
+          fs::exists(project.Root() / unicode.Reference.RelativePath)))
+    {
+        throw std::runtime_error("Valid UTF-8 names must be preserved exactly rather than transliterated during installation. error=" +
+            unicode.Message);
+    }
+    Require(repository.Install(MakeStamp(44U, 40U), {.PreferredFileStem = "CON.txt"}).Error ==
+                StampLibraryError::InvalidReference,
+        "Reserved Windows device names must be rejected even when a caller includes an extension.");
     const StampLibraryResult inventory = repository.EnumerateSourceAssets();
-    Require(inventory.Succeeded() && inventory.Assets.size() == 2U &&
+    Require(inventory.Succeeded() && inventory.Assets.size() == 3U &&
                 inventory.Assets[0].Reference.RelativePath < inventory.Assets[1].Reference.RelativePath,
         "Source enumeration must be complete and deterministically ordered.");
     Require(repository.Remove(first.Reference).Succeeded() &&

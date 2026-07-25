@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <new>
+#include <optional>
 #include <system_error>
 #include <utility>
 
@@ -71,18 +72,66 @@ public:
     return static_cast<bool>(output);
 }
 
-[[nodiscard]] std::string SafeStem(const std::string_view requested)
+[[nodiscard]] bool IsValidUtf8(const std::string_view text) noexcept
 {
-    std::string result;
+    for (std::size_t index = 0U; index < text.size();)
+    {
+        const unsigned char first = static_cast<unsigned char>(text[index++]);
+        if (first < 0x80U) continue;
+        unsigned count = 0U;
+        std::uint32_t point = 0U;
+        std::uint32_t minimum = 0U;
+        if ((first & 0xE0U) == 0xC0U) { count = 1U; point = first & 0x1FU; minimum = 0x80U; }
+        else if ((first & 0xF0U) == 0xE0U) { count = 2U; point = first & 0x0FU; minimum = 0x800U; }
+        else if ((first & 0xF8U) == 0xF0U) { count = 3U; point = first & 0x07U; minimum = 0x10000U; }
+        else return false;
+        if (index + count > text.size()) return false;
+        for (unsigned offset = 0U; offset < count; ++offset)
+        {
+            const unsigned char next = static_cast<unsigned char>(text[index++]);
+            if ((next & 0xC0U) != 0x80U) return false;
+            point = (point << 6U) | (next & 0x3FU);
+        }
+        if (point < minimum || point > 0x10FFFFU || (point >= 0xD800U && point <= 0xDFFFU)) return false;
+    }
+    return true;
+}
+
+[[nodiscard]] std::string UpperAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::toupper(character));
+    });
+    return value;
+}
+
+[[nodiscard]] bool IsReservedWindowsStem(const std::string_view stem)
+{
+    const std::size_t extension = stem.find('.');
+    const std::string upper = UpperAscii(std::string(stem.substr(0U, extension)));
+    if (upper == "CON" || upper == "PRN" || upper == "AUX" || upper == "NUL") return true;
+    return upper.size() == 4U && (upper.starts_with("COM") || upper.starts_with("LPT")) &&
+        upper[3] >= '1' && upper[3] <= '9';
+}
+
+[[nodiscard]] std::optional<std::string> ValidFileStem(const std::string_view requested)
+{
+    if (requested.empty() || requested.size() > 255U || !IsValidUtf8(requested) ||
+        requested.back() == '.' || requested.back() == ' ') return std::nullopt;
     for (const unsigned char character : requested)
     {
-        if (std::isalnum(character) || character == '-' || character == '_')
-            result.push_back(static_cast<char>(character));
-        else if (!result.empty() && result.back() != '_') result.push_back('_');
-        if (result.size() == 64U) break;
+        if (character < 0x20U || character == '<' || character == '>' || character == ':' ||
+            character == '"' || character == '/' || character == '\\' || character == '|' ||
+            character == '?' || character == '*') return std::nullopt;
     }
-    while (!result.empty() && result.back() == '_') result.pop_back();
-    return result.empty() ? "stamp" : result;
+    if (IsReservedWindowsStem(requested)) return std::nullopt;
+    return std::string(requested);
+}
+
+[[nodiscard]] std::filesystem::path Utf8Path(const std::string_view text)
+{
+    const auto* first = reinterpret_cast<const char8_t*>(text.data());
+    return std::filesystem::path(std::u8string(first, first + text.size()));
 }
 
 [[nodiscard]] bool RemoveRegularFile(const std::filesystem::path& path) noexcept
@@ -271,16 +320,18 @@ StampLibraryResult StampProjectLibraryRepository::Install(
         StampLibraryResult directory = EnsureCreationsDirectory();
         if (!directory.Succeeded()) return directory;
         const std::filesystem::path creations = projectRoot_ / ProjectCreationsRelativePath;
-        const std::string stem = SafeStem(options.PreferredFileStem.empty()
+        const std::optional<std::string> stem = ValidFileStem(options.PreferredFileStem.empty()
             ? stamp.Identity().Id.ToString() : options.PreferredFileStem);
-        std::filesystem::path destination = creations / (stem + ".vfstamp");
+        if (!stem) return Failure(StampLibraryError::InvalidReference,
+            "Stamp filename is empty, invalid UTF-8, forbidden by Windows or reserved.");
+        std::filesystem::path destination = creations / Utf8Path(*stem + ".vfstamp");
         std::error_code error;
         if (!options.ReplaceExisting)
         {
             for (std::uint32_t suffix = 2U; std::filesystem::exists(destination, error); ++suffix)
             {
                 if (error) return Failure(StampLibraryError::IoFailure, error.message());
-                destination = creations / (stem + "-" + std::to_string(suffix) + ".vfstamp");
+                destination = creations / Utf8Path(*stem + "-" + std::to_string(suffix) + ".vfstamp");
             }
         }
         const std::filesystem::path temporary = StampTransactionTemporaryPath(destination);
