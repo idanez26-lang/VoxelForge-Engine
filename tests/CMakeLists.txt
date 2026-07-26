@@ -1498,3 +1498,32 @@ add_test(
     NAME VoxelForge.Editor.StampLivePreviewSmoke
     COMMAND $<TARGET_FILE:VoxelForgeEditorStampLivePreviewSmokeTests>
 )
+
+# STAMP-12: pure deterministic palette planning tests.
+add_executable(
+    VoxelForgeEditorPaletteMappingEngineTests
+    Editor/PaletteMappingEngineTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorPaletteMappingEngineTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorPaletteMappingEngineTests)
+add_test(
+    NAME VoxelForge.Editor.PaletteMappingEngine
+    COMMAND $<TARGET_FILE:VoxelForgeEditorPaletteMappingEngineTests>
+)
+
+add_executable(
+    VoxelForgeEditorPaletteMappingEngineSmokeTests
+    Editor/PaletteMappingEngineSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorPaletteMappingEngineSmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorPaletteMappingEngineSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.PaletteMappingEngineSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorPaletteMappingEngineSmokeTests>
+)

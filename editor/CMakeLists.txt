@@ -320,6 +320,8 @@ target_sources(
         src/VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.cpp
         src/VoxelStamps/Preview/StampLivePreviewBuilder.cpp
         src/VoxelStamps/Validation/StampValidationService.cpp
+        # STAMP-12: pure deterministic palette planning; no document mutation.
+        src/VoxelStamps/Palette/PaletteMappingEngine.cpp
 )
 target_include_directories(
     VoxelForgeEditorVoxelStamps
