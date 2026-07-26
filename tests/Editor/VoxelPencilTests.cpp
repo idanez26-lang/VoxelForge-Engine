@@ -1,6 +1,9 @@
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
+#include "PencilPreviewTestSupport.h"
 #include "VoxelTools/VoxelPencilTool.h"
+#include "Commands/Voxel/VoxelEditSession.h"
+#include "SmartTools/SmartToolController.h"
 #include "VoxelTools/VoxelBrush.h"
 #include "VoxelTools/VoxelToolState.h"
 #include "VoxelHistory/VoxelEditHistory.h"
@@ -166,14 +169,72 @@ public:
     bool gpuBufferActive_ = false;
 };
 
-Editor::VoxelPencilContext Context(
+struct TestPencilContext final
+{
+    TestEditSession* EditSession = nullptr;
+    Asset::Voxel::VoxelDocument* Document = nullptr;
+    std::size_t SubModelIndex = 0U;
+    std::optional<Editor::VoxelRaycastHit> Hit;
+    Editor::SmartBrushState State{};
+    Editor::VoxelEditHistory* History = nullptr;
+    std::optional<Asset::Voxel::VoxelPosition> WorkplaneTarget;
+
+    [[nodiscard]] operator Editor::VoxelPencilContext() const
+    {
+        Require(EditSession != nullptr && Document != nullptr,
+            "Cannot build a test Smart Tool plan without a document and session.");
+        const auto dimensions = Document->GetDimensions(SubModelIndex);
+        if (!dimensions)
+        {
+            return {nullptr, {EditSession, Document, SubModelIndex,
+                EditSession->VoxelModelGeneration(), History,
+                std::optional<std::size_t>{State.PaletteIndex}, nullptr, nullptr}};
+        }
+        const bool erasing = State.Mode == Editor::SmartBrushMode::Erase;
+        const auto target = WorkplaneTarget ? WorkplaneTarget
+            : Hit ? std::optional<Asset::Voxel::VoxelPosition>{erasing
+                ? Asset::Voxel::VoxelPosition{static_cast<std::int32_t>(Hit->Coordinates.X),
+                    static_cast<std::int32_t>(Hit->Coordinates.Y),
+                    static_cast<std::int32_t>(Hit->Coordinates.Z)}
+                : Hit->AdjacentPosition} : std::nullopt;
+        Require(target.has_value(), "Missing test placement target.");
+        if (Hit && Hit->Face == Editor::VoxelHitFace::None)
+        {
+            return {nullptr, {EditSession, Document, SubModelIndex,
+                EditSession->VoxelModelGeneration(), History,
+                std::optional<std::size_t>{State.PaletteIndex}, nullptr, nullptr}};
+        }
+        const auto normal = Hit ? Editor::VoxelHitFaceIntegerNormal(Hit->Face)
+            : Asset::Voxel::VoxelPosition{0, 1, 0};
+        Editor::SmartToolRequest request;
+        request.Geometry = Editor::SmartGeometry::Pencil;
+        request.Action = erasing ? Editor::SmartAction::Erase : Editor::SmartAction::Add;
+        request.BrushRequest = {*dimensions, State, {*target, normal},
+            [document = Document, subModelIndex = SubModelIndex](
+                const Asset::Voxel::VoxelPosition position)
+            { return document->HasVoxel(position, subModelIndex); }};
+        request.SourceIdentity = reinterpret_cast<std::uintptr_t>(Document);
+        request.SourceRevision = Document->GetRevision();
+        request.SourceGeneration = EditSession->VoxelModelGeneration();
+        request.SourceSubModelIndex = SubModelIndex;
+        Editor::SmartToolController controller;
+        Editor::SmartToolSession session;
+        const Editor::SmartToolPlanPtr plan = controller.ResolvePreview(
+            session, request).Plan;
+        return {plan, {EditSession, Document, SubModelIndex,
+            request.SourceGeneration, History,
+            std::optional<std::size_t>{State.PaletteIndex}, nullptr, nullptr}};
+    }
+};
+
+TestPencilContext Context(
     TestEditSession& session,
     Asset::Voxel::VoxelDocument& document,
     const Editor::VoxelRaycastHit hit,
     const std::size_t paletteIndex = 1U,
     const std::size_t modelIndex = 0U)
 {
-    Editor::VoxelPencilContext context;
+    TestPencilContext context;
     context.EditSession = &session;
     context.Document = &document;
     context.SubModelIndex = modelIndex;
@@ -233,19 +294,19 @@ void TestToolRefusals()
 
     Editor::VoxelPencilContext noDocument =
         Context(session, document, validHit);
-    noDocument.Document = nullptr;
+    noDocument.Execution.Document = nullptr;
     Require(Editor::VoxelPencilTool::Apply(noDocument).Code ==
         Editor::VoxelToolResultCode::NoDocument,
         "Missing document was not refused.");
     Editor::VoxelPencilContext noHit = Context(session, document, validHit);
-    noHit.Hit.reset();
+    noHit.Plan.reset();
     Require(Editor::VoxelPencilTool::Apply(noHit).Code ==
-        Editor::VoxelToolResultCode::NoHit,
-        "Missing hit was not refused.");
+        Editor::VoxelToolResultCode::Failed,
+        "A missing immutable plan was not refused.");
     Require(Editor::VoxelPencilTool::Apply(Context(
         session, document, Hit(1U, 1U, 1U, Editor::VoxelHitFace::None))).Code ==
-            Editor::VoxelToolResultCode::NoHit,
-        "Face None was not refused.");
+            Editor::VoxelToolResultCode::Failed,
+        "An invalid request without a plan was not refused.");
     Require(Editor::VoxelPencilTool::Apply(Context(
         session, document, Hit(0U, 1U, 1U,
             Editor::VoxelHitFace::NegativeX))).Code ==
@@ -266,16 +327,16 @@ void TestToolRefusals()
     Require(Editor::VoxelPencilTool::Apply(Context(
         session, document,
         Hit(1U, 1U, 1U, Editor::VoxelHitFace::NegativeY, 1U),
-        1U, 1U)).Code == Editor::VoxelToolResultCode::InvalidModel,
-        "Invalid sub-model was not refused.");
+        1U, 1U)).Code == Editor::VoxelToolResultCode::Failed,
+        "An unavailable sub-model plan was not refused.");
     Editor::VoxelPencilContext blocked = Context(session, document, validHit);
-    blocked.Blocked = true;
+    blocked.Plan.reset();
     Require(Editor::VoxelPencilTool::Apply(blocked).Code ==
-        Editor::VoxelToolResultCode::Blocked,
-        "Blocked edit was not refused.");
+        Editor::VoxelToolResultCode::Failed,
+        "An absent plan was not refused before execution.");
     Editor::VoxelPencilContext inconsistent =
         Context(session, document, validHit);
-    inconsistent.Hit->AdjacentPosition = {2, 2, 2};
+    ++inconsistent.Execution.SourceGeneration;
     Require(Editor::VoxelPencilTool::Apply(inconsistent).Code ==
         Editor::VoxelToolResultCode::Failed,
         "Inconsistent hit adjacency was not refused.");
@@ -326,27 +387,27 @@ void TestPreview()
         {{0U, 1U, 1U, 2U}, {1U, 1U, 1U, 3U}, {2U, 1U, 1U, 4U}})});
     const auto validHit = Hit(
         1U, 1U, 1U, Editor::VoxelHitFace::PositiveY);
-    const auto valid = Editor::EvaluateVoxelPencilPreview(
+    const auto valid = Editor::EvaluatePencilPlanForTest(
         &document, 0U, validHit, true);
-    const auto occupied = Editor::EvaluateVoxelPencilPreview(
+    const auto occupied = Editor::EvaluatePencilPlanForTest(
         &document, 0U,
         Hit(1U, 1U, 1U, Editor::VoxelHitFace::PositiveX), true);
-    const auto outside = Editor::EvaluateVoxelPencilPreview(
+    const auto outside = Editor::EvaluatePencilPlanForTest(
         &document, 0U,
         Hit(0U, 1U, 1U, Editor::VoxelHitFace::NegativeX), true);
     Require(valid.IsVisible() && valid.IsValid() &&
         valid.Position == Asset::Voxel::VoxelPosition{1, 2, 1} &&
         occupied.Status == Editor::VoxelPlacementPreviewStatus::Occupied &&
         outside.Status == Editor::VoxelPlacementPreviewStatus::OutOfBounds &&
-        !Editor::EvaluateVoxelPencilPreview(
+        !Editor::EvaluatePencilPlanForTest(
             &document, 0U, std::nullopt, true).IsVisible() &&
-        !Editor::EvaluateVoxelPencilPreview(
+        !Editor::EvaluatePencilPlanForTest(
             &document, 0U, validHit, false).IsVisible() &&
-        !Editor::EvaluateVoxelPencilPreview(
+        !Editor::EvaluatePencilPlanForTest(
             nullptr, 0U, validHit, true).IsVisible(),
         "Placement preview statuses are incorrect.");
     const auto changed = document.SetVoxel({1, 2, 1}, 5U);
-    Require(changed && Editor::EvaluateVoxelPencilPreview(
+    Require(changed && Editor::EvaluatePencilPlanForTest(
         &document, 0U, validHit, true).Status ==
             Editor::VoxelPlacementPreviewStatus::Occupied,
         "Placement preview did not follow document revision changes.");
@@ -434,11 +495,11 @@ void TestBrushGenerationAndPreview()
 
     auto document = Document({Model(
         {8U, 8U, 8U}, {{0U, 0U, 0U, 1U}})});
-    const auto valid = Editor::EvaluateVoxelPencilPreview(
+    const auto valid = Editor::EvaluatePencilPlanForTest(
         &document, 0U, std::nullopt, true,
         Asset::Voxel::VoxelPosition{2, 2, 2},
         Editor::VoxelBrushShape::Cube, 2);
-    const auto outside = Editor::EvaluateVoxelPencilPreview(
+    const auto outside = Editor::EvaluatePencilPlanForTest(
         &document, 0U, std::nullopt, true,
         Asset::Voxel::VoxelPosition{20, 2, 2},
         Editor::VoxelBrushShape::Cube, 4);
@@ -450,7 +511,7 @@ void TestBrushGenerationAndPreview()
         "Unable to set up occupied brush preview test.");
     const std::uint64_t occupiedPreviewRevision = document.GetRevision();
     const std::uint64_t occupiedPreviewCount = document.GetVoxelCount();
-    const auto occupied = Editor::EvaluateVoxelPencilPreview(
+    const auto occupied = Editor::EvaluatePencilPlanForTest(
         &document, 0U, std::nullopt, true,
         Asset::Voxel::VoxelPosition{2, 2, 2},
         Editor::VoxelBrushShape::Cube, 2);
@@ -470,7 +531,7 @@ void TestAtomicBrushHistory()
     Editor::VoxelEditHistory history;
     const std::uint64_t revision = document.GetRevision();
     const std::uint64_t count = document.GetVoxelCount();
-    Editor::VoxelPencilContext context = Context(
+    TestPencilContext context = Context(
         session, document, Hit(0U, 0U, 0U, Editor::VoxelHitFace::PositiveX));
     context.WorkplaneTarget = {2, 2, 2};
     context.State.Shape = Editor::SmartBrushShape::Cube;
@@ -495,7 +556,7 @@ void TestAtomicBrushHistory()
     Editor::VoxelEditHistory overlapHistory;
     const std::uint64_t overlapRevision = overlapDocument.GetRevision();
     const std::uint64_t overlapCount = overlapDocument.GetVoxelCount();
-    Editor::VoxelPencilContext occupied = Context(overlapSession, overlapDocument,
+    TestPencilContext occupied = Context(overlapSession, overlapDocument,
         Hit(0U, 0U, 0U, Editor::VoxelHitFace::PositiveX));
     occupied.WorkplaneTarget = {2, 2, 2};
     occupied.State.Shape = Editor::SmartBrushShape::Cube;
@@ -526,7 +587,7 @@ void TestAtomicBrushHistory()
     Editor::VoxelEditHistory fullyOccupiedHistory;
     const std::uint64_t fullyOccupiedRevision = fullyOccupiedDocument.GetRevision();
     const std::uint64_t fullyOccupiedCount = fullyOccupiedDocument.GetVoxelCount();
-    Editor::VoxelPencilContext fullyOccupied = Context(
+    TestPencilContext fullyOccupied = Context(
         fullyOccupiedSession, fullyOccupiedDocument,
         Hit(2U, 2U, 2U, Editor::VoxelHitFace::PositiveX));
     fullyOccupied.WorkplaneTarget = {2, 2, 2};
@@ -541,7 +602,7 @@ void TestAtomicBrushHistory()
         fullyOccupiedSession.completedEdits_ == 0U,
         "A fully occupied brush was not a no-op.");
 
-    Editor::VoxelPencilContext outside = fullyOccupied;
+    TestPencilContext outside = fullyOccupied;
     outside.WorkplaneTarget = {20, 2, 2};
     outside.State.Size = 4;
     Require(Editor::VoxelPencilTool::Apply(outside).Code ==
@@ -557,11 +618,11 @@ void TestSurfaceAnchoredBrushes()
 {
     auto workplaneDocument = Document({Model(
         {8U, 8U, 8U}, {{0U, 0U, 0U, 1U}})});
-    const auto workplaneCube = Editor::EvaluateVoxelPencilPreview(
+    const auto workplaneCube = Editor::EvaluatePencilPlanForTest(
         &workplaneDocument, 0U, std::nullopt, true,
         Asset::Voxel::VoxelPosition{3, 0, 3},
         Editor::VoxelBrushShape::Cube, 3);
-    const auto workplaneSphere = Editor::EvaluateVoxelPencilPreview(
+    const auto workplaneSphere = Editor::EvaluatePencilPlanForTest(
         &workplaneDocument, 0U, std::nullopt, true,
         Asset::Voxel::VoxelPosition{6, 0, 6},
         Editor::VoxelBrushShape::Sphere, 3);
@@ -577,7 +638,7 @@ void TestSurfaceAnchoredBrushes()
             "A Size 3 Sphere brush extended behind the Y=0 workplane.");
 
     TestEditSession workplaneSession(workplaneDocument);
-    Editor::VoxelPencilContext workplaneContext = Context(
+    TestPencilContext workplaneContext = Context(
         workplaneSession, workplaneDocument,
         Hit(0U, 0U, 0U, Editor::VoxelHitFace::PositiveY));
     workplaneContext.WorkplaneTarget = {3, 0, 3};
@@ -594,7 +655,7 @@ void TestSurfaceAnchoredBrushes()
         {8U, 8U, 8U}, {{3U, 3U, 3U, 1U}, {4U, 3U, 3U, 6U}})});
     TestEditSession faceSession(faceDocument);
     const auto faceHit = Hit(3U, 3U, 3U, Editor::VoxelHitFace::PositiveX);
-    const auto facePreview = Editor::EvaluateVoxelPencilPreview(
+    const auto facePreview = Editor::EvaluatePencilPlanForTest(
         &faceDocument, 0U, faceHit, true, std::nullopt,
         Editor::VoxelBrushShape::Cube, 3);
     Require(facePreview.IsValid() && facePreview.Positions.size() == 27U &&
@@ -603,7 +664,7 @@ void TestSurfaceAnchoredBrushes()
         std::find(facePreview.Positions.begin(), facePreview.Positions.end(),
             Asset::Voxel::VoxelPosition{3, 3, 3}) == facePreview.Positions.end(),
         "A Size 3 face brush still overlaps its source voxel.");
-    Editor::VoxelPencilContext faceContext = Context(
+    TestPencilContext faceContext = Context(
         faceSession, faceDocument, faceHit);
     faceContext.State.Shape = Editor::SmartBrushShape::Cube;
     faceContext.State.Size = 3;
@@ -617,13 +678,13 @@ void TestSurfaceAnchoredBrushes()
         {8U, 8U, 8U}, {{6U, 3U, 3U, 1U}})});
     TestEditSession borderSession(borderDocument);
     const auto borderHit = Hit(6U, 3U, 3U, Editor::VoxelHitFace::PositiveX);
-    const auto borderPreview = Editor::EvaluateVoxelPencilPreview(
+    const auto borderPreview = Editor::EvaluatePencilPlanForTest(
         &borderDocument, 0U, borderHit, true, std::nullopt,
         Editor::VoxelBrushShape::Cube, 3);
     const std::uint64_t borderRevision = borderDocument.GetRevision();
     const std::uint64_t borderCount = borderDocument.GetVoxelCount();
     Editor::VoxelEditHistory borderHistory;
-    Editor::VoxelPencilContext borderContext = Context(
+    TestPencilContext borderContext = Context(
         borderSession, borderDocument, borderHit);
     borderContext.State.Shape = Editor::SmartBrushShape::Cube;
     borderContext.State.Size = 3;
@@ -657,9 +718,9 @@ void TestSmartEraseBrushHistoryAndPreview()
     Editor::SmartBrushState state;
     state.Mode = Editor::SmartBrushMode::Erase;
     state.Size = 2;
-    const auto preview = Editor::EvaluateVoxelPencilPreview(
+    const auto preview = Editor::EvaluatePencilPlanForTest(
         &document, 0U, hit, true, std::nullopt, state);
-    Editor::VoxelPencilContext context = Context(session, document, hit);
+    TestPencilContext context = Context(session, document, hit);
     context.State = state;
     context.History = &history;
     const std::uint64_t revision = document.GetRevision();
@@ -679,7 +740,7 @@ void TestSmartEraseBrushHistoryAndPreview()
 
     auto emptyHit = Hit(0U, 0U, 0U, Editor::VoxelHitFace::PositiveX);
     emptyHit.DocumentRevision = document.GetRevision();
-    const auto emptyPreview = Editor::EvaluateVoxelPencilPreview(
+    const auto emptyPreview = Editor::EvaluatePencilPlanForTest(
         &document, 0U, emptyHit, true, std::nullopt, state);
     context.Hit = emptyHit;
     context.State.Size = 1;
@@ -691,9 +752,11 @@ void TestSmartEraseBrushHistoryAndPreview()
 
     context.Hit.reset();
     context.WorkplaneTarget = {2, 2, 2};
-    Require(Editor::VoxelPencilTool::Apply(context).Code ==
-            Editor::VoxelToolResultCode::NoHit && history.UndoCount() == 1U,
-        "Smart Erase accepted a workplane target without a hit voxel.");
+    Editor::VoxelPencilContext noPlan = context;
+    noPlan.Plan.reset();
+    Require(Editor::VoxelPencilTool::Apply(noPlan).Code ==
+            Editor::VoxelToolResultCode::Failed && history.UndoCount() == 1U,
+        "Smart Erase accepted an absent plan after its preview context changed.");
 }
 
 Editor::VoxelPencilInputFrame AllowedInput()
@@ -793,6 +856,42 @@ void TestToolState()
     Require(state.IsPencilActive(),
         "Pencil tool state did not reset.");
 }
+
+void TestPlanStalenessRejectsWithoutHistory()
+{
+    auto document = Document({Model({4U, 4U, 4U}, {{1U, 1U, 1U, 1U}})});
+    TestEditSession session(document);
+    Editor::VoxelEditHistory history;
+    TestPencilContext freshRequest = Context(session, document,
+        Hit(1U, 1U, 1U, Editor::VoxelHitFace::PositiveX));
+    freshRequest.History = &history;
+    Editor::VoxelPencilContext fresh = freshRequest;
+
+    Editor::VoxelPencilContext staleGeneration = fresh;
+    ++staleGeneration.Execution.SourceGeneration;
+    Require(Editor::VoxelPencilTool::Apply(staleGeneration).Code ==
+            Editor::VoxelToolResultCode::Failed && history.UndoCount() == 0U,
+        "A stale generation created a history entry.");
+
+    Editor::VoxelPencilContext staleSubModel = fresh;
+    staleSubModel.Execution.SubModelIndex = 1U;
+    Require(Editor::VoxelPencilTool::Apply(staleSubModel).Code ==
+            Editor::VoxelToolResultCode::Failed && history.UndoCount() == 0U,
+        "A stale sub-model created a history entry.");
+
+    auto otherDocument = Document({Model({4U, 4U, 4U}, {})});
+    Editor::VoxelPencilContext staleIdentity = fresh;
+    staleIdentity.Execution.Document = &otherDocument;
+    Require(Editor::VoxelPencilTool::Apply(staleIdentity).Code ==
+            Editor::VoxelToolResultCode::Failed && history.UndoCount() == 0U,
+        "A stale document identity created a history entry.");
+
+    Require(static_cast<bool>(document.SetVoxel({0, 0, 0}, 2U)),
+        "Unable to advance the test document revision.");
+    Require(Editor::VoxelPencilTool::Apply(fresh).Code ==
+            Editor::VoxelToolResultCode::Failed && history.UndoCount() == 0U,
+        "A stale revision created a history entry.");
+}
 }
 
 int main()
@@ -809,6 +908,7 @@ int main()
         TestSmartEraseBrushHistoryAndPreview();
         TestInputController();
         TestToolState();
+        TestPlanStalenessRejectsWithoutHistory();
         std::cout << "Voxel Pencil tests passed.\n";
         return 0;
     }

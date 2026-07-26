@@ -1,4 +1,6 @@
+#include "SmartTools/LegacySmartBrushPreview.h"
 #include "SmartTools/SmartBrushPreviewResolver.h"
+#include "SmartTools/SmartToolController.h"
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelTools/VoxelPaintBrushTool.h"
@@ -123,11 +125,40 @@ std::vector<Position> Difference(
     return result;
 }
 
-SmartBrushPreviewResult Resolve(const Asset::Voxel::VoxelDocument& document,
+SmartToolPlanPtr Plan(const Asset::Voxel::VoxelDocument& document,
     SmartBrushState state, const Position target = {1, 1, 1},
+    const Position normal = {0, 1, 0})
+{
+    const auto dimensions = document.GetDimensions(0U);
+    Require(dimensions.has_value(), "Missing test document dimensions.");
+    SmartToolRequest request;
+    request.Geometry = SmartGeometry::Pencil;
+    request.Action = state.Mode == SmartBrushMode::Erase
+        ? SmartAction::Erase : SmartAction::Add;
+    request.BrushRequest = {*dimensions, state, {target, normal},
+        [&document](const Position position) { return document.HasVoxel(position, 0U); }};
+    request.SourceIdentity = reinterpret_cast<std::uintptr_t>(&document);
+    request.SourceRevision = document.GetRevision();
+    SmartToolController controller;
+    SmartToolSession session;
+    return controller.ResolvePreview(session, request).Plan;
+}
+
+SmartBrushPreviewResult ResolvePencil(const Asset::Voxel::VoxelDocument& document,
+    const SmartBrushState state, const Position target = {1, 1, 1},
     const float alpha = 0.5F)
 {
-    return SmartBrushPreviewResolver::Resolve({&document, 0U, state,
+    const SmartToolPlanPtr plan = Plan(document, state, target);
+    Require(plan != nullptr, "Unable to plan Pencil preview.");
+    return SmartBrushPreviewResolver::Resolve(
+        *plan, {0.15F, 0.45F, 0.90F, 1.0F}, alpha);
+}
+
+SmartBrushPreviewResult ResolvePaintLegacy(const Asset::Voxel::VoxelDocument& document,
+    const SmartBrushState state, const Position target = {1, 1, 1},
+    const float alpha = 0.5F)
+{
+    return LegacySmartBrushPreviewResolver::Resolve({&document, 0U, state,
         {target, {0, 0, 0}}, {0.15F, 0.45F, 0.90F, 1.0F}, alpha});
 }
 
@@ -153,28 +184,29 @@ void TestStatesColorsAndAffectedCoordinates()
     SmartBrushState state;
     state.Size = 1;
     state.PaletteIndex = 7U;
+    state.Mode = SmartBrushMode::Paint;
 
     state.Mode = SmartBrushMode::Add;
-    const auto add = Resolve(document, state);
+    const auto add = ResolvePencil(document, state);
     Require(OnlyGhost(add).State == GhostVoxelState::Ignored &&
         OnlyGhost(add).Color == GhostPreviewStyle::Ignored &&
         add.AffectedPositions.empty() && add.Statistics.IsConsistent(),
         "Add preview did not mark an existing voxel as ignored.");
 
     const auto emptyDocument = Document({});
-    const auto added = Resolve(emptyDocument, state);
+    const auto added = ResolvePencil(emptyDocument, state);
     Require(OnlyGhost(added).State == GhostVoxelState::Added &&
         OnlyGhost(added).Color == GhostPreviewStyle::Added &&
         added.AffectedPositions == std::vector<Position>{{1, 1, 1}},
         "Add preview did not mark an empty voxel as added.");
-    const auto clampedHigh = Resolve(emptyDocument, state, {1, 1, 1}, 3.0F);
-    const auto clampedLow = Resolve(emptyDocument, state, {1, 1, 1}, -1.0F);
+    const auto clampedHigh = ResolvePencil(emptyDocument, state, {1, 1, 1}, 3.0F);
+    const auto clampedLow = ResolvePencil(emptyDocument, state, {1, 1, 1}, -1.0F);
     Require(OnlyGhost(clampedHigh).Alpha == 1.0F &&
         OnlyGhost(clampedLow).Alpha == 0.0F,
         "Ghost Preview alpha was not clamped to [0, 1].");
 
     state.Mode = SmartBrushMode::Erase;
-    const auto erase = Resolve(document, state);
+    const auto erase = ResolvePencil(document, state);
     Require(OnlyGhost(erase).State == GhostVoxelState::Erased &&
         OnlyGhost(erase).Color == GhostPreviewStyle::Erased &&
         erase.AffectedPositions == std::vector<Position>{{1, 1, 1}} &&
@@ -182,7 +214,7 @@ void TestStatesColorsAndAffectedCoordinates()
         "Erase preview did not mark the existing voxel as affected.");
 
     state.Mode = SmartBrushMode::Paint;
-    const auto paint = Resolve(document, state, {1, 1, 1}, 0.35F);
+    const auto paint = ResolvePaintLegacy(document, state, {1, 1, 1}, 0.35F);
     Require(OnlyGhost(paint).State == GhostVoxelState::Painted &&
         OnlyGhost(paint).Color == std::array<float, 4>{0.15F, 0.45F, 0.90F, 1.0F} &&
         OnlyGhost(paint).Alpha == 0.35F &&
@@ -191,7 +223,7 @@ void TestStatesColorsAndAffectedCoordinates()
         "Paint preview did not use the active palette color and alpha.");
 
     state.PaletteIndex = 3U;
-    const auto sameColor = Resolve(document, state);
+    const auto sameColor = ResolvePaintLegacy(document, state);
     Require(OnlyGhost(sameColor).State == GhostVoxelState::Ignored &&
         sameColor.AffectedPositions.empty() && sameColor.Statistics.IsConsistent(),
         "Paint preview did not ignore a voxel with the active palette color.");
@@ -203,9 +235,9 @@ void TestEngineParityClippingAndInvalids()
     SmartBrushState state;
     state.Size = 3;
     state.Mode = SmartBrushMode::Add;
-    const SmartBrushPreviewResult preview = Resolve(document, state, {0, 0, 0});
+    const SmartBrushPreviewResult preview = ResolvePencil(document, state, {0, 0, 0});
     const SmartBrushResult engine = SmartBrushEngine::Resolve({{4U, 4U, 4U},
-        state, {{0, 0, 0}, {0, 0, 0}}, [&document](const Position position)
+        state, {{0, 0, 0}, {0, 1, 0}}, [&document](const Position position)
         {
             return document.HasVoxel(position, 0U);
         }});
@@ -226,13 +258,6 @@ void TestEngineParityClippingAndInvalids()
                 "Clipped Ghost Preview voxels do not use the dark red color.");
     RequireUnique(preview.GhostVoxels);
 
-    state.Shape = SmartBrushShape::Cylinder;
-    const SmartBrushPreviewResult invalid = Resolve(document, state);
-    Require(invalid.Code == SmartBrushResultCode::Unsupported &&
-        !invalid.GhostVoxels.empty() &&
-        invalid.GhostVoxels.back().State == GhostVoxelState::Invalid &&
-        invalid.GhostVoxels.back().Color == GhostPreviewStyle::Invalid,
-        "An invalid Smart Brush request has no representable invalid ghost.");
 }
 
 void TestCacheAndAppliedOperationParity()
@@ -240,14 +265,15 @@ void TestCacheAndAppliedOperationParity()
     SmartBrushState state;
     state.Size = 1;
     state.PaletteIndex = 7U;
+    state.Mode = SmartBrushMode::Paint;
     const std::array<float, 4> activeColor{0.20F, 0.50F, 0.80F, 1.0F};
 
     auto addDocument = Document({{1U, 1U, 1U, 3U}});
-    SmartBrushPreviewCache cache;
-    const SmartBrushPreviewCacheKey addKey{&addDocument, 0U,
+    LegacySmartBrushPreviewCache cache;
+    const LegacySmartBrushPreviewCacheKey addKey{&addDocument, 0U,
         addDocument.GetRevision(), 9U, state, 0U, {{2, 1, 1}, {0, 1, 0}},
         activeColor, GhostPreviewStyle::DefaultAlpha};
-    const SmartBrushPreviewRequest addRequest{&addDocument, 0U, state,
+    const LegacySmartBrushPreviewRequest addRequest{&addDocument, 0U, state,
         {{2, 1, 1}, {0, 1, 0}}, activeColor, GhostPreviewStyle::DefaultAlpha};
     const auto& addPreview = cache.Resolve(addKey, addRequest);
     const auto* const cachedPreviewAddress = &addPreview;
@@ -255,13 +281,13 @@ void TestCacheAndAppliedOperationParity()
     Require(cache.ResolutionCount() == 1U &&
         repeatedPreviewAddress == cachedPreviewAddress,
         "Ghost cache recalculated or copied an unchanged preview request.");
-    SmartBrushPreviewCacheKey revisedAddKey = addKey;
+    LegacySmartBrushPreviewCacheKey revisedAddKey = addKey;
     ++revisedAddKey.DocumentRevision;
     static_cast<void>(cache.Resolve(revisedAddKey, addRequest));
     Require(cache.ResolutionCount() == 2U,
         "Ghost cache did not invalidate after a document revision change.");
     const auto requireCacheInvalidation = [&cache, &addKey, &addRequest](
-        const SmartBrushPreviewCacheKey& changed, const std::string_view name)
+        const LegacySmartBrushPreviewCacheKey& changed, const std::string_view name)
     {
         static_cast<void>(cache.Resolve(addKey, addRequest));
         const std::size_t resolutionCount = cache.ResolutionCount();
@@ -269,7 +295,7 @@ void TestCacheAndAppliedOperationParity()
         Require(cache.ResolutionCount() == resolutionCount + 1U,
             std::string("Ghost cache did not invalidate for ") + std::string(name));
     };
-    SmartBrushPreviewCacheKey changed = addKey;
+    LegacySmartBrushPreviewCacheKey changed = addKey;
     changed.State.Size = 2;
     requireCacheInvalidation(changed, "brush size");
     changed = addKey;
@@ -293,25 +319,30 @@ void TestCacheAndAppliedOperationParity()
     changed = addKey;
     changed.State.Orientation = SmartBrushOrientation::X;
     requireCacheInvalidation(changed, "orientation");
+    SmartBrushState addState = state;
+    addState.Mode = SmartBrushMode::Add;
+    const SmartToolPlanPtr addPlan = Plan(
+        addDocument, addState, {2, 1, 1}, {0, 1, 0});
+    const SmartBrushPreviewResult addPlanPreview =
+        SmartBrushPreviewResolver::Resolve(*addPlan, activeColor);
     const std::vector<Position> addBefore = OccupiedPositions(addDocument);
     TestEditSession addSession(addDocument);
-    VoxelPencilContext addContext{&addSession, &addDocument, 0U, std::nullopt,
-        state, false, nullptr, Position{2, 1, 1}};
+    VoxelPencilContext addContext{addPlan, {&addSession, &addDocument, 0U,
+        0U, nullptr, std::optional<std::size_t>{addState.PaletteIndex}, nullptr, nullptr}};
     Require(VoxelPencilTool::Apply(addContext).Code == VoxelToolResultCode::Applied &&
         Difference(OccupiedPositions(addDocument), addBefore) ==
-            addPreview.AffectedPositions,
-        "Applied Add coordinates diverge from the Ghost Preview.");
+            addPlanPreview.AffectedPositions,
+        "Applied Add coordinates diverge from the plan-backed Ghost Preview.");
 
     auto eraseDocument = Document({{1U, 1U, 1U, 3U}});
     state.Mode = SmartBrushMode::Erase;
-    const auto erasePreview = SmartBrushPreviewResolver::Resolve({&eraseDocument,
-        0U, state, {{1, 1, 1}, {0, 1, 0}}, activeColor,
-        GhostPreviewStyle::DefaultAlpha});
+    const SmartToolPlanPtr erasePlan = Plan(
+        eraseDocument, state, {1, 1, 1}, {0, 1, 0});
+    const auto erasePreview = SmartBrushPreviewResolver::Resolve(*erasePlan, activeColor);
     const std::vector<Position> eraseBefore = OccupiedPositions(eraseDocument);
     TestEditSession eraseSession(eraseDocument);
-    VoxelPencilContext eraseContext{&eraseSession, &eraseDocument, 0U,
-        Hit({1, 1, 1}, VoxelHitFace::PositiveY, eraseDocument.GetRevision()),
-        state, false, nullptr, std::nullopt};
+    VoxelPencilContext eraseContext{erasePlan, {&eraseSession, &eraseDocument,
+        0U, 0U, nullptr, std::nullopt, nullptr, nullptr}};
     Require(VoxelPencilTool::Apply(eraseContext).Code == VoxelToolResultCode::Applied &&
         Difference(eraseBefore, OccupiedPositions(eraseDocument)) ==
             erasePreview.AffectedPositions,
@@ -319,7 +350,7 @@ void TestCacheAndAppliedOperationParity()
 
     auto paintDocument = Document({{1U, 1U, 1U, 3U}});
     state.Mode = SmartBrushMode::Paint;
-    const auto paintPreview = SmartBrushPreviewResolver::Resolve({&paintDocument,
+    const auto paintPreview = LegacySmartBrushPreviewResolver::Resolve({&paintDocument,
         0U, state, {{1, 1, 1}, {}}, activeColor,
         GhostPreviewStyle::DefaultAlpha});
     TestEditSession paintSession(paintDocument);

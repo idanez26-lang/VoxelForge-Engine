@@ -11,6 +11,7 @@ SmartToolPlan::SmartToolPlan(
     std::vector<SmartToolDiagnostic> diagnostics)
     : geometry_(request.Geometry), action_(request.Action),
       brushState_(request.BrushRequest.State),
+      activeProfileUuid_(request.ActiveProfileUuid),
       placement_(request.BrushRequest.Placement),
       brushResult_(std::move(result)), cacheKey_(MakeSmartToolRequestKey(request)),
       planId_(planId), revision_(revision), cells_(std::move(cells)),
@@ -21,6 +22,8 @@ SmartToolPlan::SmartToolPlan(
 SmartGeometry SmartToolPlan::Geometry() const noexcept { return geometry_; }
 SmartAction SmartToolPlan::Action() const noexcept { return action_; }
 const SmartBrushState& SmartToolPlan::BrushState() const noexcept { return brushState_; }
+const std::string& SmartToolPlan::ActiveProfileUuid() const noexcept
+{ return activeProfileUuid_; }
 const SmartBrushPlacement& SmartToolPlan::Placement() const noexcept { return placement_; }
 const SmartBrushResult& SmartToolPlan::BrushResult() const noexcept { return brushResult_; }
 const SmartToolRequestKey& SmartToolPlan::CacheKey() const noexcept { return cacheKey_; }

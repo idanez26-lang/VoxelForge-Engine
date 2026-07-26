@@ -64,7 +64,10 @@ int main()
             session.State().Workplane.has_value(),
             "session value state was not retained");
         const SmartToolRequest add = Request();
-        const SmartToolResult first = controller.ResolvePreview(session, add);
+        SmartToolRequest profileA = add;
+        profileA.ActiveProfileUuid = "profile-a";
+        profileA.BrushRequest.State.PaletteIndex = 17U;
+        const SmartToolResult first = controller.ResolvePreview(session, profileA);
         Require(first.HasPlan(), "planner did not create an add plan");
         Require(first.Code == SmartBrushResultCode::Valid &&
             first.Status == SmartToolStatus::Success,
@@ -73,6 +76,9 @@ int main()
             "add plan has no cells");
         Require(first.Plan->BrushState().Mode == SmartBrushMode::Add,
             "planner did not normalize the add action");
+        Require(first.Plan->ActiveProfileUuid() == "profile-a" &&
+            first.Plan->BrushState().PaletteIndex == 17U,
+            "plan did not snapshot profile and palette values");
         Require(session.PlanForPreview().get() == session.PlanForCommit().get(),
             "preview and commit do not share plan identity");
         Require(first.Plan->PlanId() != 0U &&
@@ -87,9 +93,28 @@ int main()
         Require(preview.Statistics.IsConsistent(),
             "plan-backed preview statistics are inconsistent");
 
-        const SmartToolResult cached = controller.ResolveCommit(session, add);
+        SmartToolRequest profileB = profileA;
+        profileB.ActiveProfileUuid = "profile-b";
+        profileB.BrushRequest.State.PaletteIndex = 17U;
+        Require(first.Plan->ActiveProfileUuid() == "profile-a" &&
+            first.Plan->BrushState().PaletteIndex == 17U,
+            "a later profile or palette change mutated a rendered plan");
+        const SmartToolResult cached = controller.ResolveCommit(session);
         Require(cached.Plan.get() == first.Plan.get(),
             "same request was planned twice");
+        SmartToolSession profileBSession;
+        const SmartToolResult profileBPreview = controller.ResolvePreview(
+            profileBSession, profileB);
+        Require(profileBPreview.HasPlan() &&
+            profileBPreview.Plan.get() != first.Plan.get(),
+            "a profile identity change reused the profile A plan");
+        const std::size_t cellCountBeforeExternalMutation = first.Plan->Cells().size();
+        const VoxelForge::Asset::Voxel::VoxelPosition firstCellBeforeExternalMutation =
+            first.Plan->Cells().front().Position;
+        profileA.BrushRequest.State.Size = 9;
+        Require(first.Plan->Cells().size() == cellCountBeforeExternalMutation &&
+            first.Plan->Cells().front().Position == firstCellBeforeExternalMutation,
+            "plan cells retained mutable request-owned storage");
 
         SmartToolRequest moved = add;
         moved.BrushRequest.Placement.Target = {4, 3, 3};
@@ -97,8 +122,9 @@ int main()
         Require(changed.HasPlan() && changed.Plan.get() != first.Plan.get(),
             "changed placement did not replace plan");
 
-        const SmartToolResult erase = controller.ResolveCommit(
+        const SmartToolResult erasePreview = controller.ResolvePreview(
             session, Request(SmartAction::Erase));
+        const SmartToolResult erase = controller.ResolveCommit(session);
         Require(erase.HasPlan() &&
             erase.Plan->BrushState().Mode == SmartBrushMode::Erase,
             "planner did not normalize the erase action");
@@ -106,6 +132,14 @@ int main()
             "session did not retain normalized erase mode");
         Require(erase.Plan->BrushResult().Statistics.Existing > 0U,
             "erase plan lost occupancy information");
+        Require(erase.Plan.get() == erasePreview.Plan.get(),
+            "commit did not consume the plan rendered by preview");
+
+        session.Clear();
+        const SmartToolResult missingCommit = controller.ResolveCommit(session);
+        Require(!missingCommit.HasPlan() &&
+            missingCommit.Code == SmartBrushResultCode::InvalidRequest,
+            "commit planned a replacement instead of refusing a missing preview plan");
 
         SmartToolRequest workplane = Request();
         workplane.Workplane = workplane.BrushRequest.Placement;

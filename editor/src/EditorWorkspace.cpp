@@ -8434,7 +8434,10 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
         UpdateVoxelHighlights();
         const bool firstClick = voxelToolSmokeInput_.Update(
             inputFrame(true)) == VoxelPencilInputDecision::Apply;
-        const bool applied = firstClick && ApplyVoxelPencil();
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        const bool planPrepared = request && smartToolController_.ResolvePreview(
+            smartToolSession_, *request).HasPlan();
+        const bool applied = firstClick && planPrepared && ApplyVoxelPencil();
         const auto voxel = document->GetVoxel(voxelPencilSmokeTarget_);
         const Voxel::Voxel* compatible = grid->Get(
             static_cast<std::uint32_t>(voxelPencilSmokeTarget_.X),
@@ -8497,7 +8500,10 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
         const std::size_t uploads = viewportRenderer_.ModelUploadCount();
         const bool click = voxelToolSmokeInput_.Update(
             inputFrame(true)) == VoxelPencilInputDecision::Apply;
-        const bool applied = click && ApplyVoxelPencil();
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        const bool planPrepared = request && smartToolController_.ResolvePreview(
+            smartToolSession_, *request).HasPlan();
+        const bool applied = click && planPrepared && ApplyVoxelPencil();
         voxelPencilSmokeOutOfBoundsRefused_ = !applied &&
             lastVoxelToolResult_ && lastVoxelToolResult_->Code ==
                 VoxelToolResultCode::TargetOutOfBounds &&
@@ -8599,7 +8605,9 @@ bool EditorWorkspace::RunVoxelEraserSmokeStep(
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
         UpdateVoxelHighlights();
-        const bool added = ApplyVoxelPencil();
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        const bool added = request && smartToolController_.ResolvePreview(
+            smartToolSession_, *request).HasPlan() && ApplyVoxelPencil();
         voxelEraserSmokePencilAdded_ = added &&
             document->HasVoxel(voxelEraserSmokeAddedTarget_) &&
             document->GetRevision() == voxelEraserSmokeInitialRevision_ + 1U &&
@@ -8797,7 +8805,10 @@ bool EditorWorkspace::RunVoxelUndoRedoSmokeStep(
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
         const auto before = metrics();
-        voxelUndoRedoSmokePencilExecuted_ = ApplyVoxelPencil() &&
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        voxelUndoRedoSmokePencilExecuted_ = request &&
+            smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan() && ApplyVoxelPencil() &&
             advancedOnce(before) &&
             document->HasVoxel(voxelUndoRedoSmokePencilTarget_) &&
             document->IsDirty() && voxelEditHistory_.UndoCount() == 1U &&
@@ -8880,7 +8891,10 @@ bool EditorWorkspace::RunVoxelUndoRedoSmokeStep(
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
         const auto pencilBefore = metrics();
-        voxelUndoRedoSmokeBranchClearedRedo_ = ApplyVoxelPencil() &&
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        voxelUndoRedoSmokeBranchClearedRedo_ = request &&
+            smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan() && ApplyVoxelPencil() &&
             advancedOnce(pencilBefore) &&
             document->HasVoxel(voxelUndoRedoSmokeBranchTarget_) &&
             !voxelEditHistory_.CanRedo() &&
@@ -9008,6 +9022,9 @@ bool EditorWorkspace::RunFirstCreationExperienceSmokeStep(
             WorkplaneHitStatus::Valid, firstCreationSmokeTarget_, 0.0F};
         voxelToolState_.SetActiveTool(ActiveVoxelTool::Pencil);
         static_cast<void>(paletteService_.SelectColor(1U));
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        if (!request || !smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan()) return false;
         firstCreationSmokePencilled_ = ApplyVoxelPencil() &&
             document->GetVoxelCount() == 1U &&
             document->HasVoxel(firstCreationSmokeTarget_) &&
@@ -9124,6 +9141,9 @@ bool EditorWorkspace::RunPersistentWorkplaneSmokeStep(
             WorkplaneHitStatus::Valid,
             persistentWorkplaneSmokeFirst_,
             1.0F};
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        if (!request || !smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan()) return false;
         persistentWorkplaneSmokeFirstAdded_ = ApplyVoxelPencil() &&
             document->GetVoxelCount() == 1U &&
             document->HasVoxel(persistentWorkplaneSmokeFirst_) &&
@@ -9139,6 +9159,9 @@ bool EditorWorkspace::RunPersistentWorkplaneSmokeStep(
             WorkplaneHitStatus::Valid,
             persistentWorkplaneSmokeSecond_,
             1.0F};
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        if (!request || !smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan()) return false;
         persistentWorkplaneSmokeSecondAdded_ = ApplyVoxelPencil() &&
             document->GetVoxelCount() == 2U &&
             document->HasVoxel(persistentWorkplaneSmokeFirst_) &&
@@ -9360,7 +9383,10 @@ bool EditorWorkspace::RunDirectCreationFlowSmokeStep(
         workplaneHit_ = WorkplaneHit{
             WorkplaneHitStatus::Valid, directCreationSmokeTarget_, 1.0F};
         const std::uint64_t revision = document->GetRevision();
-        directCreationSmokePencilled_ = directCreationSmokeFocused_ &&
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        directCreationSmokePencilled_ = directCreationSmokeFocused_ && request &&
+            smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan() &&
             ApplyVoxelPencil() && document->GetVoxelCount() == 1U &&
             document->HasVoxel(directCreationSmokeTarget_) &&
             document->GetRevision() == revision + 1U &&
@@ -9456,7 +9482,9 @@ bool EditorWorkspace::RunPaletteUiSmokeStep(const std::size_t frame)
         if (!paletteSmokeCreated_) return false;
         workplaneHit_ = WorkplaneHit{
             WorkplaneHitStatus::Valid, paletteSmokeTarget_, 1.0F};
-        paletteSmokePencilled_ = ApplyVoxelPencil() &&
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        paletteSmokePencilled_ = request && smartToolController_.ResolvePreview(
+            smartToolSession_, *request).HasPlan() && ApplyVoxelPencil() &&
             document->GetVoxel(paletteSmokeTarget_).has_value() &&
             document->GetVoxel(paletteSmokeTarget_)->PaletteIndex ==
                 paletteSmokeIndex_ &&
@@ -12596,7 +12624,10 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
         workplaneHit_ = WorkplaneHit{
             WorkplaneHitStatus::Valid,
             Asset::Voxel::VoxelPosition{8, 0, 8}, 1.0F};
-        modernToolbarSmokeSingleActive_ &= ApplyVoxelPencil() &&
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        modernToolbarSmokeSingleActive_ &= request &&
+            smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan() && ApplyVoxelPencil() &&
             document->IsDirty() &&
             EditorToolbarModel::IsEnabled(
                 EditorToolbarModel::Buttons().front(), toolbarState());
@@ -12662,7 +12693,10 @@ bool EditorWorkspace::RunKeyboardShortcutsSmokeStep(const std::size_t frame)
         workplaneHit_ = WorkplaneHit{
             WorkplaneHitStatus::Valid,
             Asset::Voxel::VoxelPosition{8, 0, 8}, 1.0F};
-        keyboardShortcutsSmokeEdited_ = ApplyVoxelPencil() &&
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        keyboardShortcutsSmokeEdited_ = request &&
+            smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan() && ApplyVoxelPencil() &&
             document->GetVoxelCount() == 1U;
     }
     else if (frame == 1U)
@@ -12834,7 +12868,10 @@ bool EditorWorkspace::RunLayoutStabilitySmokeStep(const std::size_t frame)
             voxelPlacementPreview_.Status !=
                 VoxelPlacementPreviewStatus::Valid)
             return false;
-        layoutStabilitySmokePencilled_ = ApplyVoxelPencil() &&
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        layoutStabilitySmokePencilled_ = request &&
+            smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan() && ApplyVoxelPencil() &&
             document->GetVoxelCount() == 1U &&
             document->HasVoxel(layoutStabilitySmokeTarget_) &&
             document->IsDirty() && voxelEditHistory_.CanUndo();
@@ -13202,7 +13239,10 @@ bool EditorWorkspace::RunQualityOfLifeSmokeStep(
         workplaneHit_ = WorkplaneHit{
             WorkplaneHitStatus::Valid,
             Asset::Voxel::VoxelPosition{0, 0, 0}, 1.0F};
-        if (!ApplyVoxelPencil() || !document->IsDirty()) return false;
+        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        if (!request || !smartToolController_.ResolvePreview(
+                smartToolSession_, *request).HasPlan() ||
+            !ApplyVoxelPencil() || !document->IsDirty()) return false;
         RequestCloseProject();
         if (!dirtyActionConfirmation_.IsPending()) return false;
     }
@@ -13461,6 +13501,7 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest()
             }},
         reinterpret_cast<std::uintptr_t>(document), document->GetRevision(),
         voxelDocumentSession_.Generation(), 0U,
+        std::string(brushProfileService_.ActiveUuid()),
         usesWorkplane ? std::optional<SmartBrushPlacement>{
             SmartBrushPlacement{*target, normal}} : std::nullopt};
 }
@@ -13477,33 +13518,12 @@ bool EditorWorkspace::ApplyVoxelPencil()
         paletteService_.ActiveColor();
     try
     {
-        const bool erasing = toolContext_.Smart.IsOperational() &&
-            toolContext_.Smart.Action() == SmartAction::Erase;
-        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
-        SmartToolPlanPtr plan;
-        if (request)
-            plan = smartToolController_.ResolveCommit(
-                smartToolSession_, *request).Plan;
-        else
-            smartToolSession_.Clear();
-        SmartBrushState brushState = plan != nullptr
-            ? plan->BrushState() : toolContext_.Smart.Brush();
-        brushState.Shape = ResolveSmartBrushShape(
-            toolContext_.Smart.Geometry(), brushState.Shape);
-        brushState.Mode = erasing ? SmartBrushMode::Erase : SmartBrushMode::Add;
-        VoxelPencilContext pencilContext{
-            static_cast<VoxelEditSession*>(this),
-            voxelDocumentSession_.ActiveDocument(),
-            0U,
-            voxelSelection_.Hovered(),
-            brushState,
-            !voxelToolState_.IsPencilActive() ||
-                !toolContext_.Smart.IsOperational() ||
-            (toolContext_.Smart.Action() != SmartAction::Add &&
-                 toolContext_.Smart.Action() != SmartAction::Erase),
-            &voxelEditHistory_,
-            !erasing && workplaneHit_ ? workplaneHit_->Position : std::nullopt,
-            std::move(plan)};
+        // Input/highlight processing produced this exact plan before the click.
+        // Commit never builds a second request or calls the planner.
+        SmartToolPlanPtr plan = smartToolController_.ResolveCommit(
+            smartToolSession_).Plan;
+        VoxelPencilContext pencilContext;
+        pencilContext.Plan = std::move(plan);
         pencilContext.Execution = {
             static_cast<VoxelEditSession*>(this),
             voxelDocumentSession_.ActiveDocument(), 0U,
@@ -15000,7 +15020,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             const std::array<float, 4>& activePaletteColor)
         {
             if (document == nullptr) return;
-            const SmartBrushPreviewCacheKey key{
+            const LegacySmartBrushPreviewCacheKey key{
                 document, 0U, document->GetRevision(),
                 voxelDocumentSession_.Generation(), state,
                 static_cast<std::uint8_t>(toolContext_.Smart.Geometry()), placement,

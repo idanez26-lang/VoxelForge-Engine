@@ -1,6 +1,7 @@
 #include "VoxelCreation/NewVoxelModelWorkflow.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelTools/VoxelPencilTool.h"
+#include "SmartToolTestSupport.h"
 
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 #include "VoxelForge/Voxel/VoxelGrid.h"
@@ -197,9 +198,9 @@ void TestInstantCreationAndEditing()
     const Asset::Voxel::VoxelPosition firstVoxel{32, 0, 32};
     SmartBrushState brushState;
     brushState.PaletteIndex = 1U;
-    const VoxelToolResult pencil = VoxelPencilTool::Apply({
-        &session, &*harness.Document, 0U, std::nullopt, brushState, false,
-        &history, firstVoxel});
+    const VoxelToolResult pencil = VoxelPencilTool::Apply(
+        TestSupport::MakePencilContext(session, *harness.Document, 0U,
+            brushState, firstVoxel, {0, 1, 0}, &history));
     Require(pencil.Changed && harness.Document->HasVoxel(firstVoxel) &&
             history.CanUndo() && history.UndoCount() == 1U,
         "The first Workplane click did not use the normal Pencil history.");

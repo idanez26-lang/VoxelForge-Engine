@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BrushEngine/SmartBrushEngine.h"
+#include "SmartTools/SmartToolPlan.h"
 #include "VoxelSelection/VoxelRaycast.h"
 
 #include <cstddef>
@@ -42,24 +42,6 @@ struct VoxelPlacementPreview final
     [[nodiscard]] bool IsVisible() const noexcept;
     [[nodiscard]] bool IsValid() const noexcept;
 };
-
-[[nodiscard]] VoxelPlacementPreview EvaluateVoxelPencilPreview(
-    const Asset::Voxel::VoxelDocument* document,
-    std::size_t subModelIndex,
-    const std::optional<VoxelRaycastHit>& hit,
-    bool pencilActive,
-    std::optional<Asset::Voxel::VoxelPosition> workplaneTarget =
-        std::nullopt,
-    SmartBrushState state = {}) noexcept;
-
-[[nodiscard]] VoxelPlacementPreview EvaluateVoxelPencilPreview(
-    const Asset::Voxel::VoxelDocument* document,
-    std::size_t subModelIndex,
-    const std::optional<VoxelRaycastHit>& hit,
-    bool pencilActive,
-    std::optional<Asset::Voxel::VoxelPosition> workplaneTarget,
-    VoxelBrushShape brush,
-    int brushSize) noexcept;
 
 [[nodiscard]] VoxelPlacementPreview EvaluateVoxelEraserPreview(
     const Asset::Voxel::VoxelDocument* document,

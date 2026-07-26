@@ -22,265 +22,154 @@ VoxelToolResult Refused(
 {
     return {code, false, position, revision, revision, std::move(error)};
 }
-
-Asset::Voxel::VoxelPosition CalculateAdjacent(
-    const VoxelRaycastHit& hit) noexcept
-{
-    const Asset::Voxel::VoxelPosition normal =
-        VoxelHitFaceIntegerNormal(hit.Face);
-    return {
-        static_cast<std::int32_t>(hit.Coordinates.X) + normal.X,
-        static_cast<std::int32_t>(hit.Coordinates.Y) + normal.Y,
-        static_cast<std::int32_t>(hit.Coordinates.Z) + normal.Z};
-}
 }
 
 VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
 {
-    if (context.Document == nullptr)
+    if (context.Plan == nullptr)
+        return Refused(VoxelToolResultCode::Failed, {}, 0U,
+            "A Smart Tool plan is required before Pencil can commit.");
+    if (context.Execution.Document == nullptr)
         return Refused(VoxelToolResultCode::NoDocument, {}, 0U);
-    Asset::Voxel::VoxelDocument& document = *context.Document;
+    if (context.Execution.EditSession == nullptr)
+        return Refused(VoxelToolResultCode::InvalidModel, {},
+            context.Execution.Document->GetRevision(),
+            "The Smart Tool execution session is unavailable.");
+
+    Asset::Voxel::VoxelDocument& document = *context.Execution.Document;
     const std::uint64_t revision = document.GetRevision();
-    if (context.Execution.Document != nullptr &&
-        context.Execution.Document != context.Document)
+    const SmartToolRequestKey& key = context.Plan->CacheKey();
+    if (key.SourceIdentity != reinterpret_cast<std::uintptr_t>(&document) ||
+        key.SourceRevision != revision ||
+        key.SourceGeneration != context.Execution.SourceGeneration ||
+        key.SourceSubModelIndex != context.Execution.SubModelIndex)
     {
         return Refused(VoxelToolResultCode::Failed, {}, revision,
-            "The Smart Tool execution document does not match the Pencil document.");
+            "The Smart Tool plan is stale or targets another document context.");
     }
-    if (context.Plan != nullptr)
-    {
-        const SmartToolRequestKey& key = context.Plan->CacheKey();
-        if (key.SourceIdentity != reinterpret_cast<std::uintptr_t>(&document) ||
-            key.SourceRevision != revision ||
-            key.SourceGeneration != context.Execution.SourceGeneration ||
-            key.SourceSubModelIndex != context.SubModelIndex ||
-            context.Execution.SubModelIndex != context.SubModelIndex)
-        {
-            return Refused(VoxelToolResultCode::Failed, {}, revision,
-                "The Smart Tool plan is stale or targets another document context.");
-        }
-    }
-    if (context.Blocked)
-        return Refused(VoxelToolResultCode::Blocked, {}, revision);
-    const bool erasing = context.State.Mode == SmartBrushMode::Erase;
-    if (!erasing && context.State.Mode != SmartBrushMode::Add)
+
+    const bool erasing = context.Plan->Action() == SmartAction::Erase;
+    if (!erasing && context.Plan->Action() != SmartAction::Add)
         return Refused(VoxelToolResultCode::Failed, {}, revision,
             "VoxelPencilTool only applies Add and Erase actions.");
-    Asset::Voxel::VoxelPosition adjacent{};
-    Asset::Voxel::VoxelPosition placementNormal{0, 1, 0};
-    if (context.WorkplaneTarget)
-    {
-        if (erasing)
-            return Refused(VoxelToolResultCode::NoHit, {}, revision);
-        adjacent = *context.WorkplaneTarget;
-    }
-    else
-    {
-        if (!context.Hit || context.Hit->Face == VoxelHitFace::None)
-            return Refused(VoxelToolResultCode::NoHit, {}, revision);
-        if (erasing)
-        {
-            if (context.Hit->DocumentRevision != revision)
-                return Refused(VoxelToolResultCode::NoHit, {}, revision,
-                    "The Smart Erase target belongs to an older document revision.");
-            adjacent = {
-                static_cast<std::int32_t>(context.Hit->Coordinates.X),
-                static_cast<std::int32_t>(context.Hit->Coordinates.Y),
-                static_cast<std::int32_t>(context.Hit->Coordinates.Z)};
-            placementNormal = VoxelHitFaceIntegerNormal(context.Hit->Face);
-        }
-        else
-        {
-            const Asset::Voxel::VoxelPosition expectedAdjacent =
-                CalculateAdjacent(*context.Hit);
-            adjacent = context.Hit->AdjacentPosition;
-            if (adjacent != expectedAdjacent)
-            {
-                return Refused(
-                    VoxelToolResultCode::Failed, adjacent, revision,
-                    "Voxel hit adjacency does not match its detected face.");
-            }
-            placementNormal = VoxelHitFaceIntegerNormal(context.Hit->Face);
-        }
-    }
-    if (context.EditSession == nullptr ||
-        (!context.WorkplaneTarget &&
-         context.Hit->SubModelIndex != context.SubModelIndex) ||
-        document.GetModel(context.SubModelIndex) == nullptr)
-    {
-        return Refused(
-            VoxelToolResultCode::InvalidModel, adjacent, revision);
-    }
-    if (!erasing && (context.State.PaletteIndex == 0U ||
-        context.State.PaletteIndex > 255U))
-        return Refused(VoxelToolResultCode::InvalidPaletteIndex, adjacent, revision);
-    Voxel::VoxelModel* model = context.EditSession->ActiveVoxelModel();
+    const Asset::Voxel::VoxelPosition target = context.Plan->Placement().Target;
+    if (document.GetModel(context.Execution.SubModelIndex) == nullptr)
+        return Refused(VoxelToolResultCode::InvalidModel, target, revision);
+    if (!erasing && (context.Plan->BrushState().PaletteIndex == 0U ||
+        context.Plan->BrushState().PaletteIndex > 255U))
+        return Refused(VoxelToolResultCode::InvalidPaletteIndex, target, revision);
+
+    Voxel::VoxelModel* model = context.Execution.EditSession->ActiveVoxelModel();
     Voxel::VoxelGrid* grid = model == nullptr
-        ? nullptr : model->GetGrid(context.SubModelIndex);
-    if (context.EditSession->ActiveVoxelDocument() != &document ||
+        ? nullptr : model->GetGrid(context.Execution.SubModelIndex);
+    if (context.Execution.EditSession->ActiveVoxelDocument() != &document ||
         grid == nullptr)
     {
-        return Refused(
-            VoxelToolResultCode::InvalidModel, adjacent, revision,
+        return Refused(VoxelToolResultCode::InvalidModel, target, revision,
             "The editable document and compatibility grid are unavailable.");
     }
-    const auto dimensions = document.GetDimensions(context.SubModelIndex);
-    if (!dimensions)
-    {
-        return Refused(
-            VoxelToolResultCode::Failed, adjacent, revision,
-            "The editable document dimensions are unavailable.");
-    }
-    const SmartBrushResult fallbackBrush = context.Plan == nullptr
-        ? SmartBrushEngine::Resolve({
-            *dimensions,
-            context.State,
-            {adjacent, placementNormal},
-            [&document, subModelIndex = context.SubModelIndex](
-                const Asset::Voxel::VoxelPosition position)
-            {
-                return document.HasVoxel(position, subModelIndex);
-            }})
-        : SmartBrushResult{};
-    const SmartBrushResult& brush = context.Plan == nullptr
-        ? fallbackBrush : context.Plan->BrushResult();
-    if (context.Plan != nullptr &&
-        (context.Plan->Action() != (erasing ? SmartAction::Erase : SmartAction::Add) ||
-         context.Plan->Placement().Target != adjacent ||
-         context.Plan->Placement().Normal != placementNormal))
-    {
-        return Refused(VoxelToolResultCode::Failed, adjacent, revision,
-            "The Smart Tool plan does not match the current Pencil placement.");
-    }
+
+    const SmartBrushResult& brush = context.Plan->BrushResult();
     if (brush.Code == SmartBrushResultCode::OutOfBounds)
-        return Refused(VoxelToolResultCode::TargetOutOfBounds, adjacent, revision);
-    if (brush.Code == SmartBrushResultCode::Unsupported)
-        return Refused(VoxelToolResultCode::Failed, adjacent, revision, brush.Error);
+        return Refused(VoxelToolResultCode::TargetOutOfBounds, target, revision);
     if (brush.Code != SmartBrushResultCode::Valid)
-        return Refused(VoxelToolResultCode::Failed, adjacent, revision, brush.Error);
+        return Refused(VoxelToolResultCode::Failed, target, revision, brush.Error);
 
     std::vector<VoxelChange> changes;
-    changes.reserve(erasing ? brush.ExistingPositions.size() :
-        brush.AddablePositions.size());
-    // The engine has already validated the complete plan. Verify that the
-    // compatibility grid agrees before creating one atomic transaction.
-    for (const Asset::Voxel::VoxelPosition position : brush.Positions)
+    changes.reserve(context.Plan->Cells().size());
+    // Geometry, occupancy classification, and palette selection come only
+    // from the plan. The remaining reads are an integrity guard before one
+    // atomic transaction, never a geometry recomputation.
+    for (const SmartToolPlanCell& cell : context.Plan->Cells())
     {
+        if (cell.Operation == SmartToolCellOperation::Ignore) continue;
+        const Asset::Voxel::VoxelPosition position = cell.Position;
         const Voxel::Voxel* compatibilityVoxel = grid->Get(
             static_cast<std::uint32_t>(position.X),
             static_cast<std::uint32_t>(position.Y),
             static_cast<std::uint32_t>(position.Z));
         if (compatibilityVoxel == nullptr)
-        {
-            return Refused(
-                VoxelToolResultCode::Failed, adjacent, revision,
+            return Refused(VoxelToolResultCode::Failed, target, revision,
                 "VoxelDocument and the editable compatibility grid diverged.");
-        }
         const bool documentOccupied =
-            document.HasVoxel(position, context.SubModelIndex);
-        if (documentOccupied)
-        {
-            if (!compatibilityVoxel->IsOccupied())
-            {
-                return Refused(
-                    VoxelToolResultCode::Failed, adjacent, revision,
-                    "VoxelDocument and the editable compatibility grid diverged.");
-            }
-            continue;
-        }
-        if (compatibilityVoxel->IsOccupied())
-        {
-            return Refused(
-                VoxelToolResultCode::Failed, adjacent, revision,
+            document.HasVoxel(position, context.Execution.SubModelIndex);
+        if (documentOccupied != compatibilityVoxel->IsOccupied())
+            return Refused(VoxelToolResultCode::Failed, target, revision,
                 "VoxelDocument and the editable compatibility grid diverged.");
-        }
-    }
-    const std::vector<Asset::Voxel::VoxelPosition>& changedPositions = erasing
-        ? brush.ExistingPositions : brush.AddablePositions;
-    for (const Asset::Voxel::VoxelPosition position : changedPositions)
-    {
-        if (erasing)
+        if ((cell.Operation == SmartToolCellOperation::Add && documentOccupied) ||
+            (cell.Operation == SmartToolCellOperation::Erase && !documentOccupied))
         {
-            const auto voxel = document.GetVoxel(position, context.SubModelIndex);
+            return Refused(VoxelToolResultCode::Failed, target, revision,
+                "The Smart Tool plan no longer matches the document state.");
+        }
+
+        if (cell.Operation == SmartToolCellOperation::Erase)
+        {
+            const auto voxel = document.GetVoxel(
+                position, context.Execution.SubModelIndex);
             if (!voxel)
-                return Refused(VoxelToolResultCode::Failed, adjacent, revision,
-                    "The Smart Brush erase plan changed during validation.");
-            changes.push_back({context.SubModelIndex, position, true,
+                return Refused(VoxelToolResultCode::Failed, target, revision,
+                    "The Smart Tool erase plan changed during validation.");
+            changes.push_back({context.Execution.SubModelIndex, position, true,
                 voxel->PaletteIndex, false, 0U});
         }
-        else
+        else if (cell.Operation == SmartToolCellOperation::Add)
         {
-            changes.push_back({context.SubModelIndex, position, false, 0U, true,
-                static_cast<std::uint8_t>(context.State.PaletteIndex)});
+            changes.push_back({context.Execution.SubModelIndex, position,
+                false, 0U, true, static_cast<std::uint8_t>(cell.PaletteIndex)});
         }
     }
     if (changes.empty())
         return Refused(erasing ? VoxelToolResultCode::TargetEmpty :
-            VoxelToolResultCode::TargetOccupied, adjacent, revision);
+            VoxelToolResultCode::TargetOccupied, target, revision);
 
     CommandResult applied;
-    if (context.History != nullptr)
+    if (context.Execution.History != nullptr)
     {
-        const VoxelEditHistoryResult historyResult = context.History->Execute(
-            *context.EditSession,
+        const VoxelEditHistoryResult historyResult = context.Execution.History->Execute(
+            *context.Execution.EditSession,
             VoxelEditOperation{
-                erasing ? (changes.size() == 1U ? "Remove Voxel" :
-                    "Remove Brush") : (changes.size() == 1U ? "Add Voxel" :
-                    "Add Brush"),
+                erasing ? (changes.size() == 1U ? "Remove Voxel" : "Remove Brush")
+                        : (changes.size() == 1U ? "Add Voxel" : "Add Brush"),
                 std::move(changes)});
-        applied = historyResult
-            ? CommandResult::Success()
-            : CommandResult::Failure(historyResult.Message);
+        applied = historyResult ? CommandResult::Success()
+                                : CommandResult::Failure(historyResult.Message);
     }
     else
     {
-        applied = ApplyVoxelChanges(
-            *context.EditSession,
-            context.EditSession->VoxelModelGeneration(),
-            changes,
+        applied = ApplyVoxelChanges(*context.Execution.EditSession,
+            context.Execution.EditSession->VoxelModelGeneration(), changes,
             VoxelChangeDirection::Forward);
     }
     if (!applied)
-    {
-        return Refused(
-            VoxelToolResultCode::Failed, adjacent,
+        return Refused(VoxelToolResultCode::Failed, target,
             document.GetRevision(), applied.Message);
-    }
 
     const std::uint64_t revisionAfter = document.GetRevision();
     bool synchronized = revisionAfter == revision + 1U && document.IsDirty();
-    for (const Asset::Voxel::VoxelPosition position : changedPositions)
+    for (const SmartToolPlanCell& cell : context.Plan->Cells())
     {
-        const auto voxel = document.GetVoxel(position, context.SubModelIndex);
+        if (cell.Operation == SmartToolCellOperation::Ignore) continue;
+        const auto voxel = document.GetVoxel(
+            cell.Position, context.Execution.SubModelIndex);
         const Voxel::Voxel* compatibilityVoxel = grid->Get(
-            static_cast<std::uint32_t>(position.X),
-            static_cast<std::uint32_t>(position.Y),
-            static_cast<std::uint32_t>(position.Z));
+            static_cast<std::uint32_t>(cell.Position.X),
+            static_cast<std::uint32_t>(cell.Position.Y),
+            static_cast<std::uint32_t>(cell.Position.Z));
         synchronized &= erasing
             ? !voxel && compatibilityVoxel != nullptr &&
                 !compatibilityVoxel->IsOccupied()
-            : voxel && voxel->PaletteIndex == context.State.PaletteIndex &&
+            : voxel && voxel->PaletteIndex == cell.PaletteIndex &&
                 compatibilityVoxel != nullptr && compatibilityVoxel->IsOccupied() &&
-                compatibilityVoxel->ColorIndex == context.State.PaletteIndex;
+                compatibilityVoxel->ColorIndex == cell.PaletteIndex;
     }
     if (!synchronized)
     {
-        return {
-            VoxelToolResultCode::Failed,
-            true,
-            adjacent,
-            revision,
-            revisionAfter,
+        return {VoxelToolResultCode::Failed, true, target, revision, revisionAfter,
             erasing ? "The applied Smart Erase edit failed its consistency check."
                     : "The applied Pencil edit failed its consistency check."};
     }
-    return {
-        VoxelToolResultCode::Applied,
-        true,
-        adjacent,
-        revision,
-        revisionAfter,
-        {}};
+    return {VoxelToolResultCode::Applied, true, target, revision, revisionAfter, {}};
 }
 
 const char* VoxelToolResultCodeName(const VoxelToolResultCode code) noexcept

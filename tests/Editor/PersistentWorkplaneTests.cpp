@@ -4,7 +4,9 @@
 #include "VoxelSave/VoxelDocumentSaveService.h"
 #include "VoxelSelection/VoxelRaycast.h"
 #include "VoxelTools/VoxelPencilPreview.h"
+#include "PencilPreviewTestSupport.h"
 #include "VoxelTools/VoxelPencilTool.h"
+#include "SmartToolTestSupport.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
@@ -135,12 +137,11 @@ Editor::VoxelToolResult PencilOnWorkplane(
     Editor::VoxelEditHistory& history,
     const Asset::Voxel::VoxelPosition position)
 {
-    Editor::VoxelPencilContext context;
-    context.EditSession = &session;
-    context.Document = &document;
-    context.State.PaletteIndex = 5U;
-    context.History = &history;
-    context.WorkplaneTarget = position;
+    Editor::SmartBrushState state;
+    state.PaletteIndex = 5U;
+    const Editor::VoxelPencilContext context =
+        Editor::TestSupport::MakePencilContext(session, document, 0U,
+            state, position, {0, 1, 0}, &history);
     return Editor::VoxelPencilTool::Apply(context);
 }
 
@@ -164,7 +165,7 @@ void TestPersistentWorkplane()
     Require(emptyHit.IsValid() &&
         emptyHit.Position == Asset::Voxel::VoxelPosition{1, 0, 1},
         "An empty document did not produce a valid Workplane hit.");
-    const auto emptyPreview = Editor::EvaluateVoxelPencilPreview(
+    const auto emptyPreview = Editor::EvaluatePencilPlanForTest(
         &document, 0U, std::nullopt, true, emptyHit.Position);
     Require(emptyPreview.IsValid(),
         "The empty Workplane target did not produce a Pencil preview.");
@@ -192,12 +193,12 @@ void TestPersistentWorkplane()
     voxelHit.AdjacentPosition = {1, 1, 1};
     voxelHit.AdjacentWithinBounds = true;
     voxelHit.DocumentRevision = document.GetRevision();
-    Editor::VoxelPencilContext voxelContext;
-    voxelContext.EditSession = &session;
-    voxelContext.Document = &document;
-    voxelContext.Hit = voxelHit;
-    voxelContext.State.PaletteIndex = 7U;
-    voxelContext.History = &history;
+    Editor::SmartBrushState voxelState;
+    voxelState.PaletteIndex = 7U;
+    const Editor::VoxelPencilContext voxelContext =
+        Editor::TestSupport::MakePencilContext(session, document, 0U,
+            voxelState, voxelHit.AdjacentPosition,
+            Editor::VoxelHitFaceIntegerNormal(voxelHit.Face), &history);
     Require(Editor::VoxelPencilTool::Apply(voxelContext).Code ==
             Editor::VoxelToolResultCode::Applied &&
         document.HasVoxel({1, 1, 1}),

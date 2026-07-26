@@ -45,6 +45,7 @@ public:
     [[nodiscard]] SmartGeometry Geometry() const noexcept;
     [[nodiscard]] SmartAction Action() const noexcept;
     [[nodiscard]] const SmartBrushState& BrushState() const noexcept;
+    [[nodiscard]] const std::string& ActiveProfileUuid() const noexcept;
     [[nodiscard]] const SmartBrushPlacement& Placement() const noexcept;
     [[nodiscard]] const SmartBrushResult& BrushResult() const noexcept;
     [[nodiscard]] const SmartToolRequestKey& CacheKey() const noexcept;
@@ -64,6 +65,7 @@ private:
     SmartGeometry geometry_ = SmartGeometry::Pencil;
     SmartAction action_ = SmartAction::Add;
     SmartBrushState brushState_{};
+    std::string activeProfileUuid_;
     SmartBrushPlacement placement_{};
     SmartBrushResult brushResult_{};
     SmartToolRequestKey cacheKey_{};

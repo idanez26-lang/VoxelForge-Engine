@@ -78,6 +78,7 @@
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
 #include "VoxelTools/VoxelPencilTool.h"
+#include "SmartTools/LegacySmartBrushPreview.h"
 #include "VoxelTools/VoxelToolState.h"
 #include "Welcome/ProjectDeletionService.h"
 #include "Welcome/WelcomeScreenModel.h"
@@ -514,7 +515,7 @@ private:
     SmartBrushState pencilPreviewState_{};
     bool pencilPreviewUsesWorkplane_ = false;
     bool pencilPreviewCacheValid_ = false;
-    SmartBrushPreviewCache smartBrushGhostPreviewCache_;
+    LegacySmartBrushPreviewCache smartBrushGhostPreviewCache_;
     SmartBrushPreviewResult smartToolPlanGhostPreview_;
     const SmartBrushPreviewResult* smartBrushGhostPreview_ = nullptr;
     VoxelPaintBrushEvaluation paintPreviewEvaluation_;

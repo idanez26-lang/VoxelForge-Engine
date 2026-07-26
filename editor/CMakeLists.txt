@@ -376,6 +376,7 @@ target_sources(
         src/SmartTools/SmartToolSession.cpp
         src/SmartTools/BrushProfileService.cpp
         src/SmartTools/SmartBrushPreviewResolver.cpp
+        src/SmartTools/LegacySmartBrushPreview.cpp
         src/VoxelTools/VoxelEraserTool.cpp
         src/VoxelTools/VoxelBoxService.cpp
         src/VoxelTools/VoxelBrush.cpp

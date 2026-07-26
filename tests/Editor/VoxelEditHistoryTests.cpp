@@ -2,6 +2,7 @@
 #include "VoxelHistory/VoxelHistoryInput.h"
 #include "VoxelTools/VoxelEraserTool.h"
 #include "VoxelTools/VoxelPencilTool.h"
+#include "SmartToolTestSupport.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
@@ -210,8 +211,10 @@ void TestEmptyAndToolIntegration()
     pencilHit.DocumentRevision = revision;
     Editor::SmartBrushState brushState;
     brushState.PaletteIndex = 7U;
-    const auto pencil = Editor::VoxelPencilTool::Apply({
-        &session, &document, 0U, pencilHit, brushState, false, &history});
+    const auto pencil = Editor::VoxelPencilTool::Apply(
+        Editor::TestSupport::MakePencilContext(session, document, 0U,
+            brushState, pencilHit.AdjacentPosition,
+            Editor::VoxelHitFaceIntegerNormal(pencilHit.Face), &history));
     Require(pencil.Code == Editor::VoxelToolResultCode::Applied &&
         history.CanUndo() && !history.CanRedo() &&
         history.UndoLabel() == "Add Voxel" &&

@@ -11,6 +11,7 @@ SmartToolResult SmartToolController::Resolve(
     session.SetBrush(request.BrushRequest.State);
     session.SetPaletteIndex(
         std::optional<std::size_t>{request.BrushRequest.State.PaletteIndex});
+    session.SetActiveProfileUuid(request.ActiveProfileUuid);
     session.SetWorkplane(request.Workplane);
     const SmartToolRequestKey key = MakeSmartToolRequestKey(request);
     if (session.HasPlanFor(key))
@@ -40,8 +41,17 @@ SmartToolResult SmartToolController::ResolvePreview(
 }
 
 SmartToolResult SmartToolController::ResolveCommit(
-    SmartToolSession& session, const SmartToolRequest& request)
+    const SmartToolSession& session) const
 {
-    return Resolve(session, request);
+    const SmartToolPlanPtr plan = session.PlanForCommit();
+    if (plan == nullptr)
+    {
+        // A commit may consume only the immutable plan rendered by preview.
+        // Planning here would create a second geometry path at click time.
+        return {SmartToolStatus::Error, SmartBrushResultCode::InvalidRequest,
+            nullptr, "The rendered Smart Tool plan is missing or stale."};
+    }
+    return {SmartToolStatusFrom(plan->BrushResult().Code),
+        plan->BrushResult().Code, plan, plan->BrushResult().Error};
 }
 } // namespace VoxelForge::Editor

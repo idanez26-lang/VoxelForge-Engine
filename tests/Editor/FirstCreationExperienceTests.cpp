@@ -6,7 +6,9 @@
 #include "VoxelSave/VoxelDocumentSaveService.h"
 #include "VoxelTools/VoxelEraserTool.h"
 #include "VoxelTools/VoxelPencilPreview.h"
+#include "PencilPreviewTestSupport.h"
 #include "VoxelTools/VoxelPencilTool.h"
+#include "SmartToolTestSupport.h"
 
 #include "Thumbnail/VoxThumbnailService.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
@@ -242,16 +244,15 @@ void TestFirstVoxelUndoRedoSaveAndReopen(
     Require(workplaneHit.IsValid() &&
         target == Asset::Voxel::VoxelPosition{32, 0, 32},
         "Workplane did not resolve the expected first voxel.");
-    const auto preview = Editor::EvaluateVoxelPencilPreview(
+    const auto preview = Editor::EvaluatePencilPlanForTest(
         &document, 0U, std::nullopt, true, target);
     Require(preview.IsValid() && preview.Position == target,
         "First voxel preview is not valid on the Workplane.");
-    Editor::VoxelPencilContext pencil;
-    pencil.EditSession = &session;
-    pencil.Document = &document;
-    pencil.State.PaletteIndex = 1U;
-    pencil.History = &history;
-    pencil.WorkplaneTarget = target;
+    Editor::SmartBrushState brushState;
+    brushState.PaletteIndex = 1U;
+    const Editor::VoxelPencilContext pencil =
+        Editor::TestSupport::MakePencilContext(session, document, 0U,
+            brushState, *target, {0, 1, 0}, &history);
     const auto pencilled = Editor::VoxelPencilTool::Apply(pencil);
     experience.OnFirstVoxelCreated();
     Require(pencilled.Code == Editor::VoxelToolResultCode::Applied &&
@@ -259,7 +260,7 @@ void TestFirstVoxelUndoRedoSaveAndReopen(
         history.CanUndo() &&
         experience.Stage() == Editor::FirstCreationStage::Undo,
         "First Pencil did not create one undoable voxel.");
-    const auto persistentPreview = Editor::EvaluateVoxelPencilPreview(
+    const auto persistentPreview = Editor::EvaluatePencilPlanForTest(
         &document, 0U, std::nullopt, true,
         Asset::Voxel::VoxelPosition{33, 0, 32});
     Require(persistentPreview.IsValid(),

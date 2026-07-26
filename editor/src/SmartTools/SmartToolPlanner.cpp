@@ -92,11 +92,11 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
     const std::string error = brush.Error;
     std::vector<SmartToolDiagnostic> diagnostics;
     if (!error.empty()) diagnostics.push_back({SmartToolStatusFrom(code), error});
-    const std::vector<SmartToolPlanCell> cells = BuildCells(
+    std::vector<SmartToolPlanCell> cells = BuildCells(
         brush, normalized.BrushRequest.State);
     const std::uint64_t planId = nextPlanId_++;
     const SmartToolPlanPtr plan(new SmartToolPlan(normalized, std::move(brush),
-        planId, planId, cells, std::move(diagnostics)));
+        planId, planId, std::move(cells), std::move(diagnostics)));
     return {SmartToolStatusFrom(code), code, plan, error};
 }
 } // namespace VoxelForge::Editor

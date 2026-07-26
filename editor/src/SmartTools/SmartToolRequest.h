@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 
 namespace VoxelForge::Editor
 {
@@ -21,6 +22,9 @@ struct SmartToolRequest final
     std::uint64_t SourceRevision = 0U;
     std::uint64_t SourceGeneration = 0U;
     std::size_t SourceSubModelIndex = 0U;
+    // Value snapshot only. It identifies the profile that supplied the brush
+    // values without giving the plan a mutable dependency on that profile.
+    std::string ActiveProfileUuid;
     // A real construction-plane interaction, distinct from ordinary hit
     // placement. It is session state, not part of geometry cache identity.
     std::optional<SmartBrushPlacement> Workplane;
@@ -37,6 +41,7 @@ struct SmartToolRequestKey final
     std::uint64_t SourceRevision = 0U;
     std::uint64_t SourceGeneration = 0U;
     std::size_t SourceSubModelIndex = 0U;
+    std::string ActiveProfileUuid;
 
     [[nodiscard]] bool operator==(const SmartToolRequestKey& other) const noexcept
     {
@@ -49,7 +54,8 @@ struct SmartToolRequestKey final
             SourceIdentity == other.SourceIdentity &&
             SourceRevision == other.SourceRevision &&
             SourceGeneration == other.SourceGeneration &&
-            SourceSubModelIndex == other.SourceSubModelIndex;
+            SourceSubModelIndex == other.SourceSubModelIndex &&
+            ActiveProfileUuid == other.ActiveProfileUuid;
     }
 };
 
@@ -59,6 +65,6 @@ struct SmartToolRequestKey final
     return {request.Geometry, request.Action, request.BrushRequest.Dimensions,
         request.BrushRequest.State, request.BrushRequest.Placement,
         request.SourceIdentity, request.SourceRevision, request.SourceGeneration,
-        request.SourceSubModelIndex};
+        request.SourceSubModelIndex, request.ActiveProfileUuid};
 }
 } // namespace VoxelForge::Editor

@@ -16,7 +16,7 @@ public:
     [[nodiscard]] SmartToolResult ResolvePreview(
         SmartToolSession& session, const SmartToolRequest& request);
     [[nodiscard]] SmartToolResult ResolveCommit(
-        SmartToolSession& session, const SmartToolRequest& request);
+        const SmartToolSession& session) const;
 
 private:
     SmartToolPlanner planner_;

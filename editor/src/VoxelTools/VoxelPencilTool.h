@@ -1,14 +1,9 @@
 #pragma once
 
-#include "Commands/Voxel/VoxelEditSession.h"
-#include "BrushEngine/SmartBrushEngine.h"
 #include "SmartTools/SmartToolExecutionContext.h"
 #include "SmartTools/SmartToolPlan.h"
-#include "VoxelSelection/VoxelRaycast.h"
 
-#include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <string>
 
 namespace VoxelForge::Editor
@@ -42,16 +37,8 @@ struct VoxelToolResult final
 
 struct VoxelPencilContext final
 {
-    VoxelEditSession* EditSession = nullptr;
-    Asset::Voxel::VoxelDocument* Document = nullptr;
-    std::size_t SubModelIndex = 0U;
-    std::optional<VoxelRaycastHit> Hit;
-    SmartBrushState State{};
-    bool Blocked = false;
-    VoxelEditHistory* History = nullptr;
-    std::optional<Asset::Voxel::VoxelPosition> WorkplaneTarget;
-    // When supplied by SMART-01, this is the same immutable plan rendered by
-    // the ghost preview. Kept last to preserve existing aggregate callers.
+    // The exact immutable plan rendered by the preview. Pencil deliberately
+    // receives no hit, brush state, or request from which to recalculate one.
     SmartToolPlanPtr Plan;
     SmartToolExecutionContext Execution;
 };
@@ -59,6 +46,8 @@ struct VoxelPencilContext final
 class VoxelPencilTool final
 {
 public:
+    // Commits an existing plan only; there is intentionally no BrushEngine
+    // fallback for a missing or stale plan.
     [[nodiscard]] static VoxelToolResult Apply(
         const VoxelPencilContext& context);
 };
