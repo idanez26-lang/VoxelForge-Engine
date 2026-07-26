@@ -49,6 +49,7 @@ constexpr const char* ToolOptionsPanelWindowName = "Tool Options";
 constexpr const char* StylePanelWindowName = "Style";
 constexpr const char* ViewportPanelWindowName = "Viewport";
 constexpr const char* AssetsPanelWindowName = "Assets";
+constexpr const char* ForgeLibraryPanelWindowName = "Forge Library";
 constexpr const char* ScenePanelWindowName = "Scene";
 constexpr const char* InspectorPanelWindowName = "Inspector";
 constexpr const char* TransformPanelWindowName = "Transform";
@@ -61,9 +62,10 @@ constexpr const char* DeleteProjectPopupName = "Delete VoxelForge Project";
 
 bool HasAllCreateWorkspaceSettings() noexcept
 {
-    constexpr std::array<const char*, 9U> officialWindowNames = {
+    constexpr std::array<const char*, 10U> officialWindowNames = {
         ToolsPanelWindowName, ToolOptionsPanelWindowName, StylePanelWindowName,
-        ViewportPanelWindowName, AssetsPanelWindowName, ScenePanelWindowName,
+        ViewportPanelWindowName, AssetsPanelWindowName,
+        ForgeLibraryPanelWindowName, ScenePanelWindowName,
         InspectorPanelWindowName, TransformPanelWindowName, "Console"};
     for (const char* const windowName : officialWindowNames)
     {
@@ -615,6 +617,8 @@ void EditorWorkspace::Draw()
         }
         DrawAssetBrowserPanel();
     }
+    if (showForgeLibrary_ && !thumbnailVisualMode_)
+        DrawForgeLibraryPanel();
     if (showInspector_ && thumbnailVisualMode_)
     {
         ImGui::SetNextWindowDockID(0U, ImGuiCond_Always);
@@ -884,12 +888,11 @@ void EditorWorkspace::DrawMainMenuBar()
     {
         const bool hasActiveProject = projectManager_.HasActiveProject();
         if (ImGui::MenuItem(
-                "Preview Latest Stamp (Developer)",
-                nullptr,
-                false,
-                hasActiveProject))
+                "Forge Library", nullptr, false, hasActiveProject))
         {
-            BeginLatestStampPreview();
+            showForgeLibrary_ = true;
+            stampCatalogService_.InvalidateCache();
+            static_cast<void>(forgeLibraryViewModel_.Refresh());
         }
 
         const bool liveStampPreviewActive =
@@ -1000,6 +1003,7 @@ void EditorWorkspace::DrawMainMenuBar()
         ImGui::MenuItem("Style", nullptr, &showPalette_);
         ImGui::MenuItem("Viewport", nullptr, &showScene_);
         ImGui::MenuItem("Assets", nullptr, &showAssetBrowser_);
+        ImGui::MenuItem("Forge Library", nullptr, &showForgeLibrary_);
         ImGui::MenuItem("Scene", nullptr, &showExplorer_);
         ImGui::MenuItem("Inspector", nullptr, &showInspector_);
         ImGui::MenuItem("Transform", nullptr, &showTransformPanel_);
@@ -1821,6 +1825,7 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     ImGui::DockBuilderDockWindow(StylePanelWindowName, styleId);
     ImGui::DockBuilderDockWindow(ViewportPanelWindowName, topId);
     ImGui::DockBuilderDockWindow(AssetsPanelWindowName, rightId);
+    ImGui::DockBuilderDockWindow(ForgeLibraryPanelWindowName, rightId);
     ImGui::DockBuilderDockWindow(ScenePanelWindowName, rightId);
     ImGui::DockBuilderDockWindow(InspectorPanelWindowName, rightId);
     ImGui::DockBuilderDockWindow(TransformPanelWindowName, rightId);
@@ -1837,6 +1842,7 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     showTransformPanel_ = true;
     showPalette_ = true;
     showAssetBrowser_ = true;
+    showForgeLibrary_ = true;
     showConsole_ = true;
 }
 
@@ -4007,6 +4013,17 @@ void EditorWorkspace::DrawAssetBrowserPanel()
     }
 }
 
+void EditorWorkspace::DrawForgeLibraryPanel()
+{
+    const Stamps::ForgeLibraryPanelResult result = forgeLibraryPanel_.Draw(
+        &showForgeLibrary_, voxelDocumentSession_.ActiveDocument(),
+        voxelDocumentSession_.Generation());
+    if (result.SessionActivated)
+        UpdateVoxelHighlights();
+    if (!result.Message.empty())
+        AddConsoleMessage("Forge Library: " + result.Message);
+}
+
 void EditorWorkspace::DrawFileDropOverlay(
     const DragDropRect& rect,
     const DragDropImportTarget target) const
@@ -4206,55 +4223,6 @@ void EditorWorkspace::BeginSaveSelectionAsStamp()
         showSaveSelectionAsStampPopup_ = true;
     }
     else AddConsoleMessage("Save Selection As: " + result.Message);
-}
-
-void EditorWorkspace::BeginLatestStampPreview()
-{
-    const Stamps::StampCatalogResult catalogue = stampJsonCatalogStore_.LoadCatalogue();
-    if (!catalogue.Succeeded() || catalogue.Catalog.Entries.empty())
-    {
-        AddConsoleMessage("Live Stamp Preview: no Project Library Stamp is available.");
-        return;
-    }
-    const Stamps::StampCatalogEntry& entry = catalogue.Catalog.Entries.back();
-    Stamps::StampLibraryResult loaded = stampProjectLibraryRepository_.Read(entry.Reference);
-    if (!loaded.Succeeded() || !loaded.Stamp)
-    {
-        AddConsoleMessage("Live Stamp Preview: " + loaded.Message);
-        return;
-    }
-    Asset::Voxel::VoxelDocument* const document =
-        voxelDocumentSession_.ActiveDocument();
-    if (document == nullptr)
-    {
-        AddConsoleMessage(
-            "Live Stamp Preview: an active voxel document is required.");
-        return;
-    }
-    const Stamps::StampFixedPoint initialTarget =
-        loaded.Stamp->Pivot().LocalPosition;
-    const Stamps::StampPlacementSessionResult result =
-        stampPlacementSession_.Begin(
-            std::move(*loaded.Stamp), *document,
-            voxelDocumentSession_.Generation(), 0U, initialTarget);
-    if (result.PreviewChanged)
-    {
-        UpdateVoxelHighlights();
-    }
-    if (!result.Succeeded)
-    {
-        AddConsoleMessage(
-            "Live Stamp Preview: " +
-            std::string(Stamps::StampPlacementDiagnosticMessage(
-                result.Diagnostic)));
-        return;
-    }
-    const Stamps::StampPlacementPlan* const plan =
-        stampPlacementSession_.CurrentPlan();
-    AddConsoleMessage(
-        plan != nullptr && plan->Statistics.OverlapCount != 0U
-        ? "Live Stamp Preview: overlap is allowed."
-        : "Live Stamp Preview: valid preview active.");
 }
 
 void EditorWorkspace::MoveLatestStampPreview(
@@ -4769,6 +4737,61 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
     return stampPlacementVisualSucceeded_;
 }
 
+bool EditorWorkspace::RunForgeLibraryVisualStep(const std::size_t frame)
+{
+    showForgeLibrary_ = true;
+    if (frame == 0U)
+    {
+        resetLayoutRequested_ = true;
+        stampCatalogService_.InvalidateCache();
+        const Stamps::ForgeLibraryOperationResult refreshed =
+            forgeLibraryViewModel_.Refresh();
+        if (!refreshed.Succeeded || forgeLibraryViewModel_.Items().empty())
+            return false;
+        forgeLibraryViewModel_.SetDisplayMode(
+            Stamps::ForgeLibraryDisplayMode::Grid);
+        static_cast<void>(forgeLibraryViewModel_.Select(
+            forgeLibraryViewModel_.Items().front().CatalogEntry.Reference.Id));
+    }
+    if (frame == 1U)
+        ImGui::SetWindowFocus(ForgeLibraryPanelWindowName);
+    if (frame == 240U)
+    {
+        forgeLibraryViewModel_.SetDisplayMode(
+            Stamps::ForgeLibraryDisplayMode::List);
+    }
+    if (frame == 480U)
+    {
+        forgeLibraryViewModel_.SetSearchText("Stone");
+        static_cast<void>(forgeLibraryViewModel_.Refresh());
+    }
+    if (frame == 720U)
+    {
+        forgeLibraryViewModel_.SetSearchText({});
+        forgeLibraryViewModel_.SetDisplayMode(
+            Stamps::ForgeLibraryDisplayMode::Grid);
+        static_cast<void>(forgeLibraryViewModel_.Refresh());
+        if (!forgeLibraryViewModel_.Items().empty())
+        {
+            static_cast<void>(forgeLibraryViewModel_.Select(
+                forgeLibraryViewModel_.Items().back()
+                    .CatalogEntry.Reference.Id));
+            Asset::Voxel::VoxelDocument* const document =
+                voxelDocumentSession_.ActiveDocument();
+            if (document != nullptr)
+            {
+                const Stamps::ForgeLibraryOperationResult activated =
+                    forgeLibraryViewModel_.ActivateSelected(
+                        *document, voxelDocumentSession_.Generation());
+                if (activated.SessionActivated) UpdateVoxelHighlights();
+            }
+        }
+    }
+    if (frame == 960U && stampPlacementSession_.CurrentPlan() != nullptr)
+        PlaceLatestStampPreview();
+    return true;
+}
+
 void EditorWorkspace::DrawSaveSelectionAsStampDialog()
 {
     constexpr const char* popupName = "Save Selection As...";
@@ -4834,6 +4857,8 @@ void EditorWorkspace::DrawSaveSelectionAsStampDialog()
         saveSelectionAsStampMessage_ = result.Message;
         if (result.IsSuccess())
         {
+            stampCatalogService_.InvalidateCache();
+            static_cast<void>(forgeLibraryViewModel_.Refresh());
             AddConsoleMessage("Save Selection As: " + result.Message);
             ImGui::CloseCurrentPopup();
         }

@@ -1651,3 +1651,37 @@ set_tests_properties(
     VoxelForge.Editor.StampMirrorSmoke
     PROPERTIES LABELS "Smoke"
 )
+
+# STAMP-18: the Project Forge Library selects catalogue entries and activates
+# the existing placement session without owning any placement calculations.
+add_executable(
+    VoxelForgeEditorForgeLibraryViewModelTests
+    Editor/ForgeLibraryViewModelTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorForgeLibraryViewModelTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorForgeLibraryViewModelTests)
+add_test(
+    NAME VoxelForge.Editor.ForgeLibrary
+    COMMAND $<TARGET_FILE:VoxelForgeEditorForgeLibraryViewModelTests>
+)
+
+add_executable(
+    VoxelForgeEditorForgeLibrarySmokeTests
+    Editor/ForgeLibrarySmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorForgeLibrarySmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorForgeLibrarySmokeTests)
+add_test(
+    NAME VoxelForge.Editor.ForgeLibrarySmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorForgeLibrarySmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.ForgeLibrarySmoke
+    PROPERTIES LABELS "Smoke"
+)

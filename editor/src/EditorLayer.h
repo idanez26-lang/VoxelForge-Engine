@@ -84,7 +84,8 @@ public:
         std::filesystem::path imguiIniPathOverride = {},
         bool createWorkspaceSmokeTest = false,
         bool stampLivePreviewVisualTest = false,
-        bool stampPlacementVisualTest = false);
+        bool stampPlacementVisualTest = false,
+        bool forgeLibraryVisualTest = false);
 
     void OnAttach() override;
     void OnDetach() override;
@@ -175,6 +176,7 @@ private:
     bool createWorkspaceSmokeTest_ = false;
     bool stampLivePreviewVisualTest_ = false;
     bool stampPlacementVisualTest_ = false;
+    bool forgeLibraryVisualTest_ = false;
     bool voxelSelectionRayHit_ = false;
     bool applicationCloseRequested_ = false;
 

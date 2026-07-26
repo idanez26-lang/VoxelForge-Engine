@@ -1,5 +1,9 @@
 #include "EditorLayer.h"
 #include "EditorWindowTitle.h"
+#include "VoxelStamps/Library/StampCatalogService.h"
+#include "VoxelStamps/Library/StampJsonCatalogStore.h"
+#include "VoxelStamps/Library/StampProjectLibraryRepository.h"
+#include "VoxelStamps/VoxelStamp.h"
 
 #include "VoxelForge/Core/Application.h"
 #include "VoxelForge/Core/ApplicationSpecification.h"
@@ -74,6 +78,7 @@ struct CommandLine final
     bool ViewportVisualTest = false;
     bool StampLivePreviewVisualTest = false;
     bool StampPlacementVisualTest = false;
+    bool ForgeLibraryVisualTest = false;
     bool VoxelSelectionSmokeTest = false;
     bool VoxelSelectionVisualTest = false;
     bool EraseVoxelSmokeTest = false;
@@ -138,6 +143,8 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--stamp-live-preview-visual-test";
         result.StampPlacementVisualTest |=
             argument == "--stamp-placement-visual-test";
+        result.ForgeLibraryVisualTest |=
+            argument == "--forge-library-visual-test";
         result.VoxelSelectionSmokeTest |=
             argument == "--voxel-selection-smoke-test" ||
             argument == "--selection-system-smoke-test" ||
@@ -264,7 +271,8 @@ public:
     bool Create(
         VoxelForge::Project::ProjectManager& projectManager,
         const bool singleVoxel,
-        const bool externalSource)
+        const bool externalSource,
+        const bool largeDocument = false)
     {
         const auto project = projectManager.CreateProject("ViewportTest", parent_);
         if (!project)
@@ -276,7 +284,10 @@ public:
             : project->RootPath() / "Assets" / "Models" / "sample.vox";
 
         std::vector<std::uint8_t> size;
-        AppendU32(size, 3U); AppendU32(size, 3U); AppendU32(size, 3U);
+        const std::uint32_t documentSize = largeDocument ? 16U : 3U;
+        AppendU32(size, documentSize);
+        AppendU32(size, documentSize);
+        AppendU32(size, documentSize);
         std::vector<std::uint8_t> xyzi;
         const std::array<std::array<std::uint8_t, 4>, 7> fullVoxels{{
             {{1U, 1U, 1U, 1U}}, {{0U, 1U, 1U, 2U}},
@@ -372,6 +383,100 @@ public:
         return true;
     }
 
+    bool CreateForgeLibrarySources(
+        VoxelForge::Project::ProjectManager& projectManager)
+    {
+        const auto& project = projectManager.ActiveProject();
+        if (!project) return false;
+
+        using namespace VoxelForge::Editor::Stamps;
+        StampProjectLibraryRepository repository;
+        StampJsonCatalogStore store;
+        if (!repository.SetProjectRoot(project->RootPath()) ||
+            !store.SetProjectRoot(project->RootPath()))
+            return false;
+
+        const auto makeStamp = [](
+            const std::uint64_t id,
+            const StampDimensions dimensions,
+            const VoxelForge::Asset::Vox::VoxColor color)
+            -> std::optional<VoxelStamp>
+        {
+            std::vector<StampVoxel> voxels;
+            voxels.reserve(
+                static_cast<std::size_t>(dimensions.X) *
+                dimensions.Y * dimensions.Z);
+            for (std::uint32_t z = 0U; z < dimensions.Z; ++z)
+            {
+                for (std::uint32_t y = 0U; y < dimensions.Y; ++y)
+                {
+                    for (std::uint32_t x = 0U; x < dimensions.X; ++x)
+                    {
+                        if (y == 0U || x == 0U ||
+                            x + 1U == dimensions.X ||
+                            z == 0U || z + 1U == dimensions.Z)
+                        {
+                            voxels.push_back({
+                                .Position = {
+                                    static_cast<std::int32_t>(x),
+                                    static_cast<std::int32_t>(y),
+                                    static_cast<std::int32_t>(z)},
+                                .LocalColorId = 0U});
+                        }
+                    }
+                }
+            }
+            StampValidationResult validation{};
+            return VoxelStamp::TryCreate(
+                {.Id = VoxelForge::Core::UUID{id}, .ContentHash = {}},
+                {{},
+                 {static_cast<std::int32_t>(dimensions.X - 1U),
+                  static_cast<std::int32_t>(dimensions.Y - 1U),
+                  static_cast<std::int32_t>(dimensions.Z - 1U)},
+                 dimensions},
+                {.RequestedMode = StampPivotMode::BottomCenter,
+                 .ResolvedMode = StampPivotMode::BottomCenter,
+                 .LocalPosition = {
+                     static_cast<std::int32_t>(dimensions.X) *
+                         StampFixedPoint::UnitsPerVoxel / 2,
+                     0,
+                     static_cast<std::int32_t>(dimensions.Z) *
+                         StampFixedPoint::UnitsPerVoxel / 2}},
+                {},
+                {{.LocalColorId = 0U, .Color = color}},
+                std::move(voxels), DefaultStampResourceLimits(), &validation);
+        };
+
+        struct Fixture final
+        {
+            const char* Name;
+            std::uint64_t Id;
+            StampDimensions Dimensions;
+            VoxelForge::Asset::Vox::VoxColor Color;
+        };
+        constexpr std::array<Fixture, 4U> fixtures{{
+            {"Castle Gate", 0x181001U, {7U, 6U, 2U},
+             {180U, 130U, 70U, 255U}},
+            {"Forest Tree", 0x181002U, {5U, 8U, 5U},
+             {60U, 175U, 85U, 255U}},
+            {"Sci-Fi Crate", 0x181003U, {4U, 4U, 4U},
+             {60U, 150U, 220U, 255U}},
+            {"Stone Arch", 0x181004U, {7U, 5U, 2U},
+             {155U, 160U, 170U, 255U}},
+        }};
+        for (const Fixture& fixture : fixtures)
+        {
+            std::optional<VoxelStamp> stamp =
+                makeStamp(fixture.Id, fixture.Dimensions, fixture.Color);
+            if (!stamp ||
+                !repository.Install(
+                    *stamp, {.PreferredFileStem = fixture.Name}).Succeeded())
+                return false;
+        }
+        StampCatalogService catalogue(repository, store);
+        return catalogue.RebuildCatalogue().Succeeded();
+    }
+
     ~ViewportTestFixture()
     {
         std::error_code ignored;
@@ -422,6 +527,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.ViewportSmokeTest || commandLine.ViewportVisualTest ||
             commandLine.StampLivePreviewVisualTest ||
             commandLine.StampPlacementVisualTest ||
+            commandLine.ForgeLibraryVisualTest ||
             commandLine.VoxelSelectionSmokeTest ||
             commandLine.VoxelSelectionVisualTest ||
             commandLine.EraseVoxelSmokeTest ||
@@ -511,15 +617,23 @@ int main(const int argumentCount, char* arguments[])
                     commandLine.AddVoxelSmokeTest ||
                         commandLine.StampLivePreviewVisualTest ||
                         commandLine.StampPlacementVisualTest ||
+                        commandLine.ForgeLibraryVisualTest ||
                         commandLine.VoxelPencilSmokeTest ||
                         commandLine.VoxelEraserSmokeTest ||
                         commandLine.VoxelUndoRedoSmokeTest,
                     commandLine.ModelImportSmokeTest ||
                         commandLine.ModelImportVisualTest ||
-                        commandLine.DragDropImportSmokeTest));
+                        commandLine.DragDropImportSmokeTest,
+                    commandLine.ForgeLibraryVisualTest));
         if (!fixtureCreated)
         {
             std::cerr << "[FATAL] Unable to create viewport test fixture.\n";
+            return 1;
+        }
+        if (commandLine.ForgeLibraryVisualTest &&
+            !viewportFixture.CreateForgeLibrarySources(projectManager))
+        {
+            std::cerr << "[FATAL] Unable to create Forge Library visual fixtures.\n";
             return 1;
         }
         if (commandLine.ModelImportVisualTest &&
@@ -726,7 +840,8 @@ int main(const int argumentCount, char* arguments[])
                              : std::filesystem::path{},
                  commandLine.CreateWorkspaceSmokeTest,
                  commandLine.StampLivePreviewVisualTest,
-                 commandLine.StampPlacementVisualTest);
+                 commandLine.StampPlacementVisualTest,
+                 commandLine.ForgeLibraryVisualTest);
         VoxelForge::Editor::EditorLayer* const editorLayerPointer =
             editorLayer.get();
         application.SetWindowCloseRequestCallback(

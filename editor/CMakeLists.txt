@@ -317,6 +317,7 @@ target_sources(
         src/VoxelStamps/Library/StampProjectLibraryRepository.cpp
         src/VoxelStamps/Library/StampJsonCatalogStore.cpp
         src/VoxelStamps/Library/StampCatalogService.cpp
+        src/VoxelStamps/Library/ForgeLibraryViewModel.cpp
         src/VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.cpp
         src/VoxelStamps/Preview/StampLivePreviewBuilder.cpp
         src/VoxelStamps/Validation/StampValidationService.cpp
@@ -670,6 +671,7 @@ target_sources(
         src/EditorLayer.cpp
         src/EditorWorkspace.cpp
         src/Input/EditorInputService.cpp
+        src/VoxelStamps/Library/ForgeLibraryPanel.cpp
         src/Tools/ToolManager.cpp
         src/Tools/ToolPanel.cpp
         src/Tools/Panels/SmartBrushOptions.cpp

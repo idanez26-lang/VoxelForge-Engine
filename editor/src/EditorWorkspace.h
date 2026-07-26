@@ -57,6 +57,8 @@
 #include "VoxelSelection/VoxelSelectionState.h"
 #include "VoxelSelection/ViewportRayBuilder.h"
 #include "VoxelStamps/Library/StampCatalogService.h"
+#include "VoxelStamps/Library/ForgeLibraryPanel.h"
+#include "VoxelStamps/Library/ForgeLibraryViewModel.h"
 #include "VoxelStamps/Library/StampJsonCatalogStore.h"
 #include "VoxelStamps/Library/StampProjectLibraryRepository.h"
 #include "VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.h"
@@ -233,6 +235,7 @@ public:
     [[nodiscard]] bool QualityOfLifeSmokePassed() const noexcept;
     [[nodiscard]] bool RunStampLivePreviewVisualStep(std::size_t frame);
     [[nodiscard]] bool RunStampPlacementVisualStep(std::size_t frame);
+    [[nodiscard]] bool RunForgeLibraryVisualStep(std::size_t frame);
     [[nodiscard]] std::size_t VoxelHighlightUploadCount() const noexcept;
     [[nodiscard]] std::size_t VoxelHighlightRenderCount() const noexcept;
 
@@ -265,6 +268,7 @@ private:
     void DrawTransformPanel();
     void DrawPalettePanel();
     void DrawAssetBrowserPanel();
+    void DrawForgeLibraryPanel();
     void DrawConsolePanel();
     void DrawProfilerPanel();
     void DrawStatusBar();
@@ -282,7 +286,6 @@ private:
     void DrawDirtyConfirmationDialog();
     void DrawSaveSelectionAsStampDialog();
     void BeginSaveSelectionAsStamp();
-    void BeginLatestStampPreview();
     void MoveLatestStampPreview(std::int32_t x, std::int32_t y, std::int32_t z);
     void RotateLatestStampPreview(bool clockwise);
     void MirrorLatestStampPreview(Stamps::StampPlacementMirrorMode mirror);
@@ -436,9 +439,15 @@ private:
     SelectionService selectionService_;
     Stamps::StampProjectLibraryRepository stampProjectLibraryRepository_;
     Stamps::StampJsonCatalogStore stampJsonCatalogStore_;
+    Stamps::StampCatalogService stampCatalogService_{
+        stampProjectLibraryRepository_, stampJsonCatalogStore_};
     Stamps::SaveSelectionAsStampWorkflow saveSelectionAsStampWorkflow_{
         stampProjectLibraryRepository_, stampJsonCatalogStore_};
     Stamps::StampPlacementSession stampPlacementSession_;
+    Stamps::ForgeLibraryViewModel forgeLibraryViewModel_{
+        stampCatalogService_, stampProjectLibraryRepository_,
+        stampPlacementSession_};
+    Stamps::ForgeLibraryPanel forgeLibraryPanel_{forgeLibraryViewModel_};
     std::uint64_t stampLivePreviewVisualDocumentRevision_ = 0U;
     std::optional<std::chrono::steady_clock::time_point>
         stampLivePreviewVisualStartedAt_;
@@ -597,6 +606,7 @@ private:
     bool showTransformPanel_ = true;
     bool showPalette_ = true;
     bool showAssetBrowser_ = true;
+    bool showForgeLibrary_ = true;
     bool showConsole_ = true;
     bool showProfiler_ = false;
     bool showImGuiDemo_ = false;

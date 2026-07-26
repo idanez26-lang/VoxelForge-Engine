@@ -73,7 +73,8 @@ EditorLayer::EditorLayer(
     std::filesystem::path imguiIniPathOverride,
     const bool createWorkspaceSmokeTest,
     const bool stampLivePreviewVisualTest,
-    const bool stampPlacementVisualTest)
+    const bool stampPlacementVisualTest,
+    const bool forgeLibraryVisualTest)
     : Layer("VoxelForge Editor Layer"),
       layoutPersistence_(std::move(imguiIniPathOverride)),
       workspace_(
@@ -98,7 +99,7 @@ EditorLayer::EditorLayer(
               transformGizmoFoundationSmokeTest ||
               transformPanelSmokeTest ||
               saveOnExitSmokeTest || stampLivePreviewVisualTest ||
-              stampPlacementVisualTest
+              stampPlacementVisualTest || forgeLibraryVisualTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -122,7 +123,7 @@ EditorLayer::EditorLayer(
               transformGizmoFoundationSmokeTest ||
               transformPanelSmokeTest ||
               saveOnExitSmokeTest || stampLivePreviewVisualTest ||
-              stampPlacementVisualTest),
+              stampPlacementVisualTest || forgeLibraryVisualTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -175,7 +176,8 @@ EditorLayer::EditorLayer(
       saveOnExitSmokeTest_(saveOnExitSmokeTest),
       createWorkspaceSmokeTest_(createWorkspaceSmokeTest),
       stampLivePreviewVisualTest_(stampLivePreviewVisualTest),
-      stampPlacementVisualTest_(stampPlacementVisualTest)
+      stampPlacementVisualTest_(stampPlacementVisualTest),
+      forgeLibraryVisualTest_(forgeLibraryVisualTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -490,6 +492,9 @@ void EditorLayer::OnImGuiRender()
         RequestApplicationClose();
         return;
     }
+    if (forgeLibraryVisualTest_)
+        static_cast<void>(workspace_.RunForgeLibraryVisualStep(
+            renderedFrameCount_));
     workspace_.Draw();
     if (createWorkspaceSmokeTest_)
     {
