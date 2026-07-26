@@ -62,6 +62,7 @@
 #include "VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.h"
 #include "VoxelStamps/Preview/StampLivePreviewBuilder.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
+#include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelTools/VoxelEraserTool.h"
 #include "VoxelTools/VoxelBoxService.h"
@@ -232,6 +233,7 @@ public:
     [[nodiscard]] bool QualityOfLifeSmokePassed() const noexcept;
     [[nodiscard]] bool RunStampLivePreviewVisualStep(std::size_t frame);
     [[nodiscard]] std::size_t VoxelHighlightUploadCount() const noexcept;
+    [[nodiscard]] bool RunStampPlacementVisualStep(std::size_t frame);
     [[nodiscard]] std::size_t VoxelHighlightRenderCount() const noexcept;
 
 private:
@@ -283,6 +285,8 @@ private:
     void BeginLatestStampPreview();
     void MoveLatestStampPreview(std::int32_t x, std::int32_t y, std::int32_t z);
     void ClearLatestStampPreview() noexcept;
+    void PlaceLatestStampPreview();
+    [[nodiscard]] bool RefreshLatestStampPreview();
     void ConsumeFileDialogResult();
     [[nodiscard]] bool DrawPathInput(
         const char* label,
@@ -442,6 +446,18 @@ private:
     bool stampLivePreviewVisualOverlap_ = false;
     bool stampLivePreviewVisualClear_ = false;
     std::array<char, 256> saveSelectionAsStampName_{};
+    std::uint64_t stampPlacementVisualDocumentRevision_ = 0U;
+    std::optional<std::chrono::steady_clock::time_point>
+        stampPlacementVisualStartedAt_;
+    bool stampPlacementVisualPreviewed_ = false;
+    bool stampPlacementVisualFirstPlaced_ = false;
+    bool stampPlacementVisualMoved_ = false;
+    bool stampPlacementVisualSecondPlaced_ = false;
+    bool stampPlacementVisualUndone_ = false;
+    bool stampPlacementVisualRedone_ = false;
+    bool stampPlacementVisualCleared_ = false;
+    bool stampPlacementVisualFinished_ = false;
+    bool stampPlacementVisualSucceeded_ = false;
     std::string saveSelectionAsStampMessage_;
     bool showSaveSelectionAsStampPopup_ = false;
     SelectionVolumeCache selectionVolumeCache_;

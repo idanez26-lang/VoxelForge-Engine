@@ -1527,3 +1527,32 @@ add_test(
     NAME VoxelForge.Editor.PaletteMappingEngineSmoke
     COMMAND $<TARGET_FILE:VoxelForgeEditorPaletteMappingEngineSmokeTests>
 )
+
+# STAMP-13: placement preparation uses the existing preview and composite history operation.
+add_executable(
+    VoxelForgeEditorPlaceVoxelStampOperationTests
+    Editor/PlaceVoxelStampOperationTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorPlaceVoxelStampOperationTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorPlaceVoxelStampOperationTests)
+add_test(
+    NAME VoxelForge.Editor.PlaceVoxelStampOperation
+    COMMAND $<TARGET_FILE:VoxelForgeEditorPlaceVoxelStampOperationTests>
+)
+
+add_executable(
+    VoxelForgeEditorPlaceVoxelStampOperationSmokeTests
+    Editor/StampPlacementSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorPlaceVoxelStampOperationSmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorPlaceVoxelStampOperationSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.PlaceVoxelStampOperationSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorPlaceVoxelStampOperationSmokeTests>
+)

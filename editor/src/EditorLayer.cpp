@@ -72,7 +72,8 @@ EditorLayer::EditorLayer(
     const bool saveOnExitSmokeTest,
     std::filesystem::path imguiIniPathOverride,
     const bool createWorkspaceSmokeTest,
-    const bool stampLivePreviewVisualTest)
+    const bool stampLivePreviewVisualTest,
+    const bool stampPlacementVisualTest)
     : Layer("VoxelForge Editor Layer"),
       layoutPersistence_(std::move(imguiIniPathOverride)),
       workspace_(
@@ -96,7 +97,8 @@ EditorLayer::EditorLayer(
               transformGizmoManagerSmokeTest ||
               transformGizmoFoundationSmokeTest ||
               transformPanelSmokeTest ||
-              saveOnExitSmokeTest || stampLivePreviewVisualTest
+              saveOnExitSmokeTest || stampLivePreviewVisualTest ||
+              stampPlacementVisualTest
               ? (qualityOfLifeSmokeTest
                   ? qualityOfLifeParent
                   : startupVoxPath.parent_path()) / "preferences.ini"
@@ -119,7 +121,8 @@ EditorLayer::EditorLayer(
               transformGizmoManagerSmokeTest ||
               transformGizmoFoundationSmokeTest ||
               transformPanelSmokeTest ||
-              saveOnExitSmokeTest || stampLivePreviewVisualTest),
+              saveOnExitSmokeTest || stampLivePreviewVisualTest ||
+              stampPlacementVisualTest),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),
@@ -171,7 +174,8 @@ EditorLayer::EditorLayer(
       transformPanelSmokeTest_(transformPanelSmokeTest),
       saveOnExitSmokeTest_(saveOnExitSmokeTest),
       createWorkspaceSmokeTest_(createWorkspaceSmokeTest),
-      stampLivePreviewVisualTest_(stampLivePreviewVisualTest)
+      stampLivePreviewVisualTest_(stampLivePreviewVisualTest),
+      stampPlacementVisualTest_(stampPlacementVisualTest)
 {
     if (voxelDocumentSmokeTest_)
         voxelDocumentSmokeSourcePath_ = startupVoxPath_;
@@ -479,6 +483,12 @@ void EditorLayer::OnImGuiRender()
     {
         static_cast<void>(workspace_.RunStampLivePreviewVisualStep(
             renderedFrameCount_));
+    }
+    if (stampPlacementVisualTest_ &&
+        workspace_.RunStampPlacementVisualStep(renderedFrameCount_))
+    {
+        RequestApplicationClose();
+        return;
     }
     workspace_.Draw();
     if (createWorkspaceSmokeTest_)
