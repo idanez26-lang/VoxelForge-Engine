@@ -1,12 +1,13 @@
 #include "Preview/VoxelPreview.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelSelection/VoxelRaycast.h"
+#include "VoxelStamps/Placement/StampPlacementPlanner.h"
 #include "VoxelStamps/Preview/StampLivePreviewBuilder.h"
 
+#include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 
 #include <cstdlib>
-#include <limits>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -30,14 +31,18 @@ VoxelStamp MakeStamp(
     const StampBounds bounds{{}, {1, 0, 0}, {2U, 1U, 1U}};
     const StampPivot stampPivot{.RequestedMode = StampPivotMode::Center,
         .ResolvedMode = StampPivotMode::Center, .LocalPosition = pivot};
-    const std::vector<StampPaletteEntry> palette{{0U, {255U, 0U, 0U, 255U}},
-                                                  {1U, {0U, 0U, 255U, 255U}}};
-    const std::vector<StampVoxel> voxels{{{0, 0, 0}, 0U}, {{1, 0, 0}, 1U}};
+    const std::vector<StampPaletteEntry> palette{
+        {0U, {255U, 0U, 0U, 255U}},
+        {1U, {0U, 0U, 255U, 255U}}};
+    const std::vector<StampVoxel> voxels{
+        {{0, 0, 0}, 0U}, {{1, 0, 0}, 1U}};
     StampValidationResult validation{};
     const auto stamp = VoxelStamp::TryCreate(
         {.Id = Core::UUID{id}, .ContentHash = "preview-" + std::to_string(id)},
-        bounds, stampPivot, {}, palette, voxels, DefaultStampResourceLimits(), &validation);
-    Require(stamp.has_value() && validation.IsValid(), "Preview fixture Stamp must be valid.");
+        bounds, stampPivot, {}, palette, voxels,
+        DefaultStampResourceLimits(), &validation);
+    Require(stamp.has_value() && validation.IsValid(),
+        "Preview fixture Stamp must be valid.");
     return *stamp;
 }
 
@@ -45,19 +50,44 @@ Asset::Voxel::VoxelDocument MakeDocument()
 {
     Asset::Vox::VoxModel source{};
     source.Version = 150U;
+    source.Palette = Asset::Vox::DefaultVoxPalette();
     source.Models.push_back({.Dimensions = {32U, 32U, 32U},
         .Voxels = {{.X = 10U, .Y = 2U, .Z = 4U, .ColorIndex = 1U}}});
-    const auto built = Asset::Voxel::VoxDocumentLoader{}.Build(source, "preview.vox");
-    Require(built.Succeeded() && built.Document, "Preview document fixture must build.");
+    const auto built =
+        Asset::Voxel::VoxDocumentLoader{}.Build(source, "preview.vox");
+    Require(built.Succeeded() && built.Document,
+        "Preview document fixture must build.");
     return std::move(*built.Document);
 }
 
-StampLivePreviewRequest Request(const VoxelStamp& stamp)
+StampPlacementPlan BuildPlan(
+    const VoxelStamp& stamp,
+    const Asset::Voxel::VoxelDocument& document,
+    const StampFixedPoint target = {
+        10 * StampFixedPoint::UnitsPerVoxel + 128,
+        2 * StampFixedPoint::UnitsPerVoxel,
+        8 * StampFixedPoint::UnitsPerVoxel},
+    const std::uint64_t generation = 1U,
+    const std::size_t subModel = 0U)
 {
-    return {.Stamp = &stamp,
-        .TargetPivot = {10 * StampFixedPoint::UnitsPerVoxel + 128,
-                        2 * StampFixedPoint::UnitsPerVoxel,
-                        -4 * StampFixedPoint::UnitsPerVoxel}};
+    return StampPlacementPlanner::Build({
+        .Stamp = &stamp,
+        .Document = &document,
+        .DocumentGeneration = generation,
+        .TargetSubModel = subModel,
+        .Transform = {.TargetPivot = target}});
+}
+
+VoxelPreviewData BuildPreview(
+    const VoxelStamp& stamp,
+    const Asset::Voxel::VoxelDocument& document,
+    const StampFixedPoint target = {
+        10 * StampFixedPoint::UnitsPerVoxel + 128,
+        2 * StampFixedPoint::UnitsPerVoxel,
+        8 * StampFixedPoint::UnitsPerVoxel})
+{
+    return StampLivePreviewBuilder::Build(
+        BuildPlan(stamp, document, target));
 }
 
 void Test01InactiveByDefault()
@@ -67,219 +97,152 @@ void Test01InactiveByDefault()
         "01: Preview session must be inactive by default.");
 }
 
-void Test02ValidActivation()
+void Test02ValidActivationAndExactCells()
 {
     const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
     VoxelPreviewSession session;
-    Require(session.Activate(StampLivePreviewBuilder::Build(Request(stamp))) && session.Current()->IsActive(),
-        "02: A valid Stamp must activate a preview session.");
-}
-
-void Test03ExactVoxelCount()
-{
-    const VoxelStamp stamp = MakeStamp();
-    const auto preview = StampLivePreviewBuilder::Build(Request(stamp));
+    const auto preview = BuildPreview(stamp, document);
+    Require(session.Activate(preview) && session.Current()->IsActive(),
+        "02: A valid plan must activate a preview session.");
     Require(preview.Voxels.size() == stamp.Voxels().size(),
-        "03: Preview must contain exactly the Stamp voxel count.");
+        "02: Preview must contain exactly the planned voxel count.");
 }
 
-void Test04PreservesPaletteColors()
+void Test03ColorsAndFractionalPivotAreCopied()
 {
     const VoxelStamp stamp = MakeStamp();
-    const auto preview = StampLivePreviewBuilder::Build(Request(stamp));
-    Require(preview.Voxels[0].Color == Asset::Vox::VoxColor{255U, 0U, 0U, 255U} &&
-                preview.Voxels[1].Color == Asset::Vox::VoxColor{0U, 0U, 255U, 255U},
-        "04: Preview must preserve the resolved real palette colors.");
+    const auto document = MakeDocument();
+    const auto preview = BuildPreview(stamp, document);
+    Require(
+        preview.Voxels[0].Color ==
+                Asset::Vox::VoxColor{255U, 0U, 0U, 255U} &&
+            preview.Voxels[1].Color ==
+                Asset::Vox::VoxColor{0U, 0U, 255U, 255U},
+        "03: Preview must preserve planned real colors.");
+    Require(preview.Pivot.LocalPosition == VoxelPreviewFixedPoint{128, 0, 0},
+        "03: Preview must preserve the exact fixed-point pivot.");
 }
 
-void Test05PreservesFractionalFixedPointPivot()
-{
-    const VoxelStamp stamp = MakeStamp(99U, {128, 0, 0});
-    const auto preview = StampLivePreviewBuilder::Build(Request(stamp));
-    Require(preview.Pivot.LocalPosition == VoxelPreviewFixedPoint{128, 0, 0} &&
-                preview.Transform.TargetPivot.X == 10 * StampFixedPoint::UnitsPerVoxel + 128,
-        "05: Preview must retain a fractional fixed-point pivot exactly.");
-}
-
-void Test06TranslationUsesStoredPivot()
+void Test04PreviewUsesExactPlannedWorldPositions()
 {
     const VoxelStamp stamp = MakeStamp();
-    const auto preview = StampLivePreviewBuilder::Build(Request(stamp));
-    Require(preview.Voxels[0].Position == Asset::Voxel::VoxelPosition{10, 2, -4} &&
-                preview.Voxels[1].Position == Asset::Voxel::VoxelPosition{11, 2, -4},
-        "06: Local voxels must translate by the stored pivot without drift.");
+    const auto document = MakeDocument();
+    const auto plan = BuildPlan(stamp, document);
+    const auto preview = StampLivePreviewBuilder::Build(plan);
+    Require(preview.Voxels[0].Position == plan.Voxels[0].WorldPosition &&
+                preview.Voxels[1].Position == plan.Voxels[1].WorldPosition,
+        "04: Preview positions must be copied from the plan.");
 }
 
-void Test07NoOverlapIsValid()
+void Test05OverlapIsNonBlocking()
 {
     const VoxelStamp stamp = MakeStamp();
-    Asset::Voxel::VoxelDocument document = MakeDocument();
-    auto request = Request(stamp);
-    request.Document = &document;
-    const auto preview = StampLivePreviewBuilder::Build(request);
-    Require(preview.State == VoxelPreviewState::Valid && !preview.Voxels[0].OverlapsExisting,
-        "07: A clear destination must be classified Valid.");
+    const auto document = MakeDocument();
+    const StampFixedPoint overlap{
+        10 * StampFixedPoint::UnitsPerVoxel + 128,
+        2 * StampFixedPoint::UnitsPerVoxel,
+        4 * StampFixedPoint::UnitsPerVoxel};
+    const auto plan = BuildPlan(stamp, document, overlap);
+    const auto preview = StampLivePreviewBuilder::Build(plan);
+    Require(plan.CanCommit && plan.Statistics.OverlapCount == 1U &&
+                preview.State == VoxelPreviewState::Overlap &&
+                preview.Voxels[0].OverlapsExisting,
+        "05: Overlap must remain a visible, non-blocking planned state.");
 }
 
-void Test08OverlapIsDetected()
+void Test06ClearAndCacheBehavior()
 {
     const VoxelStamp stamp = MakeStamp();
-    Asset::Voxel::VoxelDocument document = MakeDocument();
-    auto request = Request(stamp);
-    request.Document = &document;
-    request.TargetPivot = {10 * StampFixedPoint::UnitsPerVoxel + 128,
-                           2 * StampFixedPoint::UnitsPerVoxel,
-                           4 * StampFixedPoint::UnitsPerVoxel};
-    const auto preview = StampLivePreviewBuilder::Build(request);
-    Require(preview.State == VoxelPreviewState::Overlap && preview.Voxels[0].OverlapsExisting,
-        "08: Existing document voxels must produce an Overlap indication.");
-}
-
-void Test09OverlapRemainsNonBlocking()
-{
-    const VoxelStamp stamp = MakeStamp();
-    Asset::Voxel::VoxelDocument document = MakeDocument();
-    auto request = Request(stamp);
-    request.Document = &document;
-    request.TargetPivot = {10 * StampFixedPoint::UnitsPerVoxel + 128,
-                           2 * StampFixedPoint::UnitsPerVoxel,
-                           4 * StampFixedPoint::UnitsPerVoxel};
+    const auto document = MakeDocument();
+    const auto preview = BuildPreview(stamp, document);
     VoxelPreviewSession session;
-    const auto preview = StampLivePreviewBuilder::Build(request);
-    Require(preview.IsActive() && session.Activate(preview) && session.Current()->State == VoxelPreviewState::Overlap,
-        "09: Overlap must remain an active non-blocking preview state.");
-}
-
-void Test10ClearPreview()
-{
-    const VoxelStamp stamp = MakeStamp();
-    VoxelPreviewSession session;
-    static_cast<void>(session.Activate(StampLivePreviewBuilder::Build(Request(stamp))));
+    Require(session.Activate(preview), "06: First preview must activate.");
+    const std::uint64_t revision = session.Revision();
+    Require(!session.Activate(preview) && session.Revision() == revision,
+        "06: Identical plans must reuse the preview snapshot.");
     Require(session.Clear() && session.Current() == nullptr && !session.Clear(),
-        "10: Clear must release the active preview once and leave a clean inactive state.");
+        "06: Clear must release the snapshot exactly once.");
 }
 
-void Test11StampChangeRebuilds()
+void Test07PlanChangesRebuildPreview()
 {
     const VoxelStamp first = MakeStamp(100U);
     const VoxelStamp second = MakeStamp(101U);
+    const auto document = MakeDocument();
     VoxelPreviewSession session;
-    static_cast<void>(session.Activate(StampLivePreviewBuilder::Build(Request(first))));
-    const std::uint64_t revision = session.Revision();
-    Require(session.Activate(StampLivePreviewBuilder::Build(Request(second))) && session.Revision() == revision + 1U,
-        "11: Changing Stamp identity must rebuild the session snapshot.");
+    static_cast<void>(session.Activate(BuildPreview(first, document)));
+    const std::uint64_t firstRevision = session.Revision();
+    Require(session.Activate(BuildPreview(second, document)) &&
+                session.Revision() == firstRevision + 1U,
+        "07: Changing Stamp identity must rebuild preview.");
+
+    const auto moved = BuildPreview(second, document, {
+        12 * StampFixedPoint::UnitsPerVoxel + 128,
+        2 * StampFixedPoint::UnitsPerVoxel,
+        8 * StampFixedPoint::UnitsPerVoxel});
+    const std::uint64_t secondRevision = session.Revision();
+    Require(session.Activate(moved) &&
+                session.Revision() == secondRevision + 1U,
+        "07: Changing the planned transform must rebuild preview.");
 }
 
-void Test12TransformChangeRebuilds()
+void Test08PreviewIsReadOnly()
 {
     const VoxelStamp stamp = MakeStamp();
-    auto first = Request(stamp);
-    auto moved = first;
-    moved.TargetPivot.X += StampFixedPoint::UnitsPerVoxel;
-    VoxelPreviewSession session;
-    static_cast<void>(session.Activate(StampLivePreviewBuilder::Build(first)));
-    const std::uint64_t revision = session.Revision();
-    Require(session.Activate(StampLivePreviewBuilder::Build(moved)) && session.Revision() == revision + 1U,
-        "12: A real target transform change must rebuild the preview.");
-}
-
-void Test13PreviewDoesNotMutateDocument()
-{
-    const VoxelStamp stamp = MakeStamp();
-    Asset::Voxel::VoxelDocument document = MakeDocument();
-    const auto voxels = document.GetVoxelCount();
-    auto request = Request(stamp);
-    request.Document = &document;
-    static_cast<void>(StampLivePreviewBuilder::Build(request));
-    Require(document.GetVoxelCount() == voxels,
-        "13: Building preview must not add, erase or paint document voxels.");
-}
-
-void Test14PreviewDoesNotChangeRevisionOrUndoHistory()
-{
-    const VoxelStamp stamp = MakeStamp();
-    Asset::Voxel::VoxelDocument document = MakeDocument();
+    auto document = MakeDocument();
     VoxelEditHistory history;
-    const std::uint64_t documentRevision = document.GetRevision();
-    auto request = Request(stamp);
-    request.Document = &document;
-    VoxelPreviewSession session;
-    static_cast<void>(session.Activate(StampLivePreviewBuilder::Build(request)));
-    Require(document.GetRevision() == documentRevision && history.UndoCount() == 0U && history.RedoCount() == 0U,
-        "14: Preview must not change document revision or create Undo/Redo operations.");
+    const std::size_t voxelCount = document.GetVoxelCount();
+    const std::uint64_t revision = document.GetRevision();
+    static_cast<void>(BuildPreview(stamp, document));
+    Require(document.GetVoxelCount() == voxelCount &&
+                document.GetRevision() == revision &&
+                history.UndoCount() == 0U && history.RedoCount() == 0U,
+        "08: Plan adaptation must not mutate document or history.");
 }
 
-void Test15UnchangedFramesReuseCache()
+void Test09InvalidPlanFailsSafely()
 {
-    const VoxelStamp stamp = MakeStamp();
-    const auto preview = StampLivePreviewBuilder::Build(Request(stamp));
-    VoxelPreviewSession session;
-    Require(session.Activate(preview), "15: First preview frame must activate.");
-    const std::uint64_t revision = session.Revision();
-    Require(!session.Activate(preview) && session.Revision() == revision,
-        "15: Identical frame input must not rebuild the preview cache.");
+    const StampPlacementPlan missing{};
+    const auto preview = StampLivePreviewBuilder::Build(missing);
+    Require(!preview.IsActive() &&
+                preview.State == VoxelPreviewState::Invalid,
+        "09: Missing plan data must fail safely.");
 }
 
-void Test16ProjectChangeCleanup()
+void Test10OutOfBoundsPlanIsInvalidPreview()
 {
     const VoxelStamp stamp = MakeStamp();
-    VoxelPreviewSession session;
-    static_cast<void>(session.Activate(StampLivePreviewBuilder::Build(Request(stamp))));
-    const std::uint64_t revision = session.Revision();
-    Require(session.Clear() && session.Current() == nullptr && session.Revision() == revision + 1U,
-        "16: Project/session cleanup must drop all preview resources explicitly.");
+    const auto document = MakeDocument();
+    const auto plan = BuildPlan(stamp, document, {
+        -2 * StampFixedPoint::UnitsPerVoxel + 128, 0, 0});
+    const auto preview = StampLivePreviewBuilder::Build(plan);
+    Require(!plan.CanCommit &&
+                plan.Statistics.OutOfBoundsCount != 0U &&
+                preview.State == VoxelPreviewState::Invalid,
+        "10: Out-of-bounds cells must be diagnosed by the plan.");
 }
 
-void Test17InvalidAndEmptyInputs()
+void Test11PreviewIsExcludedFromRayPicking()
 {
-    const auto missing = StampLivePreviewBuilder::Build({});
     const VoxelStamp stamp = MakeStamp();
-    auto invalid = Request(stamp);
-    invalid.ForceInvalid = true;
-    const auto forced = StampLivePreviewBuilder::Build(invalid);
-    Require(!missing.IsActive() && forced.State == VoxelPreviewState::Invalid,
-        "17: Missing or invalid preview input must fail safely without a crash.");
+    const auto document = MakeDocument();
+    Require(BuildPreview(stamp, document).IsActive(),
+        "11: Ray-picking fixture preview must exist.");
+    const auto hit = RaycastVoxelDocument(
+        document, {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+    Require(!hit.has_value(),
+        "11: Document ray picking must not see preview-only cells.");
 }
 
-void Test18NegativeCoordinates()
+void Test12InvalidSubmodelFailsSafely()
 {
     const VoxelStamp stamp = MakeStamp();
-    auto request = Request(stamp);
-    request.TargetPivot = {-2 * StampFixedPoint::UnitsPerVoxel + 128, 0, 0};
-    const auto preview = StampLivePreviewBuilder::Build(request);
-    Require(preview.IsActive() && preview.Voxels[0].Position == Asset::Voxel::VoxelPosition{-2, 0, 0} &&
-                preview.Voxels[1].Position == Asset::Voxel::VoxelPosition{-1, 0, 0},
-        "18: Negative world coordinates must remain exact preview positions.");
-}
-
-void Test19PreviewIsExcludedFromRayPicking()
-{
-    const VoxelStamp stamp = MakeStamp();
-    Asset::Voxel::VoxelDocument document = MakeDocument();
-    auto request = Request(stamp);
-    request.Document = &document;
-    request.TargetPivot = {1 * StampFixedPoint::UnitsPerVoxel + 128,
-                           1 * StampFixedPoint::UnitsPerVoxel,
-                           1 * StampFixedPoint::UnitsPerVoxel};
-    Require(StampLivePreviewBuilder::Build(request).IsActive(), "19: Ray-picking fixture preview must exist.");
-    const auto hit = RaycastVoxelDocument(document, {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
-    Require(!hit.has_value(), "19: Document ray picking must not see preview-only ghost voxels.");
-}
-
-void Test20OverflowAndInvalidSubmodel()
-{
-    const VoxelStamp stamp = MakeStamp();
-    auto overflow = Request(stamp);
-    overflow.TargetPivot.X = std::numeric_limits<std::int32_t>::max();
-    auto submodel = Request(stamp);
-    Asset::Voxel::VoxelDocument document = MakeDocument();
-    submodel.Document = &document;
-    submodel.SubModelIndex = 1U;
-    const auto overflowPreview = StampLivePreviewBuilder::Build(overflow);
-    const auto invalidModelPreview = StampLivePreviewBuilder::Build(submodel);
-    Require(!overflowPreview.IsActive() && overflowPreview.State == VoxelPreviewState::Invalid &&
-                !invalidModelPreview.IsActive(),
-        "20: Overflow and invalid document submodels must fail without partial preview output.");
+    const auto document = MakeDocument();
+    const auto plan = BuildPlan(stamp, document, {}, 1U, 1U);
+    const auto preview = StampLivePreviewBuilder::Build(plan);
+    Require(!plan.CanCommit && !preview.IsActive(),
+        "12: Invalid submodels must not create partial previews.");
 }
 
 } // namespace
@@ -289,25 +252,17 @@ int main()
     try
     {
         Test01InactiveByDefault();
-        Test02ValidActivation();
-        Test03ExactVoxelCount();
-        Test04PreservesPaletteColors();
-        Test05PreservesFractionalFixedPointPivot();
-        Test06TranslationUsesStoredPivot();
-        Test07NoOverlapIsValid();
-        Test08OverlapIsDetected();
-        Test09OverlapRemainsNonBlocking();
-        Test10ClearPreview();
-        Test11StampChangeRebuilds();
-        Test12TransformChangeRebuilds();
-        Test13PreviewDoesNotMutateDocument();
-        Test14PreviewDoesNotChangeRevisionOrUndoHistory();
-        Test15UnchangedFramesReuseCache();
-        Test16ProjectChangeCleanup();
-        Test17InvalidAndEmptyInputs();
-        Test18NegativeCoordinates();
-        Test19PreviewIsExcludedFromRayPicking();
-        Test20OverflowAndInvalidSubmodel();
+        Test02ValidActivationAndExactCells();
+        Test03ColorsAndFractionalPivotAreCopied();
+        Test04PreviewUsesExactPlannedWorldPositions();
+        Test05OverlapIsNonBlocking();
+        Test06ClearAndCacheBehavior();
+        Test07PlanChangesRebuildPreview();
+        Test08PreviewIsReadOnly();
+        Test09InvalidPlanFailsSafely();
+        Test10OutOfBoundsPlanIsInvalidPreview();
+        Test11PreviewIsExcludedFromRayPicking();
+        Test12InvalidSubmodelFailsSafely();
     }
     catch (const std::exception& error)
     {

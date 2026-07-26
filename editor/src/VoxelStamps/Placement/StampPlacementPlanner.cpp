@@ -1,0 +1,347 @@
+#include "VoxelStamps/Placement/StampPlacementPlanner.h"
+
+#include <algorithm>
+#include <array>
+#include <limits>
+#include <new>
+#include <utility>
+
+namespace VoxelForge::Editor::Stamps
+{
+namespace
+{
+
+void AddDiagnostic(
+    StampPlacementPlan& plan,
+    const StampPlacementDiagnosticCode code,
+    const StampPlacementDiagnosticSeverity severity,
+    const std::optional<std::size_t> sourceOrdinal = std::nullopt)
+{
+    plan.Diagnostics.push_back({code, severity, sourceOrdinal});
+}
+
+[[nodiscard]] bool MakeGridCoordinate(
+    const std::int32_t target,
+    const std::int32_t local,
+    const std::int32_t pivot,
+    std::int32_t& output) noexcept
+{
+    constexpr std::int64_t units = StampFixedPoint::UnitsPerVoxel;
+    const std::int64_t fixed = static_cast<std::int64_t>(target) +
+        static_cast<std::int64_t>(local) * units -
+        static_cast<std::int64_t>(pivot);
+    if (fixed < std::numeric_limits<std::int32_t>::min() ||
+        fixed > std::numeric_limits<std::int32_t>::max() ||
+        fixed % units != 0)
+    {
+        return false;
+    }
+    output = static_cast<std::int32_t>(fixed / units);
+    return true;
+}
+
+[[nodiscard]] bool IsWithinDimensions(
+    const Asset::Voxel::VoxelPosition position,
+    const Asset::Voxel::VoxelDimensions dimensions) noexcept
+{
+    return position.X >= 0 && position.Y >= 0 && position.Z >= 0 &&
+        static_cast<std::uint64_t>(position.X) < dimensions.X &&
+        static_cast<std::uint64_t>(position.Y) < dimensions.Y &&
+        static_cast<std::uint64_t>(position.Z) < dimensions.Z;
+}
+
+void ExtendBounds(
+    StampPlacementBounds& bounds,
+    const Asset::Voxel::VoxelPosition position) noexcept
+{
+    if (!bounds.Valid)
+    {
+        bounds.Minimum = position;
+        bounds.Maximum = position;
+        bounds.Valid = true;
+        return;
+    }
+    bounds.Minimum.X = std::min(bounds.Minimum.X, position.X);
+    bounds.Minimum.Y = std::min(bounds.Minimum.Y, position.Y);
+    bounds.Minimum.Z = std::min(bounds.Minimum.Z, position.Z);
+    bounds.Maximum.X = std::max(bounds.Maximum.X, position.X);
+    bounds.Maximum.Y = std::max(bounds.Maximum.Y, position.Y);
+    bounds.Maximum.Z = std::max(bounds.Maximum.Z, position.Z);
+}
+
+} // namespace
+
+StampPlacementPlan StampPlacementPlanner::Build(
+    const StampPlacementPlannerRequest& request) noexcept
+{
+    StampPlacementPlan plan;
+    try
+    {
+        if (request.Stamp == nullptr)
+        {
+            AddDiagnostic(plan, StampPlacementDiagnosticCode::MissingStamp,
+                StampPlacementDiagnosticSeverity::Error);
+            return plan;
+        }
+        if (request.Document == nullptr)
+        {
+            plan.Stamp = request.Stamp->Identity();
+            AddDiagnostic(plan, StampPlacementDiagnosticCode::MissingDocument,
+                StampPlacementDiagnosticSeverity::Error);
+            return plan;
+        }
+        if (request.DocumentGeneration == 0U)
+        {
+            plan.Stamp = request.Stamp->Identity();
+            AddDiagnostic(
+                plan,
+                StampPlacementDiagnosticCode::InvalidDocumentGeneration,
+                StampPlacementDiagnosticSeverity::Error);
+            return plan;
+        }
+        const auto dimensions =
+            request.Document->GetDimensions(request.TargetSubModel);
+        if (!dimensions)
+        {
+            plan.Stamp = request.Stamp->Identity();
+            AddDiagnostic(plan, StampPlacementDiagnosticCode::InvalidSubModel,
+                StampPlacementDiagnosticSeverity::Error);
+            return plan;
+        }
+
+        const VoxelStamp& stamp = *request.Stamp;
+        plan.Stamp = stamp.Identity();
+        plan.Document = MakeStampDocumentIdentity(*request.Document);
+        plan.DocumentGeneration = request.DocumentGeneration;
+        plan.DocumentRevision = request.Document->GetRevision();
+        plan.TargetSubModel = request.TargetSubModel;
+        plan.LocalBounds = stamp.Bounds();
+        plan.Pivot = stamp.Pivot();
+        plan.Transform = request.Transform;
+        plan.CollisionPolicy = request.CollisionPolicy;
+        plan.DocumentPaletteBefore = request.Document->GetPaletteSnapshot();
+        plan.Statistics.TotalVoxelCount = stamp.Voxels().size();
+
+        plan.CacheKey = {
+            .Stamp = plan.Stamp,
+            .Document = plan.Document,
+            .DocumentGeneration = plan.DocumentGeneration,
+            .DocumentRevision = plan.DocumentRevision,
+            .TargetSubModel = plan.TargetSubModel,
+            .Transform = plan.Transform,
+            .CollisionPolicy = plan.CollisionPolicy};
+
+        bool transformSupported = true;
+        if (request.Transform.QuarterTurns != 0U)
+        {
+            AddDiagnostic(
+                plan, StampPlacementDiagnosticCode::UnsupportedRotation,
+                StampPlacementDiagnosticSeverity::Error);
+            transformSupported = false;
+        }
+        if (request.Transform.Mirror.X || request.Transform.Mirror.Y ||
+            request.Transform.Mirror.Z)
+        {
+            AddDiagnostic(plan, StampPlacementDiagnosticCode::UnsupportedMirror,
+                StampPlacementDiagnosticSeverity::Error);
+            transformSupported = false;
+        }
+        if (request.CollisionPolicy != StampCollisionPolicy::Overwrite)
+        {
+            AddDiagnostic(
+                plan,
+                StampPlacementDiagnosticCode::UnsupportedCollisionPolicy,
+                StampPlacementDiagnosticSeverity::Error);
+        }
+
+        PaletteMappingRequest paletteRequest{
+            .StampPalette = stamp.Palette(),
+            .StampVoxels = stamp.Voxels(),
+            .DocumentPalette = plan.DocumentPaletteBefore,
+            .PaletteCapacity = request.PaletteCapacity,
+            .ReservedDocumentPaletteIndex =
+                request.ReservedDocumentPaletteIndex};
+        for (std::size_t modelIndex = 0U;
+             modelIndex < request.Document->GetModelCount(); ++modelIndex)
+        {
+            const Asset::Voxel::VoxelSubModel* const model =
+                request.Document->GetModel(modelIndex);
+            if (model == nullptr)
+            {
+                continue;
+            }
+            model->ForEachVoxel(
+                [&paletteRequest](
+                    const Asset::Voxel::VoxelPosition,
+                    const Asset::Voxel::Voxel voxel)
+                {
+                    paletteRequest
+                        .OccupiedDocumentPaletteIndices[voxel.PaletteIndex] =
+                        true;
+                });
+        }
+        PaletteMappingResult paletteMapping =
+            PaletteMappingEngine::Plan(paletteRequest);
+        const bool paletteMappingSucceeded = paletteMapping.IsSuccess();
+        plan.PaletteStatus = paletteMapping.Status;
+        plan.PaletteMapping = std::move(paletteMapping.Plan);
+        plan.Statistics.AddedPaletteColorCount =
+            plan.PaletteMapping.AddedColorCount;
+        plan.Statistics.ReusedPaletteColorCount =
+            plan.PaletteMapping.ReusedColorCount;
+        if (!paletteMappingSucceeded)
+        {
+            AddDiagnostic(
+                plan, StampPlacementDiagnosticCode::PaletteMappingFailed,
+                StampPlacementDiagnosticSeverity::Error);
+        }
+
+        std::array<std::uint8_t, 256U> localToDocument{};
+        if (paletteMappingSucceeded)
+        {
+            for (const PaletteMappingEntry& entry :
+                 plan.PaletteMapping.LocalToDocument)
+            {
+                localToDocument[entry.LocalColorId] =
+                    entry.DocumentPaletteIndex;
+            }
+        }
+
+        plan.Voxels.reserve(stamp.Voxels().size());
+        bool representable = true;
+        bool collisionRejected = false;
+        for (std::size_t ordinal = 0U; ordinal < stamp.Voxels().size();
+             ++ordinal)
+        {
+            const StampVoxel& source = stamp.Voxels()[ordinal];
+            Asset::Voxel::VoxelPosition world{};
+            if (!MakeGridCoordinate(
+                    request.Transform.TargetPivot.X, source.Position.X,
+                    stamp.Pivot().LocalPosition.X, world.X) ||
+                !MakeGridCoordinate(
+                    request.Transform.TargetPivot.Y, source.Position.Y,
+                    stamp.Pivot().LocalPosition.Y, world.Y) ||
+                !MakeGridCoordinate(
+                    request.Transform.TargetPivot.Z, source.Position.Z,
+                    stamp.Pivot().LocalPosition.Z, world.Z))
+            {
+                AddDiagnostic(
+                    plan,
+                    StampPlacementDiagnosticCode::PositionNotRepresentable,
+                    StampPlacementDiagnosticSeverity::Error, ordinal);
+                representable = false;
+                break;
+            }
+
+            const bool outOfBounds = !IsWithinDimensions(world, *dimensions);
+            std::optional<Asset::Voxel::Voxel> existing;
+            if (!outOfBounds)
+            {
+                existing = request.Document->GetVoxel(
+                    world, request.TargetSubModel);
+            }
+            const bool overlap = existing.has_value();
+            const std::uint8_t documentPaletteIndex =
+                paletteMappingSucceeded
+                ? localToDocument[source.LocalColorId]
+                : 0U;
+            const Asset::Voxel::Voxel finalVoxel{documentPaletteIndex};
+            const StampColor color =
+                stamp.Palette()[source.LocalColorId].Color;
+            plan.Voxels.push_back({
+                .SourceOrdinal = ordinal,
+                .LocalPosition = source.Position,
+                .WorldPosition = world,
+                .LocalPaletteIndex = source.LocalColorId,
+                .DocumentPaletteIndex = documentPaletteIndex,
+                .Color = color,
+                .ExistingVoxel = existing,
+                .FinalVoxel = finalVoxel,
+                .Overlap = overlap,
+                .OutOfBounds = outOfBounds});
+            ++plan.Statistics.PlannedVoxelCount;
+            if (overlap)
+            {
+                ++plan.Statistics.OverlapCount;
+            }
+            if (outOfBounds)
+            {
+                ++plan.Statistics.OutOfBoundsCount;
+            }
+            if (paletteMappingSucceeded && !outOfBounds &&
+                existing && existing->PaletteIndex == documentPaletteIndex)
+            {
+                ++plan.Statistics.UnchangedVoxelCount;
+            }
+            else if (paletteMappingSucceeded && !outOfBounds)
+            {
+                ++plan.Statistics.ChangedVoxelCount;
+            }
+            ExtendBounds(plan.WorldBounds, world);
+
+            if (overlap &&
+                request.CollisionPolicy == StampCollisionPolicy::Reject)
+            {
+                collisionRejected = true;
+            }
+        }
+
+        if (plan.Statistics.OutOfBoundsCount != 0U)
+        {
+            AddDiagnostic(plan, StampPlacementDiagnosticCode::OutOfBounds,
+                StampPlacementDiagnosticSeverity::Error);
+        }
+        if (collisionRejected)
+        {
+            AddDiagnostic(
+                plan, StampPlacementDiagnosticCode::CollisionRejected,
+                StampPlacementDiagnosticSeverity::Error);
+        }
+
+        const bool hasChanges =
+            plan.Statistics.ChangedVoxelCount != 0U ||
+            plan.PaletteMapping.HasPaletteChanges();
+        if (representable && paletteMappingSucceeded &&
+            transformSupported &&
+            request.CollisionPolicy == StampCollisionPolicy::Overwrite &&
+            plan.Statistics.OutOfBoundsCount == 0U && !hasChanges)
+        {
+            AddDiagnostic(plan, StampPlacementDiagnosticCode::NoChanges,
+                StampPlacementDiagnosticSeverity::Information);
+        }
+        plan.CanCommit = representable && paletteMappingSucceeded &&
+            transformSupported &&
+            request.CollisionPolicy == StampCollisionPolicy::Overwrite &&
+            plan.Statistics.OutOfBoundsCount == 0U && hasChanges &&
+            !plan.HasErrors();
+    }
+    catch (const std::bad_alloc&)
+    {
+        plan = {};
+        try
+        {
+            AddDiagnostic(
+                plan, StampPlacementDiagnosticCode::AllocationFailure,
+                StampPlacementDiagnosticSeverity::Error);
+        }
+        catch (...)
+        {
+        }
+    }
+    catch (...)
+    {
+        plan = {};
+        try
+        {
+            AddDiagnostic(
+                plan, StampPlacementDiagnosticCode::AllocationFailure,
+                StampPlacementDiagnosticSeverity::Error);
+        }
+        catch (...)
+        {
+        }
+    }
+    return plan;
+}
+
+} // namespace VoxelForge::Editor::Stamps

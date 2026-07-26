@@ -1,8 +1,10 @@
 #include "Preview/VoxelPreview.h"
 #include "Selection/SelectionService.h"
 #include "VoxelHistory/VoxelEditHistory.h"
+#include "VoxelStamps/Placement/StampPlacementPlanner.h"
 #include "VoxelStamps/Preview/StampLivePreviewBuilder.h"
 
+#include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 
 #include <cstdlib>
@@ -37,6 +39,7 @@ Asset::Voxel::VoxelDocument Document()
 {
     Asset::Vox::VoxModel source{};
     source.Version = 150U;
+    source.Palette = Asset::Vox::DefaultVoxPalette();
     source.Models.push_back({.Dimensions = {8U, 8U, 8U},
         .Voxels = {{.X = 1U, .Y = 0U, .Z = 0U, .ColorIndex = 1U}}});
     const auto document = Asset::Voxel::VoxDocumentLoader{}.Build(source, "live-preview-smoke.vox");
@@ -65,18 +68,24 @@ int main()
         // Simulate several visible frames and target movement without document edits.
         for (int x = 0; x != 4; ++x)
         {
-            const auto preview = StampLivePreviewBuilder::Build({
+            const StampPlacementPlan plan = StampPlacementPlanner::Build({
                 .Stamp = &stamp, .Document = &document,
-                .TargetPivot = {x * StampFixedPoint::UnitsPerVoxel, 0, 0}});
+                .DocumentGeneration = 9U,
+                .Transform = {.TargetPivot = {
+                    x * StampFixedPoint::UnitsPerVoxel, 0, 0}}});
+            const auto preview = StampLivePreviewBuilder::Build(plan);
             Require(preview.IsActive(), "Every live preview frame must remain active.");
             static_cast<void>(session.Activate(preview));
         }
         Require(session.Current() && session.Current()->State == VoxelPreviewState::Valid,
             "Moved preview must remain valid before its overlap frame.");
 
-        const auto overlap = StampLivePreviewBuilder::Build({
+        const StampPlacementPlan overlapPlan = StampPlacementPlanner::Build({
             .Stamp = &stamp, .Document = &document,
-            .TargetPivot = {StampFixedPoint::UnitsPerVoxel, 0, 0}});
+            .DocumentGeneration = 9U,
+            .Transform = {.TargetPivot = {
+                StampFixedPoint::UnitsPerVoxel, 0, 0}}});
+        const auto overlap = StampLivePreviewBuilder::Build(overlapPlan);
         Require(overlap.IsActive() && overlap.State == VoxelPreviewState::Overlap &&
                     overlap.Voxels.front().OverlapsExisting,
             "The overlap frame must be visible and non-blocking.");

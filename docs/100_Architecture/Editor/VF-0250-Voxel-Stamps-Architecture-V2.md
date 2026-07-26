@@ -530,11 +530,61 @@ PreviewPlan
 
 Le renderer reçoit uniquement `PreviewRenderData`. Il ne calcule ni positions, ni couleurs, ni collisions.
 
-### 10.2 Brush et voxel
+### 10.2 Unified placement plan
+
+`StampPlacementPlan` est la source de vérité immuable d'une tentative de
+placement. Il est construit une seule fois par `StampPlacementPlanner`, puis
+consommé sans recalcul métier par l'adaptateur de preview et par l'adaptateur
+de transaction :
+
+```text
+StampPlacementSession
+        |
+        v
+StampPlacementPlanner
+        |
+        v
+StampPlacementPlan (immutable)
+        |                         |
+        v                         v
+StampLivePreviewBuilder   PlaceVoxelStampOperation
+        |                         |
+        v                         v
+VoxelPreviewData          VoxelEditTransaction
+```
+
+Le plan contient au minimum :
+
+- l'identité du Stamp ;
+- l'identité process-local du document, sa génération et sa révision ;
+- le sous-modèle cible ;
+- le pivot, la transformation et la politique de collision ;
+- le plan de palette complet ;
+- les bounds monde ;
+- les statistiques et diagnostics ;
+- `CanCommit` ;
+- pour chaque voxel : ordinal source, position locale, position monde,
+  index palette local et document, valeur précédente, valeur finale,
+  chevauchement et hors-limites ;
+- une clé de cache couvrant tous les paramètres qui influencent le résultat.
+
+Le preview et le clic de validation ne relisent pas le document pour refaire
+ces décisions. Au clic, l'identité, la génération, la révision et le
+sous-modèle du plan sont comparés au document actif. Si le plan est périmé,
+la session le reconstruit, rafraîchit le preview et n'applique rien : un
+nouveau clic explicite est requis. Cette règle garantit que ce qui est
+affiché est exactement ce qui sera validé.
+
+`StampPlacementSession` ne conserve aucun pointeur vers le document. Elle
+possède uniquement le Stamp actif, la transformation temporaire, le plan,
+le snapshot de preview, la clé de cache, le sous-modèle, l'ordinal de
+placement et son état (`Empty`, `Active`, `Cancelled`).
+
+### 10.3 Brush et voxel
 
 Le preview montre les voxels exacts qui seront ajoutés, peints ou supprimés. Il utilise la couleur actuellement sélectionnée lorsque l'action en dépend.
 
-### 10.3 Stamp
+### 10.4 Stamp
 
 Le preview montre :
 
@@ -549,7 +599,7 @@ Le preview montre :
 
 Pour les contenus très volumineux, un cadre peut apparaître temporairement pendant le chargement, mais la validation reste impossible tant que le Live Voxel Preview exact n'est pas prêt.
 
-### 10.4 Collision et chevauchement
+### 10.5 Collision et chevauchement
 
 La politique officielle par défaut est `OverwriteOverlapping`.
 
@@ -1213,6 +1263,8 @@ Smart Anchors et Smart Construction ne bloquent pas la première version.
 | Suppression de variante | Groupe invalide | État Missing visible | Intégration |
 | Palette pleine | Couleur impossible | Placement refusé, aucune approximation | Unitaire |
 | Preview vs commit | Résultat différent | Comparaison voxel par voxel | Test de contrat |
+| Plan de placement périmé | Commit différent du preview affiché | Rebuild du plan et du preview, aucun commit automatique, second clic requis | Intégration + smoke |
+| Cache de placement | Recalcul inutile ou réutilisation d'un résultat invalide | Clé Stamp + document + génération + révision + sous-modèle + transform + politique | Unitaire |
 | Auto Pivot répété | Résultat instable | Même contexte et même politique produisent le même preset, pivot et normale | Test déterministe |
 | Surface horizontale/verticale | Mauvais preset Auto | Horizontal supérieur = Bottom Center, vertical = Surface | Test de décision |
 | Placement libre ou grille | Pivot incorrect | Libre/ambigu = Center, grille précise = Corner | Test de décision |

@@ -1,14 +1,8 @@
 #pragma once
 
-#include "Preview/VoxelPreview.h"
 #include "VoxelHistory/VoxelEditOperation.h"
-#include "VoxelStamps/Palette/PaletteMappingEngine.h"
-#include "VoxelStamps/VoxelStamp.h"
+#include "VoxelStamps/Placement/StampPlacementPlan.h"
 
-#include "VoxelForge/Asset/Voxel/VoxelDocument.h"
-
-#include <cstddef>
-#include <cstdint>
 #include <string_view>
 
 namespace VoxelForge::Editor::Stamps
@@ -49,18 +43,6 @@ enum class PlaceVoxelStampPreparationStatus
     return "Unknown stamp placement preparation status.";
 }
 
-/// Immutable inputs for the thin STAMP-13 orchestration boundary. Preview is
-/// already renderer-ready and is used as the single source of placed positions.
-struct PlaceVoxelStampRequest final
-{
-    const VoxelStamp* Stamp = nullptr;
-    const VoxelPreviewData* Preview = nullptr;
-    const Asset::Voxel::VoxelDocument* Document = nullptr;
-    std::size_t SubModelIndex = 0U;
-    std::size_t PaletteCapacity = 256U;
-    std::uint8_t ReservedDocumentPaletteIndex = 0U;
-};
-
 /// A prepared existing VoxelEditOperation; this component never commits or
 /// mutates. The caller passes Operation unchanged to VoxelEditHistory::Execute.
 struct PlaceVoxelStampPreparation final
@@ -80,10 +62,10 @@ struct PlaceVoxelStampPreparation final
     }
 };
 
-/// Coordinates the existing palette mapper with the existing composite edit
-/// operation format. It performs no document, history, preview-session, mesh,
-/// renderer, Undo, or Redo mutation.
+/// Thin transaction adapter. All positions, palette indices, overlaps,
+/// bounds, diagnostics and before/after voxel states have already been decided
+/// by StampPlacementPlanner. This function never reads a document or replans.
 [[nodiscard]] PlaceVoxelStampPreparation PreparePlaceVoxelStampOperation(
-    const PlaceVoxelStampRequest& request) noexcept;
+    const StampPlacementPlan& plan) noexcept;
 
 } // namespace VoxelForge::Editor::Stamps

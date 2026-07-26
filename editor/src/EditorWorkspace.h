@@ -60,9 +60,9 @@
 #include "VoxelStamps/Library/StampJsonCatalogStore.h"
 #include "VoxelStamps/Library/StampProjectLibraryRepository.h"
 #include "VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.h"
-#include "VoxelStamps/Preview/StampLivePreviewBuilder.h"
-#include "VoxelDocument/VoxelDocumentSession.h"
 #include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
+#include "VoxelStamps/Placement/StampPlacementSession.h"
+#include "VoxelDocument/VoxelDocumentSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelTools/VoxelEraserTool.h"
 #include "VoxelTools/VoxelBoxService.h"
@@ -232,8 +232,8 @@ public:
         const std::filesystem::path& parentDirectory);
     [[nodiscard]] bool QualityOfLifeSmokePassed() const noexcept;
     [[nodiscard]] bool RunStampLivePreviewVisualStep(std::size_t frame);
-    [[nodiscard]] std::size_t VoxelHighlightUploadCount() const noexcept;
     [[nodiscard]] bool RunStampPlacementVisualStep(std::size_t frame);
+    [[nodiscard]] std::size_t VoxelHighlightUploadCount() const noexcept;
     [[nodiscard]] std::size_t VoxelHighlightRenderCount() const noexcept;
 
 private:
@@ -284,9 +284,9 @@ private:
     void BeginSaveSelectionAsStamp();
     void BeginLatestStampPreview();
     void MoveLatestStampPreview(std::int32_t x, std::int32_t y, std::int32_t z);
-    void ClearLatestStampPreview() noexcept;
     void PlaceLatestStampPreview();
     [[nodiscard]] bool RefreshLatestStampPreview();
+    void ClearLatestStampPreview() noexcept;
     void ConsumeFileDialogResult();
     [[nodiscard]] bool DrawPathInput(
         const char* label,
@@ -436,16 +436,13 @@ private:
     Stamps::StampJsonCatalogStore stampJsonCatalogStore_;
     Stamps::SaveSelectionAsStampWorkflow saveSelectionAsStampWorkflow_{
         stampProjectLibraryRepository_, stampJsonCatalogStore_};
-    VoxelPreviewSession liveStampPreviewSession_;
-    std::optional<Stamps::VoxelStamp> liveStampPreviewStamp_;
-    Stamps::StampFixedPoint liveStampPreviewTarget_{};
+    Stamps::StampPlacementSession stampPlacementSession_;
     std::uint64_t stampLivePreviewVisualDocumentRevision_ = 0U;
     std::optional<std::chrono::steady_clock::time_point>
         stampLivePreviewVisualStartedAt_;
     bool stampLivePreviewVisualValid_ = false;
     bool stampLivePreviewVisualOverlap_ = false;
     bool stampLivePreviewVisualClear_ = false;
-    std::array<char, 256> saveSelectionAsStampName_{};
     std::uint64_t stampPlacementVisualDocumentRevision_ = 0U;
     std::optional<std::chrono::steady_clock::time_point>
         stampPlacementVisualStartedAt_;
@@ -458,6 +455,7 @@ private:
     bool stampPlacementVisualCleared_ = false;
     bool stampPlacementVisualFinished_ = false;
     bool stampPlacementVisualSucceeded_ = false;
+    std::array<char, 256> saveSelectionAsStampName_{};
     std::string saveSelectionAsStampMessage_;
     bool showSaveSelectionAsStampPopup_ = false;
     SelectionVolumeCache selectionVolumeCache_;

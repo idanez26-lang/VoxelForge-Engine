@@ -1556,3 +1556,32 @@ add_test(
     NAME VoxelForge.Editor.PlaceVoxelStampOperationSmoke
     COMMAND $<TARGET_FILE:VoxelForgeEditorPlaceVoxelStampOperationSmokeTests>
 )
+
+# STAMP-14: one immutable plan is shared by preview and placement.
+add_executable(
+    VoxelForgeEditorStampPlacementPlanningTests
+    Editor/StampPlacementPlanningTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampPlacementPlanningTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampPlacementPlanningTests)
+add_test(
+    NAME VoxelForge.Editor.StampPlacementPlanning
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampPlacementPlanningTests>
+)
+
+add_executable(
+    VoxelForgeEditorStampPlacementPlanningSmokeTests
+    Editor/StampPlacementPlanningSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampPlacementPlanningSmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorStampPlacementPlanningSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.StampPlacementPlanningSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampPlacementPlanningSmokeTests>
+)

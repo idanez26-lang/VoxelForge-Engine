@@ -322,7 +322,11 @@ target_sources(
         src/VoxelStamps/Validation/StampValidationService.cpp
         # STAMP-12: pure deterministic palette planning; no document mutation.
         src/VoxelStamps/Palette/PaletteMappingEngine.cpp
-        # STAMP-13: prepares existing composite voxel edit operations from a preview.
+        # STAMP-14: one immutable plan drives preview and transaction adapters.
+        src/VoxelStamps/Placement/StampPlacementPlan.cpp
+        src/VoxelStamps/Placement/StampPlacementPlanner.cpp
+        src/VoxelStamps/Placement/StampPlacementSession.cpp
+        # STAMP-13/14: prepares an existing composite operation from the plan.
         src/VoxelStamps/Placement/PlaceVoxelStampOperation.cpp
 )
 target_include_directories(

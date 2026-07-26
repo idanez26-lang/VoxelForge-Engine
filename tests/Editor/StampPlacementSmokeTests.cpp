@@ -1,6 +1,7 @@
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
+#include "VoxelStamps/Placement/StampPlacementPlanner.h"
 #include "VoxelStamps/Preview/StampLivePreviewBuilder.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
@@ -124,11 +125,20 @@ VoxelStamp CreateStamp()
     return *stamp;
 }
 
-VoxelPreviewData BuildPreview(const VoxelStamp& stamp,
+StampPlacementPlan BuildPlan(const VoxelStamp& stamp,
     const Asset::Voxel::VoxelDocument& document, const StampFixedPoint target)
 {
-    const VoxelPreviewData preview = StampLivePreviewBuilder::Build(
-        {.Stamp = &stamp, .Document = &document, .TargetPivot = target});
+    return StampPlacementPlanner::Build({
+        .Stamp = &stamp,
+        .Document = &document,
+        .DocumentGeneration = 1U,
+        .Transform = {.TargetPivot = target}});
+}
+
+VoxelPreviewData BuildPreview(const StampPlacementPlan& plan)
+{
+    const VoxelPreviewData preview =
+        StampLivePreviewBuilder::Build(plan);
     Require(preview.IsActive(), "Unable to build the live stamp preview.");
     return preview;
 }
@@ -142,13 +152,14 @@ void RunStampPlacementSmokeScenario()
     const VoxelStamp stamp = CreateStamp();
     const std::uint64_t initialRevision = document.GetRevision();
 
-    VoxelPreviewData preview = BuildPreview(stamp, document, {});
+    StampPlacementPlan plan = BuildPlan(stamp, document, {});
+    VoxelPreviewData preview = BuildPreview(plan);
     Require(preview.State == VoxelPreviewState::Valid &&
             previewSession.Activate(preview) && previewSession.Current() != nullptr,
         "Opening the preview session must leave a valid active ghost.");
 
-    PlaceVoxelStampPreparation first = PreparePlaceVoxelStampOperation(
-        {.Stamp = &stamp, .Preview = previewSession.Current(), .Document = &document});
+    PlaceVoxelStampPreparation first =
+        PreparePlaceVoxelStampOperation(plan);
     Require(first.IsReady() && first.Operation.PaletteChange &&
             first.Operation.Changes.size() == preview.Voxels.size(),
         "The first placement must prepare one palette-aware composite operation.");
@@ -163,37 +174,42 @@ void RunStampPlacementSmokeScenario()
         Require(committed && document.GetPalette()[committed->PaletteIndex] == voxel.Color,
             "The committed palette color must exactly equal the preview color.");
     }
-    preview = BuildPreview(stamp, document, {});
+    plan = BuildPlan(stamp, document, {});
+    preview = BuildPreview(plan);
     Require(preview.State == VoxelPreviewState::Overlap && previewSession.Activate(preview),
         "The first placement must retain an overlap preview for the next placement.");
 
     const StampFixedPoint secondTarget{
         4 * StampFixedPoint::UnitsPerVoxel, 0, 0};
-    preview = BuildPreview(stamp, document, secondTarget);
+    plan = BuildPlan(stamp, document, secondTarget);
+    preview = BuildPreview(plan);
     Require(preview.State == VoxelPreviewState::Valid && previewSession.Activate(preview),
         "Moving the preview must produce a second valid ghost without mutation.");
-    PlaceVoxelStampPreparation second = PreparePlaceVoxelStampOperation(
-        {.Stamp = &stamp, .Preview = previewSession.Current(), .Document = &document});
+    PlaceVoxelStampPreparation second =
+        PreparePlaceVoxelStampOperation(plan);
     Require(second.IsReady() && !second.Operation.PaletteChange &&
             history.Execute(documentSession, std::move(second.Operation)) &&
             document.GetRevision() == initialRevision + 2U &&
             documentSession.RebuildCount() == 2U && history.UndoCount() == 2U,
         "The moved placement must reuse palette entries as one second operation.");
-    preview = BuildPreview(stamp, document, secondTarget);
+    plan = BuildPlan(stamp, document, secondTarget);
+    preview = BuildPreview(plan);
     Require(preview.State == VoxelPreviewState::Overlap && previewSession.Activate(preview),
         "The second placement must keep its ghost preview active.");
 
     Require(history.Undo(documentSession) && history.UndoCount() == 1U &&
             history.RedoCount() == 1U && documentSession.RebuildCount() == 3U,
         "Undo must remove only the latest placement with one rebuild.");
-    preview = BuildPreview(stamp, document, secondTarget);
+    plan = BuildPlan(stamp, document, secondTarget);
+    preview = BuildPreview(plan);
     Require(preview.State == VoxelPreviewState::Valid && previewSession.Activate(preview),
         "Undo must refresh the moved preview to valid state.");
 
     Require(history.Redo(documentSession) && history.UndoCount() == 2U &&
             history.RedoCount() == 0U && documentSession.RebuildCount() == 4U,
         "Redo must restore the latest placement with one rebuild.");
-    preview = BuildPreview(stamp, document, secondTarget);
+    plan = BuildPlan(stamp, document, secondTarget);
+    preview = BuildPreview(plan);
     Require(preview.State == VoxelPreviewState::Overlap && previewSession.Activate(preview),
         "Redo must refresh the moved preview to overlap state.");
 
