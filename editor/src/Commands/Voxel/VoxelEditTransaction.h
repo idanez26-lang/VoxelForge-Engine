@@ -41,4 +41,13 @@ enum class VoxelChangeDirection
     std::span<const VoxelChange> changes,
     VoxelChangeDirection direction);
 
+// Applies the complete history operation as one atomic document/model edit.
+// Voxel cells, the document palette and the compatibility-model palette are
+// committed together, or restored together on any failure.
+[[nodiscard]] CommandResult ApplyVoxelEditOperation(
+    VoxelEditSession& session,
+    std::uint64_t modelGeneration,
+    const VoxelEditOperation& operation,
+    VoxelChangeDirection direction);
+
 } // namespace VoxelForge::Editor

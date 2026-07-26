@@ -59,6 +59,30 @@ struct VoxelDocumentChange final
 
 using VoxelColor = Vox::VoxColor;
 
+struct VoxelDocumentPaletteSnapshot final
+{
+    std::array<VoxelColor, 256U> Colors{};
+    bool HasCustomPalette = false;
+
+    [[nodiscard]] bool operator==(
+        const VoxelDocumentPaletteSnapshot&) const noexcept = default;
+};
+
+struct VoxelDocumentPaletteChange final
+{
+    VoxelDocumentPaletteSnapshot Before;
+    VoxelDocumentPaletteSnapshot After;
+
+    [[nodiscard]] bool operator==(
+        const VoxelDocumentPaletteChange&) const noexcept = default;
+};
+
+enum class VoxelDocumentCompositeOrder
+{
+    PaletteThenVoxels,
+    VoxelsThenPalette
+};
+
 struct VoxelBounds final
 {
     bool HasValue = false;
@@ -84,7 +108,10 @@ enum class VoxelDocumentError
     VoxelNotFound,
     DuplicateVoxel,
     TooManyModels,
-    TooManyVoxels
+    TooManyVoxels,
+    InvalidPalette,
+    StateMismatch,
+    InvalidTransaction
 };
 
 struct VoxelDocumentOperationResult final
@@ -170,6 +197,8 @@ public:
     [[nodiscard]] const std::array<VoxelColor, 256U>& GetPalette() const noexcept;
     [[nodiscard]] std::optional<VoxelColor> GetPaletteColor(
         std::size_t paletteIndex) const noexcept;
+    [[nodiscard]] VoxelDocumentPaletteSnapshot GetPaletteSnapshot()
+        const noexcept;
     [[nodiscard]] std::uint32_t UsedPaletteColorCount() const noexcept;
     [[nodiscard]] bool IsDirty() const noexcept;
     [[nodiscard]] std::uint64_t GetRevision() const noexcept;
@@ -188,8 +217,17 @@ public:
     [[nodiscard]] VoxelDocumentOperationResult SetPaletteColor(
         std::size_t paletteIndex,
         VoxelColor color);
+    [[nodiscard]] VoxelDocumentOperationResult ValidatePaletteSnapshot(
+        const VoxelDocumentPaletteSnapshot& snapshot) const;
+    [[nodiscard]] VoxelDocumentOperationResult ReplacePalette(
+        const VoxelDocumentPaletteSnapshot& snapshot);
     [[nodiscard]] VoxelDocumentOperationResult ApplyVoxelChanges(
         std::span<const VoxelDocumentChange> changes);
+    [[nodiscard]] VoxelDocumentOperationResult ApplyCompositeChanges(
+        std::span<const VoxelDocumentChange> voxelChanges,
+        const VoxelDocumentPaletteChange* paletteChange,
+        VoxelDocumentCompositeOrder order =
+            VoxelDocumentCompositeOrder::PaletteThenVoxels);
     void MarkSaved() noexcept;
     void UpdateDirtyFromHistory(bool isAtSavedState) noexcept;
 

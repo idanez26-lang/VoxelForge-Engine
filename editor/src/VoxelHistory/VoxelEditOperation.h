@@ -14,6 +14,7 @@ namespace VoxelForge::Editor
 {
 
 using VoxelChange = Asset::Voxel::VoxelDocumentChange;
+using VoxelPaletteChange = Asset::Voxel::VoxelDocumentPaletteChange;
 
 struct VoxelEditSelectionSnapshot final
 {
@@ -33,6 +34,7 @@ struct VoxelEditOperation final
     std::string Label;
     std::vector<VoxelChange> Changes;
     std::shared_ptr<const VoxelEditSelectionTransition> SelectionTransition;
+    std::shared_ptr<const VoxelPaletteChange> PaletteChange;
 };
 
 [[nodiscard]] std::size_t EstimateVoxelEditOperationMemory(

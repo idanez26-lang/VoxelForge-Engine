@@ -22,6 +22,7 @@ class VoxelEditSession;
 enum class VoxelEditHistoryResultCode
 {
     Applied,
+    NoChange,
     NothingToUndo,
     NothingToRedo,
     InvalidOperation,

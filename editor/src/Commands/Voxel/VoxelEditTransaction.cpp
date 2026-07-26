@@ -179,6 +179,34 @@ CommandResult ApplyVoxelChanges(
 {
     if (changes.empty())
         return CommandResult::Failure("Voxel change set is empty.");
+    try
+    {
+        VoxelEditOperation operation;
+        operation.Changes.assign(changes.begin(), changes.end());
+        return ApplyVoxelEditOperation(
+            session, modelGeneration, operation, direction);
+    }
+    catch (const std::exception& exception)
+    {
+        return CommandResult::Failure(
+            std::string("Unable to prepare atomic voxel history edit: ") +
+            exception.what());
+    }
+    catch (...)
+    {
+        return CommandResult::Failure(
+            "Unable to prepare atomic voxel history edit.");
+    }
+}
+
+CommandResult ApplyVoxelEditOperation(
+    VoxelEditSession& session,
+    const std::uint64_t modelGeneration,
+    const VoxelEditOperation& operation,
+    const VoxelChangeDirection direction)
+{
+    if (operation.Changes.empty() && !operation.PaletteChange)
+        return CommandResult::Failure("Voxel edit operation is empty.");
     if (session.VoxelModelGeneration() != modelGeneration)
         return CommandResult::Failure("The voxel model session has changed.");
     Voxel::VoxelModel* model = session.ActiveVoxelModel();
@@ -195,11 +223,13 @@ CommandResult ApplyVoxelChanges(
     std::vector<VoxelChange> directedChanges;
     std::vector<GridSnapshot> gridSnapshots;
     std::optional<Asset::Voxel::VoxelDocument> documentSnapshot;
+    std::optional<Voxel::VoxelPalette> paletteSnapshot;
+    std::optional<VoxelPaletteChange> directedPaletteChange;
     try
     {
-        directedChanges.reserve(changes.size());
+        directedChanges.reserve(operation.Changes.size());
         gridSnapshots.reserve(model->GridCount());
-        for (const VoxelChange& source : changes)
+        for (const VoxelChange& source : operation.Changes)
         {
             VoxelChange directed = source;
             if (direction == VoxelChangeDirection::Backward)
@@ -235,7 +265,33 @@ CommandResult ApplyVoxelChanges(
                     "VoxelDocument and compatibility grid differ from the expected state.");
             directedChanges.push_back(directed);
         }
+        if (operation.PaletteChange)
+        {
+            directedPaletteChange = *operation.PaletteChange;
+            if (direction == VoxelChangeDirection::Backward)
+                std::swap(
+                    directedPaletteChange->Before,
+                    directedPaletteChange->After);
+            for (std::size_t index = 0U;
+                 index < Voxel::VoxelPalette::Size(); ++index)
+            {
+                const Asset::Voxel::VoxelColor& expected =
+                    directedPaletteChange->Before.Colors[index];
+                const Voxel::VoxelColor* current =
+                    model->Palette().Get(index);
+                if (current == nullptr || *current != Voxel::VoxelColor{
+                        expected.Red,
+                        expected.Green,
+                        expected.Blue,
+                        expected.Alpha})
+                {
+                    return CommandResult::Failure(
+                        "The compatibility model palette no longer matches the expected state.");
+                }
+            }
+        }
         documentSnapshot = *document;
+        paletteSnapshot = model->Palette();
         for (std::size_t index = 0U; index < model->GridCount(); ++index)
         {
             bool referenced = false;
@@ -266,6 +322,7 @@ CommandResult ApplyVoxelChanges(
     const auto rollback = [&]() noexcept
     {
         if (documentSnapshot) *document = std::move(*documentSnapshot);
+        if (paletteSnapshot) model->Palette() = std::move(*paletteSnapshot);
         for (GridSnapshot& snapshot : gridSnapshots)
         {
             if (Voxel::VoxelGrid* grid = model->GetGrid(snapshot.ModelIndex))
@@ -275,13 +332,41 @@ CommandResult ApplyVoxelChanges(
 
     try
     {
+        const Asset::Voxel::VoxelDocumentCompositeOrder compositeOrder =
+            direction == VoxelChangeDirection::Forward
+            ? Asset::Voxel::VoxelDocumentCompositeOrder::PaletteThenVoxels
+            : Asset::Voxel::VoxelDocumentCompositeOrder::VoxelsThenPalette;
         const Asset::Voxel::VoxelDocumentOperationResult documentResult =
-            document->ApplyVoxelChanges(directedChanges);
+            document->ApplyCompositeChanges(
+                directedChanges,
+                directedPaletteChange ? &*directedPaletteChange : nullptr,
+                compositeOrder);
         if (!documentResult.Succeeded || !documentResult.Changed)
         {
             rollback();
             return CommandResult::Failure(
                 "VoxelDocument history edit failed: " + documentResult.Message);
+        }
+        const auto synchronizeModelPalette = [&]() noexcept
+        {
+            if (!directedPaletteChange) return true;
+            for (std::size_t index = 0U;
+                 index < Voxel::VoxelPalette::Size(); ++index)
+            {
+                const Asset::Voxel::VoxelColor& source =
+                    directedPaletteChange->After.Colors[index];
+                if (!model->Palette().Set(index, Voxel::VoxelColor{
+                        source.Red, source.Green, source.Blue, source.Alpha}))
+                    return false;
+            }
+            return true;
+        };
+        if (direction == VoxelChangeDirection::Forward &&
+            !synchronizeModelPalette())
+        {
+            rollback();
+            return CommandResult::Failure(
+                "Unable to synchronize the compatibility model palette.");
         }
         for (const VoxelChange& change : directedChanges)
         {
@@ -300,6 +385,13 @@ CommandResult ApplyVoxelChanges(
                 return CommandResult::Failure(
                     "Unable to update a compatibility grid voxel.");
             }
+        }
+        if (direction == VoxelChangeDirection::Backward &&
+            !synchronizeModelPalette())
+        {
+            rollback();
+            return CommandResult::Failure(
+                "Unable to synchronize the compatibility model palette.");
         }
     }
     catch (const std::exception& exception)

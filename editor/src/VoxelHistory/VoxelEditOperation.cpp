@@ -33,6 +33,12 @@ std::size_t EstimateVoxelEditOperationMemory(
                 sizeof(Asset::Voxel::VoxelPosition)))
             return maximum;
     }
+    if (operation.PaletteChange)
+    {
+        if (result > maximum - sizeof(VoxelPaletteChange))
+            return maximum;
+        result += sizeof(VoxelPaletteChange);
+    }
     return result;
 }
 

@@ -49,10 +49,13 @@ VoxelEditHistoryResult VoxelEditHistory::Execute(
     if (busy_)
         return Result(VoxelEditHistoryResultCode::Busy, false, {},
             "A voxel history operation is already in progress.");
-    if (operation.Label.empty() || operation.Changes.empty())
+    if (operation.Changes.empty() && !operation.PaletteChange)
+        return Result(VoxelEditHistoryResultCode::NoChange, false,
+            std::move(operation.Label), "Voxel edit operation has no changes.");
+    if (operation.Label.empty())
         return Result(VoxelEditHistoryResultCode::InvalidOperation, false,
             std::move(operation.Label),
-            "Voxel edit operations require a label and at least one change.");
+            "Voxel edit operations require a label.");
 
     const std::size_t memory = EstimateVoxelEditOperationMemory(operation);
     if (limits_.MaximumCommandCount == 0U ||
@@ -81,10 +84,10 @@ VoxelEditHistoryResult VoxelEditHistory::Execute(
 
     BusyGuard guard(busy_);
     StoredOperation& pending = undoStack_.back();
-    const CommandResult applied = ApplyVoxelChanges(
+    const CommandResult applied = ApplyVoxelEditOperation(
         session,
         session.VoxelModelGeneration(),
-        pending.Operation.Changes,
+        pending.Operation,
         VoxelChangeDirection::Forward);
     if (!applied)
     {
@@ -124,10 +127,10 @@ VoxelEditHistoryResult VoxelEditHistory::Undo(VoxelEditSession& session)
 
     BusyGuard guard(busy_);
     StoredOperation& operation = undoStack_.back();
-    const CommandResult applied = ApplyVoxelChanges(
+    const CommandResult applied = ApplyVoxelEditOperation(
         session,
         session.VoxelModelGeneration(),
-        operation.Operation.Changes,
+        operation.Operation,
         VoxelChangeDirection::Backward);
     if (!applied)
         return Result(VoxelEditHistoryResultCode::Failed, false,
@@ -155,10 +158,10 @@ VoxelEditHistoryResult VoxelEditHistory::Redo(VoxelEditSession& session)
 
     BusyGuard guard(busy_);
     StoredOperation& operation = redoStack_.back();
-    const CommandResult applied = ApplyVoxelChanges(
+    const CommandResult applied = ApplyVoxelEditOperation(
         session,
         session.VoxelModelGeneration(),
-        operation.Operation.Changes,
+        operation.Operation,
         VoxelChangeDirection::Forward);
     if (!applied)
         return Result(VoxelEditHistoryResultCode::Failed, false,
@@ -257,6 +260,7 @@ const char* VoxelEditHistoryResultCodeName(
     switch (code)
     {
     case VoxelEditHistoryResultCode::Applied: return "Applied";
+    case VoxelEditHistoryResultCode::NoChange: return "No change";
     case VoxelEditHistoryResultCode::NothingToUndo: return "Nothing to undo";
     case VoxelEditHistoryResultCode::NothingToRedo: return "Nothing to redo";
     case VoxelEditHistoryResultCode::InvalidOperation: return "Invalid operation";

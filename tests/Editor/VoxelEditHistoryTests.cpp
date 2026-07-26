@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -61,6 +62,14 @@ Voxel::VoxelModel CompatibilityModel(
 {
     Voxel::VoxelModel model;
     model.SetName("History test model");
+    const auto& palette = document.GetPalette();
+    for (std::size_t index = 0U; index < palette.size(); ++index)
+    {
+        const auto color = palette[index];
+        Require(model.Palette().Set(index,
+            {color.Red, color.Green, color.Blue, color.Alpha}),
+            "Unable to initialize history compatibility palette.");
+    }
     for (std::size_t index = 0U; index < document.GetModelCount(); ++index)
     {
         const Asset::Voxel::VoxelSubModel* source = document.GetModel(index);
@@ -157,6 +166,26 @@ Editor::VoxelEditOperation AddOperation(
     const std::size_t modelIndex = 0U)
 {
     return {std::move(label), {Change(modelIndex, position, {}, palette)}};
+}
+
+Editor::VoxelEditOperation PaletteOperation(
+    const Asset::Voxel::VoxelDocument& document,
+    std::string label,
+    const std::size_t paletteIndex,
+    const Asset::Voxel::VoxelColor color)
+{
+    Asset::Voxel::VoxelDocumentPaletteChange paletteChange;
+    paletteChange.Before = document.GetPaletteSnapshot();
+    paletteChange.After = paletteChange.Before;
+    paletteChange.After.Colors[paletteIndex] = color;
+    paletteChange.After.HasCustomPalette = true;
+
+    Editor::VoxelEditOperation operation;
+    operation.Label = std::move(label);
+    operation.PaletteChange =
+        std::make_shared<Asset::Voxel::VoxelDocumentPaletteChange>(
+            std::move(paletteChange));
+    return operation;
 }
 
 void TestEmptyAndToolIntegration()
@@ -291,6 +320,251 @@ void TestMultiChangeAndSingleRevision()
         "Multi-change Redo was incomplete.");
 }
 
+void TestPaletteOnlyAndCompositeHistory()
+{
+    auto document = DefaultDocument();
+    TestSession session(document);
+    Require(session.PrimeMesh(), "Unable to prime composite history mesh.");
+    Editor::VoxelEditHistory history;
+    history.MarkSavedState(document);
+
+    constexpr std::size_t PaletteIndex = 42U;
+    constexpr Asset::Voxel::VoxelColor CompositeColor{
+        17U, 93U, 201U, 255U};
+    const auto initialPalette = document.GetPaletteSnapshot();
+    const std::uint64_t initialRevision = document.GetRevision();
+    const std::size_t initialRebuildAttempts = session.rebuildAttempts_;
+    const std::size_t initialCompletedEdits = session.completedEdits_;
+
+    auto paletteOnly = PaletteOperation(
+        document, "Palette Only", PaletteIndex, CompositeColor);
+    const Voxel::VoxelColor compatibilityCompositeColor{
+        CompositeColor.Red, CompositeColor.Green,
+        CompositeColor.Blue, CompositeColor.Alpha};
+    Require(history.Execute(session, std::move(paletteOnly)) &&
+        document.GetPaletteColor(PaletteIndex) == CompositeColor &&
+        session.model_.Palette().Get(PaletteIndex) != nullptr &&
+        *session.model_.Palette().Get(PaletteIndex) ==
+            compatibilityCompositeColor &&
+        document.GetRevision() == initialRevision + 1U &&
+        history.UndoCount() == 1U && history.RedoCount() == 0U &&
+        session.rebuildAttempts_ == initialRebuildAttempts + 1U &&
+        session.completedEdits_ == initialCompletedEdits + 1U,
+        "Palette-only transaction was not one logical edit.");
+
+    Require(history.Undo(session) &&
+        document.GetPaletteSnapshot() == initialPalette &&
+        session.model_.Palette().Get(PaletteIndex) != nullptr &&
+        *session.model_.Palette().Get(PaletteIndex) ==
+            Voxel::VoxelColor{
+                initialPalette.Colors[PaletteIndex].Red,
+                initialPalette.Colors[PaletteIndex].Green,
+                initialPalette.Colors[PaletteIndex].Blue,
+                initialPalette.Colors[PaletteIndex].Alpha} &&
+        document.GetRevision() == initialRevision + 2U &&
+        history.UndoCount() == 0U && history.RedoCount() == 1U,
+        "Palette-only Undo did not restore the exact snapshot.");
+    Require(history.Redo(session) &&
+        document.GetPaletteColor(PaletteIndex) == CompositeColor &&
+        session.model_.Palette().Get(PaletteIndex) != nullptr &&
+        *session.model_.Palette().Get(PaletteIndex) ==
+            compatibilityCompositeColor &&
+        document.GetRevision() == initialRevision + 3U &&
+        history.UndoCount() == 1U && history.RedoCount() == 0U,
+        "Palette-only Redo did not restore the exact result.");
+
+    history.Clear();
+    history.MarkSavedState(document);
+    constexpr Asset::Voxel::VoxelColor ReplacementColor{
+        224U, 61U, 37U, 255U};
+    Editor::VoxelEditOperation mixed = PaletteOperation(
+        document, "Composite Palette And Voxels",
+        PaletteIndex, ReplacementColor);
+    mixed.Changes = {
+        Change(0U, {1, 0, 0}, {}, PaletteIndex),
+        Change(0U, {2, 0, 0}, {}, PaletteIndex),
+        Change(1U, {1, 1, 1}, 9U, PaletteIndex)};
+    const auto paletteBeforeMixed = document.GetPaletteSnapshot();
+    const std::uint64_t mixedRevision = document.GetRevision();
+    const std::size_t mixedRebuildAttempts = session.rebuildAttempts_;
+    const std::size_t mixedCompletedEdits = session.completedEdits_;
+    Require(history.Execute(session, mixed) &&
+        document.GetPaletteColor(PaletteIndex) == ReplacementColor &&
+        document.GetVoxel({1, 0, 0}, 0U)->PaletteIndex == PaletteIndex &&
+        document.GetVoxel({2, 0, 0}, 0U)->PaletteIndex == PaletteIndex &&
+        document.GetVoxel({1, 1, 1}, 1U)->PaletteIndex == PaletteIndex &&
+        document.GetRevision() == mixedRevision + 1U &&
+        history.UndoCount() == 1U && history.RedoCount() == 0U &&
+        session.rebuildAttempts_ == mixedRebuildAttempts + 1U &&
+        session.completedEdits_ == mixedCompletedEdits + 1U,
+        "Mixed transaction was not committed atomically.");
+
+    Require(history.Undo(session) &&
+        document.GetPaletteSnapshot() == paletteBeforeMixed &&
+        !document.HasVoxel({1, 0, 0}, 0U) &&
+        !document.HasVoxel({2, 0, 0}, 0U) &&
+        document.GetVoxel({1, 1, 1}, 1U)->PaletteIndex == 9U &&
+        document.GetRevision() == mixedRevision + 2U &&
+        history.UndoCount() == 0U && history.RedoCount() == 1U,
+        "Mixed Undo did not restore palette and voxels exactly.");
+    Require(history.Redo(session) &&
+        document.GetPaletteColor(PaletteIndex) == ReplacementColor &&
+        document.GetVoxel({1, 0, 0}, 0U)->PaletteIndex == PaletteIndex &&
+        document.GetVoxel({2, 0, 0}, 0U)->PaletteIndex == PaletteIndex &&
+        document.GetVoxel({1, 1, 1}, 1U)->PaletteIndex == PaletteIndex &&
+        document.GetRevision() == mixedRevision + 3U &&
+        history.UndoCount() == 1U && history.RedoCount() == 0U,
+        "Mixed Redo did not reproduce the committed result exactly.");
+}
+
+void TestCompositeValidationAndRollback()
+{
+    auto document = DefaultDocument();
+    TestSession session(document);
+    Require(session.PrimeMesh(), "Unable to prime rollback mesh.");
+    Editor::VoxelEditHistory history;
+    history.MarkSavedState(document);
+
+    const auto initialPalette = document.GetPaletteSnapshot();
+    const auto initialBounds = document.GetGlobalBounds();
+    const std::uint64_t initialCount = document.GetVoxelCount();
+    const std::uint64_t initialRevision = document.GetRevision();
+    const std::size_t initialRebuildAttempts = session.rebuildAttempts_;
+    const std::size_t initialCompletedEdits = session.completedEdits_;
+
+    auto failing = PaletteOperation(document, "Composite Rollback", 27U,
+        {80U, 190U, 120U, 255U});
+    failing.Changes = {
+        Change(0U, {1, 0, 0}, {}, 27U),
+        Change(0U, {2, 0, 0}, {}, 27U)};
+    session.failRebuild_ = true;
+    const auto failed = history.Execute(session, failing);
+    Require(!failed &&
+        document.GetPaletteSnapshot() == initialPalette &&
+        document.GetGlobalBounds() == initialBounds &&
+        document.GetVoxelCount() == initialCount &&
+        document.GetRevision() == initialRevision &&
+        !document.HasVoxel({1, 0, 0}, 0U) &&
+        !document.HasVoxel({2, 0, 0}, 0U) &&
+        history.UndoCount() == 0U && history.RedoCount() == 0U &&
+        session.rebuildAttempts_ == initialRebuildAttempts + 1U &&
+        session.completedEdits_ == initialCompletedEdits,
+        "Composite failure left a partial palette, voxel or history state.");
+
+    session.failRebuild_ = false;
+    auto stalePalette = PaletteOperation(document, "Stale Palette", 17U,
+        {9U, 19U, 29U, 255U});
+    auto staleBefore = stalePalette.PaletteChange->Before;
+    staleBefore.Colors[17U] = {1U, 1U, 1U, 255U};
+    stalePalette.PaletteChange =
+        std::make_shared<Asset::Voxel::VoxelDocumentPaletteChange>(
+            Asset::Voxel::VoxelDocumentPaletteChange{
+                std::move(staleBefore), stalePalette.PaletteChange->After});
+    Require(!history.Execute(session, std::move(stalePalette)) &&
+        document.GetPaletteSnapshot() == initialPalette &&
+        document.GetRevision() == initialRevision &&
+        !history.CanUndo() && !history.CanRedo(),
+        "Stale palette before-state was not refused before mutation.");
+
+    Editor::VoxelEditOperation identicalPalette;
+    identicalPalette.Label = "Identical Palette";
+    identicalPalette.PaletteChange =
+        std::make_shared<Asset::Voxel::VoxelDocumentPaletteChange>(
+            Asset::Voxel::VoxelDocumentPaletteChange{
+                initialPalette, initialPalette});
+    Require(!history.Execute(session, std::move(identicalPalette)) &&
+        document.GetPaletteSnapshot() == initialPalette &&
+        document.GetRevision() == initialRevision &&
+        !history.CanUndo() && !history.CanRedo(),
+        "Identical palette before/after states were not refused.");
+
+    auto invalidPalette = PaletteOperation(document, "Invalid Palette", 18U,
+        {1U, 2U, 3U, 255U});
+    auto invalidSnapshot = invalidPalette.PaletteChange->After;
+    invalidSnapshot.Colors[0U] = {1U, 2U, 3U, 4U};
+    invalidPalette.PaletteChange =
+        std::make_shared<Asset::Voxel::VoxelDocumentPaletteChange>(
+            Asset::Voxel::VoxelDocumentPaletteChange{
+                invalidPalette.PaletteChange->Before,
+                std::move(invalidSnapshot)});
+    Require(!history.Execute(session, std::move(invalidPalette)) &&
+        document.GetPaletteSnapshot() == initialPalette &&
+        document.GetRevision() == initialRevision &&
+        !history.CanUndo() && !history.CanRedo(),
+        "Invalid palette snapshot was not refused before mutation.");
+
+    auto incompatibleIndex = PaletteOperation(
+        document, "Incompatible Index", 19U, {9U, 8U, 7U, 255U});
+    incompatibleIndex.Changes = {Change(0U, {1, 0, 0}, {}, 0U)};
+    Require(!history.Execute(session, std::move(incompatibleIndex)) &&
+        document.GetPaletteSnapshot() == initialPalette &&
+        document.GetRevision() == initialRevision &&
+        !history.CanUndo() && !history.CanRedo(),
+        "Invalid voxel palette index changed a composite transaction.");
+
+    auto negative = PaletteOperation(
+        document, "Negative Coordinates", 20U, {2U, 4U, 6U, 255U});
+    negative.Changes = {Change(0U, {-1, 0, 0}, {}, 20U)};
+    Require(!history.Execute(session, std::move(negative)) &&
+        document.GetPaletteSnapshot() == initialPalette &&
+        document.GetRevision() == initialRevision &&
+        !history.CanUndo() && !history.CanRedo(),
+        "Negative voxel coordinates changed a composite transaction.");
+}
+
+void TestCompositeDuplicatesLargeBatchAndLifecycle()
+{
+    auto document = Document({
+        Model({16U, 16U, 16U}, {{0U, 0U, 0U, 3U}})});
+    TestSession session(document);
+    Editor::VoxelEditHistory history;
+    history.MarkSavedState(document);
+
+    auto operation = PaletteOperation(
+        document, "Large Composite Edit", 101U, {90U, 40U, 210U, 255U});
+    auto paletteAfter = operation.PaletteChange->After;
+    paletteAfter.Colors[102U] = paletteAfter.Colors[101U];
+    operation.PaletteChange =
+        std::make_shared<Asset::Voxel::VoxelDocumentPaletteChange>(
+            Asset::Voxel::VoxelDocumentPaletteChange{
+                operation.PaletteChange->Before, paletteAfter});
+    operation.Changes.reserve(512U);
+    for (std::int32_t z = 0; z < 8; ++z)
+    {
+        for (std::int32_t y = 0; y < 8; ++y)
+        {
+            for (std::int32_t x = 0; x < 8; ++x)
+            {
+                if (x == 0 && y == 0 && z == 0) continue;
+                operation.Changes.push_back(
+                    Change(0U, {x, y, z}, {},
+                        ((x + y + z) & 1) == 0 ? 101U : 102U));
+            }
+        }
+    }
+
+    const std::uint64_t revision = document.GetRevision();
+    Require(history.Execute(session, operation) &&
+        document.GetVoxelCount() == 512U &&
+        document.GetPaletteColor(101U) == document.GetPaletteColor(102U) &&
+        document.GetRevision() == revision + 1U &&
+        history.UndoCount() == 1U,
+        "Large composite edit or duplicate palette preservation failed.");
+    Require(history.Undo(session) &&
+        document.GetVoxelCount() == 1U &&
+        document.GetRevision() == revision + 2U,
+        "Large composite Undo failed.");
+    Require(history.Redo(session) &&
+        document.GetVoxelCount() == 512U &&
+        document.GetRevision() == revision + 3U,
+        "Large composite Redo failed.");
+
+    history.Clear();
+    Require(!history.CanUndo() && !history.CanRedo() &&
+        history.EstimatedMemory() == 0U,
+        "Project/history lifecycle retained a composite operation.");
+}
+
 void TestLimitsAndMemory()
 {
     auto document = DefaultDocument();
@@ -331,10 +605,17 @@ void TestRefusalsAndRollback()
     Editor::VoxelEditHistory history;
     history.MarkSavedState(document);
     const auto empty = history.Execute(session, {});
-    Require(empty.Code ==
-            Editor::VoxelEditHistoryResultCode::InvalidOperation &&
+    Require(empty.Code == Editor::VoxelEditHistoryResultCode::NoChange &&
+        document.GetRevision() == 0U &&
         !history.Undo(session) && !history.Redo(session),
         "Empty history/refusal behavior is incorrect.");
+
+    Editor::VoxelEditOperation unlabeled =
+        AddOperation({}, {1, 0, 0}, 11U);
+    Require(history.Execute(session, std::move(unlabeled)).Code ==
+            Editor::VoxelEditHistoryResultCode::InvalidOperation &&
+        document.GetRevision() == 0U && !history.CanUndo(),
+        "Unlabelled non-empty operation was not rejected.");
 
     const auto operation = AddOperation("Rollback", {1, 0, 0}, 11U);
     const auto initialBounds = document.GetBounds();
@@ -430,6 +711,9 @@ int main()
         TestEmptyAndToolIntegration();
         TestOrderingBranchingAndSavedIdentity();
         TestMultiChangeAndSingleRevision();
+        TestPaletteOnlyAndCompositeHistory();
+        TestCompositeValidationAndRollback();
+        TestCompositeDuplicatesLargeBatchAndLifecycle();
         TestLimitsAndMemory();
         TestRefusalsAndRollback();
         TestShortcutInput();

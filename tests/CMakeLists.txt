@@ -642,6 +642,23 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelEditHistoryTests>
 )
 add_executable(
+    VoxelForgeEditorCompositeVoxelEditSmokeTests
+    Editor/CompositeVoxelEditSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorCompositeVoxelEditSmokeTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorCompositeVoxelEditSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.CompositeVoxelEditSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorCompositeVoxelEditSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.CompositeVoxelEditSmoke
+    PROPERTIES LABELS "Smoke"
+)
+add_executable(
     VoxelForgeEditorVoxelMoveTests
     Editor/VoxelMoveTests.cpp
 )

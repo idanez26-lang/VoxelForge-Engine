@@ -1,5 +1,7 @@
 #include "VoxelForge/Asset/Voxel/VoxelDocument.h"
 
+#include "VoxelForge/Asset/Vox/VoxFormat.h"
+
 #include <algorithm>
 #include <array>
 #include <functional>
@@ -213,6 +215,11 @@ std::optional<VoxelColor> VoxelDocument::GetPaletteColor(
         : std::nullopt;
 }
 
+VoxelDocumentPaletteSnapshot VoxelDocument::GetPaletteSnapshot() const noexcept
+{
+    return {palette_, hasCustomPalette_};
+}
+
 std::uint32_t VoxelDocument::UsedPaletteColorCount() const noexcept
 {
     std::array<bool, 256U> used{};
@@ -326,11 +333,70 @@ VoxelDocumentOperationResult VoxelDocument::SetPaletteColor(
     return Success(true, "Palette color changed.");
 }
 
+VoxelDocumentOperationResult VoxelDocument::ValidatePaletteSnapshot(
+    const VoxelDocumentPaletteSnapshot& snapshot) const
+{
+    if (snapshot.Colors[0U] != palette_[0U])
+    {
+        return Failure(VoxelDocumentError::InvalidPalette,
+            "Palette index 0 is reserved and cannot be changed.");
+    }
+    if (!snapshot.HasCustomPalette &&
+        snapshot.Colors != Vox::DefaultVoxPalette())
+    {
+        return Failure(VoxelDocumentError::InvalidPalette,
+            "A default palette snapshot must contain the default VOX palette.");
+    }
+    return Success(false, "Palette snapshot is valid.");
+}
+
+VoxelDocumentOperationResult VoxelDocument::ReplacePalette(
+    const VoxelDocumentPaletteSnapshot& snapshot)
+{
+    const VoxelDocumentOperationResult validation =
+        ValidatePaletteSnapshot(snapshot);
+    if (!validation) return validation;
+    if (GetPaletteSnapshot() == snapshot)
+        return Success(false, "Palette is unchanged.");
+    palette_ = snapshot.Colors;
+    hasCustomPalette_ = snapshot.HasCustomPalette;
+    RecordChange();
+    return Success(true, "Palette replaced.");
+}
+
 VoxelDocumentOperationResult VoxelDocument::ApplyVoxelChanges(
     const std::span<const VoxelDocumentChange> changes)
 {
-    if (changes.empty())
-        return Success(false, "Voxel change set is empty.");
+    return ApplyCompositeChanges(changes, nullptr);
+}
+
+VoxelDocumentOperationResult VoxelDocument::ApplyCompositeChanges(
+    const std::span<const VoxelDocumentChange> voxelChanges,
+    const VoxelDocumentPaletteChange* paletteChange,
+    const VoxelDocumentCompositeOrder order)
+{
+    if (voxelChanges.empty() && paletteChange == nullptr)
+        return Success(false, "Composite change set is empty.");
+
+    if (paletteChange != nullptr)
+    {
+        if (paletteChange->Before == paletteChange->After)
+        {
+            return Failure(VoxelDocumentError::InvalidTransaction,
+                "Palette change has identical before and after states.");
+        }
+        const VoxelDocumentOperationResult beforeValidation =
+            ValidatePaletteSnapshot(paletteChange->Before);
+        if (!beforeValidation) return beforeValidation;
+        const VoxelDocumentOperationResult afterValidation =
+            ValidatePaletteSnapshot(paletteChange->After);
+        if (!afterValidation) return afterValidation;
+        if (GetPaletteSnapshot() != paletteChange->Before)
+        {
+            return Failure(VoxelDocumentError::StateMismatch,
+                "Voxel document palette no longer matches the expected before state.");
+        }
+    }
 
     struct ChangeKey final
     {
@@ -353,8 +419,8 @@ VoxelDocumentOperationResult VoxelDocument::ApplyVoxelChanges(
     };
 
     std::unordered_set<ChangeKey, ChangeKeyHash> uniqueChanges;
-    uniqueChanges.reserve(changes.size());
-    for (const VoxelDocumentChange& change : changes)
+    uniqueChanges.reserve(voxelChanges.size());
+    for (const VoxelDocumentChange& change : voxelChanges)
     {
         if (change.SubModelIndex >= models_.size())
             return Failure(VoxelDocumentError::InvalidModelIndex,
@@ -392,34 +458,55 @@ VoxelDocumentOperationResult VoxelDocument::ApplyVoxelChanges(
     }
 
     std::vector<bool> recalculateBounds(models_.size(), false);
-    for (const VoxelDocumentChange& change : changes)
+    const auto applyPalette = [&]() noexcept
     {
-        VoxelSubModel& model = models_[change.SubModelIndex];
-        if (change.ExistedBefore && !change.ExistsAfter)
+        if (paletteChange != nullptr)
         {
-            model.voxels_.erase(change.Position);
-            --voxelCount_;
-            recalculateBounds[change.SubModelIndex] = true;
+            palette_ = paletteChange->After.Colors;
+            hasCustomPalette_ = paletteChange->After.HasCustomPalette;
         }
-        else if (!change.ExistedBefore && change.ExistsAfter)
+    };
+    const auto applyVoxels = [&]()
+    {
+        for (const VoxelDocumentChange& change : voxelChanges)
         {
-            model.voxels_.emplace(
-                change.Position, Voxel{change.PaletteIndexAfter});
-            ++voxelCount_;
-            model.ExtendBounds(change.Position);
+            VoxelSubModel& model = models_[change.SubModelIndex];
+            if (change.ExistedBefore && !change.ExistsAfter)
+            {
+                model.voxels_.erase(change.Position);
+                --voxelCount_;
+                recalculateBounds[change.SubModelIndex] = true;
+            }
+            else if (!change.ExistedBefore && change.ExistsAfter)
+            {
+                model.voxels_.emplace(
+                    change.Position, Voxel{change.PaletteIndexAfter});
+                ++voxelCount_;
+                model.ExtendBounds(change.Position);
+            }
+            else
+            {
+                model.voxels_.at(change.Position).PaletteIndex =
+                    change.PaletteIndexAfter;
+            }
         }
-        else
-        {
-            model.voxels_.at(change.Position).PaletteIndex =
-                change.PaletteIndexAfter;
-        }
+    };
+    if (order == VoxelDocumentCompositeOrder::PaletteThenVoxels)
+    {
+        applyPalette();
+        applyVoxels();
+    }
+    else
+    {
+        applyVoxels();
+        applyPalette();
     }
     for (std::size_t index = 0U; index < models_.size(); ++index)
     {
         if (recalculateBounds[index]) models_[index].RecalculateBounds();
     }
     RecordChange();
-    return Success(true, "Voxel changes applied atomically.");
+    return Success(true, "Composite voxel document changes applied atomically.");
 }
 
 void VoxelDocument::MarkSaved() noexcept
