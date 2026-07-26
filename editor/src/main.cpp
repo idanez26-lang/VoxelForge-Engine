@@ -454,7 +454,7 @@ public:
             StampDimensions Dimensions;
             VoxelForge::Asset::Vox::VoxColor Color;
         };
-        constexpr std::array<Fixture, 4U> fixtures{{
+        constexpr std::array<Fixture, 5U> fixtures{{
             {"Castle Gate", 0x181001U, {7U, 6U, 2U},
              {180U, 130U, 70U, 255U}},
             {"Forest Tree", 0x181002U, {5U, 8U, 5U},
@@ -463,6 +463,8 @@ public:
              {60U, 150U, 220U, 255U}},
             {"Stone Arch", 0x181004U, {7U, 5U, 2U},
              {155U, 160U, 170U, 255U}},
+            {"Very Long Architectural Observatory Tower", 0x181005U,
+             {5U, 10U, 5U}, {210U, 105U, 165U, 255U}},
         }};
         for (const Fixture& fixture : fixtures)
         {

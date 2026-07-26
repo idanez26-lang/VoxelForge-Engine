@@ -4018,6 +4018,8 @@ void EditorWorkspace::DrawForgeLibraryPanel()
     const Stamps::ForgeLibraryPanelResult result = forgeLibraryPanel_.Draw(
         &showForgeLibrary_, voxelDocumentSession_.ActiveDocument(),
         voxelDocumentSession_.Generation());
+    if (result.SaveSelectionRequested)
+        BeginSaveSelectionAsStamp();
     if (result.SessionActivated)
         UpdateVoxelHighlights();
     if (!result.Message.empty())
@@ -4762,7 +4764,7 @@ bool EditorWorkspace::RunForgeLibraryVisualStep(const std::size_t frame)
     }
     if (frame == 480U)
     {
-        forgeLibraryViewModel_.SetSearchText("Stone");
+        forgeLibraryViewModel_.SetSearchText("No matching Stamp");
         static_cast<void>(forgeLibraryViewModel_.Refresh());
     }
     if (frame == 720U)
@@ -4789,6 +4791,12 @@ bool EditorWorkspace::RunForgeLibraryVisualStep(const std::size_t frame)
     }
     if (frame == 960U && stampPlacementSession_.CurrentPlan() != nullptr)
         PlaceLatestStampPreview();
+    if (frame == 1200U)
+    {
+        forgeLibraryViewModel_.SetFilter(
+            Stamps::ForgeLibraryFilter::Favorites);
+        static_cast<void>(forgeLibraryViewModel_.Refresh());
+    }
     return true;
 }
 
@@ -6110,6 +6118,7 @@ void EditorWorkspace::SynchronizeProjectAssets()
     // Every project transition invalidates the immutable preview source,
     // including active-project to active-project switches.
     ClearLatestStampPreview();
+    forgeLibraryViewModel_.ResetForProjectChange();
     const auto& project = projectManager_.ActiveProject();
     if (!project)
     {

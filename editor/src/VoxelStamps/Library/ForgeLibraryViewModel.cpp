@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <new>
 #include <utility>
 
@@ -43,7 +44,89 @@ namespace
         right.CatalogEntry.Reference.Id.Value();
 }
 
+[[nodiscard]] std::shared_ptr<const ForgeLibraryThumbnail> BuildThumbnail(
+    const VoxelStamp& stamp)
+{
+    constexpr std::size_t MaximumPreviewPoints = 2048U;
+    const auto voxels = stamp.Voxels();
+    const auto palette = stamp.Palette();
+    if (voxels.empty() || palette.empty()) return {};
+
+    float minimumX = std::numeric_limits<float>::max();
+    float minimumY = std::numeric_limits<float>::max();
+    float maximumX = std::numeric_limits<float>::lowest();
+    float maximumY = std::numeric_limits<float>::lowest();
+    for (const StampVoxel& voxel : voxels)
+    {
+        const float projectedX =
+            static_cast<float>(voxel.Position.X - voxel.Position.Z);
+        const float projectedY =
+            static_cast<float>(voxel.Position.X + voxel.Position.Z) * 0.45F -
+            static_cast<float>(voxel.Position.Y);
+        minimumX = std::min(minimumX, projectedX);
+        minimumY = std::min(minimumY, projectedY);
+        maximumX = std::max(maximumX, projectedX);
+        maximumY = std::max(maximumY, projectedY);
+    }
+
+    const float spanX = std::max(1.0F, maximumX - minimumX);
+    const float spanY = std::max(1.0F, maximumY - minimumY);
+    const std::size_t stride = std::max<std::size_t>(
+        1U, (voxels.size() + MaximumPreviewPoints - 1U) /
+            MaximumPreviewPoints);
+
+    auto thumbnail = std::make_shared<ForgeLibraryThumbnail>();
+    thumbnail->SourceVoxelCount = static_cast<std::uint64_t>(voxels.size());
+    thumbnail->Points.reserve(
+        std::min(MaximumPreviewPoints, voxels.size()));
+    for (std::size_t index = 0U; index < voxels.size(); index += stride)
+    {
+        const StampVoxel& voxel = voxels[index];
+        if (voxel.LocalColorId >= palette.size()) continue;
+        const float projectedX =
+            static_cast<float>(voxel.Position.X - voxel.Position.Z);
+        const float projectedY =
+            static_cast<float>(voxel.Position.X + voxel.Position.Z) * 0.45F -
+            static_cast<float>(voxel.Position.Y);
+        thumbnail->Points.push_back({
+            .X = (projectedX - minimumX) / spanX,
+            .Y = (projectedY - minimumY) / spanY,
+            .Color = palette[voxel.LocalColorId].Color});
+    }
+    return thumbnail;
+}
+
 } // namespace
+
+ForgeLibraryResponsiveLayout ResolveForgeLibraryResponsiveLayout(
+    const float availableWidth,
+    const ForgeLibraryDisplayMode requestedMode,
+    const bool hasSelection) noexcept
+{
+    ForgeLibraryResponsiveLayout result{
+        .UseButtonVisible = hasSelection,
+        .UseButtonFullWidth = hasSelection};
+    if (availableWidth < 220.0F)
+    {
+        result.Mode = ForgeLibraryResponsiveMode::CompactList;
+        return result;
+    }
+    if (requestedMode == ForgeLibraryDisplayMode::List)
+    {
+        result.Mode = ForgeLibraryResponsiveMode::List;
+        return result;
+    }
+
+    result.Mode = ForgeLibraryResponsiveMode::Grid;
+    if (availableWidth < 320.0F)
+        result.GridColumns = 1U;
+    else if (availableWidth < 480.0F)
+        result.GridColumns = 2U;
+    else
+        result.GridColumns = std::max<std::size_t>(
+            3U, static_cast<std::size_t>(availableWidth / 148.0F));
+    return result;
+}
 
 ForgeLibraryViewModel::ForgeLibraryViewModel(
     StampCatalogService& catalogue,
@@ -71,6 +154,11 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::Refresh()
             items_.clear();
             ReconcileSelection();
             statusMessage_ = result.Message;
+            emptyState_ =
+                result.Error == StampCatalogError::NotConfigured ||
+                result.Error == StampCatalogError::InvalidProjectRoot
+                ? ForgeLibraryEmptyState::NoProject
+                : ForgeLibraryEmptyState::CatalogUnavailable;
             needsRefresh_ = false;
             return {.Message = statusMessage_};
         }
@@ -88,13 +176,26 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::Refresh()
             }
         }
         SortItems();
+        for (const ForgeLibraryItem& item : items_) EnsureThumbnail(item);
+        if (searchText_.empty() &&
+            filter_ != ForgeLibraryFilter::Favorites)
+        {
+            ReconcileThumbnailCache();
+        }
         ReconcileSelection();
         needsRefresh_ = false;
-        statusMessage_ = filter_ == ForgeLibraryFilter::Favorites
-            ? "Favorites are prepared but empty in Forge Library V1."
-            : (items_.empty() ? "No Project Library Stamps match this view."
-                              : std::to_string(items_.size()) +
-                                    (items_.size() == 1U ? " Stamp" : " Stamps"));
+        if (filter_ == ForgeLibraryFilter::Favorites)
+            emptyState_ = ForgeLibraryEmptyState::FavoritesEmpty;
+        else if (items_.empty() && !searchText_.empty())
+            emptyState_ = ForgeLibraryEmptyState::NoSearchResults;
+        else if (items_.empty())
+            emptyState_ = ForgeLibraryEmptyState::EmptyProject;
+        else
+            emptyState_ = ForgeLibraryEmptyState::None;
+        statusMessage_ = items_.empty()
+            ? std::string{}
+            : std::to_string(items_.size()) +
+                (items_.size() == 1U ? " Stamp" : " Stamps");
         return {.Succeeded = true, .Message = statusMessage_};
     }
     catch (const std::bad_alloc&)
@@ -102,6 +203,7 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::Refresh()
         items_.clear();
         ReconcileSelection();
         needsRefresh_ = false;
+        emptyState_ = ForgeLibraryEmptyState::CatalogUnavailable;
         statusMessage_ = "Forge Library ran out of memory while building the view.";
         return {.Message = statusMessage_};
     }
@@ -114,10 +216,12 @@ void ForgeLibraryViewModel::ResetForProjectChange() noexcept
     selectedId_.reset();
     selectedStamp_.reset();
     selectedDetails_.reset();
+    thumbnailCache_.clear();
     searchText_.clear();
     statusMessage_.clear();
     filter_ = ForgeLibraryFilter::All;
     sortMode_ = ForgeLibrarySortMode::Name;
+    emptyState_ = ForgeLibraryEmptyState::None;
     // Grid/List is an artist preference and intentionally survives project changes.
     needsRefresh_ = true;
 }
@@ -200,9 +304,8 @@ bool ForgeLibraryViewModel::Select(const Core::UUID& id)
         .Dimensions = item->CatalogEntry.Dimensions,
         .VoxelCount = item->CatalogEntry.VoxelCount,
         .PaletteCount = item->CatalogEntry.PaletteCount,
-        .DateLabel = "Not indexed in V1",
-        .PreviewAvailable = true};
-    statusMessage_ = "Stamp selected. Double-click it or choose Use.";
+        .PreviewAvailable = ThumbnailFor(id) != nullptr};
+    statusMessage_ = "Stamp selected. Double-click it or choose Use Stamp.";
     return true;
 }
 
@@ -227,6 +330,33 @@ ForgeLibraryViewModel::SelectedDetails() const noexcept
 const VoxelStamp* ForgeLibraryViewModel::SelectedPreviewStamp() const noexcept
 {
     return selectedStamp_ ? &*selectedStamp_ : nullptr;
+}
+
+const ForgeLibraryThumbnail* ForgeLibraryViewModel::ThumbnailFor(
+    const Core::UUID& id) const noexcept
+{
+    const auto thumbnail = thumbnailCache_.find(id.Value());
+    return thumbnail == thumbnailCache_.end() ||
+            !thumbnail->second.Thumbnail ||
+            !thumbnail->second.Thumbnail->Available()
+        ? nullptr
+        : thumbnail->second.Thumbnail.get();
+}
+
+const ForgeLibraryThumbnail*
+ForgeLibraryViewModel::SelectedThumbnail() const noexcept
+{
+    return selectedId_ ? ThumbnailFor(*selectedId_) : nullptr;
+}
+
+std::size_t ForgeLibraryViewModel::ThumbnailBuildCount() const noexcept
+{
+    return thumbnailBuildCount_;
+}
+
+ForgeLibraryEmptyState ForgeLibraryViewModel::EmptyState() const noexcept
+{
+    return emptyState_;
 }
 
 ForgeLibraryOperationResult ForgeLibraryViewModel::ActivateSelected(
@@ -291,6 +421,52 @@ void ForgeLibraryViewModel::ReconcileSelection()
 {
     if (!selectedId_) return;
     if (FindItem(*selectedId_) == nullptr) ClearSelection();
+}
+
+void ForgeLibraryViewModel::EnsureThumbnail(const ForgeLibraryItem& item)
+{
+    const std::uint64_t key = item.CatalogEntry.Reference.Id.Value();
+    const auto existing = thumbnailCache_.find(key);
+    if (existing != thumbnailCache_.end() &&
+        existing->second.ContentHash ==
+            item.CatalogEntry.Reference.ContentHash)
+    {
+        return;
+    }
+
+    StampLibraryResult loaded = repository_.Read(item.CatalogEntry.Reference);
+    if (!loaded.Succeeded() || !loaded.Stamp)
+    {
+        thumbnailCache_.erase(key);
+        return;
+    }
+    std::shared_ptr<const ForgeLibraryThumbnail> thumbnail =
+        BuildThumbnail(*loaded.Stamp);
+    ++thumbnailBuildCount_;
+    thumbnailCache_.insert_or_assign(
+        key,
+        ThumbnailCacheEntry{
+            .ContentHash = item.CatalogEntry.Reference.ContentHash,
+            .Thumbnail = std::move(thumbnail)});
+}
+
+void ForgeLibraryViewModel::ReconcileThumbnailCache()
+{
+    for (auto cached = thumbnailCache_.begin();
+         cached != thumbnailCache_.end();)
+    {
+        const bool stillPresent = std::any_of(
+            items_.begin(),
+            items_.end(),
+            [id = cached->first](const ForgeLibraryItem& item)
+            {
+                return item.CatalogEntry.Reference.Id.Value() == id;
+            });
+        if (!stillPresent)
+            cached = thumbnailCache_.erase(cached);
+        else
+            ++cached;
+    }
 }
 
 const ForgeLibraryItem* ForgeLibraryViewModel::FindItem(

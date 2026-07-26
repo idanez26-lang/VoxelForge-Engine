@@ -111,6 +111,7 @@ public:
     [[nodiscard]] StampLibraryResult Read(
         const StampAssetReference& reference) const override
     {
+        ++ReadCount;
         const auto source = std::find_if(
             Sources.begin(), Sources.end(),
             [&reference](const Source& candidate) {
@@ -153,6 +154,8 @@ public:
     {
         return EnumerateSourceAssets();
     }
+
+    mutable std::size_t ReadCount = 0U;
 };
 
 class MemoryStore final : public IStampCatalogStore
@@ -191,6 +194,10 @@ void TestEmptyAndCompleteViews()
     const auto empty = fixture.ViewModel.Refresh();
     Require(empty.Succeeded && fixture.ViewModel.Items().empty(),
         "An empty Project Library must be a successful empty view.");
+    Require(
+        fixture.ViewModel.EmptyState() ==
+            ForgeLibraryEmptyState::EmptyProject,
+        "An empty Project Library must expose an actionable empty state.");
 
     fixture.Repository.Add(2U, "Tree.vfstamp", 2U, 20U);
     fixture.Repository.Add(1U, "arch.vfstamp", 3U, 30U);
@@ -202,6 +209,21 @@ void TestEmptyAndCompleteViews()
             fixture.ViewModel.Items()[0].DisplayName == "arch" &&
             fixture.ViewModel.Items()[1].DisplayName == "Tree",
         "Full Forge Library must expose name-sorted Project Stamps.");
+    Require(
+        fixture.ViewModel.ThumbnailBuildCount() == 2U &&
+            fixture.ViewModel.ThumbnailFor(Core::UUID{1U}) != nullptr &&
+            fixture.ViewModel.ThumbnailFor(Core::UUID{2U}) != nullptr &&
+            fixture.ViewModel.ThumbnailFor(Core::UUID{1U})
+                    ->SourceVoxelCount == 3U &&
+            fixture.ViewModel.ThumbnailFor(Core::UUID{1U})
+                    ->Points.size() == 3U,
+        "Refresh must cache one authoritative thumbnail per Stamp.");
+    const std::size_t readsAfterThumbnails = fixture.Repository.ReadCount;
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.ThumbnailBuildCount() == 2U &&
+            fixture.Repository.ReadCount == readsAfterThumbnails,
+        "An unchanged refresh must reuse cached thumbnails without source reads.");
 }
 
 void TestSearchSortFiltersAndModes()
@@ -219,6 +241,14 @@ void TestSearchSortFiltersAndModes()
             fixture.ViewModel.Items()[0].DisplayName == "StoneArch",
         "Search must filter Project Library names in real time.");
 
+    fixture.ViewModel.SetSearchText("no-result");
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().empty() &&
+            fixture.ViewModel.EmptyState() ==
+                ForgeLibraryEmptyState::NoSearchResults,
+        "A search miss must be distinct from an empty Project Library.");
+
     fixture.ViewModel.SetSearchText({});
     fixture.ViewModel.SetSortMode(ForgeLibrarySortMode::Date);
     Require(fixture.ViewModel.Refresh().Succeeded &&
@@ -230,7 +260,9 @@ void TestSearchSortFiltersAndModes()
 
     fixture.ViewModel.SetFilter(ForgeLibraryFilter::Favorites);
     Require(fixture.ViewModel.Refresh().Succeeded &&
-            fixture.ViewModel.Items().empty(),
+            fixture.ViewModel.Items().empty() &&
+            fixture.ViewModel.EmptyState() ==
+                ForgeLibraryEmptyState::FavoritesEmpty,
         "Favorites must be an intentionally empty prepared V1 view.");
     fixture.ViewModel.SetFilter(ForgeLibraryFilter::Project);
     Require(fixture.ViewModel.Refresh().Succeeded &&
@@ -253,10 +285,16 @@ void TestSelectionRenameDeletionAndActivation()
     Require(fixture.ViewModel.Refresh().Succeeded,
         "Selection fixture must refresh.");
     const Core::UUID chair{30U};
+    const std::size_t thumbnailBuilds =
+        fixture.ViewModel.ThumbnailBuildCount();
     Require(fixture.ViewModel.Select(chair) &&
             fixture.ViewModel.SelectedDetails() != nullptr &&
             fixture.ViewModel.SelectedDetails()->Name == "Chair" &&
-            fixture.ViewModel.SelectedPreviewStamp() != nullptr,
+            fixture.ViewModel.SelectedPreviewStamp() != nullptr &&
+            fixture.ViewModel.SelectedThumbnail() != nullptr &&
+            fixture.ViewModel.SelectedThumbnail() ==
+                fixture.ViewModel.ThumbnailFor(chair) &&
+            fixture.ViewModel.ThumbnailBuildCount() == thumbnailBuilds,
         "Selection must load authoritative details and preview source.");
 
     auto document = MakeDocument();
@@ -286,6 +324,49 @@ void TestSelectionRenameDeletionAndActivation()
         "Deleting a selected source must clear stale selection safely.");
 }
 
+void TestResponsiveLayoutAndLongNames()
+{
+    Require(
+        ResolveForgeLibraryResponsiveLayout(
+            219.0F, ForgeLibraryDisplayMode::Grid, false).Mode ==
+            ForgeLibraryResponsiveMode::CompactList,
+        "Panels below 220 pixels must use compact List.");
+
+    const ForgeLibraryResponsiveLayout oneColumn =
+        ResolveForgeLibraryResponsiveLayout(
+            250.0F, ForgeLibraryDisplayMode::Grid, true);
+    Require(
+        oneColumn.Mode == ForgeLibraryResponsiveMode::Grid &&
+            oneColumn.GridColumns == 1U &&
+            oneColumn.UseButtonVisible &&
+            oneColumn.UseButtonFullWidth,
+        "220-320 pixel Grid must reserve one column and a full-width Use button.");
+
+    Require(
+        ResolveForgeLibraryResponsiveLayout(
+            400.0F, ForgeLibraryDisplayMode::Grid, false).GridColumns == 2U,
+        "320-480 pixel Grid must expose two columns.");
+    Require(
+        ResolveForgeLibraryResponsiveLayout(
+            640.0F, ForgeLibraryDisplayMode::Grid, false).GridColumns >= 3U,
+        "Wide Grid must expose multiple columns.");
+    Require(
+        ResolveForgeLibraryResponsiveLayout(
+            640.0F, ForgeLibraryDisplayMode::List, false).Mode ==
+            ForgeLibraryResponsiveMode::List,
+        "Explicit List mode must survive wide layouts.");
+
+    Fixture fixture;
+    const std::string longName =
+        "Extremely Long Architectural Castle Gate Stamp Name.vfstamp";
+    fixture.Repository.Add(90U, longName, 4U, 90U);
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().front().DisplayName ==
+                "Extremely Long Architectural Castle Gate Stamp Name",
+        "The model must preserve the complete name for card tooltips.");
+}
+
 } // namespace
 
 int main()
@@ -295,6 +376,7 @@ int main()
         TestEmptyAndCompleteViews();
         TestSearchSortFiltersAndModes();
         TestSelectionRenameDeletionAndActivation();
+        TestResponsiveLayoutAndLongNames();
     }
     catch (const std::exception& error)
     {

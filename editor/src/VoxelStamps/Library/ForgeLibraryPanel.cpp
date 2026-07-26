@@ -5,16 +5,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <limits>
 #include <string>
+#include <string_view>
 
 namespace VoxelForge::Editor::Stamps
 {
 namespace
 {
 
-constexpr float CardWidth = 116.0F;
-constexpr float CardHeight = 92.0F;
+constexpr float MinimumCardHeight = 94.0F;
+constexpr float MaximumCardHeight = 136.0F;
+constexpr float CardLabelHeight = 24.0F;
 
 [[nodiscard]] const char* SortLabel(const ForgeLibrarySortMode mode) noexcept
 {
@@ -27,10 +28,56 @@ constexpr float CardHeight = 92.0F;
     return "Name";
 }
 
-void DrawCardThumbnail(
+[[nodiscard]] bool ActiveButton(
+    const char* const label,
+    const bool active)
+{
+    if (active)
+    {
+        ImGui::PushStyleColor(
+            ImGuiCol_Button,
+            ImGui::GetStyleColorVec4(ImGuiCol_Header));
+        ImGui::PushStyleColor(
+            ImGuiCol_ButtonHovered,
+            ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered));
+    }
+    const bool pressed = ImGui::Button(label);
+    if (active) ImGui::PopStyleColor(2);
+    return pressed;
+}
+
+[[nodiscard]] std::string ElideText(
+    const std::string_view text,
+    const float availableWidth)
+{
+    if (ImGui::CalcTextSize(text.data(), text.data() + text.size()).x <=
+        availableWidth)
+    {
+        return std::string(text);
+    }
+
+    std::string result(text);
+    while (!result.empty())
+    {
+        std::size_t codePointStart = result.size() - 1U;
+        while (codePointStart > 0U &&
+               (static_cast<unsigned char>(result[codePointStart]) & 0xC0U) ==
+                   0x80U)
+        {
+            --codePointStart;
+        }
+        result.resize(codePointStart);
+        const std::string candidate = result + "...";
+        if (ImGui::CalcTextSize(candidate.c_str()).x <= availableWidth)
+            return candidate;
+    }
+    return "...";
+}
+
+void DrawProjectedThumbnail(
     const ImVec2 minimum,
     const ImVec2 maximum,
-    const StampDimensions dimensions,
+    const ForgeLibraryThumbnail* const thumbnail,
     const bool selected)
 {
     ImDrawList* const drawList = ImGui::GetWindowDrawList();
@@ -40,26 +87,41 @@ void DrawCardThumbnail(
         selected ? ImGuiCol_HeaderActive : ImGuiCol_Border);
     drawList->AddRectFilled(minimum, maximum, background, 4.0F);
     drawList->AddRect(minimum, maximum, border, 4.0F, 0, selected ? 2.0F : 1.0F);
+    if (thumbnail == nullptr || !thumbnail->Available())
+    {
+        const char* const unavailable = "Preview unavailable";
+        const ImVec2 textSize = ImGui::CalcTextSize(unavailable);
+        drawList->AddText(
+            {minimum.x + (maximum.x - minimum.x - textSize.x) * 0.5F,
+             minimum.y + (maximum.y - minimum.y - textSize.y) * 0.5F},
+            ImGui::GetColorU32(ImGuiCol_TextDisabled),
+            unavailable);
+        return;
+    }
 
-    const float width = maximum.x - minimum.x;
-    const float height = maximum.y - minimum.y;
-    const float largest = static_cast<float>(std::max({
-        dimensions.X, dimensions.Y, dimensions.Z, 1U}));
-    const float x = static_cast<float>(dimensions.X) / largest;
-    const float y = static_cast<float>(dimensions.Y) / largest;
-    const float z = static_cast<float>(dimensions.Z) / largest;
-    const ImVec2 center{minimum.x + width * 0.50F, minimum.y + height * 0.50F};
-    const float scale = std::min(width, height) * 0.27F;
-    const ImU32 face = ImGui::GetColorU32(ImGuiCol_ButtonHovered);
-    const ImU32 edge = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    const ImVec2 left{center.x - scale * (x + z * 0.45F),
-                      center.y + scale * (z * 0.30F)};
-    const ImVec2 right{center.x + scale * (x + z * 0.45F),
-                       center.y + scale * (z * 0.30F)};
-    const ImVec2 top{center.x, center.y - scale * (y + z * 0.35F)};
-    const ImVec2 bottom{center.x, center.y + scale * (y + z * 0.35F)};
-    drawList->AddQuadFilled(left, top, right, bottom, face);
-    drawList->AddQuad(left, top, right, bottom, edge, 1.0F);
+    const float width = std::max(1.0F, maximum.x - minimum.x - 12.0F);
+    const float height = std::max(1.0F, maximum.y - minimum.y - 12.0F);
+    const float point = std::clamp(
+        std::min(width, height) /
+            std::sqrt(static_cast<float>(
+                std::max<std::uint64_t>(1U, thumbnail->SourceVoxelCount))),
+        1.0F,
+        4.5F);
+    for (const ForgeLibraryThumbnailPoint& voxel : thumbnail->Points)
+    {
+        const float x = minimum.x + 6.0F + voxel.X * width;
+        const float y = maximum.y - 6.0F - voxel.Y * height;
+        const ImU32 color = IM_COL32(
+            voxel.Color.Red,
+            voxel.Color.Green,
+            voxel.Color.Blue,
+            voxel.Color.Alpha);
+        drawList->AddRectFilled(
+            {x - point, y - point},
+            {x + point, y + point},
+            color,
+            1.0F);
+    }
 }
 
 } // namespace
@@ -93,18 +155,24 @@ ForgeLibraryPanelResult ForgeLibraryPanel::Draw(
         if (!refresh.Succeeded) panelResult.Message = refresh.Message;
     }
 
+    const ForgeLibraryResponsiveLayout layout =
+        ResolveForgeLibraryResponsiveLayout(
+            ImGui::GetContentRegionAvail().x,
+            viewModel_.DisplayMode(),
+            viewModel_.SelectedId() != nullptr);
     const float detailsHeight =
-        viewModel_.SelectedDetails() == nullptr ? 54.0F : 214.0F;
+        viewModel_.SelectedDetails() == nullptr ? 62.0F : 252.0F;
     ImGui::BeginChild("##ForgeLibraryContent", ImVec2(0.0F, -detailsHeight), true);
-    const bool activate = DrawContent();
+    const bool activate = DrawContent(layout, panelResult);
     ImGui::EndChild();
 
     DrawDetails();
     bool useRequested = activate;
-    if (viewModel_.SelectedId() != nullptr)
+    if (layout.UseButtonVisible)
     {
-        ImGui::SameLine();
-        useRequested |= ImGui::Button("Use", ImVec2(72.0F, 0.0F));
+        useRequested |= ImGui::Button(
+            "USE STAMP",
+            ImVec2(layout.UseButtonFullWidth ? -1.0F : 120.0F, 0.0F));
     }
 
     if (useRequested)
@@ -124,8 +192,11 @@ ForgeLibraryPanelResult ForgeLibraryPanel::Draw(
         }
     }
 
-    if (!viewModel_.StatusMessage().empty())
+    if (viewModel_.EmptyState() == ForgeLibraryEmptyState::None &&
+        !viewModel_.StatusMessage().empty())
+    {
         ImGui::TextDisabled("%s", viewModel_.StatusMessage().c_str());
+    }
     ImGui::End();
     return panelResult;
 }
@@ -140,31 +211,60 @@ void ForgeLibraryPanel::DrawToolbar()
             "%s",
             viewModel_.SearchText().c_str());
     }
-    ImGui::SetNextItemWidth(-1.0F);
+    const bool hasSearch = searchBuffer_[0] != '\0';
+    ImGui::SetNextItemWidth(
+        hasSearch
+        ? std::max(60.0F, ImGui::GetContentRegionAvail().x - 58.0F)
+        : -1.0F);
     if (ImGui::InputTextWithHint(
             "##ForgeLibrarySearch", "Search Stamps...",
             searchBuffer_.data(), searchBuffer_.size()))
     {
         viewModel_.SetSearchText(searchBuffer_.data());
     }
+    if (hasSearch)
+    {
+        ImGui::SameLine();
+        if (ImGui::Button("Clear"))
+        {
+            searchBuffer_[0] = '\0';
+            viewModel_.SetSearchText({});
+        }
+    }
 
-    if (ImGui::Button("Grid"))
+    if (ActiveButton(
+            "Grid",
+            viewModel_.DisplayMode() == ForgeLibraryDisplayMode::Grid))
+    {
         viewModel_.SetDisplayMode(ForgeLibraryDisplayMode::Grid);
+    }
     ImGui::SameLine();
-    if (ImGui::Button("List"))
+    if (ActiveButton(
+            "List",
+            viewModel_.DisplayMode() == ForgeLibraryDisplayMode::List))
+    {
         viewModel_.SetDisplayMode(ForgeLibraryDisplayMode::List);
+    }
     ImGui::SameLine();
     if (ImGui::Button("Refresh"))
         static_cast<void>(viewModel_.Refresh());
 
-    if (ImGui::Button("All"))
+    if (ActiveButton("All", viewModel_.Filter() == ForgeLibraryFilter::All))
         viewModel_.SetFilter(ForgeLibraryFilter::All);
     ImGui::SameLine();
-    if (ImGui::Button("Favorites"))
+    if (ActiveButton(
+            "Favorites",
+            viewModel_.Filter() == ForgeLibraryFilter::Favorites))
+    {
         viewModel_.SetFilter(ForgeLibraryFilter::Favorites);
+    }
     ImGui::SameLine();
-    if (ImGui::Button("Project"))
+    if (ActiveButton(
+            "Project",
+            viewModel_.Filter() == ForgeLibraryFilter::Project))
+    {
         viewModel_.SetFilter(ForgeLibraryFilter::Project);
+    }
 
     ImGui::SetNextItemWidth(-1.0F);
     if (ImGui::BeginCombo(
@@ -184,33 +284,97 @@ void ForgeLibraryPanel::DrawToolbar()
     }
 }
 
-bool ForgeLibraryPanel::DrawContent()
+bool ForgeLibraryPanel::DrawContent(
+    const ForgeLibraryResponsiveLayout& layout,
+    ForgeLibraryPanelResult& result)
 {
-    if (viewModel_.Items().empty())
-    {
-        const char* message = viewModel_.Filter() == ForgeLibraryFilter::Favorites
-            ? "No favorites yet."
-            : "No Stamps in this Project Library.";
-        const ImVec2 size = ImGui::CalcTextSize(message);
-        ImGui::SetCursorPosY(
-            std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() * 0.45F));
-        ImGui::SetCursorPosX(
-            std::max(ImGui::GetCursorPosX(),
-                (ImGui::GetWindowWidth() - size.x) * 0.5F));
-        ImGui::TextDisabled("%s", message);
-        return false;
-    }
-    return viewModel_.DisplayMode() == ForgeLibraryDisplayMode::Grid
-        ? DrawGrid() : DrawList();
+    if (viewModel_.Items().empty()) return DrawEmptyState(result);
+    if (layout.Mode == ForgeLibraryResponsiveMode::Grid)
+        return DrawGrid(layout.GridColumns);
+    return DrawList(layout.Mode == ForgeLibraryResponsiveMode::CompactList);
 }
 
-bool ForgeLibraryPanel::DrawGrid()
+bool ForgeLibraryPanel::DrawEmptyState(ForgeLibraryPanelResult& result)
+{
+    const char* title = "Forge Library unavailable";
+    const char* explanation =
+        "The Project Stamp catalogue could not be loaded.";
+    switch (viewModel_.EmptyState())
+    {
+    case ForgeLibraryEmptyState::NoProject:
+        title = "No project is open";
+        explanation = "Open or create a project to use its Forge Library.";
+        break;
+    case ForgeLibraryEmptyState::EmptyProject:
+        title = "This Project Library is empty";
+        explanation =
+            "Select voxels, then save them as a reusable Stamp.";
+        break;
+    case ForgeLibraryEmptyState::NoSearchResults:
+        title = "No matching Stamps";
+        explanation = "Try another search or clear the current text.";
+        break;
+    case ForgeLibraryEmptyState::FavoritesEmpty:
+        title = "No favorites yet";
+        explanation =
+            "Favorite Stamps will appear here in a future Forge Library update.";
+        break;
+    case ForgeLibraryEmptyState::CatalogUnavailable:
+        if (!viewModel_.StatusMessage().empty())
+            explanation = viewModel_.StatusMessage().c_str();
+        break;
+    case ForgeLibraryEmptyState::None:
+        title = "No Stamps";
+        explanation = "No Stamp is available in this view.";
+        break;
+    }
+
+    ImGui::Dummy(ImVec2(0.0F, 14.0F));
+    const float width = ImGui::GetContentRegionAvail().x;
+    const ImVec2 titleSize = ImGui::CalcTextSize(title);
+    ImGui::SetCursorPosX(
+        ImGui::GetCursorPosX() +
+        std::max(0.0F, (width - titleSize.x) * 0.5F));
+    ImGui::TextUnformatted(title);
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+    ImGui::TextDisabled("%s", explanation);
+    ImGui::PopTextWrapPos();
+
+    if (viewModel_.EmptyState() == ForgeLibraryEmptyState::EmptyProject)
+    {
+        ImGui::Dummy(ImVec2(0.0F, 6.0F));
+        result.SaveSelectionRequested |= ImGui::Button(
+            "Save Selection As Stamp",
+            ImVec2(-1.0F, 0.0F));
+    }
+    else if (viewModel_.EmptyState() ==
+             ForgeLibraryEmptyState::NoSearchResults)
+    {
+        ImGui::Dummy(ImVec2(0.0F, 6.0F));
+        if (ImGui::Button("Clear Search", ImVec2(-1.0F, 0.0F)))
+        {
+            searchBuffer_[0] = '\0';
+            viewModel_.SetSearchText({});
+        }
+    }
+    return false;
+}
+
+bool ForgeLibraryPanel::DrawGrid(const std::size_t requestedColumns)
 {
     bool activate = false;
     const float available = ImGui::GetContentRegionAvail().x;
-    const int columns = std::max(
-        1, static_cast<int>(available / (CardWidth + ImGui::GetStyle().ItemSpacing.x)));
-    int column = 0;
+    const std::size_t columns = std::max<std::size_t>(1U, requestedColumns);
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float cardWidth = std::max(
+        72.0F,
+        (available - spacing * static_cast<float>(columns - 1U)) /
+            static_cast<float>(columns));
+    const float cardHeight = std::clamp(
+        cardWidth * 0.78F,
+        MinimumCardHeight,
+        MaximumCardHeight);
+    std::size_t column = 0U;
     for (const ForgeLibraryItem& item : viewModel_.Items())
     {
         const std::string id = item.CatalogEntry.Reference.Id.ToString();
@@ -218,16 +382,22 @@ bool ForgeLibraryPanel::DrawGrid()
         const bool selected = viewModel_.SelectedId() != nullptr &&
             *viewModel_.SelectedId() == item.CatalogEntry.Reference.Id;
         const ImVec2 start = ImGui::GetCursorScreenPos();
-        ImGui::InvisibleButton("##Card", ImVec2(CardWidth, CardHeight));
-        DrawCardThumbnail(
-            start, {start.x + CardWidth, start.y + CardHeight - 22.0F},
-            item.CatalogEntry.Dimensions, selected);
+        ImGui::InvisibleButton("##Card", ImVec2(cardWidth, cardHeight));
+        DrawProjectedThumbnail(
+            start,
+            {start.x + cardWidth, start.y + cardHeight - CardLabelHeight},
+            viewModel_.ThumbnailFor(item.CatalogEntry.Reference.Id),
+            selected);
         ImGui::SetCursorScreenPos(
-            {start.x + 5.0F, start.y + CardHeight - 20.0F});
-        ImGui::TextUnformatted(item.DisplayName.c_str());
-        if (ImGui::IsItemHovered() || ImGui::IsItemHovered(
-                ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
-        {
+            {start.x + 5.0F, start.y + cardHeight - 20.0F});
+        const std::string label =
+            ElideText(item.DisplayName, std::max(1.0F, cardWidth - 10.0F));
+        ImGui::TextUnformatted(label.c_str());
+        const ImVec2 mouse = ImGui::GetMousePos();
+        const bool cardHovered =
+            mouse.x >= start.x && mouse.x <= start.x + cardWidth &&
+            mouse.y >= start.y && mouse.y <= start.y + cardHeight;
+        if (cardHovered)
             ImGui::SetTooltip(
                 "%s\n%u x %u x %u\n%llu voxels",
                 item.DisplayName.c_str(),
@@ -236,11 +406,6 @@ bool ForgeLibraryPanel::DrawGrid()
                 item.CatalogEntry.Dimensions.Z,
                 static_cast<unsigned long long>(
                     item.CatalogEntry.VoxelCount));
-        }
-        const ImVec2 mouse = ImGui::GetMousePos();
-        const bool cardHovered =
-            mouse.x >= start.x && mouse.x <= start.x + CardWidth &&
-            mouse.y >= start.y && mouse.y <= start.y + CardHeight;
         if (cardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             static_cast<void>(viewModel_.Select(item.CatalogEntry.Reference.Id));
         if (cardHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
@@ -248,12 +413,12 @@ bool ForgeLibraryPanel::DrawGrid()
         ImGui::PopID();
         ++column;
         if (column < columns) ImGui::SameLine();
-        else column = 0;
+        else column = 0U;
     }
     return activate;
 }
 
-bool ForgeLibraryPanel::DrawList()
+bool ForgeLibraryPanel::DrawList(const bool compact)
 {
     bool activate = false;
     for (const ForgeLibraryItem& item : viewModel_.Items())
@@ -263,15 +428,26 @@ bool ForgeLibraryPanel::DrawList()
         const bool selected = viewModel_.SelectedId() != nullptr &&
             *viewModel_.SelectedId() == item.CatalogEntry.Reference.Id;
         char label[384]{};
-        std::snprintf(
-            label, sizeof(label), "%s    %u x %u x %u    %llu voxels",
-            item.DisplayName.c_str(),
-            item.CatalogEntry.Dimensions.X,
-            item.CatalogEntry.Dimensions.Y,
-            item.CatalogEntry.Dimensions.Z,
-            static_cast<unsigned long long>(item.CatalogEntry.VoxelCount));
+        if (compact)
+        {
+            std::snprintf(
+                label, sizeof(label), "%s", item.DisplayName.c_str());
+        }
+        else
+        {
+            std::snprintf(
+                label, sizeof(label), "%s    %u x %u x %u    %llu voxels",
+                item.DisplayName.c_str(),
+                item.CatalogEntry.Dimensions.X,
+                item.CatalogEntry.Dimensions.Y,
+                item.CatalogEntry.Dimensions.Z,
+                static_cast<unsigned long long>(
+                    item.CatalogEntry.VoxelCount));
+        }
         if (ImGui::Selectable(label, selected))
             static_cast<void>(viewModel_.Select(item.CatalogEntry.Reference.Id));
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", item.DisplayName.c_str());
         if (ImGui::IsItemHovered() &&
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             activate = true;
@@ -297,66 +473,30 @@ void ForgeLibraryPanel::DrawDetails()
         details->Dimensions.X, details->Dimensions.Y, details->Dimensions.Z,
         static_cast<unsigned long long>(details->VoxelCount),
         details->PaletteCount);
-    ImGui::TextDisabled("Date: %s", details->DateLabel.c_str());
-    if (const VoxelStamp* const stamp = viewModel_.SelectedPreviewStamp())
-        DrawStampPreview(*stamp);
+    if (const ForgeLibraryThumbnail* const thumbnail =
+            viewModel_.SelectedThumbnail())
+    {
+        DrawThumbnail(*thumbnail, 112.0F, true);
+    }
     else
         ImGui::TextDisabled("Preview unavailable.");
 }
 
-void ForgeLibraryPanel::DrawStampPreview(const VoxelStamp& stamp) const
+void ForgeLibraryPanel::DrawThumbnail(
+    const ForgeLibraryThumbnail& thumbnail,
+    const float height,
+    const bool framed) const
 {
-    constexpr float previewHeight = 112.0F;
     ImGui::BeginChild(
-        "##ForgeLibraryStampPreview", ImVec2(0.0F, previewHeight), true,
+        "##ForgeLibraryStampPreview", ImVec2(0.0F, height), framed,
         ImGuiWindowFlags_NoScrollbar);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const auto voxels = stamp.Voxels();
-    const auto palette = stamp.Palette();
-    if (!voxels.empty())
-    {
-        float minimumX = std::numeric_limits<float>::max();
-        float minimumY = std::numeric_limits<float>::max();
-        float maximumX = std::numeric_limits<float>::lowest();
-        float maximumY = std::numeric_limits<float>::lowest();
-        for (const StampVoxel& voxel : voxels)
-        {
-            const float x = static_cast<float>(voxel.Position.X - voxel.Position.Z);
-            const float y = static_cast<float>(voxel.Position.X + voxel.Position.Z) * 0.45F -
-                static_cast<float>(voxel.Position.Y);
-            minimumX = std::min(minimumX, x);
-            minimumY = std::min(minimumY, y);
-            maximumX = std::max(maximumX, x);
-            maximumY = std::max(maximumY, y);
-        }
-        const float spanX = std::max(1.0F, maximumX - minimumX);
-        const float spanY = std::max(1.0F, maximumY - minimumY);
-        const float scale = std::min(
-            (available.x - 12.0F) / spanX,
-            (available.y - 12.0F) / spanY);
-        const std::size_t stride = std::max<std::size_t>(
-            1U, (voxels.size() + 2047U) / 2048U);
-        ImDrawList* const drawList = ImGui::GetWindowDrawList();
-        for (std::size_t index = 0U; index < voxels.size(); index += stride)
-        {
-            const StampVoxel& voxel = voxels[index];
-            const float projectedX =
-                static_cast<float>(voxel.Position.X - voxel.Position.Z);
-            const float projectedY =
-                static_cast<float>(voxel.Position.X + voxel.Position.Z) * 0.45F -
-                static_cast<float>(voxel.Position.Y);
-            const float x = origin.x + 6.0F + (projectedX - minimumX) * scale;
-            const float y = origin.y + available.y - 6.0F -
-                (projectedY - minimumY) * scale;
-            const StampColor color = palette[voxel.LocalColorId].Color;
-            const ImU32 packed = IM_COL32(
-                color.Red, color.Green, color.Blue, color.Alpha);
-            const float point = std::clamp(scale * 0.65F, 1.5F, 7.0F);
-            drawList->AddRectFilled(
-                {x - point, y - point}, {x + point, y + point}, packed, 1.0F);
-        }
-    }
+    DrawProjectedThumbnail(
+        origin,
+        {origin.x + available.x, origin.y + available.y},
+        &thumbnail,
+        false);
     ImGui::EndChild();
 }
 

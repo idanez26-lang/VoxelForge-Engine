@@ -7,9 +7,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace VoxelForge::Editor::Stamps
@@ -35,6 +37,55 @@ enum class ForgeLibraryFilter : std::uint8_t
     Project
 };
 
+enum class ForgeLibraryEmptyState : std::uint8_t
+{
+    None,
+    NoProject,
+    EmptyProject,
+    NoSearchResults,
+    FavoritesEmpty,
+    CatalogUnavailable
+};
+
+enum class ForgeLibraryResponsiveMode : std::uint8_t
+{
+    CompactList,
+    List,
+    Grid
+};
+
+struct ForgeLibraryResponsiveLayout final
+{
+    ForgeLibraryResponsiveMode Mode = ForgeLibraryResponsiveMode::List;
+    std::size_t GridColumns = 0U;
+    bool UseButtonVisible = false;
+    bool UseButtonFullWidth = false;
+};
+
+/// Resolves the presentation only. It contains no ImGui state and is kept
+/// deterministic so responsive behavior can be covered by unit tests.
+[[nodiscard]] ForgeLibraryResponsiveLayout ResolveForgeLibraryResponsiveLayout(
+    float availableWidth,
+    ForgeLibraryDisplayMode requestedMode,
+    bool hasSelection) noexcept;
+
+struct ForgeLibraryThumbnailPoint final
+{
+    float X = 0.0F;
+    float Y = 0.0F;
+    StampColor Color{};
+};
+
+/// Cached, normalized projection derived from the authoritative Stamp. The
+/// panel can render it at any card/detail size without rescanning voxel data.
+struct ForgeLibraryThumbnail final
+{
+    std::vector<ForgeLibraryThumbnailPoint> Points;
+    std::uint64_t SourceVoxelCount = 0U;
+
+    [[nodiscard]] bool Available() const noexcept { return !Points.empty(); }
+};
+
 struct ForgeLibraryItem final
 {
     StampCatalogEntry CatalogEntry;
@@ -49,7 +100,6 @@ struct ForgeLibrarySelectionDetails final
     StampDimensions Dimensions{};
     std::uint64_t VoxelCount = 0U;
     std::uint32_t PaletteCount = 0U;
-    std::string DateLabel{"Not indexed in V1"};
     bool PreviewAvailable = false;
 };
 
@@ -89,6 +139,11 @@ public:
     [[nodiscard]] const Core::UUID* SelectedId() const noexcept;
     [[nodiscard]] const ForgeLibrarySelectionDetails* SelectedDetails() const noexcept;
     [[nodiscard]] const VoxelStamp* SelectedPreviewStamp() const noexcept;
+    [[nodiscard]] const ForgeLibraryThumbnail* ThumbnailFor(
+        const Core::UUID& id) const noexcept;
+    [[nodiscard]] const ForgeLibraryThumbnail* SelectedThumbnail() const noexcept;
+    [[nodiscard]] std::size_t ThumbnailBuildCount() const noexcept;
+    [[nodiscard]] ForgeLibraryEmptyState EmptyState() const noexcept;
 
     [[nodiscard]] ForgeLibraryOperationResult ActivateSelected(
         const Asset::Voxel::VoxelDocument& document,
@@ -102,12 +157,21 @@ public:
 private:
     void SortItems();
     void ReconcileSelection();
+    void EnsureThumbnail(const ForgeLibraryItem& item);
+    void ReconcileThumbnailCache();
     [[nodiscard]] const ForgeLibraryItem* FindItem(const Core::UUID& id) const noexcept;
+
+    struct ThumbnailCacheEntry final
+    {
+        std::string ContentHash;
+        std::shared_ptr<const ForgeLibraryThumbnail> Thumbnail;
+    };
 
     StampCatalogService& catalogue_;
     IStampLibraryRepository& repository_;
     StampPlacementSession& placementSession_;
     std::vector<ForgeLibraryItem> items_;
+    std::unordered_map<std::uint64_t, ThumbnailCacheEntry> thumbnailCache_;
     std::optional<Core::UUID> selectedId_;
     std::optional<VoxelStamp> selectedStamp_;
     std::optional<ForgeLibrarySelectionDetails> selectedDetails_;
@@ -116,6 +180,8 @@ private:
     ForgeLibraryDisplayMode displayMode_ = ForgeLibraryDisplayMode::Grid;
     ForgeLibrarySortMode sortMode_ = ForgeLibrarySortMode::Name;
     ForgeLibraryFilter filter_ = ForgeLibraryFilter::All;
+    ForgeLibraryEmptyState emptyState_ = ForgeLibraryEmptyState::None;
+    std::size_t thumbnailBuildCount_ = 0U;
     bool needsRefresh_ = true;
 };
 

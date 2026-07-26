@@ -49,31 +49,29 @@ void Require(const bool condition, const std::string_view message)
 class SmokeRepository final : public IStampLibraryRepository
 {
 public:
-    SmokeRepository()
-        : Stamp(MakeStamp())
+    [[nodiscard]] StampLibraryResult Install(
+        const VoxelStamp& stamp, const StampInstallOptions&) override
     {
+        Stamp = stamp;
         Reference = {
-            .Id = Stamp.Identity().Id,
-            .ContentHash = Stamp.Identity().ContentHash,
+            .Id = stamp.Identity().Id,
+            .ContentHash = stamp.Identity().ContentHash,
             .RelativePath =
                 "Assets/ForgeLibrary/Creations/SmokeStamp.vfstamp"};
-    }
-
-    [[nodiscard]] StampLibraryResult Install(
-        const VoxelStamp&, const StampInstallOptions&) override
-    {
-        return {.Error = StampLibraryError::InvalidReference};
+        return {.Reference = Reference, .Stamp = Stamp};
     }
     [[nodiscard]] StampLibraryResult Read(
         const StampAssetReference& reference) const override
     {
-        if (reference != Reference)
+        if (!Stamp || reference != Reference)
             return {.Error = StampLibraryError::AssetNotFound};
-        return {.Reference = Reference, .Stamp = Stamp};
+        return {.Reference = Reference, .Stamp = *Stamp};
     }
     [[nodiscard]] StampLibraryResult EnumerateSourceAssets() const override
     {
-        return {.Assets = {{Reference, 256U}}};
+        return Stamp
+            ? StampLibraryResult{.Assets = {{Reference, 256U}}}
+            : StampLibraryResult{};
     }
     [[nodiscard]] StampLibraryResult Remove(
         const StampAssetReference&) override
@@ -90,7 +88,7 @@ public:
         return EnumerateSourceAssets();
     }
 
-    VoxelStamp Stamp;
+    std::optional<VoxelStamp> Stamp;
     StampAssetReference Reference;
 };
 
@@ -192,8 +190,21 @@ void RunSmoke()
     SmokeEditSession editSession(document);
     VoxelEditHistory history;
 
-    Require(library.Refresh().Succeeded && library.Items().size() == 1U,
-        "Project -> Forge Library catalogue must open.");
+    Require(
+        library.Refresh().Succeeded &&
+            library.Items().empty() &&
+            library.EmptyState() == ForgeLibraryEmptyState::EmptyProject,
+        "An empty project must open an actionable Forge Library state.");
+    VoxelStamp created = MakeStamp();
+    Require(
+        repository.Install(created, {}).Succeeded(),
+        "Save Selection As Stamp equivalent must publish the smoke Stamp.");
+    catalog.InvalidateCache();
+    Require(
+        catalog.RebuildCatalogue().Succeeded() &&
+            library.Refresh().Succeeded &&
+            library.Items().size() == 1U,
+        "The newly created Stamp must appear in Forge Library.");
     Require(library.Select(repository.Reference.Id),
         "Forge Library item selection must load.");
     Require(library.ActivateSelected(document, 18U).SessionActivated &&

@@ -12,6 +12,7 @@ namespace VoxelForge::Editor::Stamps
 struct ForgeLibraryPanelResult final
 {
     bool SessionActivated = false;
+    bool SaveSelectionRequested = false;
     std::string Message;
 };
 
@@ -30,11 +31,17 @@ public:
 
 private:
     void DrawToolbar();
-    [[nodiscard]] bool DrawContent();
-    [[nodiscard]] bool DrawGrid();
-    [[nodiscard]] bool DrawList();
+    [[nodiscard]] bool DrawContent(
+        const ForgeLibraryResponsiveLayout& layout,
+        ForgeLibraryPanelResult& result);
+    [[nodiscard]] bool DrawEmptyState(ForgeLibraryPanelResult& result);
+    [[nodiscard]] bool DrawGrid(std::size_t columns);
+    [[nodiscard]] bool DrawList(bool compact);
     void DrawDetails();
-    void DrawStampPreview(const VoxelStamp& stamp) const;
+    void DrawThumbnail(
+        const ForgeLibraryThumbnail& thumbnail,
+        float height,
+        bool framed) const;
 
     ForgeLibraryViewModel& viewModel_;
     std::array<char, 192U> searchBuffer_{};
