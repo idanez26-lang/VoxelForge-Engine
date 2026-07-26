@@ -22,14 +22,14 @@ enum class StampCollisionPolicy : std::uint8_t
     SkipOccupied
 };
 
-struct StampPlacementMirror final
+/// Exact grid mirrors supported by STAMP-17. The mode is resolved before the
+/// quarter rotation and is part of the immutable transform/cache identity.
+enum class StampPlacementMirrorMode : std::uint8_t
 {
-    bool X = false;
-    bool Y = false;
-    bool Z = false;
-
-    [[nodiscard]] bool operator==(const StampPlacementMirror&) const noexcept =
-        default;
+    None,
+    X,
+    Z,
+    XZ
 };
 
 /// STAMP-15 supports exact quarter turns around the vertical Y axis only.
@@ -46,7 +46,7 @@ struct StampPlacementTransform final
     StampPlacementRotationAxis RotationAxis =
         StampPlacementRotationAxis::VerticalY;
     std::uint8_t QuarterTurns = 0U;
-    StampPlacementMirror Mirror{};
+    StampPlacementMirrorMode Mirror = StampPlacementMirrorMode::None;
 
     [[nodiscard]] bool operator==(
         const StampPlacementTransform&) const noexcept = default;
@@ -121,7 +121,7 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
     case StampPlacementDiagnosticCode::UnsupportedRotation:
         return "Stamp rotation must be an exact vertical quarter turn (0, 90, 180, or 270 degrees).";
     case StampPlacementDiagnosticCode::UnsupportedMirror:
-        return "Stamp mirror is reserved but is not supported by V1 planning yet.";
+        return "Stamp mirror must be None, X, Z, or XZ.";
     case StampPlacementDiagnosticCode::UnsupportedCollisionPolicy:
         return "Only the non-blocking overwrite collision policy is supported.";
     case StampPlacementDiagnosticCode::PaletteMappingFailed:

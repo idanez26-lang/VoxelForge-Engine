@@ -47,6 +47,7 @@ struct VoxelPreviewTransform final
 {
     VoxelPreviewFixedPoint TargetPivot{};
     std::uint8_t QuarterTurns = 0U;
+    std::uint8_t MirrorMode = 0U;
     [[nodiscard]] bool operator==(const VoxelPreviewTransform&) const noexcept = default;
 };
 

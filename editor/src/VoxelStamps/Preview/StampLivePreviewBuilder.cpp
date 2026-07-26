@@ -35,7 +35,8 @@ VoxelPreviewData StampLivePreviewBuilder::Build(
         result.Transform = {
             {plan.Transform.TargetPivot.X, plan.Transform.TargetPivot.Y,
                 plan.Transform.TargetPivot.Z},
-            plan.Transform.QuarterTurns};
+            plan.Transform.QuarterTurns,
+            static_cast<std::uint8_t>(plan.Transform.Mirror)};
         result.State = plan.HasErrors()
             ? VoxelPreviewState::Invalid
             : plan.Statistics.OverlapCount != 0U

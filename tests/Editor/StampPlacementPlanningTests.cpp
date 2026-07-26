@@ -227,11 +227,11 @@ void TestUnsupportedFutureTransformsAreExplicit()
         .Document = &document,
         .DocumentGeneration = 7U,
         .Transform = {.TargetPivot = {},
-                      .Mirror = {.X = true}}});
+                      .Mirror = static_cast<StampPlacementMirrorMode>(255U)}});
     Require(!mirror.CanCommit &&
                 HasDiagnostic(mirror,
                     StampPlacementDiagnosticCode::UnsupportedMirror),
-        "Reserved mirror must fail explicitly in V1.");
+        "Unknown mirror modes must fail explicitly.");
 }
 
 void TestStalePlansAreDetectedByRevisionAndGeneration()

@@ -4326,6 +4326,52 @@ void EditorWorkspace::RotateLatestStampPreview(const bool clockwise)
         " degrees.");
 }
 
+void EditorWorkspace::MirrorLatestStampPreview(
+    const Stamps::StampPlacementMirrorMode mirror)
+{
+    Asset::Voxel::VoxelDocument* const document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!stampPlacementSession_.IsActive() || document == nullptr)
+    {
+        return;
+    }
+
+    const Stamps::StampPlacementSessionResult result =
+        stampPlacementSession_.SetMirror(
+            mirror, *document, voxelDocumentSession_.Generation());
+    if (result.PreviewChanged)
+    {
+        UpdateVoxelHighlights();
+    }
+    if (!result.Succeeded)
+    {
+        AddConsoleMessage(
+            "Live Stamp Preview: " +
+            std::string(Stamps::StampPlacementDiagnosticMessage(
+                result.Diagnostic)));
+        return;
+    }
+
+    const char* label = "None";
+    switch (stampPlacementSession_.Mirror())
+    {
+    case Stamps::StampPlacementMirrorMode::X:
+        label = "X";
+        break;
+    case Stamps::StampPlacementMirrorMode::Z:
+        label = "Z";
+        break;
+    case Stamps::StampPlacementMirrorMode::XZ:
+        label = "XZ";
+        break;
+    case Stamps::StampPlacementMirrorMode::None:
+    default:
+        break;
+    }
+    AddConsoleMessage(
+        "Live Stamp Preview: mirror " + std::string(label) + ".");
+}
+
 void EditorWorkspace::PlaceLatestStampPreview()
 {
     Asset::Voxel::VoxelDocument* const document = voxelDocumentSession_.ActiveDocument();
@@ -4580,55 +4626,80 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
             preview->State == VoxelPreviewState::Valid;
         stampPlacementVisualStartedAt_ = std::chrono::steady_clock::now();
         AddConsoleMessage(stampPlacementVisualPreviewed_
-            ? "Stamp rotation visual test [0-2s]: 0-degree preview."
-            : "Stamp rotation visual test [0-2s]: preview failed.");
+            ? "Stamp mirror visual test [0-2s]: neutral preview."
+            : "Stamp mirror visual test [0-2s]: preview failed.");
     }
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - *stampPlacementVisualStartedAt_);
     if (elapsed >= std::chrono::seconds{2} &&
-        !stampPlacementVisualRotated90_)
+        !stampPlacementVisualMirroredX_)
     {
-        RotateLatestStampPreview(true);
-        stampPlacementVisualRotated90_ =
-            stampPlacementSession_.QuarterRotation() == 1U &&
+        MirrorLatestStampPreview(Stamps::StampPlacementMirrorMode::X);
+        stampPlacementVisualMirroredX_ =
+            stampPlacementSession_.Mirror() ==
+                Stamps::StampPlacementMirrorMode::X &&
             stampPlacementSession_.CurrentPreview() != nullptr &&
-            stampPlacementSession_.CurrentPreview()->Transform.QuarterTurns ==
-                1U;
-        AddConsoleMessage(stampPlacementVisualRotated90_
-            ? "Stamp rotation visual test [2-4s]: 90-degree preview."
-            : "Stamp rotation visual test [2-4s]: rotation failed.");
+            stampPlacementSession_.CurrentPreview()->Transform.MirrorMode ==
+                static_cast<std::uint8_t>(
+                    Stamps::StampPlacementMirrorMode::X);
+        AddConsoleMessage(stampPlacementVisualMirroredX_
+            ? "Stamp mirror visual test [2-4s]: Mirror X."
+            : "Stamp mirror visual test [2-4s]: Mirror X failed.");
     }
     if (elapsed >= std::chrono::seconds{4} &&
-        stampPlacementVisualRotated90_ &&
-        !stampPlacementVisualRotated180_)
+        stampPlacementVisualMirroredX_ &&
+        !stampPlacementVisualMirroredZ_)
     {
-        RotateLatestStampPreview(true);
-        stampPlacementVisualRotated180_ =
-            stampPlacementSession_.QuarterRotation() == 2U &&
+        MirrorLatestStampPreview(Stamps::StampPlacementMirrorMode::Z);
+        stampPlacementVisualMirroredZ_ =
+            stampPlacementSession_.Mirror() ==
+                Stamps::StampPlacementMirrorMode::Z &&
             stampPlacementSession_.CurrentPreview() != nullptr &&
-            stampPlacementSession_.CurrentPreview()->Transform.QuarterTurns ==
-                2U;
-        AddConsoleMessage(stampPlacementVisualRotated180_
-            ? "Stamp rotation visual test [4-6s]: 180-degree preview."
-            : "Stamp rotation visual test [4-6s]: rotation failed.");
+            stampPlacementSession_.CurrentPreview()->Transform.MirrorMode ==
+                static_cast<std::uint8_t>(
+                    Stamps::StampPlacementMirrorMode::Z);
+        AddConsoleMessage(stampPlacementVisualMirroredZ_
+            ? "Stamp mirror visual test [4-6s]: Mirror Z."
+            : "Stamp mirror visual test [4-6s]: Mirror Z failed.");
     }
     if (elapsed >= std::chrono::seconds{6} &&
-        stampPlacementVisualRotated180_ &&
-        !stampPlacementVisualRotated270_)
+        stampPlacementVisualMirroredZ_ &&
+        !stampPlacementVisualMirroredXZ_)
     {
-        RotateLatestStampPreview(true);
-        stampPlacementVisualRotated270_ =
-            stampPlacementSession_.QuarterRotation() == 3U &&
+        MirrorLatestStampPreview(Stamps::StampPlacementMirrorMode::XZ);
+        stampPlacementVisualMirroredXZ_ =
+            stampPlacementSession_.Mirror() ==
+                Stamps::StampPlacementMirrorMode::XZ &&
             stampPlacementSession_.CurrentPreview() != nullptr &&
-            stampPlacementSession_.CurrentPreview()->Transform.QuarterTurns ==
-                3U;
-        AddConsoleMessage(stampPlacementVisualRotated270_
-            ? "Stamp rotation visual test [6-8s]: 270-degree preview."
-            : "Stamp rotation visual test [6-8s]: rotation failed.");
+            stampPlacementSession_.CurrentPreview()->Transform.MirrorMode ==
+                static_cast<std::uint8_t>(
+                    Stamps::StampPlacementMirrorMode::XZ);
+        AddConsoleMessage(stampPlacementVisualMirroredXZ_
+            ? "Stamp mirror visual test [6-8s]: Mirror XZ."
+            : "Stamp mirror visual test [6-8s]: Mirror XZ failed.");
     }
     if (elapsed >= std::chrono::seconds{8} &&
-        stampPlacementVisualRotated270_ &&
+        stampPlacementVisualMirroredXZ_ &&
+        !stampPlacementVisualMirrorRotated_)
+    {
+        RotateLatestStampPreview(true);
+        stampPlacementVisualMirrorRotated_ =
+            stampPlacementSession_.Mirror() ==
+                Stamps::StampPlacementMirrorMode::XZ &&
+            stampPlacementSession_.QuarterRotation() == 1U &&
+            stampPlacementSession_.CurrentPreview() != nullptr &&
+            stampPlacementSession_.CurrentPreview()->Transform.MirrorMode ==
+                static_cast<std::uint8_t>(
+                    Stamps::StampPlacementMirrorMode::XZ) &&
+            stampPlacementSession_.CurrentPreview()->Transform.QuarterTurns ==
+                1U;
+        AddConsoleMessage(stampPlacementVisualMirrorRotated_
+            ? "Stamp mirror visual test [8-10s]: Mirror XZ + rotation 90."
+            : "Stamp mirror visual test [8-10s]: combined transform failed.");
+    }
+    if (elapsed >= std::chrono::seconds{10} &&
+        stampPlacementVisualMirrorRotated_ &&
         !stampPlacementVisualFirstPlaced_)
     {
         PlaceLatestStampPreview();
@@ -4638,10 +4709,10 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
             stampPlacementSession_.CurrentPreview() != nullptr &&
             stampPlacementSession_.CurrentPreview()->State == VoxelPreviewState::Overlap;
         AddConsoleMessage(stampPlacementVisualFirstPlaced_
-            ? "Stamp rotation visual test [8-10s]: rotated placement."
-            : "Stamp rotation visual test [8-10s]: placement failed.");
+            ? "Stamp mirror visual test [10-12s]: mirrored placement."
+            : "Stamp mirror visual test [10-12s]: placement failed.");
     }
-    if (elapsed >= std::chrono::seconds{10} &&
+    if (elapsed >= std::chrono::seconds{12} &&
         stampPlacementVisualFirstPlaced_ && !stampPlacementVisualUndone_)
     {
         UndoCommand();
@@ -4651,10 +4722,10 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
             stampPlacementSession_.CurrentPreview() != nullptr &&
             stampPlacementSession_.CurrentPreview()->State == VoxelPreviewState::Valid;
         AddConsoleMessage(stampPlacementVisualUndone_
-            ? "Stamp rotation visual test [10-12s]: Undo."
-            : "Stamp rotation visual test [10-12s]: Undo failed.");
+            ? "Stamp mirror visual test [12-14s]: Undo."
+            : "Stamp mirror visual test [12-14s]: Undo failed.");
     }
-    if (elapsed >= std::chrono::seconds{12} &&
+    if (elapsed >= std::chrono::seconds{14} &&
         stampPlacementVisualUndone_ && !stampPlacementVisualRedone_)
     {
         RedoCommand();
@@ -4664,10 +4735,10 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
             stampPlacementSession_.CurrentPreview() != nullptr &&
             stampPlacementSession_.CurrentPreview()->State == VoxelPreviewState::Overlap;
         AddConsoleMessage(stampPlacementVisualRedone_
-            ? "Stamp rotation visual test [12-14s]: Redo."
-            : "Stamp rotation visual test [12-14s]: Redo failed.");
+            ? "Stamp mirror visual test [14-16s]: Redo."
+            : "Stamp mirror visual test [14-16s]: Redo failed.");
     }
-    if (elapsed >= std::chrono::seconds{14} &&
+    if (elapsed >= std::chrono::seconds{16} &&
         stampPlacementVisualRedone_ && !stampPlacementVisualCleared_)
     {
         const std::uint64_t revision = document->GetRevision();
@@ -4677,20 +4748,23 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
             !stampPlacementSession_.IsActive() &&
             document->GetRevision() == revision;
         AddConsoleMessage(stampPlacementVisualCleared_
-            ? "Stamp placement visual test [16-20s Clear/Esc]: preview cleared."
-            : "Stamp placement visual test [16-20s Clear/Esc]: failed.");
+            ? "Stamp mirror visual test [16-18s]: Clear/Esc."
+            : "Stamp mirror visual test [16-18s]: Clear/Esc failed.");
     }
-    if (elapsed >= std::chrono::seconds{20} &&
+    if (elapsed >= std::chrono::seconds{18} &&
         !stampPlacementVisualFinished_)
     {
         stampPlacementVisualFinished_ = true;
         stampPlacementVisualSucceeded_ = stampPlacementVisualPreviewed_ &&
-            stampPlacementVisualFirstPlaced_ && stampPlacementVisualMoved_ &&
-            stampPlacementVisualSecondPlaced_ && stampPlacementVisualUndone_ &&
+            stampPlacementVisualMirroredX_ &&
+            stampPlacementVisualMirroredZ_ &&
+            stampPlacementVisualMirroredXZ_ &&
+            stampPlacementVisualMirrorRotated_ &&
+            stampPlacementVisualFirstPlaced_ && stampPlacementVisualUndone_ &&
             stampPlacementVisualRedone_ && stampPlacementVisualCleared_;
         AddConsoleMessage(stampPlacementVisualSucceeded_
-            ? "Stamp placement visual test: completed successfully; closing."
-            : "Stamp placement visual test: failed; keeping workspace open.");
+            ? "Stamp mirror visual test: completed successfully; closing."
+            : "Stamp mirror visual test: failed; keeping workspace open.");
     }
     return stampPlacementVisualSucceeded_;
 }

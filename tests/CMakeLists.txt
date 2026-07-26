@@ -1618,3 +1618,36 @@ set_tests_properties(
     VoxelForge.Editor.StampQuarterRotationSmoke
     PROPERTIES LABELS "Smoke"
 )
+
+# STAMP-17: exact X/Z mirrors are resolved before quarter rotation.
+add_executable(
+    VoxelForgeEditorStampMirrorTests
+    Editor/StampMirrorTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampMirrorTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampMirrorTests)
+add_test(
+    NAME VoxelForge.Editor.StampMirror
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampMirrorTests>
+)
+
+add_executable(
+    VoxelForgeEditorStampMirrorSmokeTests
+    Editor/StampMirrorSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampMirrorSmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorStampMirrorSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.StampMirrorSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampMirrorSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.StampMirrorSmoke
+    PROPERTIES LABELS "Smoke"
+)

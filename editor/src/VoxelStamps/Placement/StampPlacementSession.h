@@ -66,6 +66,13 @@ public:
     [[nodiscard]] StampPlacementSessionResult RotateCounterClockwise(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult SetMirror(
+        StampPlacementMirrorMode mirror,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult CycleMirror(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
     [[nodiscard]] bool Cancel() noexcept;
     void MarkPlacementCommitted() noexcept;
 
@@ -80,6 +87,7 @@ public:
     [[nodiscard]] const StampPlacementCacheKey* CacheKey() const noexcept;
     [[nodiscard]] StampFixedPoint Target() const noexcept;
     [[nodiscard]] std::uint8_t QuarterRotation() const noexcept;
+    [[nodiscard]] StampPlacementMirrorMode Mirror() const noexcept;
     [[nodiscard]] std::size_t TargetSubModel() const noexcept;
     [[nodiscard]] std::uint64_t PlacementOrdinal() const noexcept;
 

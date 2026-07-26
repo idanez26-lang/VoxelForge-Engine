@@ -35,7 +35,7 @@ void AddDiagnostic(
     return true;
 }
 
-[[nodiscard]] bool MakeRotatedGridPosition(
+[[nodiscard]] bool MakeTransformedGridPosition(
     const StampPlacementTransform& transform,
     const StampLocalPosition local,
     const StampFixedPoint pivot,
@@ -49,23 +49,43 @@ void AddDiagnostic(
     const std::int64_t relativeZ =
         static_cast<std::int64_t>(local.Z) * units - pivot.Z;
 
-    std::int64_t rotatedX = relativeX;
-    std::int64_t rotatedZ = relativeZ;
+    std::int64_t mirroredX = relativeX;
+    std::int64_t mirroredZ = relativeZ;
+    switch (transform.Mirror)
+    {
+    case StampPlacementMirrorMode::None:
+        break;
+    case StampPlacementMirrorMode::X:
+        mirroredX = -relativeX;
+        break;
+    case StampPlacementMirrorMode::Z:
+        mirroredZ = -relativeZ;
+        break;
+    case StampPlacementMirrorMode::XZ:
+        mirroredX = -relativeX;
+        mirroredZ = -relativeZ;
+        break;
+    default:
+        return false;
+    }
+
+    std::int64_t rotatedX = mirroredX;
+    std::int64_t rotatedZ = mirroredZ;
     switch (transform.QuarterTurns)
     {
     case 0U:
         break;
     case 1U:
-        rotatedX = relativeZ;
-        rotatedZ = -relativeX;
+        rotatedX = mirroredZ;
+        rotatedZ = -mirroredX;
         break;
     case 2U:
-        rotatedX = -relativeX;
-        rotatedZ = -relativeZ;
+        rotatedX = -mirroredX;
+        rotatedZ = -mirroredZ;
         break;
     case 3U:
-        rotatedX = -relativeZ;
-        rotatedZ = relativeX;
+        rotatedX = -mirroredZ;
+        rotatedZ = mirroredX;
         break;
     default:
         return false;
@@ -184,8 +204,10 @@ StampPlacementPlan StampPlacementPlanner::Build(
                 StampPlacementDiagnosticSeverity::Error);
             transformSupported = false;
         }
-        if (request.Transform.Mirror.X || request.Transform.Mirror.Y ||
-            request.Transform.Mirror.Z)
+        if (request.Transform.Mirror != StampPlacementMirrorMode::None &&
+            request.Transform.Mirror != StampPlacementMirrorMode::X &&
+            request.Transform.Mirror != StampPlacementMirrorMode::Z &&
+            request.Transform.Mirror != StampPlacementMirrorMode::XZ)
         {
             AddDiagnostic(plan, StampPlacementDiagnosticCode::UnsupportedMirror,
                 StampPlacementDiagnosticSeverity::Error);
@@ -260,7 +282,7 @@ StampPlacementPlan StampPlacementPlanner::Build(
         {
             const StampVoxel& source = stamp.Voxels()[ordinal];
             Asset::Voxel::VoxelPosition world{};
-            if (!MakeRotatedGridPosition(
+            if (!MakeTransformedGridPosition(
                     request.Transform, source.Position,
                     stamp.Pivot().LocalPosition, world))
             {

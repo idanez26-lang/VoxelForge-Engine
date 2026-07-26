@@ -122,6 +122,43 @@ StampPlacementSessionResult StampPlacementSession::RotateCounterClockwise(
         document, documentGeneration);
 }
 
+StampPlacementSessionResult StampPlacementSession::SetMirror(
+    const StampPlacementMirrorMode mirror,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+    transform_.Mirror = mirror;
+    return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::CycleMirror(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    StampPlacementMirrorMode next = StampPlacementMirrorMode::None;
+    switch (transform_.Mirror)
+    {
+    case StampPlacementMirrorMode::None:
+        next = StampPlacementMirrorMode::X;
+        break;
+    case StampPlacementMirrorMode::X:
+        next = StampPlacementMirrorMode::Z;
+        break;
+    case StampPlacementMirrorMode::Z:
+        next = StampPlacementMirrorMode::XZ;
+        break;
+    case StampPlacementMirrorMode::XZ:
+        break;
+    default:
+        break;
+    }
+    return SetMirror(next, document, documentGeneration);
+}
+
 bool StampPlacementSession::Cancel() noexcept
 {
     const bool changed = stamp_.has_value() || plan_.has_value() ||
@@ -196,6 +233,11 @@ StampFixedPoint StampPlacementSession::Target() const noexcept
 std::uint8_t StampPlacementSession::QuarterRotation() const noexcept
 {
     return transform_.QuarterTurns;
+}
+
+StampPlacementMirrorMode StampPlacementSession::Mirror() const noexcept
+{
+    return transform_.Mirror;
 }
 
 std::size_t StampPlacementSession::TargetSubModel() const noexcept
