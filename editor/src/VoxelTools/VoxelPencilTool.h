@@ -2,6 +2,8 @@
 
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "BrushEngine/SmartBrushEngine.h"
+#include "SmartTools/SmartToolExecutionContext.h"
+#include "SmartTools/SmartToolPlan.h"
 #include "VoxelSelection/VoxelRaycast.h"
 
 #include <cstddef>
@@ -48,6 +50,10 @@ struct VoxelPencilContext final
     bool Blocked = false;
     VoxelEditHistory* History = nullptr;
     std::optional<Asset::Voxel::VoxelPosition> WorkplaneTarget;
+    // When supplied by SMART-01, this is the same immutable plan rendered by
+    // the ghost preview. Kept last to preserve existing aggregate callers.
+    SmartToolPlanPtr Plan;
+    SmartToolExecutionContext Execution;
 };
 
 class VoxelPencilTool final

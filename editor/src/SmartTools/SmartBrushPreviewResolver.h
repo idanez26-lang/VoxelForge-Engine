@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BrushEngine/SmartBrushEngine.h"
+#include "SmartTools/SmartToolPlan.h"
 
 #include <array>
 #include <cstddef>
@@ -111,6 +112,10 @@ class SmartBrushPreviewResolver final
 public:
     [[nodiscard]] static SmartBrushPreviewResult Resolve(
         const SmartBrushPreviewRequest& request);
+    [[nodiscard]] static SmartBrushPreviewResult Resolve(
+        const SmartToolPlan& plan,
+        const std::array<float, 4>& activePaletteColor,
+        float alpha = GhostPreviewStyle::DefaultAlpha);
 };
 
 class SmartBrushPreviewCache final

@@ -28,6 +28,8 @@
 #include "Selection/SelectionHandleModel.h"
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
+#include "SmartTools/SmartToolController.h"
+#include "SmartTools/SmartToolRequest.h"
 #include "SmartTools/SmartBrushPreviewResolver.h"
 #include "SmartTools/BrushProfileService.h"
 #include "Transform/TransformPreviewModel.h"
@@ -358,6 +360,7 @@ private:
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
     [[nodiscard]] bool AddAdjacentVoxel();
+    [[nodiscard]] std::optional<SmartToolRequest> BuildSmartPencilRequest();
     [[nodiscard]] bool ApplyVoxelPencil();
     [[nodiscard]] bool ApplyVoxelEraser();
     [[nodiscard]] bool ApplyVoxelPaintBrush();
@@ -490,6 +493,8 @@ private:
     VoxelToolState voxelToolState_;
     ToolManager toolManager_{voxelToolState_};
     ToolContext toolContext_{};
+    SmartToolController smartToolController_{};
+    SmartToolSession smartToolSession_{};
     BrushProfileService brushProfileService_;
     SmartBrushSizeFeedback smartBrushSizeFeedback_{};
     bool smartBrushPreviewRefreshRequested_ = false;
@@ -510,6 +515,7 @@ private:
     bool pencilPreviewUsesWorkplane_ = false;
     bool pencilPreviewCacheValid_ = false;
     SmartBrushPreviewCache smartBrushGhostPreviewCache_;
+    SmartBrushPreviewResult smartToolPlanGhostPreview_;
     const SmartBrushPreviewResult* smartBrushGhostPreview_ = nullptr;
     VoxelPaintBrushEvaluation paintPreviewEvaluation_;
     const Asset::Voxel::VoxelDocument* paintPreviewDocument_ = nullptr;

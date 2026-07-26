@@ -6,6 +6,7 @@
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -40,6 +41,25 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
         return Refused(VoxelToolResultCode::NoDocument, {}, 0U);
     Asset::Voxel::VoxelDocument& document = *context.Document;
     const std::uint64_t revision = document.GetRevision();
+    if (context.Execution.Document != nullptr &&
+        context.Execution.Document != context.Document)
+    {
+        return Refused(VoxelToolResultCode::Failed, {}, revision,
+            "The Smart Tool execution document does not match the Pencil document.");
+    }
+    if (context.Plan != nullptr)
+    {
+        const SmartToolRequestKey& key = context.Plan->CacheKey();
+        if (key.SourceIdentity != reinterpret_cast<std::uintptr_t>(&document) ||
+            key.SourceRevision != revision ||
+            key.SourceGeneration != context.Execution.SourceGeneration ||
+            key.SourceSubModelIndex != context.SubModelIndex ||
+            context.Execution.SubModelIndex != context.SubModelIndex)
+        {
+            return Refused(VoxelToolResultCode::Failed, {}, revision,
+                "The Smart Tool plan is stale or targets another document context.");
+        }
+    }
     if (context.Blocked)
         return Refused(VoxelToolResultCode::Blocked, {}, revision);
     const bool erasing = context.State.Mode == SmartBrushMode::Erase;
@@ -111,15 +131,27 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
             VoxelToolResultCode::Failed, adjacent, revision,
             "The editable document dimensions are unavailable.");
     }
-    const SmartBrushResult brush = SmartBrushEngine::Resolve({
-        *dimensions,
-        context.State,
-        {adjacent, placementNormal},
-        [&document, subModelIndex = context.SubModelIndex](
-            const Asset::Voxel::VoxelPosition position)
-        {
-            return document.HasVoxel(position, subModelIndex);
-        }});
+    const SmartBrushResult fallbackBrush = context.Plan == nullptr
+        ? SmartBrushEngine::Resolve({
+            *dimensions,
+            context.State,
+            {adjacent, placementNormal},
+            [&document, subModelIndex = context.SubModelIndex](
+                const Asset::Voxel::VoxelPosition position)
+            {
+                return document.HasVoxel(position, subModelIndex);
+            }})
+        : SmartBrushResult{};
+    const SmartBrushResult& brush = context.Plan == nullptr
+        ? fallbackBrush : context.Plan->BrushResult();
+    if (context.Plan != nullptr &&
+        (context.Plan->Action() != (erasing ? SmartAction::Erase : SmartAction::Add) ||
+         context.Plan->Placement().Target != adjacent ||
+         context.Plan->Placement().Normal != placementNormal))
+    {
+        return Refused(VoxelToolResultCode::Failed, adjacent, revision,
+            "The Smart Tool plan does not match the current Pencil placement.");
+    }
     if (brush.Code == SmartBrushResultCode::OutOfBounds)
         return Refused(VoxelToolResultCode::TargetOutOfBounds, adjacent, revision);
     if (brush.Code == SmartBrushResultCode::Unsupported)

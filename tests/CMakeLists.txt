@@ -426,6 +426,19 @@ add_executable(
 target_link_libraries(VoxelForgeEditorSmartToolTests PRIVATE VoxelForgeEditorCommands)
 vf_configure_test(VoxelForgeEditorSmartToolTests)
 add_test(NAME VoxelForge.Editor.SmartTool COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolTests>)
+add_executable(
+    VoxelForgeEditorSmartToolFoundationTests
+    Editor/SmartToolFoundationTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolFoundationTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolFoundationTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolFoundation
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolFoundationTests>
+)
 add_executable(VoxelForgeEditorBrushProfileTests Editor/BrushProfileServiceTests.cpp)
 target_link_libraries(VoxelForgeEditorBrushProfileTests PRIVATE VoxelForgeEditorCommands)
 vf_configure_test(VoxelForgeEditorBrushProfileTests)
