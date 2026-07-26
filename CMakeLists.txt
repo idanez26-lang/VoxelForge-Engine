@@ -14,6 +14,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(VF_BUILD_EDITOR "Build the VoxelForge editor executable" ON)
+option(
+    VF_BUILD_BENCHMARKS
+    "Build reproducible developer benchmarks (never registered with CTest)"
+    OFF
+)
 
 include(FetchContent)
 
@@ -137,4 +142,8 @@ endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+if(VF_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
