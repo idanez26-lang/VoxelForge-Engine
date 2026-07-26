@@ -1585,3 +1585,36 @@ add_test(
     NAME VoxelForge.Editor.StampPlacementPlanningSmoke
     COMMAND $<TARGET_FILE:VoxelForgeEditorStampPlacementPlanningSmokeTests>
 )
+
+# STAMP-15: exact pivot-aware quarter turns are resolved by the planner.
+add_executable(
+    VoxelForgeEditorStampQuarterRotationTests
+    Editor/StampQuarterRotationTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampQuarterRotationTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampQuarterRotationTests)
+add_test(
+    NAME VoxelForge.Editor.StampQuarterRotation
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampQuarterRotationTests>
+)
+
+add_executable(
+    VoxelForgeEditorStampQuarterRotationSmokeTests
+    Editor/StampQuarterRotationSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampQuarterRotationSmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorStampQuarterRotationSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.StampQuarterRotationSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampQuarterRotationSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.StampQuarterRotationSmoke
+    PROPERTIES LABELS "Smoke"
+)

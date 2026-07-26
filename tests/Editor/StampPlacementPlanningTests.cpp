@@ -216,11 +216,11 @@ void TestUnsupportedFutureTransformsAreExplicit()
         .Stamp = &stamp,
         .Document = &document,
         .DocumentGeneration = 7U,
-        .Transform = {.TargetPivot = {}, .QuarterTurns = 1U}});
+        .Transform = {.TargetPivot = {}, .QuarterTurns = 4U}});
     Require(!rotation.CanCommit &&
                 HasDiagnostic(rotation,
                     StampPlacementDiagnosticCode::UnsupportedRotation),
-        "Reserved rotation must fail explicitly in V1.");
+        "Non-quarter rotation states must fail explicitly.");
 
     const auto mirror = StampPlacementPlanner::Build({
         .Stamp = &stamp,

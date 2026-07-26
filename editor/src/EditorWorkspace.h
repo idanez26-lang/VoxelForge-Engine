@@ -284,6 +284,7 @@ private:
     void BeginSaveSelectionAsStamp();
     void BeginLatestStampPreview();
     void MoveLatestStampPreview(std::int32_t x, std::int32_t y, std::int32_t z);
+    void RotateLatestStampPreview(bool clockwise);
     void PlaceLatestStampPreview();
     [[nodiscard]] bool RefreshLatestStampPreview();
     void ClearLatestStampPreview() noexcept;
@@ -447,6 +448,9 @@ private:
     std::optional<std::chrono::steady_clock::time_point>
         stampPlacementVisualStartedAt_;
     bool stampPlacementVisualPreviewed_ = false;
+    bool stampPlacementVisualRotated90_ = false;
+    bool stampPlacementVisualRotated180_ = false;
+    bool stampPlacementVisualRotated270_ = false;
     bool stampPlacementVisualFirstPlaced_ = false;
     bool stampPlacementVisualMoved_ = false;
     bool stampPlacementVisualSecondPlaced_ = false;

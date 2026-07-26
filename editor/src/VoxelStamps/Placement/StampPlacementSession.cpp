@@ -90,6 +90,38 @@ StampPlacementSessionResult StampPlacementSession::TranslateTarget(
     return SetTarget(target, document, documentGeneration);
 }
 
+StampPlacementSessionResult StampPlacementSession::SetQuarterRotation(
+    const std::uint8_t quarterTurns,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+    transform_.QuarterTurns =
+        static_cast<std::uint8_t>(quarterTurns % 4U);
+    return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::RotateClockwise(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    return SetQuarterRotation(
+        static_cast<std::uint8_t>((transform_.QuarterTurns + 1U) % 4U),
+        document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::RotateCounterClockwise(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    return SetQuarterRotation(
+        static_cast<std::uint8_t>((transform_.QuarterTurns + 3U) % 4U),
+        document, documentGeneration);
+}
+
 bool StampPlacementSession::Cancel() noexcept
 {
     const bool changed = stamp_.has_value() || plan_.has_value() ||
@@ -159,6 +191,11 @@ StampPlacementSession::CacheKey() const noexcept
 StampFixedPoint StampPlacementSession::Target() const noexcept
 {
     return transform_.TargetPivot;
+}
+
+std::uint8_t StampPlacementSession::QuarterRotation() const noexcept
+{
+    return transform_.QuarterTurns;
 }
 
 std::size_t StampPlacementSession::TargetSubModel() const noexcept

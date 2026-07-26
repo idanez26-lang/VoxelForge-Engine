@@ -931,6 +931,20 @@ void EditorWorkspace::DrawMainMenuBar()
         }
 
         if (ImGui::MenuItem(
+                "Rotate Stamp Preview Clockwise", nullptr, false,
+                liveStampPreviewActive))
+        {
+            RotateLatestStampPreview(true);
+        }
+
+        if (ImGui::MenuItem(
+                "Rotate Stamp Preview Counter-Clockwise", nullptr, false,
+                liveStampPreviewActive))
+        {
+            RotateLatestStampPreview(false);
+        }
+
+        if (ImGui::MenuItem(
                 "Place Stamp Preview (Developer)", nullptr, false,
                 liveStampPreviewActive && voxelDocumentSession_.HasActiveDocument() &&
                     !voxelEditInProgress_))
@@ -4276,6 +4290,42 @@ void EditorWorkspace::MoveLatestStampPreview(
         : "Live Stamp Preview: valid preview active.");
 }
 
+void EditorWorkspace::RotateLatestStampPreview(const bool clockwise)
+{
+    Asset::Voxel::VoxelDocument* const document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!stampPlacementSession_.IsActive() || document == nullptr)
+    {
+        return;
+    }
+
+    const Stamps::StampPlacementSessionResult result = clockwise
+        ? stampPlacementSession_.RotateClockwise(
+              *document, voxelDocumentSession_.Generation())
+        : stampPlacementSession_.RotateCounterClockwise(
+              *document, voxelDocumentSession_.Generation());
+    if (result.PreviewChanged)
+    {
+        UpdateVoxelHighlights();
+    }
+    if (!result.Succeeded)
+    {
+        AddConsoleMessage(
+            "Live Stamp Preview: " +
+            std::string(Stamps::StampPlacementDiagnosticMessage(
+                result.Diagnostic)));
+        return;
+    }
+
+    AddConsoleMessage(
+        "Live Stamp Preview: rotation " +
+        std::to_string(
+            static_cast<unsigned int>(
+                stampPlacementSession_.QuarterRotation()) *
+            90U) +
+        " degrees.");
+}
+
 void EditorWorkspace::PlaceLatestStampPreview()
 {
     Asset::Voxel::VoxelDocument* const document = voxelDocumentSession_.ActiveDocument();
@@ -4484,19 +4534,20 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
 
     if (!stampPlacementVisualStartedAt_)
     {
-        const Stamps::StampBounds bounds{{0, 0, 0}, {2, 0, 2}, {3U, 1U, 3U}};
+        constexpr std::int32_t unit =
+            Stamps::StampFixedPoint::UnitsPerVoxel;
+        const Stamps::StampBounds bounds{{0, 0, 0}, {2, 0, 1}, {3U, 1U, 2U}};
         const Stamps::StampPivot pivot{
             .RequestedMode = Stamps::StampPivotMode::Center,
             .ResolvedMode = Stamps::StampPivotMode::Center,
-            .LocalPosition = {0, 0, 0}};
+            .LocalPosition = {unit, 0, 0}};
         const std::vector<Stamps::StampPaletteEntry> palette{
             {0U, {255U, 82U, 82U, 255U}},
             {1U, {255U, 210U, 64U, 255U}},
-            {2U, {88U, 188U, 255U, 255U}},
-            {3U, {148U, 104U, 255U, 255U}}};
+            {2U, {148U, 104U, 255U, 255U}}};
         const std::vector<Stamps::StampVoxel> voxels{
             {{0, 0, 0}, 0U}, {{2, 0, 0}, 1U},
-            {{0, 0, 2}, 2U}, {{2, 0, 2}, 3U}};
+            {{0, 0, 1}, 2U}};
         Stamps::StampValidationResult validation{};
         const std::optional<Stamps::VoxelStamp> fixture =
             Stamps::VoxelStamp::TryCreate(
@@ -4521,7 +4572,7 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
         const Stamps::StampPlacementSessionResult previewResult =
             stampPlacementSession_.Begin(
                 *fixture, *document, voxelDocumentSession_.Generation(),
-                0U, {0, 0, 0});
+                0U, {unit, unit, unit});
         const VoxelPreviewData* const preview =
             stampPlacementSession_.CurrentPreview();
         stampPlacementVisualPreviewed_ = previewResult.Succeeded &&
@@ -4529,13 +4580,55 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
             preview->State == VoxelPreviewState::Valid;
         stampPlacementVisualStartedAt_ = std::chrono::steady_clock::now();
         AddConsoleMessage(stampPlacementVisualPreviewed_
-            ? "Stamp placement visual test [0-4s Preview]: valid ghost preview."
-            : "Stamp placement visual test [0-4s Preview]: failed.");
+            ? "Stamp rotation visual test [0-2s]: 0-degree preview."
+            : "Stamp rotation visual test [0-2s]: preview failed.");
     }
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - *stampPlacementVisualStartedAt_);
+    if (elapsed >= std::chrono::seconds{2} &&
+        !stampPlacementVisualRotated90_)
+    {
+        RotateLatestStampPreview(true);
+        stampPlacementVisualRotated90_ =
+            stampPlacementSession_.QuarterRotation() == 1U &&
+            stampPlacementSession_.CurrentPreview() != nullptr &&
+            stampPlacementSession_.CurrentPreview()->Transform.QuarterTurns ==
+                1U;
+        AddConsoleMessage(stampPlacementVisualRotated90_
+            ? "Stamp rotation visual test [2-4s]: 90-degree preview."
+            : "Stamp rotation visual test [2-4s]: rotation failed.");
+    }
     if (elapsed >= std::chrono::seconds{4} &&
+        stampPlacementVisualRotated90_ &&
+        !stampPlacementVisualRotated180_)
+    {
+        RotateLatestStampPreview(true);
+        stampPlacementVisualRotated180_ =
+            stampPlacementSession_.QuarterRotation() == 2U &&
+            stampPlacementSession_.CurrentPreview() != nullptr &&
+            stampPlacementSession_.CurrentPreview()->Transform.QuarterTurns ==
+                2U;
+        AddConsoleMessage(stampPlacementVisualRotated180_
+            ? "Stamp rotation visual test [4-6s]: 180-degree preview."
+            : "Stamp rotation visual test [4-6s]: rotation failed.");
+    }
+    if (elapsed >= std::chrono::seconds{6} &&
+        stampPlacementVisualRotated180_ &&
+        !stampPlacementVisualRotated270_)
+    {
+        RotateLatestStampPreview(true);
+        stampPlacementVisualRotated270_ =
+            stampPlacementSession_.QuarterRotation() == 3U &&
+            stampPlacementSession_.CurrentPreview() != nullptr &&
+            stampPlacementSession_.CurrentPreview()->Transform.QuarterTurns ==
+                3U;
+        AddConsoleMessage(stampPlacementVisualRotated270_
+            ? "Stamp rotation visual test [6-8s]: 270-degree preview."
+            : "Stamp rotation visual test [6-8s]: rotation failed.");
+    }
+    if (elapsed >= std::chrono::seconds{8} &&
+        stampPlacementVisualRotated270_ &&
         !stampPlacementVisualFirstPlaced_)
     {
         PlaceLatestStampPreview();
@@ -4545,58 +4638,36 @@ bool EditorWorkspace::RunStampPlacementVisualStep(const std::size_t)
             stampPlacementSession_.CurrentPreview() != nullptr &&
             stampPlacementSession_.CurrentPreview()->State == VoxelPreviewState::Overlap;
         AddConsoleMessage(stampPlacementVisualFirstPlaced_
-            ? "Stamp placement visual test [4-8s Placement]: first placement."
-            : "Stamp placement visual test [4-8s Placement]: first placement failed.");
+            ? "Stamp rotation visual test [8-10s]: rotated placement."
+            : "Stamp rotation visual test [8-10s]: placement failed.");
     }
-    if (elapsed >= std::chrono::seconds{5} &&
-        stampPlacementVisualFirstPlaced_ && !stampPlacementVisualMoved_)
-    {
-        MoveLatestStampPreview(0, 2, 0);
-        stampPlacementVisualMoved_ =
-            stampPlacementSession_.CurrentPreview() != nullptr &&
-            stampPlacementSession_.CurrentPreview()->State == VoxelPreviewState::Valid;
-        AddConsoleMessage(stampPlacementVisualMoved_
-            ? "Stamp placement visual test [4-8s Placement]: moved valid ghost preview."
-            : "Stamp placement visual test [4-8s Placement]: preview move failed.");
-    }
-    if (elapsed >= std::chrono::seconds{6} &&
-        stampPlacementVisualMoved_ && !stampPlacementVisualSecondPlaced_)
-    {
-        PlaceLatestStampPreview();
-        stampPlacementVisualSecondPlaced_ =
-            document->GetRevision() == stampPlacementVisualDocumentRevision_ + 2U &&
-            voxelEditHistory_.UndoCount() == 2U &&
-            stampPlacementSession_.CurrentPreview() != nullptr &&
-            stampPlacementSession_.CurrentPreview()->State == VoxelPreviewState::Overlap;
-        AddConsoleMessage(stampPlacementVisualSecondPlaced_
-            ? "Stamp placement visual test [4-8s Placement]: second placement."
-            : "Stamp placement visual test [4-8s Placement]: second placement failed.");
-    }
-    if (elapsed >= std::chrono::seconds{8} &&
-        stampPlacementVisualSecondPlaced_ && !stampPlacementVisualUndone_)
+    if (elapsed >= std::chrono::seconds{10} &&
+        stampPlacementVisualFirstPlaced_ && !stampPlacementVisualUndone_)
     {
         UndoCommand();
         stampPlacementVisualUndone_ =
-            voxelEditHistory_.UndoCount() == 1U && voxelEditHistory_.RedoCount() == 1U &&
+            voxelEditHistory_.UndoCount() == 0U &&
+            voxelEditHistory_.RedoCount() == 1U &&
             stampPlacementSession_.CurrentPreview() != nullptr &&
             stampPlacementSession_.CurrentPreview()->State == VoxelPreviewState::Valid;
         AddConsoleMessage(stampPlacementVisualUndone_
-            ? "Stamp placement visual test [8-12s Undo]: valid ghost preview restored."
-            : "Stamp placement visual test [8-12s Undo]: failed.");
+            ? "Stamp rotation visual test [10-12s]: Undo."
+            : "Stamp rotation visual test [10-12s]: Undo failed.");
     }
     if (elapsed >= std::chrono::seconds{12} &&
         stampPlacementVisualUndone_ && !stampPlacementVisualRedone_)
     {
         RedoCommand();
         stampPlacementVisualRedone_ =
-            voxelEditHistory_.UndoCount() == 2U && voxelEditHistory_.RedoCount() == 0U &&
+            voxelEditHistory_.UndoCount() == 1U &&
+            voxelEditHistory_.RedoCount() == 0U &&
             stampPlacementSession_.CurrentPreview() != nullptr &&
             stampPlacementSession_.CurrentPreview()->State == VoxelPreviewState::Overlap;
         AddConsoleMessage(stampPlacementVisualRedone_
-            ? "Stamp placement visual test [12-16s Redo]: overlap ghost preview restored."
-            : "Stamp placement visual test [12-16s Redo]: failed.");
+            ? "Stamp rotation visual test [12-14s]: Redo."
+            : "Stamp rotation visual test [12-14s]: Redo failed.");
     }
-    if (elapsed >= std::chrono::seconds{16} &&
+    if (elapsed >= std::chrono::seconds{14} &&
         stampPlacementVisualRedone_ && !stampPlacementVisualCleared_)
     {
         const std::uint64_t revision = document->GetRevision();

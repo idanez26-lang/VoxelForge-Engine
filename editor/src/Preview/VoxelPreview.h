@@ -41,9 +41,8 @@ struct VoxelPreviewPivot final
     [[nodiscard]] bool operator==(const VoxelPreviewPivot&) const noexcept = default;
 };
 
-/// Neutral V1 transform contract. QuarterTurns is intentionally retained at
-/// zero in STAMP-09; its presence keeps future rotation explicit rather than
-/// implicit in a Stamp-specific builder.
+/// Neutral exact-grid transform contract. QuarterTurns is resolved by the
+/// domain planner; preview consumers only retain it as immutable metadata.
 struct VoxelPreviewTransform final
 {
     VoxelPreviewFixedPoint TargetPivot{};

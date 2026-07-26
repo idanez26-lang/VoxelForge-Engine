@@ -32,9 +32,19 @@ struct StampPlacementMirror final
         default;
 };
 
+/// STAMP-15 supports exact quarter turns around the vertical Y axis only.
+/// Keeping the axis explicit avoids changing the transform contract when
+/// additional exact grid axes are introduced later.
+enum class StampPlacementRotationAxis : std::uint8_t
+{
+    VerticalY
+};
+
 struct StampPlacementTransform final
 {
     StampFixedPoint TargetPivot{};
+    StampPlacementRotationAxis RotationAxis =
+        StampPlacementRotationAxis::VerticalY;
     std::uint8_t QuarterTurns = 0U;
     StampPlacementMirror Mirror{};
 
@@ -109,7 +119,7 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
     case StampPlacementDiagnosticCode::InvalidSubModel:
         return "The target voxel sub-model does not exist.";
     case StampPlacementDiagnosticCode::UnsupportedRotation:
-        return "Stamp rotation is reserved but is not supported by V1 planning yet.";
+        return "Stamp rotation must be an exact vertical quarter turn (0, 90, 180, or 270 degrees).";
     case StampPlacementDiagnosticCode::UnsupportedMirror:
         return "Stamp mirror is reserved but is not supported by V1 planning yet.";
     case StampPlacementDiagnosticCode::UnsupportedCollisionPolicy:

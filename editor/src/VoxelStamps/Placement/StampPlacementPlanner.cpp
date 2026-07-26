@@ -21,15 +21,10 @@ void AddDiagnostic(
 }
 
 [[nodiscard]] bool MakeGridCoordinate(
-    const std::int32_t target,
-    const std::int32_t local,
-    const std::int32_t pivot,
+    const std::int64_t fixed,
     std::int32_t& output) noexcept
 {
     constexpr std::int64_t units = StampFixedPoint::UnitsPerVoxel;
-    const std::int64_t fixed = static_cast<std::int64_t>(target) +
-        static_cast<std::int64_t>(local) * units -
-        static_cast<std::int64_t>(pivot);
     if (fixed < std::numeric_limits<std::int32_t>::min() ||
         fixed > std::numeric_limits<std::int32_t>::max() ||
         fixed % units != 0)
@@ -38,6 +33,56 @@ void AddDiagnostic(
     }
     output = static_cast<std::int32_t>(fixed / units);
     return true;
+}
+
+[[nodiscard]] bool MakeRotatedGridPosition(
+    const StampPlacementTransform& transform,
+    const StampLocalPosition local,
+    const StampFixedPoint pivot,
+    Asset::Voxel::VoxelPosition& output) noexcept
+{
+    constexpr std::int64_t units = StampFixedPoint::UnitsPerVoxel;
+    const std::int64_t relativeX =
+        static_cast<std::int64_t>(local.X) * units - pivot.X;
+    const std::int64_t relativeY =
+        static_cast<std::int64_t>(local.Y) * units - pivot.Y;
+    const std::int64_t relativeZ =
+        static_cast<std::int64_t>(local.Z) * units - pivot.Z;
+
+    std::int64_t rotatedX = relativeX;
+    std::int64_t rotatedZ = relativeZ;
+    switch (transform.QuarterTurns)
+    {
+    case 0U:
+        break;
+    case 1U:
+        rotatedX = relativeZ;
+        rotatedZ = -relativeX;
+        break;
+    case 2U:
+        rotatedX = -relativeX;
+        rotatedZ = -relativeZ;
+        break;
+    case 3U:
+        rotatedX = -relativeZ;
+        rotatedZ = relativeX;
+        break;
+    default:
+        return false;
+    }
+
+    return MakeGridCoordinate(
+               static_cast<std::int64_t>(transform.TargetPivot.X) +
+                   rotatedX,
+               output.X) &&
+        MakeGridCoordinate(
+               static_cast<std::int64_t>(transform.TargetPivot.Y) +
+                   relativeY,
+               output.Y) &&
+        MakeGridCoordinate(
+               static_cast<std::int64_t>(transform.TargetPivot.Z) +
+                   rotatedZ,
+               output.Z);
 }
 
 [[nodiscard]] bool IsWithinDimensions(
@@ -132,7 +177,7 @@ StampPlacementPlan StampPlacementPlanner::Build(
             .CollisionPolicy = plan.CollisionPolicy};
 
         bool transformSupported = true;
-        if (request.Transform.QuarterTurns != 0U)
+        if (request.Transform.QuarterTurns > 3U)
         {
             AddDiagnostic(
                 plan, StampPlacementDiagnosticCode::UnsupportedRotation,
@@ -215,15 +260,9 @@ StampPlacementPlan StampPlacementPlanner::Build(
         {
             const StampVoxel& source = stamp.Voxels()[ordinal];
             Asset::Voxel::VoxelPosition world{};
-            if (!MakeGridCoordinate(
-                    request.Transform.TargetPivot.X, source.Position.X,
-                    stamp.Pivot().LocalPosition.X, world.X) ||
-                !MakeGridCoordinate(
-                    request.Transform.TargetPivot.Y, source.Position.Y,
-                    stamp.Pivot().LocalPosition.Y, world.Y) ||
-                !MakeGridCoordinate(
-                    request.Transform.TargetPivot.Z, source.Position.Z,
-                    stamp.Pivot().LocalPosition.Z, world.Z))
+            if (!MakeRotatedGridPosition(
+                    request.Transform, source.Position,
+                    stamp.Pivot().LocalPosition, world))
             {
                 AddDiagnostic(
                     plan,

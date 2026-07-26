@@ -56,6 +56,16 @@ public:
         std::int32_t z,
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult SetQuarterRotation(
+        std::uint8_t quarterTurns,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult RotateClockwise(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult RotateCounterClockwise(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
     [[nodiscard]] bool Cancel() noexcept;
     void MarkPlacementCommitted() noexcept;
 
@@ -69,6 +79,7 @@ public:
     [[nodiscard]] const VoxelPreviewData* CurrentPreview() const noexcept;
     [[nodiscard]] const StampPlacementCacheKey* CacheKey() const noexcept;
     [[nodiscard]] StampFixedPoint Target() const noexcept;
+    [[nodiscard]] std::uint8_t QuarterRotation() const noexcept;
     [[nodiscard]] std::size_t TargetSubModel() const noexcept;
     [[nodiscard]] std::uint64_t PlacementOrdinal() const noexcept;
 
