@@ -1,5 +1,7 @@
 #include "SmartTool.h"
 
+#include <algorithm>
+
 namespace VoxelForge::Editor
 {
 SmartGeometry SmartTool::Geometry() const noexcept { return geometry_; }
@@ -46,6 +48,13 @@ void SmartTool::SetStatistics(
 }
 
 void SmartTool::ClearStatistics() noexcept { statistics_ = {}; }
+float SmartTool::PreviewAlpha() const noexcept { return previewAlpha_; }
+void SmartTool::SetPreviewAlpha(const float alpha) noexcept
+{
+    previewAlpha_ = std::clamp(alpha, 0.0F, 1.0F);
+    preview_ = {};
+    statistics_ = {};
+}
 
 bool SmartTool::IsOperational() const noexcept
 {

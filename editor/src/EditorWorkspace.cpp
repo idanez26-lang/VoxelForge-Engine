@@ -384,6 +384,11 @@ EditorWorkspace::EditorWorkspace(
 {
     toolContext_.Constraints = &constraintSettings_;
     toolContext_.PivotManager = &transformPivotManager_;
+    toolContext_.BrushProfiles = &brushProfileService_;
+    toolContext_.ActivePaletteIndex = [this]() { return paletteService_.ActiveIndex(); };
+    toolContext_.SelectPaletteIndex = [this](const std::size_t index) {
+        return paletteService_.SelectColor(index);
+    };
     assetBrowser_.SetMessageCallback(
         [this](std::string message)
         {
@@ -6144,6 +6149,7 @@ void EditorWorkspace::SynchronizeProjectAssets()
         stampJsonCatalogStore_.ClearProjectRoot();
         static_cast<void>(saveSelectionAsStampWorkflow_.Cancel());
         ClearLatestStampPreview();
+        brushProfileService_.ClearProject();
         assetBrowser_.ClearAssetsRoot();
         assetInspector_.ClearProject();
         return;
@@ -6172,6 +6178,24 @@ void EditorWorkspace::SynchronizeProjectAssets()
     if (!stampProjectLibraryRepository_.SetProjectRoot(project->RootPath()) ||
         !stampJsonCatalogStore_.SetProjectRoot(project->RootPath()))
         AddConsoleMessage("Project Stamp Library setup failed.");
+    if (!brushProfileService_.SetProjectRoot(project->RootPath()))
+        AddConsoleMessage("Brush profile setup failed.");
+    else
+    {
+        const BrushProfileResult profiles = brushProfileService_.Load();
+        if (profiles.Status != BrushProfileStatus::Success &&
+            profiles.Status != BrushProfileStatus::NotFound)
+            AddConsoleMessage("Brush profile load failed: " + profiles.Message);
+        else if (!profiles.Message.empty())
+            AddConsoleMessage("Brush profiles: " + profiles.Message);
+        if (const BrushProfile* active = brushProfileService_.ActiveProfile(); active != nullptr)
+        {
+            static_cast<void>(BrushProfileService::Apply(*active, toolContext_.Smart));
+            if (paletteService_.HasActivePalette() &&
+                !paletteService_.SelectColor(active->PaletteIndex))
+                AddConsoleMessage("Brush profile palette is unavailable in this project.");
+        }
+    }
 }
 
 bool EditorWorkspace::SaveActiveProjectSession()
@@ -6598,6 +6622,9 @@ bool EditorWorkspace::OpenVoxInViewportNow(
             document->GetPalette(),
             document->HasCustomPalette()
                 ? "Custom VOX Palette" : "Default VOX Palette");
+        if (const BrushProfile* active = brushProfileService_.ActiveProfile(); active != nullptr &&
+            !paletteService_.SelectColor(active->PaletteIndex))
+            AddConsoleMessage("Brush profile palette is unavailable in this document.");
     }
     else
     {

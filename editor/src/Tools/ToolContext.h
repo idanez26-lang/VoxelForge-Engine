@@ -5,9 +5,13 @@
 #include "Transform/TransformPivotManager.h"
 
 #include <cstdint>
+#include <cstddef>
+#include <functional>
+#include <optional>
 
 namespace VoxelForge::Editor
 {
+class BrushProfileService;
 
 struct ScaleToolOptions final
 {
@@ -21,6 +25,9 @@ struct ToolContext final
 {
     bool HasDocument = false;
     SmartTool Smart{};
+    BrushProfileService* BrushProfiles = nullptr;
+    std::function<std::optional<std::size_t>()> ActivePaletteIndex;
+    std::function<bool(std::size_t)> SelectPaletteIndex;
     ScaleToolOptions Scale{};
     ConstraintSettings* Constraints = nullptr;
     TransformPivotManager* PivotManager = nullptr;

@@ -113,6 +113,8 @@ public:
     void SetStatistics(std::size_t total, std::size_t changed,
         std::size_t unchanged, std::size_t clipped) noexcept;
     void ClearStatistics() noexcept;
+    [[nodiscard]] float PreviewAlpha() const noexcept;
+    void SetPreviewAlpha(float alpha) noexcept;
     [[nodiscard]] bool IsOperational() const noexcept;
 
 private:
@@ -121,5 +123,6 @@ private:
     SmartBrushState brush_{};
     SmartToolPreview preview_{};
     SmartToolStatistics statistics_{};
+    float previewAlpha_ = 0.5F;
 };
 } // namespace VoxelForge::Editor

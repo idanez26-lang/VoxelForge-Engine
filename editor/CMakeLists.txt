@@ -370,6 +370,7 @@ target_sources(
         src/VoxelHistory/VoxelHistoryInput.cpp
         src/BrushEngine/SmartBrushEngine.cpp
         src/SmartTools/SmartTool.cpp
+        src/SmartTools/BrushProfileService.cpp
         src/SmartTools/SmartBrushPreviewResolver.cpp
         src/VoxelTools/VoxelEraserTool.cpp
         src/VoxelTools/VoxelBoxService.cpp

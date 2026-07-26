@@ -1,7 +1,10 @@
 #include "SmartBrushOptions.h"
 #include "SmartToolPanel.h"
+#include "SmartTools/BrushProfileService.h"
 
 #include <imgui.h>
+
+#include <cstdio>
 
 namespace VoxelForge::Editor
 {
@@ -55,6 +58,100 @@ bool DrawSmartToolPanel(ToolContext& context)
     changed |= tool.Action() != actionBefore;
 
     changed |= DrawSmartBrushOptions(tool.Brush());
+    float previewAlpha = tool.PreviewAlpha();
+    if (ImGui::SliderFloat("Preview Alpha", &previewAlpha, 0.0F, 1.0F))
+    {
+        tool.SetPreviewAlpha(previewAlpha);
+        changed = true;
+    }
+    if (context.BrushProfiles != nullptr)
+    {
+        BrushProfileService& profiles = *context.BrushProfiles;
+        static char newName[96] = "Brush Profile";
+        static char rename[96] = {};
+        static std::string renameUuid;
+        static std::string profileFeedback;
+        if (context.ActivePaletteIndex)
+        {
+            if (const auto activePalette = context.ActivePaletteIndex())
+                tool.Brush().PaletteIndex = *activePalette;
+        }
+        const auto applySelected = [&](const BrushProfileResult& result) {
+            if (!result.Succeeded() || !result.Profile)
+            {
+                profileFeedback = result.Message;
+                return;
+            }
+            changed |= BrushProfileService::Apply(*result.Profile, tool);
+            if (context.SelectPaletteIndex && !context.SelectPaletteIndex(result.Profile->PaletteIndex))
+                profileFeedback = "Profile selected; its palette color is unavailable.";
+            else
+                profileFeedback = result.Message.empty() ? "Profile selected." : result.Message;
+        };
+        ImGui::Separator();
+        ImGui::TextDisabled("Brush Profile");
+        if (const BrushProfile* active = profiles.ActiveProfile(); active != nullptr)
+        {
+            ImGui::TextUnformatted(active->Name.c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton(active->Favorite ? "Favorite" : "Add Favorite"))
+            {
+                const bool wasFavorite = active->Favorite;
+                const BrushProfileResult result = profiles.SetFavorite(active->Uuid, !wasFavorite);
+                profileFeedback = result.Succeeded()
+                    ? (wasFavorite ? "Profile unfavorited." : "Profile favorited.")
+                    : result.Message;
+            }
+        }
+        if (ImGui::CollapsingHeader("Manage Profiles"))
+        {
+            ImGui::SetNextItemWidth(-1.0F);
+            ImGui::InputText("Name##BrushProfile", newName, sizeof(newName));
+            if (ImGui::Button("Save New"))
+            {
+                const BrushProfileResult result = profiles.SaveNew(newName, tool);
+                applySelected(result);
+            }
+            if (const BrushProfile* active = profiles.ActiveProfile(); active != nullptr &&
+                ImGui::Button("Duplicate Active"))
+            {
+                applySelected(profiles.Duplicate(active->Uuid, active->Name + " Copy"));
+            }
+            ImGui::TextDisabled("Saved Profiles");
+            for (const BrushProfile* profile : profiles.SortedProfiles())
+            {
+                ImGui::PushID(profile->Uuid.c_str());
+                if (ImGui::Selectable(profile->Name.c_str(), profile->Uuid == profiles.ActiveUuid()))
+                    applySelected(profiles.SelectProfile(profile->Uuid));
+                ImGui::PopID();
+            }
+            if (const BrushProfile* active = profiles.ActiveProfile(); active != nullptr &&
+                active->Uuid != BrushProfileService::DefaultProfileUuid)
+            {
+                if (renameUuid != active->Uuid)
+                {
+                    renameUuid = active->Uuid;
+                    std::snprintf(rename, sizeof(rename), "%s", active->Name.c_str());
+                }
+                ImGui::SetNextItemWidth(-1.0F);
+                ImGui::InputText("Rename##BrushProfile", rename, sizeof(rename));
+                if (ImGui::Button("Rename"))
+                {
+                    const BrushProfileResult result = profiles.Rename(active->Uuid, rename);
+                    profileFeedback = result.Succeeded() ? "Profile renamed." : result.Message;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Overwrite"))
+                {
+                    const BrushProfileResult result = profiles.Overwrite(active->Uuid, tool);
+                    profileFeedback = result.Succeeded() ? "Profile overwritten." : result.Message;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Delete")) applySelected(profiles.Delete(active->Uuid));
+            }
+        }
+        if (!profileFeedback.empty()) ImGui::TextDisabled("%s", profileFeedback.c_str());
+    }
     ImGui::TextDisabled("Advanced");
     ImGui::BeginDisabled();
     ImGui::TextUnformatted("More controls coming soon");

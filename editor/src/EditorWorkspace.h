@@ -29,6 +29,7 @@
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
 #include "SmartTools/SmartBrushPreviewResolver.h"
+#include "SmartTools/BrushProfileService.h"
 #include "Transform/TransformPreviewModel.h"
 #include "Transform/TransformPivotManager.h"
 #include "TransformGizmo/TransformGizmoInteraction.h"
@@ -489,6 +490,7 @@ private:
     VoxelToolState voxelToolState_;
     ToolManager toolManager_{voxelToolState_};
     ToolContext toolContext_{};
+    BrushProfileService brushProfileService_;
     SmartBrushSizeFeedback smartBrushSizeFeedback_{};
     bool smartBrushPreviewRefreshRequested_ = false;
     EditorInputService editorInputService_;
