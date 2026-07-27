@@ -1490,6 +1490,10 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
 
 void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
 {
+    if (smartToolStroke_.IsActive() &&
+        (tool != ActiveVoxelTool::Pencil ||
+         toolContext_.Smart.Action() != smartToolStroke_.Action()))
+        CancelSmartToolStroke();
     if (tool == ActiveVoxelTool::Eraser)
     {
         toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
@@ -1556,6 +1560,12 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
 
 void EditorWorkspace::CancelActiveInteraction()
 {
+    if (smartToolStroke_.IsActive())
+    {
+        CancelSmartToolStroke();
+        UpdateVoxelHighlights();
+        return;
+    }
     if (stampPlacementSession_.IsActive())
     {
         ClearLatestStampPreview();
@@ -1609,6 +1619,12 @@ void EditorWorkspace::CancelActiveInteraction()
 
 void EditorWorkspace::UndoCommand()
 {
+    if (smartToolStroke_.IsActive())
+    {
+        CancelSmartToolStroke();
+        UpdateVoxelHighlights();
+        return;
+    }
     if (transformGizmoManager_.IsDragging())
         CancelTransformGizmoInteraction();
     if (voxelDocumentSession_.HasActiveDocument())
@@ -1652,6 +1668,12 @@ void EditorWorkspace::UndoCommand()
 
 void EditorWorkspace::RedoCommand()
 {
+    if (smartToolStroke_.IsActive())
+    {
+        CancelSmartToolStroke();
+        UpdateVoxelHighlights();
+        return;
+    }
     if (transformGizmoManager_.IsDragging())
         CancelTransformGizmoInteraction();
     if (voxelDocumentSession_.HasActiveDocument())
@@ -2342,9 +2364,14 @@ void EditorWorkspace::DrawScenePanel()
         const bool gizmoPointerTracking =
             transformGizmoManager_.IsDragging() &&
             ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        // ImGui keeps the viewport item active after MouseDown. A Smart Tool
+        // stroke owns that same pointer until MouseUp, so it must be treated
+        // like selection/gizmo tracking rather than as an unrelated UI edit.
+        const bool smartStrokePointerTracking = smartToolStroke_.IsActive() &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left);
         const bool inputBlocked =
             (ImGui::IsAnyItemActive() && !selectionPointerTracking &&
-             !gizmoPointerTracking) ||
+             !gizmoPointerTracking && !smartStrokePointerTracking) ||
             io.WantTextInput || incompatiblePopupOpen;
         const bool smartBrushOptionsChanged = std::exchange(
             smartBrushPreviewRefreshRequested_, false);
@@ -2360,7 +2387,8 @@ void EditorWorkspace::DrawScenePanel()
                 inputBlocked || (io.WantCaptureMouse && !imageHovered),
                 incompatiblePopupOpen,
                 dragDropActive,
-                selectionPointerTracking || gizmoPointerTracking || cameraControl,
+                selectionPointerTracking || gizmoPointerTracking ||
+                    smartStrokePointerTracking || cameraControl,
                 toolContext_.Smart.Brush().Size});
         if (brushSizeInput.Changed)
         {
@@ -2803,7 +2831,48 @@ void EditorWorkspace::DrawScenePanel()
                 cameraInteraction,
                 voxelEditInProgress_,
                 voxelDocumentSession_.Generation()});
-        if (!doubleClickFocus && toolDecision == VoxelToolInputDecision::Apply)
+        const bool smartContinuousTool = voxelToolState_.IsPencilActive() &&
+            toolContext_.Smart.IsOperational() &&
+            (toolContext_.Smart.Action() == SmartAction::Add ||
+             toolContext_.Smart.Action() == SmartAction::Paint ||
+             toolContext_.Smart.Action() == SmartAction::Erase);
+        const bool smartStrokeMayContinue = document != nullptr && imageHovered &&
+            sceneFocused && !((io.WantCaptureMouse && (!imageHovered || inputBlocked)) ||
+                gizmoConsumesPointer) && !incompatiblePopupOpen && !dragDropActive &&
+            cameraInteraction == VoxelCameraInteraction::None && !voxelEditInProgress_;
+        // A continuous stroke is valid only while its original interaction
+        // context remains intact. Leaving the viewport, losing focus, a
+        // popup, drag/drop, camera interaction, tool or action change must
+        // cancel (not commit) the pending atomic edit. An invalid voxel
+        // target is handled inside ContinueSmartToolStroke() and merely
+        // suspends the segment so a later valid target starts a new one.
+        if (smartToolStroke_.IsActive() &&
+            (!smartContinuousTool || !smartStrokeMayContinue ||
+             toolContext_.Smart.Action() != smartToolStroke_.Action()))
+            CancelSmartToolStroke();
+        if (!doubleClickFocus && smartContinuousTool)
+        {
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                if (smartToolStroke_.IsActive())
+                {
+                    static_cast<void>(CommitSmartToolStroke());
+                    UpdateVoxelHighlights();
+                }
+            }
+            else if (!smartToolStroke_.IsActive())
+            {
+                if (toolDecision == VoxelToolInputDecision::Apply &&
+                    BeginSmartToolStroke())
+                    UpdateVoxelHighlights();
+            }
+            else if (smartStrokeMayContinue)
+            {
+                if (ContinueSmartToolStroke()) UpdateVoxelHighlights();
+            }
+            else CancelSmartToolStroke();
+        }
+        else if (!doubleClickFocus && toolDecision == VoxelToolInputDecision::Apply)
         {
             if (voxelToolState_.IsPencilActive())
             {
@@ -13456,7 +13525,8 @@ bool EditorWorkspace::AddAdjacentVoxel()
     return true;
 }
 
-std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest()
+std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
+    const SmartToolStroke* const stroke)
 {
     Asset::Voxel::VoxelDocument* document = voxelDocumentSession_.ActiveDocument();
     if (document == nullptr || !toolContext_.Smart.IsOperational()) return std::nullopt;
@@ -13504,14 +13574,18 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest()
     request.Action = action;
     request.BrushRequest = {*dimensions, state, {*target, normal}, {}};
     request.ReadVoxel =
-        [document](const Asset::Voxel::VoxelPosition position)
+        [document, stroke](const Asset::Voxel::VoxelPosition position)
         {
+            if (stroke != nullptr && stroke->IsActive())
+                return stroke->ReadVoxel(position);
             const auto voxel = document->GetVoxel(position, 0U);
             return SmartToolVoxelState{
                 voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
         };
     request.SourceIdentity = reinterpret_cast<std::uintptr_t>(document);
     request.SourceRevision = document->GetRevision();
+    request.VirtualRevision = stroke != nullptr && stroke->IsActive()
+        ? stroke->Revision() : 0U;
     request.SourceGeneration = voxelDocumentSession_.Generation();
     request.SourceSubModelIndex = 0U;
     request.ActiveProfileUuid = brushProfileService_.ActiveUuid();
@@ -13531,6 +13605,158 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest()
             SmartBrushPlacement{*target, normal}}
         : std::nullopt;
     return request;
+}
+
+bool EditorWorkspace::BeginSmartToolStroke()
+{
+    const std::optional<SmartToolRequest> initialRequest = BuildSmartPencilRequest();
+    Asset::Voxel::VoxelDocument* const document = voxelDocumentSession_.ActiveDocument();
+    if (!initialRequest || document == nullptr) return false;
+    const SmartAction action = initialRequest->Action;
+    if (action != SmartAction::Add && action != SmartAction::Paint &&
+        action != SmartAction::Erase)
+        return false;
+    if (!smartToolStroke_.Begin({reinterpret_cast<std::uintptr_t>(document),
+            document->GetRevision(), voxelDocumentSession_.Generation(), 0U,
+            [document](const Asset::Voxel::VoxelPosition position)
+            {
+                const auto voxel = document->GetVoxel(position, 0U);
+                return SmartToolVoxelState{
+                    voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
+            }}, action, initialRequest->BrushRequest.Placement.Target,
+            initialRequest->BrushRequest.Placement.Normal))
+        return false;
+    const std::optional<SmartToolRequest> request =
+        BuildSmartPencilRequest(&smartToolStroke_);
+    if (!request)
+    {
+        CancelSmartToolStroke();
+        return false;
+    }
+    const SmartToolResult result = smartToolController_.ResolvePreview(
+        smartToolSession_, *request);
+    if (!result.HasPlan() || result.Code == SmartBrushResultCode::OutOfBounds ||
+        !smartToolStroke_.Accumulate(*result.Plan))
+    {
+        CancelSmartToolStroke();
+        return false;
+    }
+    smartToolStrokePreviewPlan_ = result.Plan;
+    return true;
+}
+
+bool EditorWorkspace::ContinueSmartToolStroke()
+{
+    if (!smartToolStroke_.IsActive()) return false;
+    Asset::Voxel::VoxelDocument* const document = voxelDocumentSession_.ActiveDocument();
+    const SmartToolStrokeContext& context = smartToolStroke_.Context();
+    if (document == nullptr || reinterpret_cast<std::uintptr_t>(document) !=
+            context.DocumentIdentity || document->GetRevision() !=
+            context.DocumentRevision || voxelDocumentSession_.Generation() !=
+            context.DocumentGeneration)
+    {
+        CancelSmartToolStroke();
+        return false;
+    }
+    const std::optional<SmartToolRequest> current =
+        BuildSmartPencilRequest(&smartToolStroke_);
+    if (!current)
+    {
+        smartToolStroke_.Suspend();
+        return false;
+    }
+    if (current->Action != smartToolStroke_.Action())
+    {
+        CancelSmartToolStroke();
+        return false;
+    }
+    const std::vector<Asset::Voxel::VoxelPosition> samples = smartToolStroke_.Advance(
+        current->BrushRequest.Placement.Target, current->BrushRequest.Placement.Normal);
+    if (samples.empty()) return false;
+    bool changed = false;
+    for (const Asset::Voxel::VoxelPosition sample : samples)
+    {
+        SmartToolRequest request = *current;
+        request.BrushRequest.Placement.Target = sample;
+        if (request.Workplane) request.Workplane->Target = sample;
+        request.VirtualRevision = smartToolStroke_.Revision();
+        const SmartToolResult result = smartToolController_.ResolvePreview(
+            smartToolSession_, request);
+        if (!result.HasPlan() || result.Code == SmartBrushResultCode::OutOfBounds)
+        {
+            smartToolStroke_.Suspend();
+            return false;
+        }
+        if (!smartToolStroke_.Accumulate(*result.Plan))
+        {
+            CancelSmartToolStroke();
+            return false;
+        }
+        smartToolStrokePreviewPlan_ = result.Plan;
+        changed = true;
+    }
+    return changed;
+}
+
+bool EditorWorkspace::CommitSmartToolStroke()
+{
+    if (!smartToolStroke_.IsActive()) return false;
+    Asset::Voxel::VoxelDocument* const document = voxelDocumentSession_.ActiveDocument();
+    const SmartToolStrokeContext& context = smartToolStroke_.Context();
+    if (document == nullptr || reinterpret_cast<std::uintptr_t>(document) !=
+            context.DocumentIdentity || document->GetRevision() !=
+            context.DocumentRevision || voxelDocumentSession_.Generation() !=
+            context.DocumentGeneration)
+    {
+        CancelSmartToolStroke();
+        return false;
+    }
+    const std::vector<VoxelChange> changes = smartToolStroke_.Changes();
+    const SmartAction action = smartToolStroke_.Action();
+    const std::uint64_t voxelCountBefore = document->GetVoxelCount();
+    const Asset::Voxel::VoxelPosition target = smartToolStrokePreviewPlan_
+        ? smartToolStrokePreviewPlan_->Placement().Target
+        : Asset::Voxel::VoxelPosition{};
+    voxelEditInProgress_ = true;
+    VoxelToolResult result = VoxelPencilTool::ApplyChanges({
+        static_cast<VoxelEditSession*>(this), document, 0U,
+        voxelDocumentSession_.Generation(), &voxelEditHistory_, std::nullopt,
+        nullptr, nullptr}, action, target, changes);
+    voxelEditInProgress_ = false;
+    viewportFocusRequested_ = false;
+    viewportFocusApplied_ = false;
+    lastVoxelToolResult_ = result;
+    const bool committed = result.Code == VoxelToolResultCode::Applied;
+    if (committed)
+    {
+        toolContext_.Smart.SetStatistics(changes.size(), changes.size(), 0U, 0U);
+        workplaneHit_.reset();
+        if (action == SmartAction::Add && voxelCountBefore == 0U)
+            firstCreationExperience_.OnFirstVoxelCreated();
+        if (action == SmartAction::Add || action == SmartAction::Paint)
+            static_cast<void>(paletteService_.RecordActiveColorUsage());
+        AddConsoleMessage(std::string("[Edit] ") +
+            (action == SmartAction::Add ? "Added" :
+             action == SmartAction::Paint ? "Painted" : "Erased") +
+            " Smart Tool stroke (" + std::to_string(changes.size()) +
+            " voxel change(s)).");
+    }
+    else if (result.Code == VoxelToolResultCode::Failed && !result.Error.empty())
+    {
+        AddConsoleMessage("[Edit] Smart Tool stroke failed: " + result.Error);
+    }
+    CancelSmartToolStroke();
+    return committed;
+}
+
+void EditorWorkspace::CancelSmartToolStroke() noexcept
+{
+    smartToolStroke_.Cancel();
+    smartToolStrokePreviewPlan_.reset();
+    smartToolStrokePreviewMesh_ = {};
+    smartToolStrokePreviewPlanId_ = 0U;
+    smartToolStrokePreviewPlanRevision_ = 0U;
+    smartToolStrokePreviewStrokeRevision_ = 0U;
 }
 
 bool EditorWorkspace::ApplyVoxelPencil()
@@ -15084,7 +15310,10 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     }
     if (smartAddActive || smartEraseActive || smartPaintActive)
     {
-        const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
+        const SmartToolStroke* const activeStroke = smartToolStroke_.IsActive()
+            ? &smartToolStroke_ : nullptr;
+        const std::optional<SmartToolRequest> request =
+            BuildSmartPencilRequest(activeStroke);
         const SmartToolResult planning = request
             ? smartToolController_.ResolvePreview(smartToolSession_, *request)
             : SmartToolResult{};
@@ -15102,14 +15331,58 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             if (document != nullptr)
             {
                 exactSmartToolPlan = plan;
-                exactSmartToolPreview = &smartToolExactPreviewCache_.Resolve(
-                    *document, voxelDocumentSession_.Generation(), plan);
+                if (activeStroke != nullptr)
+                {
+                    const bool rebuild = smartToolStrokePreviewPlanId_ !=
+                            plan->PlanId() ||
+                        smartToolStrokePreviewPlanRevision_ != plan->Revision() ||
+                        smartToolStrokePreviewStrokeRevision_ !=
+                            activeStroke->Revision();
+                    smartToolStrokePreviewPlan_ = plan;
+                    if (rebuild)
+                    {
+                        smartToolStrokePreviewMesh_ =
+                            SmartToolExactPreviewComposer::Compose(*document,
+                                activeStroke->PreviewChanges(*plan));
+                        smartToolStrokePreviewPlanId_ = plan->PlanId();
+                        smartToolStrokePreviewPlanRevision_ = plan->Revision();
+                        smartToolStrokePreviewStrokeRevision_ =
+                            activeStroke->Revision();
+                    }
+                    exactSmartToolPreview = &smartToolStrokePreviewMesh_;
+                }
+                else
+                {
+                    exactSmartToolPreview = &smartToolExactPreviewCache_.Resolve(
+                        *document, voxelDocumentSession_.Generation(), plan);
+                }
             }
         }
         else
         {
             smartToolSession_.Clear();
             smartToolExactPreviewCache_.Clear();
+            // Keep the accumulated exact state visible while a target is
+            // temporarily invalid. The stroke remains suspended and the next
+            // valid target starts a fresh segment; no missing target is ever
+            // interpolated across.
+            const Asset::Voxel::VoxelDocument* const document =
+                voxelDocumentSession_.ActiveDocument();
+            if (activeStroke != nullptr && document != nullptr &&
+                smartToolStrokePreviewPlan_ != nullptr)
+            {
+                exactSmartToolPlan = smartToolStrokePreviewPlan_;
+                if (smartToolStrokePreviewStrokeRevision_ !=
+                    activeStroke->Revision())
+                {
+                    smartToolStrokePreviewMesh_ =
+                        SmartToolExactPreviewComposer::Compose(*document,
+                            activeStroke->Changes());
+                    smartToolStrokePreviewStrokeRevision_ =
+                        activeStroke->Revision();
+                }
+                exactSmartToolPreview = &smartToolStrokePreviewMesh_;
+            }
         }
         voxelPlacementPreview_ = {};
         if (smartBrushGhostPreview_ != nullptr)
@@ -15378,7 +15651,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             voxelModelCenter_, exactSmartToolPreview->Active,
             voxelDocumentSession_.Generation(), activeDocument
                 ? activeDocument->GetRevision() : 0U,
-            exactSmartToolPlan->PlanId(), exactSmartToolPlan->Revision()));
+            exactSmartToolPlan->PlanId(), smartToolStroke_.IsActive()
+                ? smartToolStroke_.Revision() : exactSmartToolPlan->Revision()));
     }
     else
     {
@@ -15740,6 +16014,7 @@ void EditorWorkspace::DrawTransformGizmoVisibilityAnchor() const noexcept
 
 void EditorWorkspace::ClearVoxelViewport() noexcept
 {
+    CancelSmartToolStroke();
     commandHistory_.Clear();
     voxelEditHistory_.Clear();
     ++voxelModelGeneration_;

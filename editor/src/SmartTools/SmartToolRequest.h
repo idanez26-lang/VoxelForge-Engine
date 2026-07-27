@@ -53,6 +53,10 @@ struct SmartToolRequest final
     std::optional<std::uint8_t> ReplacePaletteIndex;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
+    // A transient overlay revision. It is zero for ordinary preview/commit
+    // requests and advances only while a continuous stroke provides a virtual
+    // document reader, preventing session cache reuse across stroke samples.
+    std::uint64_t VirtualRevision = 0U;
     std::uint64_t SourceGeneration = 0U;
     std::size_t SourceSubModelIndex = 0U;
     // Value snapshot only. It identifies the profile that supplied the brush
@@ -74,6 +78,7 @@ struct SmartToolRequestKey final
     std::optional<std::uint8_t> ReplacePaletteIndex;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
+    std::uint64_t VirtualRevision = 0U;
     std::uint64_t SourceGeneration = 0U;
     std::size_t SourceSubModelIndex = 0U;
     std::string ActiveProfileUuid;
@@ -92,6 +97,7 @@ struct SmartToolRequestKey final
             ReplacePaletteIndex == other.ReplacePaletteIndex &&
             SourceIdentity == other.SourceIdentity &&
             SourceRevision == other.SourceRevision &&
+            VirtualRevision == other.VirtualRevision &&
             SourceGeneration == other.SourceGeneration &&
             SourceSubModelIndex == other.SourceSubModelIndex &&
             ActiveProfileUuid == other.ActiveProfileUuid &&
@@ -154,7 +160,8 @@ struct SmartToolRequestKey final
     return {geometry, request.Mode, request.Action, request.BrushRequest.Dimensions,
         state, request.BrushRequest.Placement,
         request.ReplacePaletteIndex,
-        request.SourceIdentity, request.SourceRevision, request.SourceGeneration,
+        request.SourceIdentity, request.SourceRevision, request.VirtualRevision,
+        request.SourceGeneration,
         request.SourceSubModelIndex, request.ActiveProfileUuid,
         request.PreviewAlpha, request.HasPaletteColors, paletteSignature};
 }

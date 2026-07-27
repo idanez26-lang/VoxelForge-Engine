@@ -31,6 +31,7 @@
 #include "SmartTools/SmartToolController.h"
 #include "SmartTools/SmartToolExactPreviewComposer.h"
 #include "SmartTools/SmartToolRequest.h"
+#include "SmartTools/SmartToolStroke.h"
 #include "SmartTools/SmartPreviewEngine.h"
 #include "SmartTools/BrushProfileService.h"
 #include "Transform/TransformPreviewModel.h"
@@ -361,7 +362,12 @@ private:
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
     [[nodiscard]] bool AddAdjacentVoxel();
-    [[nodiscard]] std::optional<SmartToolRequest> BuildSmartPencilRequest();
+    [[nodiscard]] std::optional<SmartToolRequest> BuildSmartPencilRequest(
+        const SmartToolStroke* stroke = nullptr);
+    [[nodiscard]] bool BeginSmartToolStroke();
+    [[nodiscard]] bool ContinueSmartToolStroke();
+    [[nodiscard]] bool CommitSmartToolStroke();
+    void CancelSmartToolStroke() noexcept;
     [[nodiscard]] bool ApplyVoxelPencil();
     [[nodiscard]] bool ApplyVoxelEraser();
     [[nodiscard]] bool ApplyVoxelPaintBrush();
@@ -496,6 +502,12 @@ private:
     ToolContext toolContext_{};
     SmartToolController smartToolController_{};
     SmartToolSession smartToolSession_{};
+    SmartToolStroke smartToolStroke_{};
+    SmartToolPlanPtr smartToolStrokePreviewPlan_;
+    SmartToolExactPreviewMesh smartToolStrokePreviewMesh_{};
+    std::uint64_t smartToolStrokePreviewPlanId_ = 0U;
+    std::uint64_t smartToolStrokePreviewPlanRevision_ = 0U;
+    std::uint64_t smartToolStrokePreviewStrokeRevision_ = 0U;
     BrushProfileService brushProfileService_;
     SmartBrushSizeFeedback smartBrushSizeFeedback_{};
     bool smartBrushPreviewRefreshRequested_ = false;

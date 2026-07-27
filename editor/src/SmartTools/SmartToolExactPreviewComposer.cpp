@@ -27,6 +27,21 @@ namespace
 SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
     const Asset::Voxel::VoxelDocument& document, const SmartToolPlan& plan)
 {
+    std::vector<Asset::Voxel::VoxelDocumentChange> changes;
+    changes.reserve(plan.Cells().size());
+    for (const SmartToolPlanCell& cell : plan.Cells())
+    {
+        if (!cell.HasChange()) continue;
+        changes.push_back({0U, cell.WorldPosition, cell.Before.Exists,
+            cell.Before.PaletteIndex, cell.After.Exists, cell.After.PaletteIndex});
+    }
+    return Compose(document, changes);
+}
+
+SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::span<const Asset::Voxel::VoxelDocumentChange> changes)
+{
     SmartToolExactPreviewMesh result;
     result.Active = true;
     try
@@ -35,14 +50,6 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
         // Before -> After cells makes Remove (including the last voxel) use the
         // exact same visible topology as the post-commit document.
         Asset::Voxel::VoxelDocument finalDocument = document;
-        std::vector<Asset::Voxel::VoxelDocumentChange> changes;
-        changes.reserve(plan.Cells().size());
-        for (const SmartToolPlanCell& cell : plan.Cells())
-        {
-            if (!cell.HasChange()) continue;
-            changes.push_back({0U, cell.WorldPosition, cell.Before.Exists,
-                cell.Before.PaletteIndex, cell.After.Exists, cell.After.PaletteIndex});
-        }
         if (!changes.empty())
         {
             const Asset::Voxel::VoxelDocumentOperationResult applied =

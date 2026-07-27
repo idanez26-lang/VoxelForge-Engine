@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace VoxelForge::Editor
@@ -32,6 +33,11 @@ class SmartToolExactPreviewComposer final
 public:
     [[nodiscard]] static SmartToolExactPreviewMesh Compose(
         const Asset::Voxel::VoxelDocument& document, const SmartToolPlan& plan);
+    // Continuous strokes supply a de-duplicated sequence of planner-produced
+    // Before -> After changes. This overload never resolves geometry itself.
+    [[nodiscard]] static SmartToolExactPreviewMesh Compose(
+        const Asset::Voxel::VoxelDocument& document,
+        std::span<const Asset::Voxel::VoxelDocumentChange> changes);
 };
 
 // One-entry cache keyed by immutable plan identity plus the document identity

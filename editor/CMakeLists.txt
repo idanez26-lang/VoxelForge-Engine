@@ -374,6 +374,7 @@ target_sources(
         src/SmartTools/SmartToolPlan.cpp
         src/SmartTools/SmartToolPlanner.cpp
         src/SmartTools/SmartToolSession.cpp
+        src/SmartTools/SmartToolStroke.cpp
         src/SmartTools/BrushProfileService.cpp
         src/SmartTools/SmartBrushPreviewResolver.cpp
         src/SmartTools/SmartPreviewEngine.cpp
