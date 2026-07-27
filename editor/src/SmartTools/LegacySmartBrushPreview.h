@@ -1,7 +1,7 @@
 #pragma once
 
-// Compatibility adapter for Paint while Paint is not yet migrated to the
-// immutable SmartToolPlan pipeline. Pencil must use SmartBrushPreviewResolver.
+// Compatibility adapter retained for older callers. It delegates Paint
+// planning and rendering to the immutable SmartToolPlan pipeline.
 #include "SmartTools/SmartBrushPreviewResolver.h"
 
 #include <optional>

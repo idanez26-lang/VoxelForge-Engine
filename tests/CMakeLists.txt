@@ -439,6 +439,36 @@ add_test(
     NAME VoxelForge.Editor.SmartToolFoundation
     COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolFoundationTests>
 )
+add_executable(
+    VoxelForgeEditorSmartToolPlanStateTests
+    Editor/SmartToolPlanStateTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolPlanStateTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolPlanStateTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolPlanState
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolPlanStateTests>
+)
+add_executable(
+    VoxelForgeEditorSmartToolPlanStateSmokeTests
+    Editor/SmartToolPlanStateSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolPlanStateSmokeTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorSmartToolPlanStateSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolPlanStateSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolPlanStateSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.SmartToolPlanStateSmoke
+    PROPERTIES LABELS "Smoke"
+)
 add_executable(VoxelForgeEditorBrushProfileTests Editor/BrushProfileServiceTests.cpp)
 target_link_libraries(VoxelForgeEditorBrushProfileTests PRIVATE VoxelForgeEditorCommands)
 vf_configure_test(VoxelForgeEditorBrushProfileTests)

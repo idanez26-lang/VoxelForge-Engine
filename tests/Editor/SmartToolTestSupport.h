@@ -19,10 +19,19 @@ inline SmartToolPlanPtr PlanPencil(VoxelEditSession& session,
     SmartToolRequest request;
     request.Geometry = SmartGeometry::Pencil;
     request.Action = state.Mode == SmartBrushMode::Erase
-        ? SmartAction::Erase : SmartAction::Add;
-    request.BrushRequest = {*dimensions, state, {target, normal},
+        ? SmartAction::Erase
+        : state.Mode == SmartBrushMode::Paint
+        ? SmartAction::Paint
+        : state.Mode == SmartBrushMode::Replace
+        ? SmartAction::Replace : SmartAction::Add;
+    request.BrushRequest = {*dimensions, state, {target, normal}, {}};
+    request.ReadVoxel =
         [&document, subModelIndex](const Asset::Voxel::VoxelPosition position)
-        { return document.HasVoxel(position, subModelIndex); }};
+        {
+            const auto voxel = document.GetVoxel(position, subModelIndex);
+            return SmartToolVoxelState{
+                voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
+        };
     request.SourceIdentity = reinterpret_cast<std::uintptr_t>(&document);
     request.SourceRevision = document.GetRevision();
     request.SourceGeneration = session.VoxelModelGeneration();

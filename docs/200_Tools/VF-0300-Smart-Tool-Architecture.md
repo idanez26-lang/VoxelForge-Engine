@@ -1905,3 +1905,41 @@ visible de VoxelForge Studio tout en rendant son moteur de création extensible.
 **Recommandation :** valider les six questions du chapitre 27, puis produire un
 plan d'implémentation détaillé commençant par SMART-01. Aucun développement
 fonctionnel ne devrait précéder cette validation.
+
+## 30. Contrat implémenté par SMART-02.5
+
+SMART-02.5 rend `SmartToolPlan` autonome pour le Preview, le Commit et la
+construction de l'opération Undo/Redo. Chaque `SmartToolPlanCell` mémorise :
+
+- son ordinal source, sa position locale et sa position monde ;
+- l'état `Before` complet (existence et palette) ;
+- l'état `After` complet (existence et palette) ;
+- l'action et l'opération résolues ;
+- l'état de preview, le diagnostic et les flags
+  `ExistingVoxel`, `FinalVoxel`, `Overlap`, `OutOfBounds`, `NoChange` et
+  `Invalid`.
+
+Le Planner lit une vue versionnée du document une seule fois pendant la
+planification. Il résout Add, Erase, Paint et le contrat interne Replace, puis
+fige les transitions dans le plan. Replace reste indisponible dans l'interface
+tant que sa mission fonctionnelle n'est pas ouverte.
+
+Le Preview ne lit que les cellules du plan. Le Commit convertit mécaniquement
+leurs états `Before`/`After` en une transaction atomique ; ses lectures du
+document et de la grille sont uniquement des gardes d'intégrité contre un plan
+obsolète. Undo et Redo rejouent cette transaction sans recalcul métier.
+
+Le chemin Paint historique est conservé seulement comme façade de
+compatibilité : `VoxelPaintBrushTool` et
+`LegacySmartBrushPreviewResolver` délèguent désormais au
+`SmartToolController`/`SmartToolPlanner` et au même contrat de plan. Le
+Workspace utilise directement ce pipeline pour Add, Erase et Paint.
+
+Garanties nouvelles :
+
+- le plan affiché et le plan validé sont la même instance immuable ;
+- toute modification pertinente de la session invalide le plan ;
+- les palettes précédente et finale sont disponibles sans nouvelle décision ;
+- les no-op, overlaps, cellules hors limites et états invalides sont explicites ;
+- aucune géométrie ni sémantique d'action n'est recalculée au clic ;
+- aucun changement UX et aucune activation de Replace ne sont introduits.

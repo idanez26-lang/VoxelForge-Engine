@@ -134,9 +134,16 @@ SmartToolPlanPtr Plan(const Asset::Voxel::VoxelDocument& document,
     SmartToolRequest request;
     request.Geometry = SmartGeometry::Pencil;
     request.Action = state.Mode == SmartBrushMode::Erase
-        ? SmartAction::Erase : SmartAction::Add;
-    request.BrushRequest = {*dimensions, state, {target, normal},
-        [&document](const Position position) { return document.HasVoxel(position, 0U); }};
+        ? SmartAction::Erase
+        : state.Mode == SmartBrushMode::Paint
+        ? SmartAction::Paint : SmartAction::Add;
+    request.BrushRequest = {*dimensions, state, {target, normal}, {}};
+    request.ReadVoxel = [&document](const Position position)
+    {
+        const auto voxel = document.GetVoxel(position, 0U);
+        return SmartToolVoxelState{
+            voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
+    };
     request.SourceIdentity = reinterpret_cast<std::uintptr_t>(&document);
     request.SourceRevision = document.GetRevision();
     SmartToolController controller;
@@ -350,14 +357,17 @@ void TestCacheAndAppliedOperationParity()
 
     auto paintDocument = Document({{1U, 1U, 1U, 3U}});
     state.Mode = SmartBrushMode::Paint;
-    const auto paintPreview = LegacySmartBrushPreviewResolver::Resolve({&paintDocument,
-        0U, state, {{1, 1, 1}, {}}, activeColor,
-        GhostPreviewStyle::DefaultAlpha});
     TestEditSession paintSession(paintDocument);
     VoxelEditHistory history;
     VoxelPaintBrushContext paintContext{&paintSession, &paintDocument, 0U,
         Hit({1, 1, 1}, VoxelHitFace::PositiveY, paintDocument.GetRevision()),
         state, false, &history};
+    const auto paintEvaluation = VoxelPaintBrushTool::Evaluate(paintContext);
+    Require(paintEvaluation.Plan != nullptr,
+        "Paint preview did not expose its immutable plan.");
+    paintContext.Plan = paintEvaluation.Plan;
+    const auto paintPreview = SmartBrushPreviewResolver::Resolve(
+        *paintEvaluation.Plan, activeColor);
     Require(VoxelPaintBrushTool::Apply(paintContext).Code ==
             VoxelPaintBrushResultCode::Applied &&
         paintPreview.AffectedPositions == std::vector<Position>{{1, 1, 1}} &&

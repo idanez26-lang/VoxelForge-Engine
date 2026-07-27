@@ -23,14 +23,14 @@ SmartBrushPreviewResult SmartBrushPreviewResolver::Resolve(
     const SmartToolPlan& plan,
     const std::array<float, 4>& activePaletteColor, const float requestedAlpha)
 {
-    static_cast<void>(activePaletteColor);
     SmartBrushPreviewResult result;
     const float alpha = ResolveAlpha(requestedAlpha);
     const SmartBrushResult& brush = plan.BrushResult();
     result.Code = brush.Code;
     result.Error = brush.Error;
     result.RenderPlan = brush.RenderPlan;
-    result.Statistics = {brush.Statistics.Total, 0U, 0U, brush.Statistics.Clipped};
+    result.Statistics = {
+        plan.Statistics().Total, 0U, 0U, plan.Statistics().Clipped};
 
     if (brush.Code != SmartBrushResultCode::Valid &&
         brush.Code != SmartBrushResultCode::OutOfBounds)
@@ -59,6 +59,12 @@ SmartBrushPreviewResult SmartBrushPreviewResolver::Resolve(
             state = GhostVoxelState::Erased;
             color = GhostPreviewStyle::Erased;
             break;
+        case SmartToolPlanPreviewState::Painted:
+        case SmartToolPlanPreviewState::Replaced:
+            affected = true;
+            state = GhostVoxelState::Painted;
+            color = activePaletteColor;
+            break;
         case SmartToolPlanPreviewState::Ignored:
             state = GhostVoxelState::Ignored;
             color = GhostPreviewStyle::Ignored;
@@ -73,10 +79,10 @@ SmartBrushPreviewResult SmartBrushPreviewResolver::Resolve(
         if (affected)
         {
             ++result.Statistics.Affected;
-            result.AffectedPositions.push_back(cell.Position);
+            result.AffectedPositions.push_back(cell.WorldPosition);
         }
         else if (state != GhostVoxelState::Clipped) ++result.Statistics.Ignored;
-        AppendGhost(result, cell.Position, state, color, alpha);
+        AppendGhost(result, cell.WorldPosition, state, color, alpha);
     }
     return result;
 }

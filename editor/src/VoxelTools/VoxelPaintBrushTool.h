@@ -2,6 +2,7 @@
 
 #include "BrushEngine/SmartBrushEngine.h"
 #include "Commands/Voxel/VoxelEditSession.h"
+#include "SmartTools/SmartToolPlan.h"
 #include "VoxelSelection/VoxelRaycast.h"
 
 #include <cstddef>
@@ -50,6 +51,8 @@ struct VoxelPaintBrushContext final
     SmartBrushState State{};
     bool Blocked = false;
     VoxelEditHistory* History = nullptr;
+    // Apply consumes the exact plan returned by Evaluate; it never replans.
+    SmartToolPlanPtr Plan;
 };
 
 struct VoxelPaintBrushEvaluation final
@@ -62,6 +65,8 @@ struct VoxelPaintBrushEvaluation final
     std::vector<Asset::Voxel::VoxelPosition> IgnoredPositions;
     SmartBrushRenderPlan RenderPlan{};
     std::string Error;
+    // Immutable plan represented by this evaluation and required by Apply.
+    SmartToolPlanPtr Plan;
 
     [[nodiscard]] bool IsResolved() const noexcept
     {
@@ -84,9 +89,8 @@ struct VoxelPaintBrushResult final
 class VoxelPaintBrushTool final
 {
 public:
-    // Resolves Paint geometry through SmartBrushEngine using a private Add-mode
-    // copy. It never creates or deletes voxels: only occupied, different-color
-    // cells are returned as paintable.
+    // Compatibility facade for legacy callers. Planning and commit are both
+    // delegated to the immutable SmartToolPlan pipeline.
     [[nodiscard]] static VoxelPaintBrushEvaluation Evaluate(
         const VoxelPaintBrushContext& context);
     [[nodiscard]] static VoxelPaintBrushResult Apply(

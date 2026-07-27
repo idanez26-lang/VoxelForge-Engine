@@ -209,10 +209,15 @@ struct TestPencilContext final
         Editor::SmartToolRequest request;
         request.Geometry = Editor::SmartGeometry::Pencil;
         request.Action = erasing ? Editor::SmartAction::Erase : Editor::SmartAction::Add;
-        request.BrushRequest = {*dimensions, State, {*target, normal},
+        request.BrushRequest = {*dimensions, State, {*target, normal}, {}};
+        request.ReadVoxel =
             [document = Document, subModelIndex = SubModelIndex](
                 const Asset::Voxel::VoxelPosition position)
-            { return document->HasVoxel(position, subModelIndex); }};
+            {
+                const auto voxel = document->GetVoxel(position, subModelIndex);
+                return Editor::SmartToolVoxelState{
+                    voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
+            };
         request.SourceIdentity = reinterpret_cast<std::uintptr_t>(Document);
         request.SourceRevision = Document->GetRevision();
         request.SourceGeneration = EditSession->VoxelModelGeneration();
@@ -317,13 +322,16 @@ void TestToolRefusals()
             Editor::VoxelHitFace::PositiveX))).Code ==
             Editor::VoxelToolResultCode::TargetOccupied,
         "Occupied target was not refused.");
-    Require(Editor::VoxelPencilTool::Apply(Context(
-        session, document, validHit, 0U)).Code ==
-            Editor::VoxelToolResultCode::InvalidPaletteIndex &&
-        Editor::VoxelPencilTool::Apply(Context(
-            session, document, validHit, 256U)).Code ==
-            Editor::VoxelToolResultCode::InvalidPaletteIndex,
-        "Invalid palette indices were not refused.");
+    const Editor::VoxelPencilContext zeroPalette =
+        Context(session, document, validHit, 0U);
+    const Editor::VoxelPencilContext oversizedPalette =
+        Context(session, document, validHit, 256U);
+    Require(zeroPalette.Plan == nullptr && oversizedPalette.Plan == nullptr &&
+        Editor::VoxelPencilTool::Apply(zeroPalette).Code ==
+            Editor::VoxelToolResultCode::Failed &&
+        Editor::VoxelPencilTool::Apply(oversizedPalette).Code ==
+            Editor::VoxelToolResultCode::Failed,
+        "The Planner did not refuse invalid palette requests before commit.");
     Require(Editor::VoxelPencilTool::Apply(Context(
         session, document,
         Hit(1U, 1U, 1U, Editor::VoxelHitFace::NegativeY, 1U),

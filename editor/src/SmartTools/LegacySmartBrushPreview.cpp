@@ -1,6 +1,6 @@
 #include "SmartTools/LegacySmartBrushPreview.h"
 
-#include "BrushEngine/SmartBrushEngine.h"
+#include "SmartTools/SmartToolController.h"
 
 #include <algorithm>
 
@@ -36,10 +36,10 @@ bool LegacySmartBrushPreviewCacheKey::operator==(
 SmartBrushPreviewResult LegacySmartBrushPreviewResolver::Resolve(
     const LegacySmartBrushPreviewRequest& request)
 {
-    SmartBrushPreviewResult result;
     const float alpha = ResolveAlpha(request.Alpha);
     if (request.State.Mode != SmartBrushMode::Paint)
     {
+        SmartBrushPreviewResult result;
         result.Code = SmartBrushResultCode::InvalidRequest;
         result.Error = "The legacy Smart Brush preview is Paint-only.";
         AppendGhost(result, request.Placement.Target, GhostVoxelState::Invalid,
@@ -49,6 +49,7 @@ SmartBrushPreviewResult LegacySmartBrushPreviewResolver::Resolve(
     if (request.Document == nullptr ||
         request.Document->GetModel(request.SubModelIndex) == nullptr)
     {
+        SmartBrushPreviewResult result;
         result.Code = SmartBrushResultCode::InvalidRequest;
         result.Error = "The legacy Smart Brush preview has no editable document.";
         AppendGhost(result, request.Placement.Target, GhostVoxelState::Invalid,
@@ -58,6 +59,7 @@ SmartBrushPreviewResult LegacySmartBrushPreviewResolver::Resolve(
     const auto dimensions = request.Document->GetDimensions(request.SubModelIndex);
     if (!dimensions)
     {
+        SmartBrushPreviewResult result;
         result.Code = SmartBrushResultCode::InvalidRequest;
         result.Error = "The legacy Smart Brush preview has no valid dimensions.";
         AppendGhost(result, request.Placement.Target, GhostVoxelState::Invalid,
@@ -65,57 +67,39 @@ SmartBrushPreviewResult LegacySmartBrushPreviewResolver::Resolve(
         return result;
     }
 
-    const SmartBrushResult brush = SmartBrushEngine::Resolve({*dimensions,
-        request.State, request.Placement,
+    SmartToolRequest planRequest;
+    planRequest.Geometry = SmartGeometry::Pencil;
+    planRequest.Action = SmartAction::Paint;
+    planRequest.BrushRequest = {
+        *dimensions, request.State, request.Placement, {}};
+    planRequest.ReadVoxel =
         [document = request.Document, subModelIndex = request.SubModelIndex](
             const Asset::Voxel::VoxelPosition position)
-        { return document->HasVoxel(position, subModelIndex); }});
-    result.Code = brush.Code;
-    result.Error = brush.Error;
-    result.RenderPlan = brush.RenderPlan;
-    result.Statistics = {brush.Statistics.Total, 0U, 0U, brush.Statistics.Clipped};
-    for (const Asset::Voxel::VoxelPosition position : brush.ClippedPositions)
-        AppendGhost(result, position, GhostVoxelState::Clipped,
-            GhostPreviewStyle::Clipped, alpha);
-    if (brush.Code != SmartBrushResultCode::Valid &&
-        brush.Code != SmartBrushResultCode::OutOfBounds)
     {
-        AppendGhost(result, request.Placement.Target, GhostVoxelState::Invalid,
-            GhostPreviewStyle::Invalid, alpha);
+        const auto voxel = document->GetVoxel(position, subModelIndex);
+        return SmartToolVoxelState{
+            voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
+    };
+    planRequest.SourceIdentity =
+        reinterpret_cast<std::uintptr_t>(request.Document);
+    planRequest.SourceRevision = request.Document->GetRevision();
+    planRequest.SourceSubModelIndex = request.SubModelIndex;
+
+    SmartToolController controller;
+    SmartToolSession session;
+    const SmartToolResult planned =
+        controller.ResolvePreview(session, planRequest);
+    if (!planned.HasPlan())
+    {
+        SmartBrushPreviewResult result;
+        result.Code = planned.Code;
+        result.Error = planned.Error;
+        AppendGhost(result, request.Placement.Target,
+            GhostVoxelState::Invalid, GhostPreviewStyle::Invalid, alpha);
         return result;
     }
-
-    result.GhostVoxels.reserve(result.GhostVoxels.size() + brush.Positions.size());
-    result.AffectedPositions.reserve(brush.Positions.size());
-    for (const Asset::Voxel::VoxelPosition position : brush.Positions)
-    {
-        const bool occupied = request.Document->HasVoxel(position, request.SubModelIndex);
-        const auto voxel = occupied ? request.Document->GetVoxel(
-            position, request.SubModelIndex) : std::nullopt;
-        bool affected = false;
-        GhostVoxelState state = GhostVoxelState::Ignored;
-        std::array<float, 4> color = GhostPreviewStyle::Ignored;
-        switch (request.State.Mode)
-        {
-        case SmartBrushMode::Paint:
-            affected = voxel && voxel->PaletteIndex != request.State.PaletteIndex;
-            state = affected ? GhostVoxelState::Painted : GhostVoxelState::Ignored;
-            color = affected ? request.ActivePaletteColor : GhostPreviewStyle::Ignored;
-            break;
-        case SmartBrushMode::Add:
-        case SmartBrushMode::Erase:
-        case SmartBrushMode::Replace:
-        default: break;
-        }
-        if (affected)
-        {
-            ++result.Statistics.Affected;
-            result.AffectedPositions.push_back(position);
-        }
-        else ++result.Statistics.Ignored;
-        AppendGhost(result, position, state, color, alpha);
-    }
-    return result;
+    return SmartBrushPreviewResolver::Resolve(
+        *planned.Plan, request.ActivePaletteColor, alpha);
 }
 
 const SmartBrushPreviewResult& LegacySmartBrushPreviewCache::Resolve(

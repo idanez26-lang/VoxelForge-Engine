@@ -148,6 +148,15 @@ Editor::VoxelPaintBrushContext Context(
         Hit(position, face, document.GetRevision()), state, false, history};
 }
 
+Editor::VoxelPaintBrushResult Apply(
+    Editor::VoxelPaintBrushContext context)
+{
+    const Editor::VoxelPaintBrushEvaluation preview =
+        Editor::VoxelPaintBrushTool::Evaluate(context);
+    context.Plan = preview.Plan;
+    return Editor::VoxelPaintBrushTool::Apply(context);
+}
+
 std::vector<Asset::Vox::VoxVoxel> FilledCube(
     const std::uint32_t side, const std::uint8_t color)
 {
@@ -270,7 +279,7 @@ void TestClippingAndNoCreation()
 
     Editor::VoxelEditHistory history;
     const std::uint64_t count = document.GetVoxelCount();
-    const auto result = Editor::VoxelPaintBrushTool::Apply(Context(
+    const auto result = Apply(Context(
         session, document, {0, 0, 0},
         State(9U, Editor::SmartBrushShape::Cube,
             Editor::SmartBrushDimension::Volume3D,
@@ -290,7 +299,7 @@ void TestNoOpAndAtomicHistory()
     TestEditSession session(document);
     Editor::VoxelEditHistory history;
     const std::uint64_t revision = document.GetRevision();
-    const auto applied = Editor::VoxelPaintBrushTool::Apply(Context(
+    const auto applied = Apply(Context(
         session, document, {2, 1, 1}, State(8U), &history));
     Require(applied.Code == Editor::VoxelPaintBrushResultCode::Applied &&
         applied.Statistics.Total == 1U && applied.Statistics.Painted == 1U &&
@@ -307,9 +316,9 @@ void TestNoOpAndAtomicHistory()
 
     const std::uint64_t noChangeRevision = document.GetRevision();
     const std::size_t rebuilds = session.rebuildCount_;
-    const auto same = Editor::VoxelPaintBrushTool::Apply(Context(
+    const auto same = Apply(Context(
         session, document, {2, 1, 1}, State(8U), &history));
-    const auto empty = Editor::VoxelPaintBrushTool::Apply(Context(
+    const auto empty = Apply(Context(
         session, document, {0, 0, 0}, State(8U), &history));
     Require(same.Code == Editor::VoxelPaintBrushResultCode::NoChange &&
         empty.Code == Editor::VoxelPaintBrushResultCode::NoChange &&

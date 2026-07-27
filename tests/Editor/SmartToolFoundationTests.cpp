@@ -27,10 +27,12 @@ SmartToolRequest Request(const SmartAction action = SmartAction::Add)
     request.BrushRequest.State = state;
     request.BrushRequest.Placement = {{3, 3, 3}, {0, 1, 0}};
     const VoxelForge::Asset::Voxel::VoxelPosition occupied{3, 3, 3};
-    request.BrushRequest.IsOccupied = [occupied](
+    request.ReadVoxel = [occupied](
         const VoxelForge::Asset::Voxel::VoxelPosition position)
     {
-        return position == occupied;
+        return SmartToolVoxelState{
+            position == occupied,
+            static_cast<std::uint8_t>(position == occupied ? 9U : 0U)};
     };
     request.SourceIdentity = 42U;
     request.SourceRevision = 7U;
@@ -82,7 +84,7 @@ int main()
         Require(session.PlanForPreview().get() == session.PlanForCommit().get(),
             "preview and commit do not share plan identity");
         Require(first.Plan->PlanId() != 0U &&
-            first.Plan->PlanId() == first.Plan->Revision() &&
+            first.Plan->Revision() == profileA.SourceRevision &&
             !first.Plan->Cells().empty(),
             "immutable plan metadata or resolved cells missing");
         Require(session.State().PaletteIndex == first.Plan->BrushState().PaletteIndex &&
@@ -110,10 +112,11 @@ int main()
             "a profile identity change reused the profile A plan");
         const std::size_t cellCountBeforeExternalMutation = first.Plan->Cells().size();
         const VoxelForge::Asset::Voxel::VoxelPosition firstCellBeforeExternalMutation =
-            first.Plan->Cells().front().Position;
+            first.Plan->Cells().front().WorldPosition;
         profileA.BrushRequest.State.Size = 9;
         Require(first.Plan->Cells().size() == cellCountBeforeExternalMutation &&
-            first.Plan->Cells().front().Position == firstCellBeforeExternalMutation,
+            first.Plan->Cells().front().WorldPosition ==
+                firstCellBeforeExternalMutation,
             "plan cells retained mutable request-owned storage");
 
         SmartToolRequest moved = add;
@@ -170,7 +173,8 @@ int main()
             "controller accepted a request without a source identity");
 
         SmartToolRequest noChange = Request();
-        noChange.BrushRequest.IsOccupied = [](const auto) { return true; };
+        noChange.ReadVoxel = [](const auto)
+        { return SmartToolVoxelState{true, 4U}; };
         const SmartToolResult ignored = controller.ResolvePreview(session, noChange);
         Require(ignored.Succeeded() && ignored.HasPlan(),
             "valid no-change plan was rejected");

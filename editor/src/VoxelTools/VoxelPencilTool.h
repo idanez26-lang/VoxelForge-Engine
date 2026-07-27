@@ -14,6 +14,7 @@ class VoxelEditHistory;
 enum class VoxelToolResultCode
 {
     Applied,
+    NoChange,
     NoDocument,
     NoHit,
     TargetOutOfBounds,

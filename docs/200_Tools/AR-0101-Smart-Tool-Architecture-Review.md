@@ -503,3 +503,25 @@ coûteux ; le laisser passer SMART-03 créerait un adaptateur différent pour
 chaque action et imposerait une vraie refonte plus tard.
 
 **Architecture nécessitant une correction avant SMART-03.**
+
+## 15. Résolution post-audit : SMART-02.5
+
+La correction ciblée recommandée par AR-01 a été implémentée par SMART-02.5
+sans modifier les conclusions historiques de l'audit.
+
+Les points bloquants sont désormais traités :
+
+- `SmartToolPlanCell` porte les états `Before` et `After` complets, les palettes,
+  l'action, l'opération, les diagnostics et les flags de contexte ;
+- Add, Erase, Paint et le contrat interne Replace sont décidés par
+  `SmartToolPlanner` ;
+- Preview et Commit consomment la même instance immuable ;
+- le Commit crée l'opération atomique directement depuis `Before`/`After` ;
+- Undo/Redo ne demande aucun recalcul métier ;
+- le chemin Paint historique n'est plus une seconde autorité : ses façades
+  délèguent au pipeline Planner/Plan ;
+- un changement de session invalide le plan avant Commit.
+
+La garde architecturale « SMART-03 bloqué tant que le plan n'est pas autonome »
+peut être levée après validation technique et manuelle de SMART-02.5. Replace
+reste volontairement non exposé à l'utilisateur.
