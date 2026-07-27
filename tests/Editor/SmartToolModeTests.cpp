@@ -34,7 +34,8 @@ void Require(const bool condition, const std::string_view message)
 SmartToolRequest Request(const SmartToolMode mode, const SmartAction action,
     const States& states = {}, const int size = 1,
     const Position target = {16, 16, 16},
-    const Asset::Voxel::VoxelDimensions dimensions = {128U, 128U, 128U})
+    const Asset::Voxel::VoxelDimensions dimensions = {128U, 128U, 128U},
+    const Position normal = {0, 0, 0})
 {
     SmartToolRequest request;
     request.Geometry = SmartGeometry::Pencil;
@@ -47,7 +48,7 @@ SmartToolRequest Request(const SmartToolMode mode, const SmartAction action,
     request.BrushRequest.State.Orientation = SmartBrushOrientation::Z;
     request.BrushRequest.State.Size = size;
     request.BrushRequest.State.PaletteIndex = 7U;
-    request.BrushRequest.Placement = {target, {0, 0, 0}};
+    request.BrushRequest.Placement = {target, normal};
     const auto snapshot = std::make_shared<States>(states);
     request.ReadVoxel = [snapshot](const Position position)
     {
@@ -70,16 +71,39 @@ SmartToolResult Resolve(const SmartToolRequest& request)
     return controller.ResolvePreview(session, request);
 }
 
+SmartBrushShape ShapeForMode(const SmartToolMode mode)
+{
+    switch (mode)
+    {
+    case SmartToolMode::SingleVoxel:
+    case SmartToolMode::CubeBrush: return SmartBrushShape::Cube;
+    case SmartToolMode::SphereBrush: return SmartBrushShape::Sphere;
+    case SmartToolMode::CylinderBrush: return SmartBrushShape::Cylinder;
+    }
+    throw std::runtime_error("Unknown Smart Tool mode.");
+}
+
 void RequireCanonical(const SmartToolPlan& plan, const SmartToolMode expectedMode,
     const int expectedSize)
 {
     Require(plan.Mode().has_value() && *plan.Mode() ==
             expectedMode &&
-            plan.BrushState().Shape == SmartBrushShape::Cube &&
+            plan.BrushState().Shape == ShapeForMode(expectedMode) &&
             plan.BrushState().Dimension == SmartBrushDimension::Volume3D &&
             plan.BrushState().Orientation == SmartBrushOrientation::Auto &&
             plan.BrushState().Size == expectedSize,
         "Planner did not canonicalize the exposed Smart Tool mode.");
+}
+
+void RequireSameCells(const SmartToolPlan& left, const SmartToolPlan& right)
+{
+    Require(left.Cells().size() == right.Cells().size(),
+        "Repeated planning changed the number of Smart Brush cells.");
+    for (std::size_t index = 0U; index < left.Cells().size(); ++index)
+    {
+        Require(left.Cells()[index].WorldPosition == right.Cells()[index].WorldPosition,
+            "Repeated planning changed Smart Brush cell order or position.");
+    }
 }
 
 void TestSingleActions()
@@ -128,6 +152,70 @@ void TestCubeSizesAndLimits()
         "Cube Brush accepted an invalid size outside [1, 64].");
 }
 
+void TestSphereAndCylinderShapes()
+{
+    const Position target{40, 40, 40};
+    constexpr Asset::Voxel::VoxelDimensions dimensions{128U, 128U, 128U};
+    for (const int size : {1, 3, 5, 7, 4, 64})
+    {
+        const auto result = Resolve(Request(SmartToolMode::SphereBrush,
+            SmartAction::Add, {}, size, target, dimensions));
+        const auto repeated = Resolve(Request(SmartToolMode::SphereBrush,
+            SmartAction::Add, {}, size, target, dimensions));
+        Require(result.HasPlan() && repeated.HasPlan(),
+            "Sphere Brush did not produce a deterministic plan.");
+        RequireCanonical(*result.Plan, SmartToolMode::SphereBrush, size);
+        RequireSameCells(*result.Plan, *repeated.Plan);
+        Require(SmartBrushEngine::EstimateTotal(result.Plan->BrushState()) ==
+                result.Plan->Cells().size(),
+            "Sphere Brush estimate differs from its exact planned volume.");
+        const int evenCenterOffset = size % 2 == 0 ? 1 : 0;
+        const int radiusSquared = size * size;
+        for (const SmartToolPlanCell& cell : result.Plan->Cells())
+        {
+            const int dx = 2 * (cell.WorldPosition.X - target.X) - evenCenterOffset;
+            const int dy = 2 * (cell.WorldPosition.Y - target.Y) - evenCenterOffset;
+            const int dz = 2 * (cell.WorldPosition.Z - target.Z) - evenCenterOffset;
+            Require(dx * dx + dy * dy + dz * dz <= radiusSquared,
+                "Sphere Brush generated a voxel outside its exact sphere.");
+            Require(cell.After.Exists && cell.After.PaletteIndex == 7U,
+                "Sphere Brush did not materialize the requested palette color.");
+        }
+    }
+
+    for (const int size : {3, 5, 7, 4, 64})
+    {
+        const auto result = Resolve(Request(SmartToolMode::CylinderBrush,
+            SmartAction::Add, {}, size, target, dimensions, {0, 1, 0}));
+        const auto repeated = Resolve(Request(SmartToolMode::CylinderBrush,
+            SmartAction::Add, {}, size, target, dimensions, {0, 1, 0}));
+        Require(result.HasPlan() && repeated.HasPlan(),
+            "Cylinder Brush did not produce a deterministic plan.");
+        RequireCanonical(*result.Plan, SmartToolMode::CylinderBrush, size);
+        RequireSameCells(*result.Plan, *repeated.Plan);
+        Require(SmartBrushEngine::EstimateTotal(result.Plan->BrushState()) ==
+                result.Plan->Cells().size(),
+            "Cylinder Brush estimate differs from its exact planned volume.");
+        const int evenCenterOffset = size % 2 == 0 ? 1 : 0;
+        const int radiusSquared = size * size;
+        for (const SmartToolPlanCell& cell : result.Plan->Cells())
+        {
+            const int dx = 2 * (cell.WorldPosition.X - target.X) - evenCenterOffset;
+            const int dz = 2 * (cell.WorldPosition.Z - target.Z) - evenCenterOffset;
+            Require(dx * dx + dz * dz <= radiusSquared &&
+                    cell.WorldPosition.Y >= target.Y &&
+                    cell.WorldPosition.Y < target.Y + size,
+                "Cylinder Brush did not use its exact vertical voxel volume.");
+        }
+    }
+
+    const auto sideCylinder = Resolve(Request(SmartToolMode::CylinderBrush,
+        SmartAction::Add, {}, 3, target, dimensions, {1, 0, 0}));
+    Require(sideCylinder.HasPlan() && sideCylinder.Plan->Bounds().Minimum.Y == target.Y - 1 &&
+            sideCylinder.Plan->Bounds().Maximum.Y == target.Y + 1,
+        "Cylinder Brush did not keep its vertical axis centered on a side surface.");
+}
+
 void TestDiagnosticsCacheAndPreview()
 {
     const States occupied{{{16, 16, 16}, {true, 3U}}};
@@ -155,6 +243,28 @@ void TestDiagnosticsCacheAndPreview()
             missingPreview.AffectedPositions.empty() && !missingPreview.CanCommit(),
         "Paint changed or previewed a missing voxel as a committable edit.");
 
+    const auto spherePaintMissing = Resolve(Request(SmartToolMode::SphereBrush,
+        SmartAction::Paint, {}, 3));
+    Require(spherePaintMissing.HasPlan() && !spherePaintMissing.Plan->HasChanges() &&
+            std::all_of(spherePaintMissing.Plan->Cells().begin(),
+                spherePaintMissing.Plan->Cells().end(),
+                [](const SmartToolPlanCell& cell) { return !cell.After.Exists; }),
+        "Sphere Paint created voxels that were absent from the document.");
+
+    const States sphereOccupied{{{16, 16, 16}, {true, 3U}}};
+    const auto sphereOverlap = Resolve(Request(SmartToolMode::SphereBrush,
+        SmartAction::Add, sphereOccupied, 3));
+    Require(sphereOverlap.HasPlan() &&
+            sphereOverlap.Plan->PreviewDiagnostics().HasOverlap,
+        "Sphere overlap was not retained in the immutable plan diagnostics.");
+
+    const auto sphereRemove = Resolve(Request(SmartToolMode::SphereBrush,
+        SmartAction::Erase, sphereOccupied, 3));
+    Require(sphereRemove.HasPlan() &&
+            sphereRemove.Plan->AffectedPositions().size() == 1U &&
+            sphereRemove.Plan->AffectedPositions().front() == Position{16, 16, 16},
+        "Sphere Remove did not affect exactly the existing source voxel.");
+
     const States sparse{{{15, 15, 15}, {true, 3U}},
         {{16, 16, 16}, {true, 3U}}};
     const auto mixedRemove = Resolve(Request(SmartToolMode::CubeBrush,
@@ -171,11 +281,44 @@ void TestDiagnosticsCacheAndPreview()
                 removePreview.AffectedPositions.end(),
         "Cube Remove preview did not retain exactly the existing cells to erase.");
 
+    const States cylinderOccupied{{{16, 16, 16}, {true, 3U}},
+        {{17, 16, 16}, {true, 3U}}};
+    const auto cylinderRemove = Resolve(Request(SmartToolMode::CylinderBrush,
+        SmartAction::Erase, cylinderOccupied, 3));
+    Require(cylinderRemove.HasPlan() &&
+            cylinderRemove.Plan->AffectedPositions().size() == 2U &&
+            std::all_of(cylinderRemove.Plan->AffectedPositions().begin(),
+                cylinderRemove.Plan->AffectedPositions().end(),
+                [&cylinderOccupied](const Position position)
+                {
+                    return cylinderOccupied.contains(position);
+                }),
+        "Cylinder Remove targeted cells that did not exist in the document.");
+
+    const auto cylinderPaint = Resolve(Request(SmartToolMode::CylinderBrush,
+        SmartAction::Paint, cylinderOccupied, 3));
+    Require(cylinderPaint.HasPlan() &&
+            cylinderPaint.Plan->AffectedPositions().size() == 2U &&
+            std::all_of(cylinderPaint.Plan->Cells().begin(),
+                cylinderPaint.Plan->Cells().end(),
+                [](const SmartToolPlanCell& cell)
+                {
+                    return !cell.After.Exists || cell.After.PaletteIndex == 7U;
+                }),
+        "Cylinder Paint did not paint existing cells without creating new voxels.");
+
     const auto clipped = Resolve(Request(SmartToolMode::CubeBrush, SmartAction::Add,
         {}, 3, {3, 2, 2}, {4U, 4U, 4U}));
     Require(clipped.HasPlan() && clipped.Plan->Statistics().Clipped > 0U &&
             clipped.Plan->PreviewDiagnostics().HasOutOfBounds,
         "Cube Brush clipping did not remain visible in the plan diagnostics.");
+
+    const auto cylinderClipped = Resolve(Request(SmartToolMode::CylinderBrush,
+        SmartAction::Add, {}, 3, {3, 2, 2}, {4U, 4U, 4U}));
+    Require(cylinderClipped.HasPlan() &&
+            cylinderClipped.Plan->Statistics().Clipped > 0U &&
+            cylinderClipped.Plan->PreviewDiagnostics().HasOutOfBounds,
+        "Cylinder Brush clipping did not remain visible in the plan diagnostics.");
 
     SmartToolController controller;
     SmartToolSession session;
@@ -183,9 +326,13 @@ void TestDiagnosticsCacheAndPreview()
         Request(SmartToolMode::CubeBrush, SmartAction::Add, {}, 3));
     const SmartToolResult sizeFive = controller.ResolvePreview(session,
         Request(SmartToolMode::CubeBrush, SmartAction::Add, {}, 5));
-    Require(sizeThree.HasPlan() && sizeFive.HasPlan() &&
-            sizeThree.Plan.get() != sizeFive.Plan.get(),
-        "Changing Cube Brush size reused an obsolete immutable plan.");
+    const SmartToolResult sphere = controller.ResolvePreview(session,
+        Request(SmartToolMode::SphereBrush, SmartAction::Add, {}, 5));
+    Require(sizeThree.HasPlan() && sizeFive.HasPlan() && sphere.HasPlan() &&
+            sizeThree.Plan.get() != sizeFive.Plan.get() &&
+            sizeFive.Plan.get() != sphere.Plan.get() &&
+            sphere.Plan->BrushState().Shape == SmartBrushShape::Sphere,
+        "Changing Smart Tool size or mode reused an obsolete immutable plan.");
     SmartPreviewCache cache;
     const SmartPreviewData& preview = cache.Resolve(sizeFive.Plan);
     Require(preview.GhostVoxels.size() == sizeFive.Plan->Cells().size() &&
@@ -206,6 +353,12 @@ void TestEngineSafetyCap()
     const SmartBrushResult result = SmartBrushEngine::Resolve(request);
     Require(result.Code == SmartBrushResultCode::InvalidRequest,
         "Smart Brush accepted an unsafe caller-provided maximum size.");
+
+    const auto unknownMode = Resolve(Request(
+        static_cast<SmartToolMode>(255U), SmartAction::Add));
+    Require(!unknownMode.HasPlan() &&
+            unknownMode.Code == SmartBrushResultCode::Unsupported,
+        "Planner accepted an unknown Smart Tool mode.");
 }
 }
 
@@ -215,6 +368,7 @@ int main()
     {
         TestSingleActions();
         TestCubeSizesAndLimits();
+        TestSphereAndCylinderShapes();
         TestDiagnosticsCacheAndPreview();
         TestEngineSafetyCap();
         std::cout << "Smart Tool mode tests passed.\n";

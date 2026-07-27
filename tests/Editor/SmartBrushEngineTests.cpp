@@ -225,6 +225,39 @@ void TestEraseStatistics()
             result.Statistics.New + result.Statistics.Clipped,
         "Smart Erase Total/Erased/Ignored/Clipped statistics are inconsistent.");
 }
+
+void TestCylinderVolume()
+{
+    Editor::SmartBrushState cylinder;
+    cylinder.Shape = Editor::SmartBrushShape::Cylinder;
+    cylinder.Size = 4;
+    Editor::SmartBrushRequest request;
+    request.Dimensions = {32U, 32U, 32U};
+    request.State = cylinder;
+    request.Placement = {{8, 8, 8}, {0, 1, 0}};
+    request.IsOccupied = [](const Position) { return false; };
+    request.MaximumSize = Editor::MaximumSmartBrushRequestSize;
+    const Editor::SmartBrushResult result =
+        Editor::SmartBrushEngine::Resolve(request);
+    Require(result.Code == Editor::SmartBrushResultCode::Valid &&
+            result.Statistics.Total == result.Positions.size() &&
+            Editor::SmartBrushEngine::EstimateTotal(cylinder) ==
+                result.Positions.size(),
+        "Vertical Cylinder statistics are inconsistent.");
+    const int evenCenterOffset = 1;
+    for (const Position position : result.Positions)
+    {
+        const int dx = 2 * (position.X - 8) - evenCenterOffset;
+        const int dz = 2 * (position.Z - 8) - evenCenterOffset;
+        Require(dx * dx + dz * dz <= 16 && position.Y >= 8 && position.Y < 12,
+            "Vertical Cylinder generated an invalid voxel position.");
+    }
+    cylinder.Dimension = Editor::SmartBrushDimension::Surface2D;
+    request.State = cylinder;
+    Require(Editor::SmartBrushEngine::Resolve(request).Code ==
+            Editor::SmartBrushResultCode::Unsupported,
+        "Cylinder accepted an unsupported 2D surface request.");
+}
 }
 
 int main()
@@ -236,6 +269,7 @@ int main()
         TestRefusalsAndAdaptivePlan();
         TestBoundaryClipping();
         TestEraseStatistics();
+        TestCylinderVolume();
         std::cout << "Smart Brush Engine tests passed.\n";
         return 0;
     }

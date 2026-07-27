@@ -190,6 +190,11 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
         return Error(SmartBrushResultCode::Unsupported,
             "The Smart Tool planner supports only Pencil, Cube, and Sphere geometry.");
     }
+    if (request.Mode && request.Geometry != SmartGeometry::Pencil)
+    {
+        return Error(SmartBrushResultCode::Unsupported,
+            "SMART-05 modes require the Pencil Smart Geometry.");
+    }
     if (request.Action != SmartAction::Add &&
         request.Action != SmartAction::Erase &&
         request.Action != SmartAction::Paint &&
@@ -224,26 +229,39 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
         SmartToolRequest normalized = request;
         if (request.Mode)
         {
-            // SMART-04 has one canonical geometry pipeline. The mode is
-            // normalized here rather than trusted from UI state, which makes
-            // Preview and Commit consume exactly the same bounded plan.
+            // The Planner is the business boundary that resolves a Smart Tool
+            // mode. Preview and Commit subsequently consume this exact plan.
             normalized.Geometry = SmartGeometry::Pencil;
-            normalized.BrushRequest.State.Shape = SmartBrushShape::Cube;
             normalized.BrushRequest.State.Dimension =
                 SmartBrushDimension::Volume3D;
             normalized.BrushRequest.State.Orientation = SmartBrushOrientation::Auto;
-            if (*request.Mode == SmartToolMode::SingleVoxel)
+            switch (*request.Mode)
+            {
+            case SmartToolMode::SingleVoxel:
+                normalized.BrushRequest.State.Shape = SmartBrushShape::Cube;
                 normalized.BrushRequest.State.Size = 1;
-            else if (*request.Mode == SmartToolMode::CubeBrush)
+                break;
+            case SmartToolMode::CubeBrush:
+                normalized.BrushRequest.State.Shape = SmartBrushShape::Cube;
+                break;
+            case SmartToolMode::SphereBrush:
+                normalized.BrushRequest.State.Shape = SmartBrushShape::Sphere;
+                break;
+            case SmartToolMode::CylinderBrush:
+                normalized.BrushRequest.State.Shape = SmartBrushShape::Cylinder;
+                break;
+            default:
+                return Error(SmartBrushResultCode::Unsupported,
+                    "The requested Smart Tool mode is not implemented.");
+            }
+            if (*request.Mode != SmartToolMode::SingleVoxel)
             {
                 if (normalized.BrushRequest.State.Size < 1 ||
-                    normalized.BrushRequest.State.Size > MaximumSmartToolCubeBrushSize)
+                    normalized.BrushRequest.State.Size > MaximumSmartToolBrushSize)
                     return Error(SmartBrushResultCode::InvalidRequest,
-                        "Cube Brush size must be between 1 and 64 voxels.");
-                normalized.BrushRequest.MaximumSize = MaximumSmartToolCubeBrushSize;
+                        "Smart Brush size must be between 1 and 64 voxels.");
             }
-            else return Error(SmartBrushResultCode::Unsupported,
-                "The requested Smart Tool mode is not implemented.");
+            normalized.BrushRequest.MaximumSize = MaximumSmartToolBrushSize;
         }
         else normalized.BrushRequest.State.Shape = ResolveSmartBrushShape(
             request.Geometry, normalized.BrushRequest.State.Shape);

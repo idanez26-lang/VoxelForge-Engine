@@ -35,7 +35,7 @@ struct SmartToolRequest final
 {
     SmartGeometry Geometry = SmartGeometry::Pencil;
     // Optional only to preserve isolated legacy callers during migration.
-    // The active Smart Tool always supplies an explicit SMART-04 mode.
+    // The active Smart Tool always supplies an explicit SMART-05 mode.
     std::optional<SmartToolMode> Mode;
     SmartAction Action = SmartAction::Add;
     SmartBrushRequest BrushRequest{};
@@ -123,10 +123,24 @@ struct SmartToolRequestKey final
     if (request.Mode)
     {
         geometry = SmartGeometry::Pencil;
-        state.Shape = SmartBrushShape::Cube;
         state.Dimension = SmartBrushDimension::Volume3D;
         state.Orientation = SmartBrushOrientation::Auto;
-        if (*request.Mode == SmartToolMode::SingleVoxel) state.Size = 1;
+        switch (*request.Mode)
+        {
+        case SmartToolMode::SingleVoxel:
+            state.Shape = SmartBrushShape::Cube;
+            state.Size = 1;
+            break;
+        case SmartToolMode::CubeBrush:
+            state.Shape = SmartBrushShape::Cube;
+            break;
+        case SmartToolMode::SphereBrush:
+            state.Shape = SmartBrushShape::Sphere;
+            break;
+        case SmartToolMode::CylinderBrush:
+            state.Shape = SmartBrushShape::Cylinder;
+            break;
+        }
     }
     else state.Shape = ResolveSmartBrushShape(request.Geometry, state.Shape);
     switch (request.Action)

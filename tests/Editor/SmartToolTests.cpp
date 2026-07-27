@@ -47,6 +47,18 @@ int main()
             tool.Brush().Size != 7 || tool.Brush().PaletteIndex != 23U ||
             !tool.IsOperational())
             throw std::runtime_error("single voxel return transition");
+        tool.SetMode(SmartToolMode::SphereBrush);
+        if (tool.Geometry() != SmartGeometry::Pencil ||
+            tool.Mode() != SmartToolMode::SphereBrush ||
+            tool.Brush().Size != 7 || tool.Brush().PaletteIndex != 23U ||
+            !tool.IsOperational())
+            throw std::runtime_error("sphere brush transition");
+        tool.SetMode(SmartToolMode::CylinderBrush);
+        if (tool.Geometry() != SmartGeometry::Pencil ||
+            tool.Mode() != SmartToolMode::CylinderBrush ||
+            tool.Brush().Size != 7 || tool.Brush().PaletteIndex != 23U ||
+            !tool.IsOperational())
+            throw std::runtime_error("cylinder brush transition");
 
         tool.SetAction(SmartAction::Add);
         if (!tool.IsOperational()) throw std::runtime_error("create action");

@@ -11,7 +11,8 @@ namespace
 {
 bool IsSupportedShape(const SmartBrushShape shape) noexcept
 {
-    return shape == SmartBrushShape::Cube || shape == SmartBrushShape::Sphere;
+    return shape == SmartBrushShape::Cube || shape == SmartBrushShape::Sphere ||
+        shape == SmartBrushShape::Cylinder;
 }
 
 bool IsKnownDimension(const SmartBrushDimension dimension) noexcept
@@ -121,14 +122,19 @@ SmartBrushBounds CalculateBounds(
     return bounds;
 }
 
+[[nodiscard]] Asset::Voxel::VoxelPosition VolumeAnchor(
+    const SmartBrushPlacement placement, const int size) noexcept
+{
+    const int depthOffset = (size - 1) / 2;
+    return {placement.Target.X + placement.Normal.X * depthOffset,
+        placement.Target.Y + placement.Normal.Y * depthOffset,
+        placement.Target.Z + placement.Normal.Z * depthOffset};
+}
+
 [[nodiscard]] std::vector<Asset::Voxel::VoxelPosition> GenerateCubeVolume(
     const SmartBrushPlacement placement, const int size)
 {
-    const int depthOffset = (size - 1) / 2;
-    const Asset::Voxel::VoxelPosition anchor{
-        placement.Target.X + placement.Normal.X * depthOffset,
-        placement.Target.Y + placement.Normal.Y * depthOffset,
-        placement.Target.Z + placement.Normal.Z * depthOffset};
+    const Asset::Voxel::VoxelPosition anchor = VolumeAnchor(placement, size);
     const int minimumOffset = -((size - 1) / 2);
     const int maximumOffset = size / 2;
     std::vector<Asset::Voxel::VoxelPosition> positions;
@@ -138,6 +144,61 @@ SmartBrushBounds CalculateBounds(
         for (int y = minimumOffset; y <= maximumOffset; ++y)
             for (int x = minimumOffset; x <= maximumOffset; ++x)
                 positions.push_back({anchor.X + x, anchor.Y + y, anchor.Z + z});
+    return positions;
+}
+
+[[nodiscard]] std::vector<Asset::Voxel::VoxelPosition> GenerateSphereVolume(
+    const SmartBrushPlacement placement, const int size)
+{
+    const Asset::Voxel::VoxelPosition anchor = VolumeAnchor(placement, size);
+    const int minimumOffset = -((size - 1) / 2);
+    const int maximumOffset = size / 2;
+    const int evenCenterOffset = size % 2 == 0 ? 1 : 0;
+    const int radiusSquared = size * size;
+    std::vector<Asset::Voxel::VoxelPosition> positions;
+    positions.reserve(static_cast<std::size_t>(size) *
+        static_cast<std::size_t>(size) * static_cast<std::size_t>(size));
+    for (int z = minimumOffset; z <= maximumOffset; ++z)
+    {
+        for (int y = minimumOffset; y <= maximumOffset; ++y)
+        {
+            for (int x = minimumOffset; x <= maximumOffset; ++x)
+            {
+                const int dx = 2 * x - evenCenterOffset;
+                const int dy = 2 * y - evenCenterOffset;
+                const int dz = 2 * z - evenCenterOffset;
+                if (dx * dx + dy * dy + dz * dz > radiusSquared) continue;
+                positions.push_back({anchor.X + x, anchor.Y + y, anchor.Z + z});
+            }
+        }
+    }
+    return positions;
+}
+
+[[nodiscard]] std::vector<Asset::Voxel::VoxelPosition>
+GenerateVerticalCylinderVolume(const SmartBrushPlacement placement, const int size)
+{
+    const Asset::Voxel::VoxelPosition anchor = VolumeAnchor(placement, size);
+    const int minimumOffset = -((size - 1) / 2);
+    const int maximumOffset = size / 2;
+    const int evenCenterOffset = size % 2 == 0 ? 1 : 0;
+    const int radiusSquared = size * size;
+    std::vector<Asset::Voxel::VoxelPosition> positions;
+    positions.reserve(static_cast<std::size_t>(size) *
+        static_cast<std::size_t>(size) * static_cast<std::size_t>(size));
+    for (int y = minimumOffset; y <= maximumOffset; ++y)
+    {
+        for (int z = minimumOffset; z <= maximumOffset; ++z)
+        {
+            for (int x = minimumOffset; x <= maximumOffset; ++x)
+            {
+                const int dx = 2 * x - evenCenterOffset;
+                const int dz = 2 * z - evenCenterOffset;
+                if (dx * dx + dz * dz > radiusSquared) continue;
+                positions.push_back({anchor.X + x, anchor.Y + y, anchor.Z + z});
+            }
+        }
+    }
     return positions;
 }
 
@@ -161,6 +222,41 @@ std::size_t EstimateSurface(
         }
     return count;
 }
+
+std::size_t EstimateVolume(
+    const SmartBrushShape shape, const int size) noexcept
+{
+    if (shape == SmartBrushShape::Cube)
+    {
+        const std::size_t dimension = static_cast<std::size_t>(size);
+        return dimension * dimension * dimension;
+    }
+
+    const int minimumOffset = -((size - 1) / 2);
+    const int maximumOffset = size / 2;
+    const int evenCenterOffset = size % 2 == 0 ? 1 : 0;
+    const int radiusSquared = size * size;
+    std::size_t count = 0U;
+    for (int z = minimumOffset; z <= maximumOffset; ++z)
+    {
+        for (int y = minimumOffset; y <= maximumOffset; ++y)
+        {
+            for (int x = minimumOffset; x <= maximumOffset; ++x)
+            {
+                const int dx = 2 * x - evenCenterOffset;
+                const int dz = 2 * z - evenCenterOffset;
+                if (shape == SmartBrushShape::Cylinder)
+                {
+                    if (dx * dx + dz * dz <= radiusSquared) ++count;
+                    continue;
+                }
+                const int dy = 2 * y - evenCenterOffset;
+                if (dx * dx + dy * dy + dz * dz <= radiusSquared) ++count;
+            }
+        }
+    }
+    return count;
+}
 }
 
 int SmartBrushEngine::MaximumSize() noexcept
@@ -171,7 +267,8 @@ int SmartBrushEngine::MaximumSize() noexcept
 std::size_t SmartBrushEngine::EstimateTotal(
     const SmartBrushState& state) noexcept
 {
-    if (!IsSupportedShape(state.Shape) || !IsVoxelBrushSizeValid(state.Size) ||
+    if (!IsSupportedShape(state.Shape) || state.Size < 1 ||
+        state.Size > MaximumSmartBrushRequestSize ||
         !IsKnownDimension(state.Dimension) ||
         !IsKnownOrientation(state.Orientation) ||
         !IsKnownMode(state.Mode) ||
@@ -179,12 +276,12 @@ std::size_t SmartBrushEngine::EstimateTotal(
     {
         return 0U;
     }
+    if (state.Shape == SmartBrushShape::Cylinder &&
+        state.Dimension != SmartBrushDimension::Volume3D)
+        return 0U;
     if (state.Dimension == SmartBrushDimension::Surface2D)
         return EstimateSurface(state.Shape, state.Size);
-    return EstimateVoxelBrushVoxelCount(
-        state.Shape == SmartBrushShape::Sphere
-            ? VoxelBrushShape::Sphere : VoxelBrushShape::Cube,
-        state.Size);
+    return EstimateVolume(state.Shape, state.Size);
 }
 
 bool SmartBrushResult::IsWithinBounds() const noexcept
@@ -204,6 +301,13 @@ SmartBrushResult SmartBrushEngine::Resolve(const SmartBrushRequest& request)
     {
         result.Code = SmartBrushResultCode::Unsupported;
         result.Error = "The selected Smart Brush shape is not implemented.";
+        return result;
+    }
+    if (request.State.Shape == SmartBrushShape::Cylinder &&
+        request.State.Dimension != SmartBrushDimension::Volume3D)
+    {
+        result.Code = SmartBrushResultCode::Unsupported;
+        result.Error = "Cylinder Brush supports only a vertical 3D volume.";
         return result;
     }
     if (request.MaximumSize < 1 ||
@@ -227,19 +331,28 @@ SmartBrushResult SmartBrushEngine::Resolve(const SmartBrushRequest& request)
     {
         if (request.State.Dimension == SmartBrushDimension::Volume3D)
         {
-            const VoxelBrushShape shape = request.State.Shape ==
-                    SmartBrushShape::Cube
-                ? VoxelBrushShape::Cube : VoxelBrushShape::Sphere;
-            result.Positions = request.State.Shape == SmartBrushShape::Cube &&
-                    request.State.Size > MaximumVoxelBrushSize
-                ? GenerateCubeVolume(request.Placement, request.State.Size)
-                : GenerateVoxelBrush(
-                    OffsetVoxelBrushAnchor(
-                        request.Placement.Target,
-                        request.Placement.Normal,
-                        request.State.Size),
-                    shape,
-                    request.State.Size);
+            if (request.State.Shape == SmartBrushShape::Cylinder)
+            {
+                result.Positions = GenerateVerticalCylinderVolume(
+                    request.Placement, request.State.Size);
+            }
+            else
+            {
+                const VoxelBrushShape shape = request.State.Shape ==
+                        SmartBrushShape::Cube
+                    ? VoxelBrushShape::Cube : VoxelBrushShape::Sphere;
+                result.Positions = request.State.Size > MaximumVoxelBrushSize
+                    ? request.State.Shape == SmartBrushShape::Cube
+                        ? GenerateCubeVolume(request.Placement, request.State.Size)
+                        : GenerateSphereVolume(request.Placement, request.State.Size)
+                    : GenerateVoxelBrush(
+                        OffsetVoxelBrushAnchor(
+                            request.Placement.Target,
+                            request.Placement.Normal,
+                            request.State.Size),
+                        shape,
+                        request.State.Size);
+            }
         }
         else
         {

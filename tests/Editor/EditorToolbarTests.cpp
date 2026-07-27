@@ -93,7 +93,8 @@ void TestAvailabilityAndSingleActiveTool()
             description);
     };
     constexpr SmartToolMode smartModes[] = {
-        SmartToolMode::SingleVoxel, SmartToolMode::CubeBrush};
+        SmartToolMode::SingleVoxel, SmartToolMode::CubeBrush,
+        SmartToolMode::SphereBrush, SmartToolMode::CylinderBrush};
     constexpr SmartAction smartActions[] = {
         SmartAction::Add, SmartAction::Erase, SmartAction::Paint};
     for (const SmartToolMode mode : smartModes)
@@ -109,7 +110,7 @@ void TestAvailabilityAndSingleActiveTool()
     {
         smartTool.SetGeometry(unsupported);
         Require(!smartTool.IsOperational(),
-            "A removed SmartGeometry remains operational in the SMART-04 contract.");
+            "A removed SmartGeometry remains operational in the SMART-05 contract.");
     }
 
     const EditorToolbarState selectionState{

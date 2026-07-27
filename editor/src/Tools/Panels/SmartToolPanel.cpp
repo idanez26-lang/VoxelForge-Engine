@@ -18,11 +18,6 @@ bool DrawSmartToolPanel(ToolContext& context)
         tool.SetGeometry(SmartGeometry::Pencil);
         changed = true;
     }
-    // SMART-04 has no shape/orientation dimension choices: both exposed modes
-    // are canonical Cube volumes and Planner normalizes them again at commit.
-    tool.Brush().Shape = SmartBrushShape::Cube;
-    tool.Brush().Dimension = SmartBrushDimension::Volume3D;
-    tool.Brush().Orientation = SmartBrushOrientation::Auto;
     ImGui::TextDisabled("SMART TOOL");
     ImGui::TextDisabled("Mode");
     ImGui::PushID("Mode");
@@ -32,6 +27,12 @@ bool DrawSmartToolPanel(ToolContext& context)
     ImGui::SameLine();
     changed |= ImGui::RadioButton("Cube Brush", &mode,
         static_cast<int>(SmartToolMode::CubeBrush));
+    ImGui::NewLine();
+    changed |= ImGui::RadioButton("Sphere Brush", &mode,
+        static_cast<int>(SmartToolMode::SphereBrush));
+    ImGui::SameLine();
+    changed |= ImGui::RadioButton("Cylinder Brush", &mode,
+        static_cast<int>(SmartToolMode::CylinderBrush));
     ImGui::PopID();
     const SmartToolMode modeBefore = tool.Mode();
     tool.SetMode(static_cast<SmartToolMode>(mode));
@@ -39,11 +40,6 @@ bool DrawSmartToolPanel(ToolContext& context)
 
     if (tool.Mode() == SmartToolMode::SingleVoxel)
     {
-        if (tool.Brush().Size != 1)
-        {
-            tool.Brush().Size = 1;
-            changed = true;
-        }
         ImGui::TextDisabled("Size: 1 voxel");
     }
     else
@@ -52,7 +48,7 @@ bool DrawSmartToolPanel(ToolContext& context)
         ImGui::SetNextItemWidth(90.0F);
         changed |= ImGui::InputInt("Size", &tool.Brush().Size);
         tool.Brush().Size = std::clamp(tool.Brush().Size, 1,
-            MaximumSmartToolCubeBrushSize);
+            MaximumSmartToolBrushSize);
         changed |= tool.Brush().Size != sizeBefore;
         ImGui::TextDisabled("1-64 voxels");
     }

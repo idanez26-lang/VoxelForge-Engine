@@ -105,18 +105,18 @@ void PreviewCommit(SmartToolController& controller, SmartToolSession& session,
     const SmartToolRequest& request)
 {
     const SmartToolResult previewed = controller.ResolvePreview(session, request);
-    Require(previewed.HasPlan(), "Planner did not produce a SMART-04 plan.");
+    Require(previewed.HasPlan(), "Planner did not produce a SMART-05 plan.");
     const SmartPreviewData& preview = cache.Resolve(previewed.Plan);
     Require(preview.GhostVoxels.size() == previewed.Plan->Cells().size() &&
             preview.AffectedPositions == previewed.Plan->AffectedPositions(),
-        "Preview does not display the exact SMART-04 plan.");
+        "Preview does not display the exact SMART-05 plan.");
     const SmartToolResult committed = controller.ResolveCommit(session);
     Require(committed.Plan.get() == previewed.Plan.get(),
-        "Commit attempted to replace the previewed SMART-04 plan.");
+        "Commit attempted to replace the previewed SMART-05 plan.");
     const VoxelToolResult applied = VoxelPencilTool::Apply({committed.Plan,
         {&editSession, editSession.document_, 0U, 1U, &history, 0U, nullptr, nullptr}});
     Require(applied.Code == VoxelToolResultCode::Applied,
-        "SMART-04 commit was not one atomic document operation.");
+        "SMART-05 commit was not one atomic document operation.");
     for (const SmartToolPlanCell& cell : committed.Plan->Cells())
     {
         const auto voxel = editSession.document_->GetVoxel(cell.WorldPosition);
@@ -138,31 +138,31 @@ int main()
         SmartToolSession session;
         SmartPreviewCache cache;
 
-        // Single -> Cube -> Paint -> Remove: one exact plan and one history
-        // transaction for each click.
+        // Sphere -> Cylinder -> Paint -> Remove: one exact plan and one
+        // history transaction for each click.
         PreviewCommit(controller, session, cache, editSession, history,
-            Request(document, SmartToolMode::SingleVoxel, SmartAction::Add,
-                9, {2, 1, 1}, 5U));
+            Request(document, SmartToolMode::SphereBrush, SmartAction::Add,
+                3, {3, 3, 3}, 5U));
         PreviewCommit(controller, session, cache, editSession, history,
-            Request(document, SmartToolMode::CubeBrush, SmartAction::Add,
-                3, {4, 4, 4}, 6U));
+            Request(document, SmartToolMode::CylinderBrush, SmartAction::Add,
+                3, {5, 3, 5}, 6U));
         PreviewCommit(controller, session, cache, editSession, history,
-            Request(document, SmartToolMode::SingleVoxel, SmartAction::Paint,
-                3, {2, 1, 1}, 7U));
+            Request(document, SmartToolMode::SphereBrush, SmartAction::Paint,
+                3, {3, 3, 3}, 7U));
         PreviewCommit(controller, session, cache, editSession, history,
-            Request(document, SmartToolMode::SingleVoxel, SmartAction::Erase,
-                5, {2, 1, 1}, 7U));
+            Request(document, SmartToolMode::CylinderBrush, SmartAction::Erase,
+                3, {3, 3, 3}, 7U));
         Require(history.UndoCount() == 4U && editSession.rebuilds == 4U,
-            "SMART-04 did not preserve one transaction per click.");
-        Require(history.Undo(editSession) && document.HasVoxel({2, 1, 1}) &&
-                history.Redo(editSession) && !document.HasVoxel({2, 1, 1}),
-            "SMART-04 Undo/Redo did not restore the exact remove transaction.");
+            "SMART-05 did not preserve one transaction per click.");
+        Require(history.Undo(editSession) && document.HasVoxel({3, 3, 3}) &&
+                history.Redo(editSession) && !document.HasVoxel({3, 3, 3}),
+            "SMART-05 Undo/Redo did not restore the exact remove transaction.");
 
         session.Clear();
         cache.Clear();
         Require(cache.Resolve(nullptr).GhostVoxels.empty() &&
                 !controller.ResolveCommit(session).HasPlan(),
-            "SMART-04 Clear did not remove the active preview and plan.");
+            "SMART-05 Clear did not remove the active preview and plan.");
         std::cout << "Smart Tool mode smoke passed.\n";
         return 0;
     }
