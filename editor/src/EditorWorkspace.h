@@ -30,7 +30,7 @@
 #include "Selection/SelectionVolumeCache.h"
 #include "SmartTools/SmartToolController.h"
 #include "SmartTools/SmartToolRequest.h"
-#include "SmartTools/SmartBrushPreviewResolver.h"
+#include "SmartTools/SmartPreviewEngine.h"
 #include "SmartTools/BrushProfileService.h"
 #include "Transform/TransformPreviewModel.h"
 #include "Transform/TransformPivotManager.h"
@@ -514,8 +514,8 @@ private:
     SmartBrushState pencilPreviewState_{};
     bool pencilPreviewUsesWorkplane_ = false;
     bool pencilPreviewCacheValid_ = false;
-    SmartBrushPreviewResult smartToolPlanGhostPreview_;
-    const SmartBrushPreviewResult* smartBrushGhostPreview_ = nullptr;
+    SmartPreviewCache smartPreviewCache_{};
+    const SmartPreviewData* smartBrushGhostPreview_ = nullptr;
     VoxelPaintBrushEvaluation paintPreviewEvaluation_;
     const Asset::Voxel::VoxelDocument* paintPreviewDocument_ = nullptr;
     std::uint64_t paintPreviewRevision_ = 0U;

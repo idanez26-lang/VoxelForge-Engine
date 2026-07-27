@@ -465,6 +465,39 @@ add_test(
     NAME VoxelForge.Editor.SmartToolPlanStateSmoke
     COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolPlanStateSmokeTests>
 )
+
+# SMART-03: preview is a cached presentation of the immutable plan only.
+add_executable(
+    VoxelForgeEditorSmartPreviewEngineTests
+    Editor/SmartPreviewEngineTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartPreviewEngineTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartPreviewEngineTests)
+add_test(
+    NAME VoxelForge.Editor.SmartPreviewEngine
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartPreviewEngineTests>
+)
+
+add_executable(
+    VoxelForgeEditorSmartPreviewEngineSmokeTests
+    Editor/SmartPreviewEngineSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartPreviewEngineSmokeTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartPreviewEngineSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.SmartPreviewEngineSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartPreviewEngineSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.SmartPreviewEngineSmoke
+    PROPERTIES LABELS "Smoke"
+)
 set_tests_properties(
     VoxelForge.Editor.SmartToolPlanStateSmoke
     PROPERTIES LABELS "Smoke"

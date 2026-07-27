@@ -89,6 +89,10 @@ struct SmartToolPlanCell final
     SmartToolPlanCellDiagnostic Diagnostic =
         SmartToolPlanCellDiagnostic::InvalidState;
     SmartToolPlanCellFlag Flags = SmartToolPlanCellFlag::Invalid;
+    // Materialized by SmartToolPlan at the planning boundary.  They are kept
+    // after the planner-owned fields to preserve its narrow aggregate contract.
+    std::array<float, 4> BeforeColor{};
+    std::array<float, 4> AfterColor{};
 
     [[nodiscard]] bool HasChange() const noexcept { return Before != After; }
     [[nodiscard]] bool ExistingVoxel() const noexcept
@@ -110,6 +114,25 @@ struct SmartToolPlanCell final
         return HasSmartToolPlanCellFlag(
             Flags, SmartToolPlanCellFlag::OutOfBounds);
     }
+};
+
+// Precomputed plan metadata consumed verbatim by the preview.  Keeping it on
+// the immutable plan prevents preview code from making business decisions.
+struct SmartToolPlanBounds final
+{
+    bool HasValue = false;
+    Asset::Voxel::VoxelPosition Minimum{};
+    Asset::Voxel::VoxelPosition Maximum{};
+    Asset::Voxel::VoxelDimensions Dimensions{};
+};
+
+struct SmartToolPlanPreviewDiagnostics final
+{
+    bool HasOverlap = false;
+    bool HasOutOfBounds = false;
+    bool HasInvalid = false;
+    bool HasNoChange = false;
+    bool CanCommit = false;
 };
 
 struct SmartToolPlanStatistics final
@@ -149,7 +172,11 @@ public:
     [[nodiscard]] std::uint64_t PlanId() const noexcept;
     [[nodiscard]] std::uint64_t Revision() const noexcept;
     [[nodiscard]] const std::vector<SmartToolPlanCell>& Cells() const noexcept;
+    [[nodiscard]] const std::vector<Asset::Voxel::VoxelPosition>& AffectedPositions() const noexcept;
     [[nodiscard]] const SmartToolPlanStatistics& Statistics() const noexcept;
+    [[nodiscard]] const SmartToolPlanBounds& Bounds() const noexcept;
+    [[nodiscard]] const SmartToolPlanPreviewDiagnostics& PreviewDiagnostics() const noexcept;
+    [[nodiscard]] float PreviewAlpha() const noexcept;
     [[nodiscard]] bool HasChanges() const noexcept;
     [[nodiscard]] const std::vector<SmartToolDiagnostic>& Diagnostics() const noexcept;
 
@@ -170,8 +197,12 @@ private:
     SmartToolRequestKey cacheKey_{};
     std::uint64_t planId_ = 0U;
     std::uint64_t revision_ = 0U;
+    float previewAlpha_ = 0.5F;
     std::vector<SmartToolPlanCell> cells_;
+    std::vector<Asset::Voxel::VoxelPosition> affectedPositions_;
     SmartToolPlanStatistics statistics_{};
+    SmartToolPlanBounds bounds_{};
+    SmartToolPlanPreviewDiagnostics previewDiagnostics_{};
     std::vector<SmartToolDiagnostic> diagnostics_;
 };
 

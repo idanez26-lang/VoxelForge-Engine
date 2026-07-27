@@ -3174,13 +3174,13 @@ void EditorWorkspace::DrawScenePanel()
                     SmartAction::Erase ? "Erase"
                 : toolContext_.Smart.Action() == SmartAction::Paint
                     ? "Paint" : "Add";
-            const GhostPreviewStatistics& ghostStatistics =
+            const SmartToolPlanStatistics& ghostStatistics =
                 smartBrushGhostPreview_->Statistics;
             const std::string label = std::string(shape) + " / " + action +
                 " / Size " + std::to_string(state.Size) + "\n" +
                 "Total " + std::to_string(ghostStatistics.Total) +
-                "  Affected " + std::to_string(ghostStatistics.Affected) +
-                "  Ignored " + std::to_string(ghostStatistics.Ignored) +
+                "  Affected " + std::to_string(ghostStatistics.Changed) +
+                "  Ignored " + std::to_string(ghostStatistics.Unchanged) +
                 "  Clipped " + std::to_string(ghostStatistics.Clipped);
             const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
             const ImVec2 minimum{imageOrigin.x + 12.0F,
@@ -13514,6 +13514,17 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest()
     request.SourceGeneration = voxelDocumentSession_.Generation();
     request.SourceSubModelIndex = 0U;
     request.ActiveProfileUuid = brushProfileService_.ActiveUuid();
+    constexpr float colorScale = 1.0F / 255.0F;
+    const auto& palette = document->GetPalette();
+    for (std::size_t index = 0U; index < palette.size(); ++index)
+    {
+        const Asset::Voxel::VoxelColor& color = palette[index];
+        request.PaletteColors[index] = {color.Red * colorScale,
+            color.Green * colorScale, color.Blue * colorScale,
+            color.Alpha * colorScale};
+    }
+    request.HasPaletteColors = true;
+    request.PreviewAlpha = toolContext_.Smart.PreviewAlpha();
     request.Workplane = usesWorkplane
         ? std::optional<SmartBrushPlacement>{
             SmartBrushPlacement{*target, normal}}
@@ -15070,15 +15081,6 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     }
     if (smartAddActive || smartEraseActive || smartPaintActive)
     {
-        std::array<float, 4> activePaletteColor{1.0F, 1.0F, 1.0F, 1.0F};
-        if (const std::optional<PaletteColorSelection> activeColor =
-                paletteService_.ActiveColor())
-        {
-            constexpr float scale = 1.0F / 255.0F;
-            activePaletteColor = {activeColor->Color.Red * scale,
-                activeColor->Color.Green * scale, activeColor->Color.Blue * scale,
-                activeColor->Color.Alpha * scale};
-        }
         const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
         const SmartToolResult planning = request
             ? smartToolController_.ResolvePreview(smartToolSession_, *request)
@@ -15089,26 +15091,24 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             : std::nullopt;
         if (plan != nullptr)
         {
-            // The resolver consumes the exact immutable planner output. It
-            // never invokes SmartBrushEngine a second time for this preview.
-            smartToolPlanGhostPreview_ = SmartBrushPreviewResolver::Resolve(
-                *plan, activePaletteColor, toolContext_.Smart.PreviewAlpha());
-            smartBrushGhostPreview_ = &smartToolPlanGhostPreview_;
+            // This engine consumes only the materialized immutable plan. It
+            // never asks a document, palette, or planner for another value.
+            smartBrushGhostPreview_ = &smartPreviewCache_.Resolve(plan);
         }
         else smartToolSession_.Clear();
         voxelPlacementPreview_ = {};
         if (smartBrushGhostPreview_ != nullptr)
         {
-            const SmartBrushPreviewResult& preview = *smartBrushGhostPreview_;
+            const SmartPreviewData& preview = *smartBrushGhostPreview_;
             voxelPlacementPreview_.Tool = smartEraseActive
                 ? VoxelPreviewTool::Eraser : VoxelPreviewTool::Pencil;
             voxelPlacementPreview_.Position = anchor;
             voxelPlacementPreview_.RenderPlan = preview.RenderPlan;
             voxelPlacementPreview_.Statistics = {preview.Statistics.Total,
-                smartEraseActive ? preview.Statistics.Ignored :
-                    preview.Statistics.Affected,
-                smartEraseActive ? preview.Statistics.Affected :
-                    preview.Statistics.Ignored,
+                smartEraseActive ? preview.Statistics.Unchanged :
+                    preview.Statistics.Changed,
+                smartEraseActive ? preview.Statistics.Changed :
+                    preview.Statistics.Unchanged,
                 preview.Statistics.Clipped};
             for (const GhostVoxel& ghost : preview.GhostVoxels)
             {
@@ -15127,19 +15127,19 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                     SmartBrushResultCode::OutOfBounds
                 ? VoxelPlacementPreviewStatus::OutOfBounds
                 : preview.Code == SmartBrushResultCode::Valid
-                ? preview.Statistics.Affected == 0U
+                ? preview.Statistics.Changed == 0U
                     ? VoxelPlacementPreviewStatus::Occupied
                     : VoxelPlacementPreviewStatus::Valid
                 : VoxelPlacementPreviewStatus::Unavailable;
             toolContext_.Smart.SetStatistics(preview.Statistics.Total,
-                preview.Statistics.Affected, preview.Statistics.Ignored,
+                preview.Statistics.Changed, preview.Statistics.Unchanged,
                 preview.Statistics.Clipped);
             toolContext_.Smart.SetPreview(preview.Code ==
                     SmartBrushResultCode::OutOfBounds
                 ? SmartToolPreviewState::OutOfBounds
                 : preview.Code != SmartBrushResultCode::Valid
                 ? SmartToolPreviewState::Unavailable
-                : preview.Statistics.Affected == 0U
+                : preview.Statistics.Changed == 0U
                 ? SmartToolPreviewState::NoChange : SmartToolPreviewState::Valid,
                 preview.RenderPlan);
         }
