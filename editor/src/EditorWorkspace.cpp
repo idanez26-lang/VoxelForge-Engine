@@ -2848,7 +2848,9 @@ void EditorWorkspace::DrawScenePanel()
         // suspends the segment so a later valid target starts a new one.
         if (smartToolStroke_.IsActive() &&
             (!smartContinuousTool || !smartStrokeMayContinue ||
-             toolContext_.Smart.Action() != smartToolStroke_.Action()))
+             toolContext_.Smart.Action() != smartToolStroke_.Action() ||
+             (smartLineLockedStart_ &&
+                 toolContext_.Smart.Geometry() != SmartGeometry::Line)))
             CancelSmartToolStroke();
         if (!doubleClickFocus && smartContinuousTool)
         {
@@ -13592,6 +13594,17 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
             : seed;
     }
     if (!target) return std::nullopt;
+    if (lineGeometry && smartLineLockedStart_)
+    {
+        const SmartToolLineConstraintResult constrained =
+            smartToolLineConstraintResolver_.Resolve(*target, ImGui::GetIO().KeyShift);
+        target = constrained.Endpoint;
+        toolContext_.Smart.SetLineConstraintAxis(constrained.Axis);
+    }
+    else if (lineGeometry)
+    {
+        toolContext_.Smart.SetLineConstraintAxis(std::nullopt);
+    }
     state.Mode = action == SmartAction::Erase
         ? SmartBrushMode::Erase
         : action == SmartAction::Paint
@@ -13695,6 +13708,8 @@ bool EditorWorkspace::BeginSmartToolStroke()
         smartLineLockedStart_ = initialRequest->BrushRequest.Placement.Target;
         smartLinePlannedEnd_.reset();
         smartLineEndpointValid_ = false;
+        smartToolLineConstraintResolver_.Begin(*smartLineLockedStart_);
+        toolContext_.Smart.SetLineConstraintAxis(std::nullopt);
     }
     if (!smartToolStroke_.Begin({reinterpret_cast<std::uintptr_t>(document),
             document->GetRevision(), voxelDocumentSession_.Generation(), 0U,
@@ -13928,6 +13943,8 @@ void EditorWorkspace::CancelSmartToolStroke() noexcept
     smartLineLockedStart_.reset();
     smartLinePlannedEnd_.reset();
     smartLineEndpointValid_ = false;
+    smartToolLineConstraintResolver_.Reset();
+    toolContext_.Smart.SetLineConstraintAxis(std::nullopt);
 }
 
 bool EditorWorkspace::ApplyVoxelPencil()

@@ -70,7 +70,12 @@ bool DrawSmartToolPanel(ToolContext& context)
             ImGui::TextDisabled("1-64 voxels");
         }
         if (tool.Geometry() == SmartGeometry::Line)
-            ImGui::TextDisabled("Drag from A to B; release to apply");
+        {
+            if (const auto axis = tool.LineConstraintAxis())
+                ImGui::TextDisabled("Line | Axis %s", SmartToolLineAxisLabel(*axis));
+            else
+                ImGui::TextDisabled("Drag from A to B; hold Shift to constrain");
+        }
     }
 
     ImGui::TextDisabled("Action");

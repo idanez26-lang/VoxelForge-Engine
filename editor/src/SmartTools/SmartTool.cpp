@@ -14,6 +14,7 @@ void SmartTool::SetGeometry(const SmartGeometry geometry) noexcept
     geometry_ = geometry;
     preview_ = {};
     statistics_ = {};
+    lineConstraintAxis_.reset();
 }
 
 void SmartTool::SetMode(const SmartToolMode mode) noexcept
@@ -63,6 +64,17 @@ void SmartTool::SetPreviewAlpha(const float alpha) noexcept
     previewAlpha_ = std::clamp(alpha, 0.0F, 1.0F);
     preview_ = {};
     statistics_ = {};
+}
+
+std::optional<SmartToolLineAxis> SmartTool::LineConstraintAxis() const noexcept
+{
+    return lineConstraintAxis_;
+}
+
+void SmartTool::SetLineConstraintAxis(
+    const std::optional<SmartToolLineAxis> axis) noexcept
+{
+    lineConstraintAxis_ = axis;
 }
 
 bool SmartTool::IsOperational() const noexcept

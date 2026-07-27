@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BrushEngine/SmartBrushEngine.h"
+#include "SmartTools/SmartToolLineConstraintResolver.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -129,6 +130,8 @@ public:
     void ClearStatistics() noexcept;
     [[nodiscard]] float PreviewAlpha() const noexcept;
     void SetPreviewAlpha(float alpha) noexcept;
+    [[nodiscard]] std::optional<SmartToolLineAxis> LineConstraintAxis() const noexcept;
+    void SetLineConstraintAxis(std::optional<SmartToolLineAxis> axis) noexcept;
     [[nodiscard]] bool IsOperational() const noexcept;
 
 private:
@@ -139,5 +142,6 @@ private:
     SmartToolPreview preview_{};
     SmartToolStatistics statistics_{};
     float previewAlpha_ = 0.5F;
+    std::optional<SmartToolLineAxis> lineConstraintAxis_;
 };
 } // namespace VoxelForge::Editor

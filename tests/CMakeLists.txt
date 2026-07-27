@@ -585,6 +585,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolLineTests>
 )
 add_executable(
+    VoxelForgeEditorSmartToolLineConstraintResolverTests
+    Editor/SmartToolLineConstraintResolverTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolLineConstraintResolverTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolLineConstraintResolverTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolLineConstraints
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolLineConstraintResolverTests>
+)
+add_executable(
     VoxelForgeEditorSmartToolLineSmokeTests
     Editor/SmartToolLineSmokeTests.cpp
 )
@@ -599,6 +612,23 @@ add_test(
 )
 set_tests_properties(
     VoxelForge.Editor.SmartToolLineSmoke
+    PROPERTIES LABELS "Smoke"
+)
+add_executable(
+    VoxelForgeEditorSmartToolLineConstraintSmokeTests
+    Editor/SmartToolLineConstraintSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolLineConstraintSmokeTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorSmartToolLineConstraintSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolLineConstraintSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolLineConstraintSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.SmartToolLineConstraintSmoke
     PROPERTIES LABELS "Smoke"
 )
 add_executable(

@@ -30,6 +30,7 @@
 #include "Selection/SelectionVolumeCache.h"
 #include "SmartTools/SmartToolController.h"
 #include "SmartTools/SmartToolFaceDepthDrag.h"
+#include "SmartTools/SmartToolLineConstraintResolver.h"
 #include "SmartTools/SmartToolExactPreviewComposer.h"
 #include "SmartTools/SmartToolRequest.h"
 #include "SmartTools/SmartToolStroke.h"
@@ -517,6 +518,7 @@ private:
     int faceDepthPlannedLayers_ = 0;
     std::optional<Asset::Voxel::VoxelPosition> smartLineLockedStart_;
     std::optional<Asset::Voxel::VoxelPosition> smartLinePlannedEnd_;
+    SmartToolLineConstraintResolver smartToolLineConstraintResolver_;
     // A Line may keep its locked A while the pointer temporarily loses a
     // valid B. Such a suspended line must never commit its previous plan.
     bool smartLineEndpointValid_ = false;

@@ -371,6 +371,7 @@ target_sources(
         src/BrushEngine/SmartBrushEngine.cpp
         src/SmartTools/SmartTool.cpp
         src/SmartTools/SmartToolController.cpp
+        src/SmartTools/SmartToolLineConstraintResolver.cpp
         src/SmartTools/SmartToolPlan.cpp
         src/SmartTools/SmartToolPlanner.cpp
         src/SmartTools/SmartToolSession.cpp

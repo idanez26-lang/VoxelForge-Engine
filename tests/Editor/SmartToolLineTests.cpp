@@ -1,4 +1,5 @@
 #include "SmartTools/SmartToolController.h"
+#include "SmartTools/SmartToolLineConstraintResolver.h"
 #include "SmartTools/SmartToolStroke.h"
 
 #include <cstdint>
@@ -158,6 +159,45 @@ void TestReversibleTieDiagonals()
             "Line reverse drag chose a different tie-diagonal voxel.");
 }
 
+void TestConstrainedPlanningRegression()
+{
+    const States empty;
+    const Position pointA{2, 2, 2};
+    SmartToolLineConstraintResolver resolver;
+    resolver.Begin(pointA);
+    const Position pointB = resolver.Resolve({7, 4, 3}, true).Endpoint;
+    Require(pointB == Position{7, 2, 2},
+        "Constrained Line X endpoint was not resolved before planning.");
+    const SmartToolPlanPtr forward = Plan(Request(SmartAction::Add, empty,
+        pointA, pointB));
+
+    resolver.Begin(pointB);
+    const Position reverseEnd = resolver.Resolve({2, 4, 3}, true).Endpoint;
+    const SmartToolPlanPtr reverse = Plan(Request(SmartAction::Add, empty,
+        pointB, reverseEnd));
+    Require(forward->Cells().size() == reverse->Cells().size(),
+        "Constrained reverse Line changed the planned voxel count.");
+    for (std::size_t index = 0U; index < forward->Cells().size(); ++index)
+        Require(forward->Cells()[index].WorldPosition ==
+                reverse->Cells()[index].WorldPosition,
+            "Constrained A-to-B and B-to-A Lines diverged in the Planner.");
+
+    States occupied;
+    for (int x = 2; x <= 7; ++x)
+        occupied.emplace(Position{x, 2, 2}, SmartToolVoxelState{true, 9U});
+    const SmartToolPlanPtr noChange = Plan(Request(SmartAction::Add, occupied,
+        pointA, pointB));
+    Require(!noChange->HasChanges() && noChange->Statistics().Unchanged == 6U,
+        "Constrained occupied Line did not preserve Add no-change semantics.");
+
+    resolver.Begin({14, 1, 1});
+    const Position outside = resolver.Resolve({19, 4, 3}, true).Endpoint;
+    const SmartToolPlanPtr clipped = Plan(Request(SmartAction::Add, empty,
+        {14, 1, 1}, outside));
+    Require(clipped->Statistics().Clipped > 0U && clipped->HasChanges(),
+        "Constrained out-of-bounds Line did not preserve Planner clipping.");
+}
+
 void TestActionsAndBrushModes()
 {
     States existing;
@@ -207,6 +247,7 @@ int main()
         TestNoChangeAndClipping();
         TestReplaceAndFrameIndependence();
         TestReversibleTieDiagonals();
+        TestConstrainedPlanningRegression();
         std::cout << "Smart Tool Line tests passed.\n";
         return 0;
     }
