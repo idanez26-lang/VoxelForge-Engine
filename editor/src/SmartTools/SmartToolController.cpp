@@ -7,6 +7,7 @@ SmartToolResult SmartToolController::Resolve(
 {
     const SmartToolRequestKey key = MakeSmartToolRequestKey(request);
     session.SetActiveGeometry(request.Geometry);
+    session.SetToolMode(request.Mode);
     session.SetAction(request.Action);
     session.SetMode(key.State.Mode);
     session.SetBrush(key.State);

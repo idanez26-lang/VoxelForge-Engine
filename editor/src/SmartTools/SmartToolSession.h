@@ -16,6 +16,7 @@ struct SmartToolSessionState final
 {
     bool ToolActive = false;
     SmartGeometry Geometry = SmartGeometry::Pencil;
+    std::optional<SmartToolMode> ToolMode;
     std::string ActiveProfileUuid;
     std::optional<std::size_t> PaletteIndex;
     SmartBrushState Brush{};
@@ -31,6 +32,7 @@ public:
     [[nodiscard]] const SmartToolSessionState& State() const noexcept;
     void SetState(SmartToolSessionState state);
     void SetActiveGeometry(SmartGeometry geometry) noexcept;
+    void SetToolMode(std::optional<SmartToolMode> mode) noexcept;
     void SetActiveProfileUuid(std::string uuid);
     void SetPaletteIndex(std::optional<std::size_t> paletteIndex) noexcept;
     void SetBrush(SmartBrushState brush) noexcept;

@@ -4,6 +4,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdio>
 
 namespace VoxelForge::Editor
@@ -12,52 +13,66 @@ bool DrawSmartToolPanel(ToolContext& context)
 {
     SmartTool& tool = context.Smart;
     bool changed = false;
-    if (tool.Geometry() == SmartGeometry::Cube ||
-        tool.Geometry() == SmartGeometry::Sphere)
+    if (tool.Geometry() != SmartGeometry::Pencil)
     {
-        tool.Brush().Shape = ResolveSmartBrushShape(
-            tool.Geometry(), tool.Brush().Shape);
         tool.SetGeometry(SmartGeometry::Pencil);
         changed = true;
     }
+    // SMART-04 has no shape/orientation dimension choices: both exposed modes
+    // are canonical Cube volumes and Planner normalizes them again at commit.
+    tool.Brush().Shape = SmartBrushShape::Cube;
+    tool.Brush().Dimension = SmartBrushDimension::Volume3D;
+    tool.Brush().Orientation = SmartBrushOrientation::Auto;
     ImGui::TextDisabled("SMART TOOL");
-    ImGui::TextDisabled("Geometry");
-    ImGui::PushID("Geometry");
-    int geometry = static_cast<int>(SmartGeometry::Pencil);
-    changed |= ImGui::RadioButton(
-        "Pencil", &geometry, static_cast<int>(SmartGeometry::Pencil));
-    ImGui::BeginDisabled();
-    ImGui::RadioButton("Face", &geometry, static_cast<int>(SmartGeometry::Face));
-    ImGui::RadioButton("Box", &geometry, static_cast<int>(SmartGeometry::Box));
-    ImGui::RadioButton("Line", &geometry, static_cast<int>(SmartGeometry::Line));
-    ImGui::EndDisabled();
+    ImGui::TextDisabled("Mode");
+    ImGui::PushID("Mode");
+    int mode = static_cast<int>(tool.Mode());
+    changed |= ImGui::RadioButton("Single Voxel", &mode,
+        static_cast<int>(SmartToolMode::SingleVoxel));
+    ImGui::SameLine();
+    changed |= ImGui::RadioButton("Cube Brush", &mode,
+        static_cast<int>(SmartToolMode::CubeBrush));
     ImGui::PopID();
-    const SmartGeometry geometryBefore = tool.Geometry();
-    tool.SetGeometry(static_cast<SmartGeometry>(geometry));
-    changed |= tool.Geometry() != geometryBefore;
+    const SmartToolMode modeBefore = tool.Mode();
+    tool.SetMode(static_cast<SmartToolMode>(mode));
+    changed |= tool.Mode() != modeBefore;
+
+    if (tool.Mode() == SmartToolMode::SingleVoxel)
+    {
+        if (tool.Brush().Size != 1)
+        {
+            tool.Brush().Size = 1;
+            changed = true;
+        }
+        ImGui::TextDisabled("Size: 1 voxel");
+    }
+    else
+    {
+        const int sizeBefore = tool.Brush().Size;
+        ImGui::SetNextItemWidth(90.0F);
+        changed |= ImGui::InputInt("Size", &tool.Brush().Size);
+        tool.Brush().Size = std::clamp(tool.Brush().Size, 1,
+            MaximumSmartToolCubeBrushSize);
+        changed |= tool.Brush().Size != sizeBefore;
+        ImGui::TextDisabled("1-64 voxels");
+    }
 
     ImGui::TextDisabled("Action");
     ImGui::PushID("Action");
     int action = static_cast<int>(tool.Action());
     changed |= ImGui::RadioButton(
-        "Add", &action, static_cast<int>(SmartAction::Add));
+        "Create", &action, static_cast<int>(SmartAction::Add));
+    ImGui::SameLine();
+    changed |= ImGui::RadioButton(
+        "Remove", &action, static_cast<int>(SmartAction::Erase));
     ImGui::SameLine();
     changed |= ImGui::RadioButton(
         "Paint", &action, static_cast<int>(SmartAction::Paint));
-    ImGui::SameLine();
-    changed |= ImGui::RadioButton(
-        "Erase", &action, static_cast<int>(SmartAction::Erase));
-    ImGui::BeginDisabled();
-    ImGui::SameLine();
-    ImGui::RadioButton(
-        "Replace", &action, static_cast<int>(SmartAction::Replace));
-    ImGui::EndDisabled();
     ImGui::PopID();
     const SmartAction actionBefore = tool.Action();
     tool.SetAction(static_cast<SmartAction>(action));
     changed |= tool.Action() != actionBefore;
 
-    changed |= DrawSmartBrushOptions(tool.Brush());
     float previewAlpha = tool.PreviewAlpha();
     if (ImGui::SliderFloat("Preview Alpha", &previewAlpha, 0.0F, 1.0F))
     {

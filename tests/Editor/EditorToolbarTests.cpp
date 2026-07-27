@@ -72,11 +72,12 @@ void TestAvailabilityAndSingleActiveTool()
 
     SmartTool smartTool;
     const auto requireSmartToolOnly = [&buttons, &smartTool](
-        const SmartGeometry geometry,
+        const SmartToolMode mode,
         const SmartAction action,
         const std::string_view description)
     {
-        smartTool.SetGeometry(geometry);
+        smartTool.SetGeometry(SmartGeometry::Pencil);
+        smartTool.SetMode(mode);
         smartTool.SetAction(action);
         const EditorToolbarState smartState{
             true, false, ActiveVoxelTool::Pencil};
@@ -91,17 +92,24 @@ void TestAvailabilityAndSingleActiveTool()
             !EditorToolbarModel::IsActive(buttons[2], smartState) && active == 1,
             description);
     };
-    constexpr SmartGeometry smartGeometries[] = {
-        SmartGeometry::Pencil, SmartGeometry::Cube, SmartGeometry::Sphere};
+    constexpr SmartToolMode smartModes[] = {
+        SmartToolMode::SingleVoxel, SmartToolMode::CubeBrush};
     constexpr SmartAction smartActions[] = {
         SmartAction::Add, SmartAction::Erase, SmartAction::Paint};
-    for (const SmartGeometry geometry : smartGeometries)
+    for (const SmartToolMode mode : smartModes)
     {
         for (const SmartAction action : smartActions)
         {
-            requireSmartToolOnly(geometry, action,
+            requireSmartToolOnly(mode, action,
                 "Smart Tool is not exclusively active for a supported configuration.");
         }
+    }
+    for (const SmartGeometry unsupported :
+        {SmartGeometry::Cube, SmartGeometry::Sphere})
+    {
+        smartTool.SetGeometry(unsupported);
+        Require(!smartTool.IsOperational(),
+            "A removed SmartGeometry remains operational in the SMART-04 contract.");
     }
 
     const EditorToolbarState selectionState{

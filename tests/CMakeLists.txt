@@ -498,6 +498,39 @@ set_tests_properties(
     VoxelForge.Editor.SmartPreviewEngineSmoke
     PROPERTIES LABELS "Smoke"
 )
+
+# SMART-04: canonical Single Voxel and Cube Brush modes share one planner.
+add_executable(
+    VoxelForgeEditorSmartToolModeTests
+    Editor/SmartToolModeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolModeTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolModeTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolModes
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolModeTests>
+)
+
+add_executable(
+    VoxelForgeEditorSmartToolModeSmokeTests
+    Editor/SmartToolModeSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolModeSmokeTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolModeSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolModesSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolModeSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.SmartToolModesSmoke
+    PROPERTIES LABELS "Smoke"
+)
 set_tests_properties(
     VoxelForge.Editor.SmartToolPlanStateSmoke
     PROPERTIES LABELS "Smoke"

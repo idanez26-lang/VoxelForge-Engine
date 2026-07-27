@@ -222,7 +222,30 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
     try
     {
         SmartToolRequest normalized = request;
-        normalized.BrushRequest.State.Shape = ResolveSmartBrushShape(
+        if (request.Mode)
+        {
+            // SMART-04 has one canonical geometry pipeline. The mode is
+            // normalized here rather than trusted from UI state, which makes
+            // Preview and Commit consume exactly the same bounded plan.
+            normalized.Geometry = SmartGeometry::Pencil;
+            normalized.BrushRequest.State.Shape = SmartBrushShape::Cube;
+            normalized.BrushRequest.State.Dimension =
+                SmartBrushDimension::Volume3D;
+            normalized.BrushRequest.State.Orientation = SmartBrushOrientation::Auto;
+            if (*request.Mode == SmartToolMode::SingleVoxel)
+                normalized.BrushRequest.State.Size = 1;
+            else if (*request.Mode == SmartToolMode::CubeBrush)
+            {
+                if (normalized.BrushRequest.State.Size < 1 ||
+                    normalized.BrushRequest.State.Size > MaximumSmartToolCubeBrushSize)
+                    return Error(SmartBrushResultCode::InvalidRequest,
+                        "Cube Brush size must be between 1 and 64 voxels.");
+                normalized.BrushRequest.MaximumSize = MaximumSmartToolCubeBrushSize;
+            }
+            else return Error(SmartBrushResultCode::Unsupported,
+                "The requested Smart Tool mode is not implemented.");
+        }
+        else normalized.BrushRequest.State.Shape = ResolveSmartBrushShape(
             request.Geometry, normalized.BrushRequest.State.Shape);
         normalized.BrushRequest.State.Mode = ModeForAction(request.Action);
 

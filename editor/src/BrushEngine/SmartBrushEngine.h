@@ -12,6 +12,7 @@
 
 namespace VoxelForge::Editor
 {
+inline constexpr int MaximumSmartBrushRequestSize = 64;
 
 enum class SmartBrushShape : std::uint8_t
 {
@@ -93,6 +94,10 @@ struct SmartBrushRequest final
     SmartBrushState State{};
     SmartBrushPlacement Placement{};
     std::function<bool(Asset::Voxel::VoxelPosition)> IsOccupied;
+    // Legacy callers retain the historic 1..16 limit. A higher limit must be
+    // explicitly granted by a domain boundary such as SmartToolPlanner, and
+    // can never exceed the engine-wide allocation safety cap of 64.
+    int MaximumSize = MaximumVoxelBrushSize;
 };
 
 struct SmartBrushResult final

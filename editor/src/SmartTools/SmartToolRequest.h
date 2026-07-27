@@ -34,6 +34,9 @@ using SmartToolVoxelReader = std::function<SmartToolVoxelState(
 struct SmartToolRequest final
 {
     SmartGeometry Geometry = SmartGeometry::Pencil;
+    // Optional only to preserve isolated legacy callers during migration.
+    // The active Smart Tool always supplies an explicit SMART-04 mode.
+    std::optional<SmartToolMode> Mode;
     SmartAction Action = SmartAction::Add;
     SmartBrushRequest BrushRequest{};
     SmartToolVoxelReader ReadVoxel;
@@ -63,6 +66,7 @@ struct SmartToolRequest final
 struct SmartToolRequestKey final
 {
     SmartGeometry Geometry = SmartGeometry::Pencil;
+    std::optional<SmartToolMode> Mode;
     SmartAction Action = SmartAction::Add;
     Asset::Voxel::VoxelDimensions Dimensions{};
     SmartBrushState State{};
@@ -79,7 +83,7 @@ struct SmartToolRequestKey final
 
     [[nodiscard]] bool operator==(const SmartToolRequestKey& other) const noexcept
     {
-        return Geometry == other.Geometry && Action == other.Action &&
+        return Geometry == other.Geometry && Mode == other.Mode && Action == other.Action &&
             Dimensions.X == other.Dimensions.X &&
             Dimensions.Y == other.Dimensions.Y &&
             Dimensions.Z == other.Dimensions.Z && State == other.State &&
@@ -114,8 +118,17 @@ struct SmartToolRequestKey final
                 paletteSignature *= prime;
             }
     }
+    SmartGeometry geometry = request.Geometry;
     SmartBrushState state = request.BrushRequest.State;
-    state.Shape = ResolveSmartBrushShape(request.Geometry, state.Shape);
+    if (request.Mode)
+    {
+        geometry = SmartGeometry::Pencil;
+        state.Shape = SmartBrushShape::Cube;
+        state.Dimension = SmartBrushDimension::Volume3D;
+        state.Orientation = SmartBrushOrientation::Auto;
+        if (*request.Mode == SmartToolMode::SingleVoxel) state.Size = 1;
+    }
+    else state.Shape = ResolveSmartBrushShape(request.Geometry, state.Shape);
     switch (request.Action)
     {
     case SmartAction::Erase: state.Mode = SmartBrushMode::Erase; break;
@@ -124,7 +137,7 @@ struct SmartToolRequestKey final
     case SmartAction::Add:
     default: state.Mode = SmartBrushMode::Add; break;
     }
-    return {request.Geometry, request.Action, request.BrushRequest.Dimensions,
+    return {geometry, request.Mode, request.Action, request.BrushRequest.Dimensions,
         state, request.BrushRequest.Placement,
         request.ReplacePaletteIndex,
         request.SourceIdentity, request.SourceRevision, request.SourceGeneration,

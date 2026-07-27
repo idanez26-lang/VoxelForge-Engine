@@ -11,6 +11,7 @@ int main()
     {
         SmartTool tool;
         if (tool.Geometry() != SmartGeometry::Pencil ||
+            tool.Mode() != SmartToolMode::SingleVoxel ||
             tool.Action() != SmartAction::Add ||
             !tool.IsOperational())
             throw std::runtime_error("defaults");
@@ -34,24 +35,33 @@ int main()
         if (!tool.IsOperational() || tool.Brush().Size != 7)
             throw std::runtime_error("erase transition");
 
-        tool.SetGeometry(SmartGeometry::Pencil);
-        tool.Brush().Shape = SmartBrushShape::Cube;
-        if (ResolveSmartBrushShape(tool.Geometry(), tool.Brush().Shape) !=
-            SmartBrushShape::Cube)
-            throw std::runtime_error("cube shape");
-        tool.Brush().Shape = SmartBrushShape::Sphere;
-        if (ResolveSmartBrushShape(tool.Geometry(), tool.Brush().Shape) !=
-            SmartBrushShape::Sphere)
-            throw std::runtime_error("sphere shape");
+        tool.SetMode(SmartToolMode::CubeBrush);
+        if (tool.Geometry() != SmartGeometry::Pencil ||
+            tool.Mode() != SmartToolMode::CubeBrush ||
+            tool.Brush().Size != 7 || tool.Brush().PaletteIndex != 23U ||
+            !tool.IsOperational())
+            throw std::runtime_error("cube brush transition");
+        tool.SetMode(SmartToolMode::SingleVoxel);
+        if (tool.Geometry() != SmartGeometry::Pencil ||
+            tool.Mode() != SmartToolMode::SingleVoxel ||
+            tool.Brush().Size != 7 || tool.Brush().PaletteIndex != 23U ||
+            !tool.IsOperational())
+            throw std::runtime_error("single voxel return transition");
 
-        tool.SetGeometry(SmartGeometry::Cube);
-        if (!tool.IsOperational() || ResolveSmartBrushShape(
-                tool.Geometry(), tool.Brush().Shape) != SmartBrushShape::Cube)
-            throw std::runtime_error("cube geometry");
-        tool.SetGeometry(SmartGeometry::Sphere);
-        if (!tool.IsOperational() || ResolveSmartBrushShape(
-                tool.Geometry(), tool.Brush().Shape) != SmartBrushShape::Sphere)
-            throw std::runtime_error("sphere geometry");
+        tool.SetAction(SmartAction::Add);
+        if (!tool.IsOperational()) throw std::runtime_error("create action");
+        tool.SetAction(SmartAction::Paint);
+        if (!tool.IsOperational()) throw std::runtime_error("paint action");
+        tool.SetAction(SmartAction::Erase);
+        if (!tool.IsOperational()) throw std::runtime_error("remove action");
+        for (const SmartGeometry unsupported :
+            {SmartGeometry::Cube, SmartGeometry::Sphere})
+        {
+            tool.SetGeometry(unsupported);
+            if (tool.IsOperational())
+                throw std::runtime_error("removed smart geometry remains operational");
+        }
+        tool.SetGeometry(SmartGeometry::Pencil);
 
         SmartBrushSizeFeedback feedback;
         if (feedback.IsVisible(0U))

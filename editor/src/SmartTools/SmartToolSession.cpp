@@ -29,6 +29,12 @@ void SmartToolSession::SetActiveGeometry(const SmartGeometry geometry) noexcept
     state_.Geometry = geometry;
     Clear();
 }
+void SmartToolSession::SetToolMode(const std::optional<SmartToolMode> mode) noexcept
+{
+    if (state_.ToolMode == mode) return;
+    state_.ToolMode = mode;
+    Clear();
+}
 void SmartToolSession::SetActiveProfileUuid(std::string uuid)
 {
     if (state_.ActiveProfileUuid == uuid) return;

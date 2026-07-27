@@ -13500,6 +13500,7 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest()
         ? SmartBrushMode::Paint : SmartBrushMode::Add;
     SmartToolRequest request;
     request.Geometry = toolContext_.Smart.Geometry();
+    request.Mode = toolContext_.Smart.Mode();
     request.Action = action;
     request.BrushRequest = {*dimensions, state, {*target, normal}, {}};
     request.ReadVoxel =

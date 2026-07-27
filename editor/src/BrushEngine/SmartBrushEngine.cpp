@@ -121,6 +121,26 @@ SmartBrushBounds CalculateBounds(
     return bounds;
 }
 
+[[nodiscard]] std::vector<Asset::Voxel::VoxelPosition> GenerateCubeVolume(
+    const SmartBrushPlacement placement, const int size)
+{
+    const int depthOffset = (size - 1) / 2;
+    const Asset::Voxel::VoxelPosition anchor{
+        placement.Target.X + placement.Normal.X * depthOffset,
+        placement.Target.Y + placement.Normal.Y * depthOffset,
+        placement.Target.Z + placement.Normal.Z * depthOffset};
+    const int minimumOffset = -((size - 1) / 2);
+    const int maximumOffset = size / 2;
+    std::vector<Asset::Voxel::VoxelPosition> positions;
+    positions.reserve(static_cast<std::size_t>(size) *
+        static_cast<std::size_t>(size) * static_cast<std::size_t>(size));
+    for (int z = minimumOffset; z <= maximumOffset; ++z)
+        for (int y = minimumOffset; y <= maximumOffset; ++y)
+            for (int x = minimumOffset; x <= maximumOffset; ++x)
+                positions.push_back({anchor.X + x, anchor.Y + y, anchor.Z + z});
+    return positions;
+}
+
 std::size_t EstimateSurface(
     const SmartBrushShape shape,
     const int size) noexcept
@@ -186,7 +206,10 @@ SmartBrushResult SmartBrushEngine::Resolve(const SmartBrushRequest& request)
         result.Error = "The selected Smart Brush shape is not implemented.";
         return result;
     }
-    if (!IsVoxelBrushSizeValid(request.State.Size) ||
+    if (request.MaximumSize < 1 ||
+        request.MaximumSize > MaximumSmartBrushRequestSize ||
+        request.State.Size < 1 ||
+        request.State.Size > request.MaximumSize ||
         ((request.State.Mode == SmartBrushMode::Add ||
           request.State.Mode == SmartBrushMode::Paint) &&
          (request.State.PaletteIndex == 0U || request.State.PaletteIndex > 255U)) ||
@@ -207,13 +230,16 @@ SmartBrushResult SmartBrushEngine::Resolve(const SmartBrushRequest& request)
             const VoxelBrushShape shape = request.State.Shape ==
                     SmartBrushShape::Cube
                 ? VoxelBrushShape::Cube : VoxelBrushShape::Sphere;
-            result.Positions = GenerateVoxelBrush(
-                OffsetVoxelBrushAnchor(
-                    request.Placement.Target,
-                    request.Placement.Normal,
-                    request.State.Size),
-                shape,
-                request.State.Size);
+            result.Positions = request.State.Shape == SmartBrushShape::Cube &&
+                    request.State.Size > MaximumVoxelBrushSize
+                ? GenerateCubeVolume(request.Placement, request.State.Size)
+                : GenerateVoxelBrush(
+                    OffsetVoxelBrushAnchor(
+                        request.Placement.Target,
+                        request.Placement.Normal,
+                        request.State.Size),
+                    shape,
+                    request.State.Size);
         }
         else
         {

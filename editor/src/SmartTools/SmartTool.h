@@ -7,6 +7,16 @@
 
 namespace VoxelForge::Editor
 {
+// SMART-04 exposes one Smart Tool with two deliberately small geometry modes.
+// Future geometries remain separate work and are not implied by this enum.
+enum class SmartToolMode : std::uint8_t
+{
+    SingleVoxel,
+    CubeBrush
+};
+
+inline constexpr int MaximumSmartToolCubeBrushSize = MaximumSmartBrushRequestSize;
+
 enum class SmartGeometry : std::uint8_t
 {
     Pencil,
@@ -101,8 +111,10 @@ class SmartTool final
 {
 public:
     [[nodiscard]] SmartGeometry Geometry() const noexcept;
+    [[nodiscard]] SmartToolMode Mode() const noexcept;
     [[nodiscard]] SmartAction Action() const noexcept;
     void SetGeometry(SmartGeometry geometry) noexcept;
+    void SetMode(SmartToolMode mode) noexcept;
     void SetAction(SmartAction action) noexcept;
     [[nodiscard]] SmartBrushState& Brush() noexcept;
     [[nodiscard]] const SmartBrushState& Brush() const noexcept;
@@ -119,6 +131,7 @@ public:
 
 private:
     SmartGeometry geometry_ = SmartGeometry::Pencil;
+    SmartToolMode mode_ = SmartToolMode::SingleVoxel;
     SmartAction action_ = SmartAction::Add;
     SmartBrushState brush_{};
     SmartToolPreview preview_{};
