@@ -543,6 +543,81 @@ bool ViewportRenderer::Upload(
         lastError_.clear();
         return true;
     }
+    if (!UploadMesh(mesh, palette, modelCenter, vertexBuffer_, indexBuffer_,
+            indexCount_, "voxel model"))
+        return false;
+    ++modelUploadCount_;
+    lastError_.clear();
+    return true;
+}
+
+bool ViewportRenderer::ConfigureExactPreviewMesh(
+    const Mesh::MeshData* const mesh,
+    const Voxel::VoxelPalette* const palette,
+    const Vec3 modelCenter,
+    const bool active,
+    const std::uint64_t documentIdentity,
+    const std::uint64_t documentRevision,
+    const std::uint64_t planId,
+    const std::uint64_t planRevision)
+{
+    if (!active)
+    {
+        ClearExactPreviewMesh();
+        return true;
+    }
+    if (mesh == nullptr || palette == nullptr)
+    {
+        SetError("Exact preview requires prepared mesh and palette data.");
+        return false;
+    }
+    if (exactPreviewActive_ && exactPreviewDocumentIdentity_ == documentIdentity &&
+        exactPreviewDocumentRevision_ == documentRevision &&
+        exactPreviewPlanId_ == planId && exactPreviewPlanRevision_ == planRevision)
+    {
+        return true;
+    }
+    if (mesh->Empty())
+    {
+        if (device_ != nullptr)
+        {
+            if (exactPreviewVertexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(device_, exactPreviewVertexBuffer_);
+            if (exactPreviewIndexBuffer_ != nullptr)
+                SDL_ReleaseGPUBuffer(device_, exactPreviewIndexBuffer_);
+        }
+        exactPreviewVertexBuffer_ = nullptr;
+        exactPreviewIndexBuffer_ = nullptr;
+        exactPreviewIndexCount_ = 0U;
+    }
+    else if (!UploadMesh(*mesh, *palette, modelCenter, exactPreviewVertexBuffer_,
+                 exactPreviewIndexBuffer_, exactPreviewIndexCount_,
+                 "exact Smart Tool preview"))
+    {
+        // The old buffer represents another immutable plan. Never leave it on
+        // screen when the replacement failed, otherwise preview and commit
+        // could visibly diverge.
+        ClearExactPreviewMesh();
+        return false;
+    }
+    exactPreviewActive_ = true;
+    exactPreviewDocumentIdentity_ = documentIdentity;
+    exactPreviewDocumentRevision_ = documentRevision;
+    exactPreviewPlanId_ = planId;
+    exactPreviewPlanRevision_ = planRevision;
+    lastError_.clear();
+    return true;
+}
+
+bool ViewportRenderer::UploadMesh(
+    const Mesh::MeshData& mesh,
+    const Voxel::VoxelPalette& palette,
+    const Vec3 modelCenter,
+    SDL_GPUBuffer*& vertexBuffer,
+    SDL_GPUBuffer*& indexBuffer,
+    std::uint32_t& indexCount,
+    const std::string_view label)
+{
     if (!EnsurePipeline() ||
         mesh.VertexCount() > std::numeric_limits<std::uint32_t>::max() ||
         mesh.IndexCount() > std::numeric_limits<std::uint32_t>::max())
@@ -577,13 +652,11 @@ bool ViewportRenderer::Upload(
     if (!UploadBufferPair(
             vertices.data(), vertexBytes,
             mesh.Indices().data(), indexBytes,
-            vertexBuffer_, indexBuffer_, "voxel model"))
+            vertexBuffer, indexBuffer, label))
     {
         return false;
     }
-    indexCount_ = static_cast<std::uint32_t>(mesh.IndexCount());
-    ++modelUploadCount_;
-    lastError_.clear();
+    indexCount = static_cast<std::uint32_t>(mesh.IndexCount());
     return true;
 }
 
@@ -1516,14 +1589,20 @@ bool ViewportRenderer::Render(
                 pass, axesIndexCount_, 1U, gridIndexCount_, 0, 0U);
         }
     }
-    if (indexCount_ > 0U)
+    SDL_GPUBuffer* const visibleVertexBuffer = exactPreviewActive_
+        ? exactPreviewVertexBuffer_ : vertexBuffer_;
+    SDL_GPUBuffer* const visibleIndexBuffer = exactPreviewActive_
+        ? exactPreviewIndexBuffer_ : indexBuffer_;
+    const std::uint32_t visibleIndexCount = exactPreviewActive_
+        ? exactPreviewIndexCount_ : indexCount_;
+    if (visibleIndexCount > 0U)
     {
-        const SDL_GPUBufferBinding vertexBinding{vertexBuffer_, 0U};
-        const SDL_GPUBufferBinding indexBinding{indexBuffer_, 0U};
+        const SDL_GPUBufferBinding vertexBinding{visibleVertexBuffer, 0U};
+        const SDL_GPUBufferBinding indexBinding{visibleIndexBuffer, 0U};
         SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
         SDL_BindGPUIndexBuffer(
             pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-        SDL_DrawGPUIndexedPrimitives(pass, indexCount_, 1U, 0U, 0, 0U);
+        SDL_DrawGPUIndexedPrimitives(pass, visibleIndexCount, 1U, 0U, 0, 0U);
         ++modelRenderCount_;
     }
     if (smartBrushGhostIndexCount_ > 0U)
@@ -1599,6 +1678,7 @@ void ViewportRenderer::ClearModel() noexcept
     vertexBuffer_ = nullptr;
     indexBuffer_ = nullptr;
     indexCount_ = 0U;
+    ClearExactPreviewMesh();
     ConfigureVoxelPreview(nullptr);
     ConfigureTransformPreview(nullptr);
     ConfigureTransformGizmo(nullptr);
@@ -1614,6 +1694,25 @@ void ViewportRenderer::ClearModel() noexcept
         std::nullopt, std::span<const GhostVoxel>{}, {});
     highlightGeometry_.reset();
     smartBrushGhostGeometry_.reset();
+}
+
+void ViewportRenderer::ClearExactPreviewMesh() noexcept
+{
+    if (device_ != nullptr)
+    {
+        if (exactPreviewVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, exactPreviewVertexBuffer_);
+        if (exactPreviewIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, exactPreviewIndexBuffer_);
+    }
+    exactPreviewVertexBuffer_ = nullptr;
+    exactPreviewIndexBuffer_ = nullptr;
+    exactPreviewIndexCount_ = 0U;
+    exactPreviewActive_ = false;
+    exactPreviewDocumentIdentity_ = 0U;
+    exactPreviewDocumentRevision_ = 0U;
+    exactPreviewPlanId_ = 0U;
+    exactPreviewPlanRevision_ = 0U;
 }
 
 void ViewportRenderer::ReleaseHighlights() noexcept
@@ -1744,6 +1843,11 @@ bool ViewportRenderer::HasModelMesh() const noexcept
 {
     return vertexBuffer_ != nullptr && indexBuffer_ != nullptr &&
         indexCount_ > 0U;
+}
+
+bool ViewportRenderer::HasExactPreviewMesh() const noexcept
+{
+    return exactPreviewActive_;
 }
 
 bool ViewportRenderer::HasHighlightMesh() const noexcept

@@ -7638,8 +7638,10 @@ bool EditorWorkspace::RunAddVoxelSmokeStep(const std::size_t frame)
             return false;
         }
         static_cast<void>(paintPaletteSelection_.SetIndex(255U));
-        addVoxelSmokePreviewUploadBaseline_ =
-            viewportRenderer_.HighlightUploadCount();
+        // Add Adjacent is a selection-driven legacy command. Keep this smoke
+        // in the Selection context so it validates ray picking/highlighting,
+        // rather than the Smart Tool's exact-model preview override.
+        SelectVoxelTool(ActiveVoxelTool::Selection);
         static_cast<void>(voxelSelection_.SetHovered(hit));
         static_cast<void>(voxelSelection_.SelectHovered());
         const AddVoxelTarget target = FindAddVoxelTarget(grid, hit);
@@ -7665,9 +7667,7 @@ bool EditorWorkspace::RunAddVoxelSmokeStep(const std::size_t frame)
             voxel->Flags == Voxel::Voxel::OccupiedFlag &&
             grid->OccupiedVoxelCount() == 2U &&
             viewportState_.Statistics().TriangleCount == 20U &&
-            voxelSaveState_.IsDirty() && !voxelSelection_.Selected() &&
-            viewportRenderer_.HighlightUploadCount() >
-                addVoxelSmokePreviewUploadBaseline_;
+            voxelSaveState_.IsDirty() && !voxelSelection_.Selected();
     }
     else if (frame == 10U)
     {
@@ -8269,6 +8269,10 @@ bool EditorWorkspace::RunVoxelRayPickingSmokeStep(
         voxelRayPickingSmokeSourceHash_ = *hash;
         voxelRayPickingInitialRevision_ = document->GetRevision();
         voxelRayPickingInitialDirty_ = document->IsDirty();
+        // This smoke verifies the ordinary picking/highlight route, not the
+        // Smart Tool exact preview. Select explicitly so both routes remain
+        // independently covered.
+        SelectVoxelTool(ActiveVoxelTool::Selection);
         voxelRayPickingHighlightUploadBaseline_ =
             viewportRenderer_.HighlightUploadCount();
 
@@ -8397,8 +8401,6 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
             voxelDocumentMeshCache_.BuildCount();
         voxelPencilSmokeInitialUploadCount_ =
             viewportRenderer_.ModelUploadCount();
-        voxelPencilSmokeHighlightUploadBaseline_ =
-            viewportRenderer_.HighlightUploadCount();
         voxelPencilSmokeRenderBaseline_ =
             viewportRenderer_.ModelRenderCount();
 
@@ -8419,7 +8421,8 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
             voxelPlacementPreview_.IsValid() &&
             voxelPlacementPreview_.Position == hit->AdjacentPosition &&
             GetBackendDisplayName() == "Direct3D 12" &&
-            viewportRenderer_.HasModelMesh();
+            viewportRenderer_.HasModelMesh() &&
+            viewportRenderer_.HasExactPreviewMesh();
         voxelToolSmokeInput_.Reset();
     }
     else if (frame == 1U)
@@ -8453,9 +8456,6 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
                 voxelPencilSmokeInitialBuildCount_ + 1U &&
             viewportRenderer_.ModelUploadCount() ==
                 voxelPencilSmokeInitialUploadCount_ + 1U &&
-            viewportRenderer_.HighlightUploadCount() >
-                voxelPencilSmokeHighlightUploadBaseline_ &&
-            viewportRenderer_.HighlightRenderCount() > 0U &&
             viewportRenderer_.HasModelMesh() && lastVoxelToolResult_ &&
             lastVoxelToolResult_->Code == VoxelToolResultCode::Applied;
     }
@@ -15059,6 +15059,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::vector<Asset::Voxel::VoxelPosition> linePreview;
     std::optional<VoxelSpherePreview> spherePreview;
     std::span<const GhostVoxel> smartBrushGhostPreview;
+    const SmartToolExactPreviewMesh* exactSmartToolPreview = nullptr;
+    SmartToolPlanPtr exactSmartToolPlan;
     smartBrushGhostPreview_ = nullptr;
     VoxelPlacementPreviewStyle placementStyle =
         VoxelPlacementPreviewStyle::PencilInvalid;
@@ -15095,8 +15097,20 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             // This engine consumes only the materialized immutable plan. It
             // never asks a document, palette, or planner for another value.
             smartBrushGhostPreview_ = &smartPreviewCache_.Resolve(plan);
+            const Asset::Voxel::VoxelDocument* const document =
+                voxelDocumentSession_.ActiveDocument();
+            if (document != nullptr)
+            {
+                exactSmartToolPlan = plan;
+                exactSmartToolPreview = &smartToolExactPreviewCache_.Resolve(
+                    *document, voxelDocumentSession_.Generation(), plan);
+            }
         }
-        else smartToolSession_.Clear();
+        else
+        {
+            smartToolSession_.Clear();
+            smartToolExactPreviewCache_.Clear();
+        }
         voxelPlacementPreview_ = {};
         if (smartBrushGhostPreview_ != nullptr)
         {
@@ -15310,13 +15324,24 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         }
     }
     // Smart Add/Erase/Paint render exclusively from the immutable planner
-    // output through the professional Ghost Preview.
+    // output through the exact final-state preview.
+    if (exactSmartToolPreview == nullptr) smartToolExactPreviewCache_.Clear();
     if (smartAddActive || smartEraseActive || smartPaintActive)
     {
         brushPreview = {};
         brushOccupiedPreview = {};
         brushAggregatePreview.reset();
         brushAggregateSpherePreview.reset();
+    }
+    if (exactSmartToolPreview != nullptr && exactSmartToolPreview->Succeeded())
+    {
+        // The exact final-state mesh replaces the base model for this frame;
+        // legacy hover/selection highlights would otherwise falsely describe
+        // the pre-commit document, most visibly for Remove.
+        hoveredCoordinates.reset();
+        selectedCoordinates = {};
+        selectionBounds.reset();
+        editableSelectionBounds.reset();
     }
     viewportRenderer_.ConfigureHighlights(
         hoveredCoordinates,
@@ -15341,14 +15366,29 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         boxPreview,
         linePreview,
         spherePreview,
-        smartBrushGhostPreview,
+        std::span<const GhostVoxel>{},
         voxelModelCenter_);
+    const Asset::Voxel::VoxelDocument* const activeDocument =
+        voxelDocumentSession_.ActiveDocument();
+    if (exactSmartToolPreview != nullptr && exactSmartToolPlan != nullptr &&
+        exactSmartToolPreview->Succeeded())
+    {
+        static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
+            &exactSmartToolPreview->Mesh, &exactSmartToolPreview->Palette,
+            voxelModelCenter_, exactSmartToolPreview->Active,
+            voxelDocumentSession_.Generation(), activeDocument
+                ? activeDocument->GetRevision() : 0U,
+            exactSmartToolPlan->PlanId(), exactSmartToolPlan->Revision()));
+    }
+    else
+    {
+        static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
+            nullptr, nullptr, {}, false, 0U, 0U, 0U, 0U));
+    }
     viewportRenderer_.ConfigureVoxelPreview(
         stampPlacementSession_.CurrentPreview());
-    const Asset::Voxel::VoxelDocument* document =
-        voxelDocumentSession_.ActiveDocument();
-    if (document && transformPreviewModel_.IsValidFor(
-            *document, selectionService_, voxelDocumentSession_.Generation()))
+    if (activeDocument && transformPreviewModel_.IsValidFor(
+            *activeDocument, selectionService_, voxelDocumentSession_.Generation()))
     {
         const TransformPreviewRenderData preview =
             transformPreviewModel_.RenderData();
@@ -15712,6 +15752,7 @@ void EditorWorkspace::ClearVoxelViewport() noexcept
     voxelMirrorStatusMessage_.clear();
     voxelScaleStatusMessage_.clear();
     viewportRenderer_.ClearModel();
+    smartToolExactPreviewCache_.Clear();
     viewportRenderer_.ConfigureGuides(0.0F, 0.0F, 0.0F);
     viewportState_.Clear();
     voxelDocumentSession_.Close();

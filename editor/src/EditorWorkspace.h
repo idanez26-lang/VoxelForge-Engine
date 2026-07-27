@@ -29,6 +29,7 @@
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
 #include "SmartTools/SmartToolController.h"
+#include "SmartTools/SmartToolExactPreviewComposer.h"
 #include "SmartTools/SmartToolRequest.h"
 #include "SmartTools/SmartPreviewEngine.h"
 #include "SmartTools/BrushProfileService.h"
@@ -515,6 +516,7 @@ private:
     bool pencilPreviewUsesWorkplane_ = false;
     bool pencilPreviewCacheValid_ = false;
     SmartPreviewCache smartPreviewCache_{};
+    SmartToolExactPreviewCache smartToolExactPreviewCache_{};
     const SmartPreviewData* smartBrushGhostPreview_ = nullptr;
     VoxelPaintBrushEvaluation paintPreviewEvaluation_;
     const Asset::Voxel::VoxelDocument* paintPreviewDocument_ = nullptr;
@@ -923,7 +925,6 @@ private:
     bool voxelSaveSmokeCleanupComplete_ = false;
     std::filesystem::path addVoxelSmokeSavePath_;
     VoxelCoordinates addVoxelSmokeTarget_{};
-    std::size_t addVoxelSmokePreviewUploadBaseline_ = 0U;
     std::size_t addVoxelSmokeExecuteRenderBaseline_ = 0U;
     std::size_t addVoxelSmokeUndoRenderBaseline_ = 0U;
     std::size_t addVoxelSmokeReloadRenderBaseline_ = 0U;
@@ -999,7 +1000,6 @@ private:
     std::uint64_t voxelPencilSmokeInitialVoxelCount_ = 0U;
     std::size_t voxelPencilSmokeInitialBuildCount_ = 0U;
     std::size_t voxelPencilSmokeInitialUploadCount_ = 0U;
-    std::size_t voxelPencilSmokeHighlightUploadBaseline_ = 0U;
     std::size_t voxelPencilSmokeRenderBaseline_ = 0U;
     Asset::Voxel::VoxelPosition voxelPencilSmokeTarget_{};
     bool voxelPencilSmokePreviewValid_ = false;

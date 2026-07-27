@@ -82,18 +82,13 @@ void TestEmptyAndExactGhosts()
     Require(preview.GhostVoxels.size() == 1U && preview.AffectedPositions.size() == 1U &&
             preview.GhostVoxels.front().Position == Position{2, 2, 2} &&
             preview.GhostVoxels.front().State == GhostVoxelState::Added &&
-            preview.GhostVoxels.front().Alpha == 0.65F &&
+            preview.GhostVoxels.front().Alpha == 1.0F &&
             preview.Bounds.HasValue && preview.Bounds.Dimensions == Asset::Voxel::VoxelDimensions{1U, 1U, 1U} &&
             preview.CanCommit(),
         "The preview did not reproduce the exact changed plan cell.");
-    Require(preview.GhostVoxels.front().Color !=
+    Require(preview.GhostVoxels.front().Color ==
             std::array<float, 4>{0.84F, 0.18F, 0.36F, 1.0F},
-        "The valid status tint was not applied to the materialized final colour.");
-    const std::array<float, 4> expected{0.732F, 0.328F, 0.384F, 1.0F};
-    Require(std::fabs(preview.GhostVoxels.front().Color[0] - expected[0]) < 0.0001F &&
-            std::fabs(preview.GhostVoxels.front().Color[1] - expected[1]) < 0.0001F &&
-            std::fabs(preview.GhostVoxels.front().Color[2] - expected[2]) < 0.0001F,
-        "The preview did not retain the recognizable final colour under a light tint.");
+        "The preview did not expose the exact final palette colour.");
 }
 
 void TestDiagnosticsAndColours()
@@ -140,8 +135,8 @@ void TestCubeAndCache()
     alphaChanged.PreviewAlpha = 0.25F;
     const SmartToolPlanPtr alphaPlan = Plan(alphaChanged);
     const SmartPreviewData& alphaPreview = cache.Resolve(alphaPlan);
-    Require(cache.BuildCount() == 3U && alphaPreview.GhostVoxels.front().Alpha == 0.25F,
-        "Preview alpha was not captured in a new request key and immutable plan.");
+    Require(cache.BuildCount() == 3U && alphaPreview.GhostVoxels.front().Alpha == 1.0F,
+        "Exact preview opacity must not be affected by the legacy ghost alpha setting.");
 }
 
 void TestPaletteSnapshotInvalidatesSessionPlan()

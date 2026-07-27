@@ -377,6 +377,7 @@ target_sources(
         src/SmartTools/BrushProfileService.cpp
         src/SmartTools/SmartBrushPreviewResolver.cpp
         src/SmartTools/SmartPreviewEngine.cpp
+        src/SmartTools/SmartToolExactPreviewComposer.cpp
         src/SmartTools/LegacySmartBrushPreview.cpp
         src/VoxelTools/VoxelEraserTool.cpp
         src/VoxelTools/VoxelBoxService.cpp
@@ -400,6 +401,7 @@ target_link_libraries(
     PUBLIC
         VoxelForgeVoxel
         VoxelForgeAsset
+        VoxelForgeMesh
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorTransformPreview)
 if(MSVC)

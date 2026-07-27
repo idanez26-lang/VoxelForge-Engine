@@ -480,6 +480,19 @@ add_test(
     NAME VoxelForge.Editor.SmartPreviewEngine
     COMMAND $<TARGET_FILE:VoxelForgeEditorSmartPreviewEngineTests>
 )
+add_executable(
+    VoxelForgeEditorSmartToolExactPreviewComposerTests
+    Editor/SmartToolExactPreviewComposerTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolExactPreviewComposerTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolExactPreviewComposerTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolExactPreviewComposer
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolExactPreviewComposerTests>
+)
 
 add_executable(
     VoxelForgeEditorSmartPreviewEngineSmokeTests
