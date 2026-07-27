@@ -28,6 +28,18 @@ struct SmartToolVoxelState final
 using SmartToolVoxelReader = std::function<SmartToolVoxelState(
     Asset::Voxel::VoxelPosition)>;
 
+// A Face operation starts from the hit voxel, not from the resulting target.
+// This keeps Add (which writes one cell along the normal) and Erase/Paint
+// (which write the hit cell) on one explicit, immutable planning contract.
+struct SmartToolFaceSeed final
+{
+    Asset::Voxel::VoxelPosition Position{};
+    Asset::Voxel::VoxelPosition Normal{0, 1, 0};
+
+    [[nodiscard]] bool operator==(const SmartToolFaceSeed&) const noexcept =
+        default;
+};
+
 // The planner only needs value data and a versioned cell reader.
 // SourceIdentity and SourceRevision are opaque cache/integrity inputs; neither
 // gives this domain layer ownership of a VoxelDocument.
@@ -40,6 +52,10 @@ struct SmartToolRequest final
     SmartAction Action = SmartAction::Add;
     SmartBrushRequest BrushRequest{};
     SmartToolVoxelReader ReadVoxel;
+    // Face visibility is resolved against the source document captured at the
+    // beginning of a stroke. The ordinary reader may include stroke-local
+    // virtual edits so it remains the authoritative Before/After reader.
+    SmartToolVoxelReader ReadFaceSupportVoxel;
     // A value snapshot captured at the planning boundary.  The plan copies the
     // exact Before/After colours it needs, so downstream preview code never
     // reads a palette or document.
@@ -51,6 +67,12 @@ struct SmartToolRequest final
     // Internal preparation for Replace. The action remains unavailable in the
     // UI until SMART-03, but its Before/After contract can already be verified.
     std::optional<std::uint8_t> ReplacePaletteIndex;
+    // Required only for SmartGeometry::Face. Workplanes intentionally cannot
+    // seed a face because a face is defined by an existing exposed voxel.
+    std::optional<SmartToolFaceSeed> FaceSeed;
+    // Face Add depth is measured in exact voxel layers from the locked
+    // exposed support surface. Face Paint/Erase always use one layer.
+    int FaceDepth = 1;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
     // A transient overlay revision. It is zero for ordinary preview/commit
@@ -76,6 +98,8 @@ struct SmartToolRequestKey final
     SmartBrushState State{};
     SmartBrushPlacement Placement{};
     std::optional<std::uint8_t> ReplacePaletteIndex;
+    std::optional<SmartToolFaceSeed> FaceSeed;
+    int FaceDepth = 1;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
     std::uint64_t VirtualRevision = 0U;
@@ -95,6 +119,8 @@ struct SmartToolRequestKey final
             Placement.Target == other.Placement.Target &&
             Placement.Normal == other.Placement.Normal &&
             ReplacePaletteIndex == other.ReplacePaletteIndex &&
+            FaceSeed == other.FaceSeed &&
+            FaceDepth == other.FaceDepth &&
             SourceIdentity == other.SourceIdentity &&
             SourceRevision == other.SourceRevision &&
             VirtualRevision == other.VirtualRevision &&
@@ -160,6 +186,8 @@ struct SmartToolRequestKey final
     return {geometry, request.Mode, request.Action, request.BrushRequest.Dimensions,
         state, request.BrushRequest.Placement,
         request.ReplacePaletteIndex,
+        request.FaceSeed,
+        request.FaceDepth,
         request.SourceIdentity, request.SourceRevision, request.VirtualRevision,
         request.SourceGeneration,
         request.SourceSubModelIndex, request.ActiveProfileUuid,

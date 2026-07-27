@@ -2868,6 +2868,21 @@ void EditorWorkspace::DrawScenePanel()
             }
             else if (smartStrokeMayContinue)
             {
+                if (smartToolStroke_.IsActive() &&
+                    toolContext_.Smart.Geometry() == SmartGeometry::Face &&
+                    smartToolStroke_.Action() == SmartAction::Add)
+                {
+                    // The axis was projected once when the face was locked.
+                    // Thus X/Z faces follow their visible screen direction,
+                    // while camera motion cannot perturb a live extrusion.
+                    constexpr float pixelsPerFaceLayer = 24.0F;
+                    const ImVec2 drag = ImGui::GetMouseDragDelta(
+                        ImGuiMouseButton_Left, 0.0F);
+                    faceDepthLayers_ = ResolveSmartToolFaceDepthLayers(
+                        faceDepthDragAxis_.value_or(SmartToolFaceDepthDragAxis{}),
+                        {drag.x, drag.y}, 1, MaximumSmartToolBrushSize,
+                        pixelsPerFaceLayer);
+                }
                 if (ContinueSmartToolStroke()) UpdateVoxelHighlights();
             }
             else CancelSmartToolStroke();
@@ -13548,8 +13563,12 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
     }
 
     const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
-    const bool usesWorkplane = action == SmartAction::Add && workplaneHit_.has_value();
-    const std::optional<Asset::Voxel::VoxelPosition> target = usesWorkplane
+    const bool faceGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Face;
+    // A Face is anchored exclusively to an actual exposed voxel face. A
+    // construction plane has no supporting voxel and therefore cannot seed it.
+    const bool usesWorkplane = !faceGeometry && action == SmartAction::Add &&
+        workplaneHit_.has_value();
+    std::optional<Asset::Voxel::VoxelPosition> target = usesWorkplane
         ? std::optional<Asset::Voxel::VoxelPosition>{workplaneHit_->Position}
         : hit ? action != SmartAction::Add
             ? std::optional<Asset::Voxel::VoxelPosition>{{
@@ -13558,33 +13577,55 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
                 static_cast<std::int32_t>(hit->Coordinates.Z)}}
             : std::optional<Asset::Voxel::VoxelPosition>{hit->AdjacentPosition}
         : std::nullopt;
-    if (!target) return std::nullopt;
-
-    const Asset::Voxel::VoxelPosition normal = usesWorkplane
+    Asset::Voxel::VoxelPosition normal = usesWorkplane
         ? Asset::Voxel::VoxelPosition{0, 1, 0}
         : hit ? VoxelHitFaceIntegerNormal(hit->Face)
               : Asset::Voxel::VoxelPosition{0, 1, 0};
+    if (faceGeometry && faceDepthLockedSeed_)
+    {
+        normal = faceDepthLockedSeed_->Normal;
+        const Asset::Voxel::VoxelPosition seed = faceDepthLockedSeed_->Position;
+        target = action == SmartAction::Add
+            ? Asset::Voxel::VoxelPosition{seed.X + normal.X, seed.Y + normal.Y,
+                seed.Z + normal.Z}
+            : seed;
+    }
+    if (!target) return std::nullopt;
     state.Mode = action == SmartAction::Erase
         ? SmartBrushMode::Erase
         : action == SmartAction::Paint
         ? SmartBrushMode::Paint : SmartBrushMode::Add;
     SmartToolRequest request;
     request.Geometry = toolContext_.Smart.Geometry();
-    request.Mode = toolContext_.Smart.Mode();
+    request.Mode = faceGeometry ? std::nullopt
+        : std::optional<SmartToolMode>{toolContext_.Smart.Mode()};
     request.Action = action;
     request.BrushRequest = {*dimensions, state, {*target, normal}, {}};
     request.ReadVoxel =
-        [document, stroke](const Asset::Voxel::VoxelPosition position)
+        [document, stroke, faceGeometry](const Asset::Voxel::VoxelPosition position)
         {
-            if (stroke != nullptr && stroke->IsActive())
+            // A Face depth plan is always source-relative. Its current depth
+            // replaces the prior drag depth, so virtual stroke cells must not
+            // turn former layers into permanent input geometry.
+            if (!faceGeometry && stroke != nullptr && stroke->IsActive())
                 return stroke->ReadVoxel(position);
+            const auto voxel = document->GetVoxel(position, 0U);
+            return SmartToolVoxelState{
+                voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
+        };
+    request.ReadFaceSupportVoxel =
+        [document](const Asset::Voxel::VoxelPosition position)
+        {
             const auto voxel = document->GetVoxel(position, 0U);
             return SmartToolVoxelState{
                 voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
         };
     request.SourceIdentity = reinterpret_cast<std::uintptr_t>(document);
     request.SourceRevision = document->GetRevision();
-    request.VirtualRevision = stroke != nullptr && stroke->IsActive()
+    // Face depth plans use the source snapshot rather than the stroke's
+    // virtual overlay, so a replacement depth must not invalidate the cache
+    // merely because the pending transaction revision changed.
+    request.VirtualRevision = !faceGeometry && stroke != nullptr && stroke->IsActive()
         ? stroke->Revision() : 0U;
     request.SourceGeneration = voxelDocumentSession_.Generation();
     request.SourceSubModelIndex = 0U;
@@ -13604,6 +13645,19 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
         ? std::optional<SmartBrushPlacement>{
             SmartBrushPlacement{*target, normal}}
         : std::nullopt;
+    if (faceGeometry)
+    {
+        if (faceDepthLockedSeed_)
+            request.FaceSeed = *faceDepthLockedSeed_;
+        else
+        {
+            if (!hit) return std::nullopt;
+            request.FaceSeed = {{static_cast<std::int32_t>(hit->Coordinates.X),
+                    static_cast<std::int32_t>(hit->Coordinates.Y),
+                    static_cast<std::int32_t>(hit->Coordinates.Z)}, normal};
+        }
+        request.FaceDepth = action == SmartAction::Add ? faceDepthLayers_ : 1;
+    }
     return request;
 }
 
@@ -13616,6 +13670,22 @@ bool EditorWorkspace::BeginSmartToolStroke()
     if (action != SmartAction::Add && action != SmartAction::Paint &&
         action != SmartAction::Erase)
         return false;
+    if (initialRequest->Geometry == SmartGeometry::Face && initialRequest->FaceSeed)
+    {
+        faceDepthLockedSeed_ = *initialRequest->FaceSeed;
+        faceDepthLayers_ = 1;
+        faceDepthPlannedLayers_ = 0;
+        const Asset::Voxel::VoxelPosition seed = faceDepthLockedSeed_->Position;
+        const Asset::Voxel::VoxelPosition normal = faceDepthLockedSeed_->Normal;
+        const Vec3 surfaceWorld = VoxelGridToViewport({
+            static_cast<float>(seed.X) + 0.5F,
+            static_cast<float>(seed.Y) + 0.5F,
+            static_cast<float>(seed.Z) + 0.5F}, voxelModelCenter_);
+        faceDepthDragAxis_ = MakeSmartToolFaceDepthDragAxis(surfaceWorld,
+            {static_cast<float>(normal.X), static_cast<float>(normal.Y),
+                static_cast<float>(normal.Z)}, currentViewportRectangle_,
+            viewportCamera_.GetViewProjection());
+    }
     if (!smartToolStroke_.Begin({reinterpret_cast<std::uintptr_t>(document),
             document->GetRevision(), voxelDocumentSession_.Generation(), 0U,
             [document](const Asset::Voxel::VoxelPosition position)
@@ -13636,12 +13706,16 @@ bool EditorWorkspace::BeginSmartToolStroke()
     const SmartToolResult result = smartToolController_.ResolvePreview(
         smartToolSession_, *request);
     if (!result.HasPlan() || result.Code == SmartBrushResultCode::OutOfBounds ||
-        !smartToolStroke_.Accumulate(*result.Plan))
+        !(request->Geometry == SmartGeometry::Face
+            ? smartToolStroke_.ReplaceWithPlan(*result.Plan)
+            : smartToolStroke_.Accumulate(*result.Plan)))
     {
         CancelSmartToolStroke();
         return false;
     }
     smartToolStrokePreviewPlan_ = result.Plan;
+    if (request->Geometry == SmartGeometry::Face)
+        faceDepthPlannedLayers_ = request->FaceDepth;
     return true;
 }
 
@@ -13669,6 +13743,28 @@ bool EditorWorkspace::ContinueSmartToolStroke()
     {
         CancelSmartToolStroke();
         return false;
+    }
+    if (current->Geometry == SmartGeometry::Face)
+    {
+        if (current->FaceDepth == faceDepthPlannedLayers_)
+            return false;
+        SmartToolRequest request = *current;
+        request.VirtualRevision = 0U;
+        const SmartToolResult result = smartToolController_.ResolvePreview(
+            smartToolSession_, request);
+        if (!result.HasPlan() || result.Code == SmartBrushResultCode::OutOfBounds)
+        {
+            smartToolStroke_.Suspend();
+            return false;
+        }
+        if (!smartToolStroke_.ReplaceWithPlan(*result.Plan))
+        {
+            CancelSmartToolStroke();
+            return false;
+        }
+        smartToolStrokePreviewPlan_ = result.Plan;
+        faceDepthPlannedLayers_ = request.FaceDepth;
+        return true;
     }
     const std::vector<Asset::Voxel::VoxelPosition> samples = smartToolStroke_.Advance(
         current->BrushRequest.Placement.Target, current->BrushRequest.Placement.Normal);
@@ -13757,6 +13853,10 @@ void EditorWorkspace::CancelSmartToolStroke() noexcept
     smartToolStrokePreviewPlanId_ = 0U;
     smartToolStrokePreviewPlanRevision_ = 0U;
     smartToolStrokePreviewStrokeRevision_ = 0U;
+    faceDepthLockedSeed_.reset();
+    faceDepthDragAxis_.reset();
+    faceDepthLayers_ = 1;
+    faceDepthPlannedLayers_ = 0;
 }
 
 bool EditorWorkspace::ApplyVoxelPencil()

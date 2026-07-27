@@ -67,7 +67,7 @@ void SmartTool::SetPreviewAlpha(const float alpha) noexcept
 
 bool SmartTool::IsOperational() const noexcept
 {
-    return geometry_ == SmartGeometry::Pencil &&
+    return (geometry_ == SmartGeometry::Pencil || geometry_ == SmartGeometry::Face) &&
         (action_ == SmartAction::Add || action_ == SmartAction::Erase ||
          action_ == SmartAction::Paint);
 }

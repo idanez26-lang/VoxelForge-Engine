@@ -162,6 +162,26 @@ bool SmartToolStroke::Accumulate(const SmartToolPlan& plan)
     return true;
 }
 
+bool SmartToolStroke::ReplaceWithPlan(const SmartToolPlan& plan)
+{
+    if (!active_ || !MatchesContext(plan) || plan.Action() != action_) return false;
+    std::unordered_map<Position, AccumulatedCell, PositionHash> replacement;
+    replacement.reserve(plan.Cells().size());
+    for (const SmartToolPlanCell& cell : plan.Cells())
+    {
+        if (!cell.HasChange()) continue;
+        const SmartToolVoxelState sourceBefore = context_.ReadSourceVoxel
+            ? context_.ReadSourceVoxel(cell.WorldPosition) : SmartToolVoxelState{};
+        if (sourceBefore != cell.Before) return false;
+        MergeChange(replacement, {context_.SubModelIndex, cell.WorldPosition,
+            cell.Before.Exists, cell.Before.PaletteIndex,
+            cell.After.Exists, cell.After.PaletteIndex});
+    }
+    cells_ = std::move(replacement);
+    ++revision_;
+    return true;
+}
+
 std::vector<Asset::Voxel::VoxelDocumentChange> SmartToolStroke::Changes() const
 {
     std::vector<Asset::Voxel::VoxelDocumentChange> changes;

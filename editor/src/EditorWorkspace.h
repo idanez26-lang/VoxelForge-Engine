@@ -29,6 +29,7 @@
 #include "Selection/SelectionHighlightPolicy.h"
 #include "Selection/SelectionVolumeCache.h"
 #include "SmartTools/SmartToolController.h"
+#include "SmartTools/SmartToolFaceDepthDrag.h"
 #include "SmartTools/SmartToolExactPreviewComposer.h"
 #include "SmartTools/SmartToolRequest.h"
 #include "SmartTools/SmartToolStroke.h"
@@ -508,6 +509,12 @@ private:
     std::uint64_t smartToolStrokePreviewPlanId_ = 0U;
     std::uint64_t smartToolStrokePreviewPlanRevision_ = 0U;
     std::uint64_t smartToolStrokePreviewStrokeRevision_ = 0U;
+    // A Face drag is an extrusion of the single surface captured on MouseDown.
+    // The current pointer can change depth, but never its source face or normal.
+    std::optional<SmartToolFaceSeed> faceDepthLockedSeed_;
+    std::optional<SmartToolFaceDepthDragAxis> faceDepthDragAxis_;
+    int faceDepthLayers_ = 1;
+    int faceDepthPlannedLayers_ = 0;
     BrushProfileService brushProfileService_;
     SmartBrushSizeFeedback smartBrushSizeFeedback_{};
     bool smartBrushPreviewRefreshRequested_ = false;

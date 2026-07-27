@@ -2,11 +2,17 @@
 
 #include "SmartTools/SmartToolPlan.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <deque>
 #include <exception>
+#include <limits>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace VoxelForge::Editor
 {
@@ -26,6 +32,205 @@ struct PositionHash final
 
 using VoxelSnapshot = std::unordered_map<
     Asset::Voxel::VoxelPosition, SmartToolVoxelState, PositionHash>;
+using Position = Asset::Voxel::VoxelPosition;
+
+[[nodiscard]] bool IsInside(const Position position,
+    const Asset::Voxel::VoxelDimensions dimensions) noexcept
+{
+    return position.X >= 0 && position.Y >= 0 && position.Z >= 0 &&
+        static_cast<std::uint32_t>(position.X) < dimensions.X &&
+        static_cast<std::uint32_t>(position.Y) < dimensions.Y &&
+        static_cast<std::uint32_t>(position.Z) < dimensions.Z;
+}
+
+[[nodiscard]] bool IsUnitAxisNormal(const Position normal) noexcept
+{
+    const auto absolute = [](const std::int32_t value) noexcept
+    {
+        return value < 0 ? -static_cast<std::int64_t>(value)
+                         : static_cast<std::int64_t>(value);
+    };
+    return absolute(normal.X) + absolute(normal.Y) + absolute(normal.Z) == 1;
+}
+
+[[nodiscard]] std::optional<Position> Offset(const Position position,
+    const Position delta) noexcept
+{
+    const std::int64_t x = static_cast<std::int64_t>(position.X) + delta.X;
+    const std::int64_t y = static_cast<std::int64_t>(position.Y) + delta.Y;
+    const std::int64_t z = static_cast<std::int64_t>(position.Z) + delta.Z;
+    if (x < std::numeric_limits<std::int32_t>::min() ||
+        x > std::numeric_limits<std::int32_t>::max() ||
+        y < std::numeric_limits<std::int32_t>::min() ||
+        y > std::numeric_limits<std::int32_t>::max() ||
+        z < std::numeric_limits<std::int32_t>::min() ||
+        z > std::numeric_limits<std::int32_t>::max())
+        return std::nullopt;
+    return Position{static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+        static_cast<std::int32_t>(z)};
+}
+
+[[nodiscard]] std::array<Position, 4U> PlanarOffsets(
+    const Position normal) noexcept
+{
+    if (normal.X != 0)
+        return {{{0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}};
+    if (normal.Y != 0)
+        return {{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}};
+    return {{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}}};
+}
+
+[[nodiscard]] SmartToolVoxelState ReadSnapshot(const SmartToolRequest& request,
+    VoxelSnapshot& snapshot, const Position position)
+{
+    const auto found = snapshot.find(position);
+    if (found != snapshot.end()) return found->second;
+    SmartToolVoxelState state = request.ReadVoxel(position);
+    if (!state.Exists) state.PaletteIndex = 0U;
+    snapshot.emplace(position, state);
+    return state;
+}
+
+[[nodiscard]] SmartBrushBounds CalculateBounds(
+    const std::vector<Position>& positions)
+{
+    SmartBrushBounds bounds{positions.front(), positions.front()};
+    for (const Position position : positions)
+    {
+        bounds.Minimum.X = std::min(bounds.Minimum.X, position.X);
+        bounds.Minimum.Y = std::min(bounds.Minimum.Y, position.Y);
+        bounds.Minimum.Z = std::min(bounds.Minimum.Z, position.Z);
+        bounds.Maximum.X = std::max(bounds.Maximum.X, position.X);
+        bounds.Maximum.Y = std::max(bounds.Maximum.Y, position.Y);
+        bounds.Maximum.Z = std::max(bounds.Maximum.Z, position.Z);
+    }
+    return bounds;
+}
+
+[[nodiscard]] SmartBrushResult ResolveFace(const SmartToolRequest& request,
+    VoxelSnapshot& snapshot)
+{
+    SmartBrushResult result;
+    if (!request.FaceSeed || !IsUnitAxisNormal(request.FaceSeed->Normal) ||
+        request.FaceSeed->Normal != request.BrushRequest.Placement.Normal)
+    {
+        result.Code = SmartBrushResultCode::InvalidRequest;
+        result.Error = "Face requires an exposed voxel hit and one axis normal.";
+        return result;
+    }
+
+    const Position seed = request.FaceSeed->Position;
+    const Position normal = request.FaceSeed->Normal;
+    const auto readSupport = [&request, &snapshot](const Position position)
+    {
+        if (request.ReadFaceSupportVoxel)
+        {
+            SmartToolVoxelState state = request.ReadFaceSupportVoxel(position);
+            if (!state.Exists) state.PaletteIndex = 0U;
+            return state;
+        }
+        return ReadSnapshot(request, snapshot, position);
+    };
+    const std::optional<Position> seedOutward = Offset(seed, normal);
+    if (!IsInside(seed, request.BrushRequest.Dimensions) ||
+        !readSupport(seed).Exists ||
+        (seedOutward && IsInside(*seedOutward, request.BrushRequest.Dimensions) &&
+         readSupport(*seedOutward).Exists))
+    {
+        result.Code = SmartBrushResultCode::InvalidRequest;
+        result.Error = "Face requires an existing exposed voxel hit.";
+        return result;
+    }
+    if (request.Action == SmartAction::Add &&
+        (request.FaceDepth < 1 || request.FaceDepth > MaximumSmartToolBrushSize))
+    {
+        result.Code = SmartBrushResultCode::InvalidRequest;
+        result.Error = "Face Add depth must be between 1 and 64 layers.";
+        return result;
+    }
+
+    // Face resolves the complete exposed, coplanar component. It deliberately
+    // ignores Brush Size and Shape: a Face is a topological surface query,
+    // not a planar brush. Four planar neighbors prevent traversal into another
+    // plane, face orientation, or diagonal-only component.
+    std::unordered_set<Position, PositionHash> visited;
+    std::deque<Position> pending;
+    std::vector<Position> support;
+    visited.insert(seed);
+    pending.push_back(seed);
+    const std::array<Position, 4U> offsets = PlanarOffsets(normal);
+    while (!pending.empty())
+    {
+        const Position current = pending.front();
+        pending.pop_front();
+        support.push_back(current);
+        for (const Position offset : offsets)
+        {
+            const std::optional<Position> neighbor = Offset(current, offset);
+            if (!neighbor || !IsInside(*neighbor, request.BrushRequest.Dimensions) ||
+                !visited.insert(*neighbor).second)
+                continue;
+            const std::optional<Position> neighborOutward = Offset(*neighbor, normal);
+            const bool neighborExposed = !neighborOutward ||
+                !IsInside(*neighborOutward, request.BrushRequest.Dimensions) ||
+                !readSupport(*neighborOutward).Exists;
+            if (readSupport(*neighbor).Exists && neighborExposed)
+                pending.push_back(*neighbor);
+        }
+    }
+    std::sort(support.begin(), support.end(), [](const Position left,
+        const Position right)
+    {
+        if (left.X != right.X) return left.X < right.X;
+        if (left.Y != right.Y) return left.Y < right.Y;
+        return left.Z < right.Z;
+    });
+
+    result.Positions.reserve(support.size());
+    result.ClippedPositions.reserve(support.size());
+    const int depth = request.Action == SmartAction::Add ? request.FaceDepth : 1;
+    for (const Position source : support)
+    {
+        Position finalPosition = source;
+        for (int layer = 0; layer < depth; ++layer)
+        {
+            if (request.Action == SmartAction::Add)
+            {
+                const std::optional<Position> outward = Offset(finalPosition, normal);
+                if (!outward || !IsInside(*outward, request.BrushRequest.Dimensions))
+                {
+                    result.ClippedPositions.push_back(outward.value_or(finalPosition));
+                    break;
+                }
+                finalPosition = *outward;
+            }
+            result.Positions.push_back(finalPosition);
+            const SmartToolVoxelState state = ReadSnapshot(request, snapshot, finalPosition);
+            if (state.Exists) result.ExistingPositions.push_back(finalPosition);
+            else result.AddablePositions.push_back(finalPosition);
+        }
+    }
+    result.Statistics.Total = result.Positions.size() + result.ClippedPositions.size();
+    result.Statistics.New = result.AddablePositions.size();
+    result.Statistics.Existing = result.ExistingPositions.size();
+    result.Statistics.Clipped = result.ClippedPositions.size();
+    if (result.Positions.empty() && result.ClippedPositions.empty())
+    {
+        // A valid plane may contain only holes or occluded support cells. It
+        // is a no-change plan, not an error and not an out-of-bounds request.
+        result.Code = SmartBrushResultCode::Valid;
+        return result;
+    }
+    if (result.Positions.empty())
+    {
+        result.Code = SmartBrushResultCode::OutOfBounds;
+        return result;
+    }
+    result.RenderPlan.Mode = SmartBrushRenderMode::DetailedCells;
+    result.RenderPlan.Bounds = CalculateBounds(result.Positions);
+    result.Code = SmartBrushResultCode::Valid;
+    return result;
+}
 
 [[nodiscard]] SmartBrushMode ModeForAction(const SmartAction action) noexcept
 {
@@ -185,10 +390,11 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
     }
     if (request.Geometry != SmartGeometry::Pencil &&
         request.Geometry != SmartGeometry::Cube &&
-        request.Geometry != SmartGeometry::Sphere)
+        request.Geometry != SmartGeometry::Sphere &&
+        request.Geometry != SmartGeometry::Face)
     {
         return Error(SmartBrushResultCode::Unsupported,
-            "The Smart Tool planner supports only Pencil, Cube, and Sphere geometry.");
+            "The Smart Tool planner supports only Pencil, Cube, Sphere, and Face geometry.");
     }
     if (request.Mode && request.Geometry != SmartGeometry::Pencil)
     {
@@ -283,7 +489,12 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
                 return state.Exists;
             };
 
-        SmartBrushResult brush = SmartBrushEngine::Resolve(geometryRequest);
+        SmartBrushResult brush = request.Geometry == SmartGeometry::Face
+            ? ResolveFace(normalized, snapshot)
+            : SmartBrushEngine::Resolve(geometryRequest);
+        if (request.Geometry == SmartGeometry::Face &&
+            brush.Code == SmartBrushResultCode::InvalidRequest)
+            return Error(brush.Code, std::move(brush.Error));
         const SmartBrushResultCode code = brush.Code;
         const std::string error = brush.Error;
         std::vector<SmartToolDiagnostic> diagnostics;

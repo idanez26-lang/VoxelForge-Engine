@@ -57,6 +57,11 @@ public:
     [[nodiscard]] SmartToolVoxelState ReadVoxel(
         Asset::Voxel::VoxelPosition position) const;
     [[nodiscard]] bool Accumulate(const SmartToolPlan& plan);
+    // Replaces the pending edit with one complete, source-relative plan. This
+    // is intentionally separate from Accumulate(): ordinary Pencil strokes
+    // union sampled segments, whereas a Face depth drag is a single mutable
+    // extrusion whose latest depth is the only pending result.
+    [[nodiscard]] bool ReplaceWithPlan(const SmartToolPlan& plan);
     [[nodiscard]] std::vector<Asset::Voxel::VoxelDocumentChange> Changes() const;
     [[nodiscard]] std::vector<Asset::Voxel::VoxelDocumentChange> PreviewChanges(
         const SmartToolPlan& nextPlan) const;

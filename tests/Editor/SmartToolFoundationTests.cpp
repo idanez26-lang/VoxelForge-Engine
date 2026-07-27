@@ -152,8 +152,18 @@ int main()
                 workplane.BrushRequest.Placement.Target,
             "real workplane was not retained in the session");
 
+        SmartToolRequest face = Request();
+        face.Geometry = SmartGeometry::Face;
+        face.Mode.reset();
+        face.BrushRequest.Placement = {{3, 4, 3}, {0, 1, 0}};
+        face.FaceSeed = {{3, 3, 3}, {0, 1, 0}};
+        const SmartToolResult acceptedFace = controller.ResolvePreview(session, face);
+        Require(acceptedFace.HasPlan() &&
+            acceptedFace.Code == SmartBrushResultCode::Valid,
+            "supported Face geometry was rejected");
+
         SmartToolRequest unsupported = Request();
-        unsupported.Geometry = SmartGeometry::Face;
+        unsupported.Geometry = SmartGeometry::Box;
         const SmartToolResult rejected = controller.ResolvePreview(session, unsupported);
         Require(!rejected.HasPlan() &&
             rejected.Code == SmartBrushResultCode::Unsupported &&

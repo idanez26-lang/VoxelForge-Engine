@@ -13,44 +13,58 @@ bool DrawSmartToolPanel(ToolContext& context)
 {
     SmartTool& tool = context.Smart;
     bool changed = false;
-    if (tool.Geometry() != SmartGeometry::Pencil)
-    {
-        tool.SetGeometry(SmartGeometry::Pencil);
-        changed = true;
-    }
     ImGui::TextDisabled("SMART TOOL");
-    ImGui::TextDisabled("Mode");
-    ImGui::PushID("Mode");
-    int mode = static_cast<int>(tool.Mode());
-    changed |= ImGui::RadioButton("Single Voxel", &mode,
-        static_cast<int>(SmartToolMode::SingleVoxel));
+    ImGui::TextDisabled("Geometry");
+    ImGui::PushID("Geometry");
+    int geometry = tool.Geometry() == SmartGeometry::Face ? 1 : 0;
+    changed |= ImGui::RadioButton("Pencil", &geometry, 0);
     ImGui::SameLine();
-    changed |= ImGui::RadioButton("Cube Brush", &mode,
-        static_cast<int>(SmartToolMode::CubeBrush));
-    ImGui::NewLine();
-    changed |= ImGui::RadioButton("Sphere Brush", &mode,
-        static_cast<int>(SmartToolMode::SphereBrush));
-    ImGui::SameLine();
-    changed |= ImGui::RadioButton("Cylinder Brush", &mode,
-        static_cast<int>(SmartToolMode::CylinderBrush));
+    changed |= ImGui::RadioButton("Face", &geometry, 1);
     ImGui::PopID();
-    const SmartToolMode modeBefore = tool.Mode();
-    tool.SetMode(static_cast<SmartToolMode>(mode));
-    changed |= tool.Mode() != modeBefore;
+    const SmartGeometry geometryBefore = tool.Geometry();
+    tool.SetGeometry(geometry == 1 ? SmartGeometry::Face : SmartGeometry::Pencil);
+    changed |= tool.Geometry() != geometryBefore;
 
-    if (tool.Mode() == SmartToolMode::SingleVoxel)
+    if (tool.Geometry() == SmartGeometry::Face)
     {
-        ImGui::TextDisabled("Size: 1 voxel");
+        ImGui::TextDisabled("Face: connected exposed surface");
+        ImGui::TextDisabled("Size and shape are not used");
     }
     else
     {
-        const int sizeBefore = tool.Brush().Size;
-        ImGui::SetNextItemWidth(90.0F);
-        changed |= ImGui::InputInt("Size", &tool.Brush().Size);
-        tool.Brush().Size = std::clamp(tool.Brush().Size, 1,
-            MaximumSmartToolBrushSize);
-        changed |= tool.Brush().Size != sizeBefore;
-        ImGui::TextDisabled("1-64 voxels");
+        ImGui::TextDisabled("Mode");
+        ImGui::PushID("Mode");
+        int mode = static_cast<int>(tool.Mode());
+        changed |= ImGui::RadioButton("Single Voxel", &mode,
+            static_cast<int>(SmartToolMode::SingleVoxel));
+        ImGui::SameLine();
+        changed |= ImGui::RadioButton("Cube Brush", &mode,
+            static_cast<int>(SmartToolMode::CubeBrush));
+        ImGui::NewLine();
+        changed |= ImGui::RadioButton("Sphere Brush", &mode,
+            static_cast<int>(SmartToolMode::SphereBrush));
+        ImGui::SameLine();
+        changed |= ImGui::RadioButton("Cylinder Brush", &mode,
+            static_cast<int>(SmartToolMode::CylinderBrush));
+        ImGui::PopID();
+        const SmartToolMode modeBefore = tool.Mode();
+        tool.SetMode(static_cast<SmartToolMode>(mode));
+        changed |= tool.Mode() != modeBefore;
+
+        if (tool.Mode() == SmartToolMode::SingleVoxel)
+        {
+            ImGui::TextDisabled("Size: 1 voxel");
+        }
+        else
+        {
+            const int sizeBefore = tool.Brush().Size;
+            ImGui::SetNextItemWidth(90.0F);
+            changed |= ImGui::InputInt("Size", &tool.Brush().Size);
+            tool.Brush().Size = std::clamp(tool.Brush().Size, 1,
+                MaximumSmartToolBrushSize);
+            changed |= tool.Brush().Size != sizeBefore;
+            ImGui::TextDisabled("1-64 voxels");
+        }
     }
 
     ImGui::TextDisabled("Action");

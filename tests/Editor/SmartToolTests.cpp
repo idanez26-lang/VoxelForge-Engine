@@ -91,8 +91,9 @@ int main()
             throw std::runtime_error("feedback rearm");
 
         tool.SetGeometry(SmartGeometry::Face);
-        if (tool.IsOperational() || tool.Geometry() != SmartGeometry::Face)
-            throw std::runtime_error("future geometry");
+        if (!tool.IsOperational() || tool.Geometry() != SmartGeometry::Face ||
+            tool.Brush().Size != 7 || tool.Brush().PaletteIndex != 23U)
+            throw std::runtime_error("face geometry transition");
 
         tool.SetStatistics(10U, 4U, 5U, 1U);
         tool.SetPreview(SmartToolPreviewState::Valid);
