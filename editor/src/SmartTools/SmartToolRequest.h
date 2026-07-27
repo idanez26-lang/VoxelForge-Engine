@@ -73,6 +73,9 @@ struct SmartToolRequest final
     // Face Add depth is measured in exact voxel layers from the locked
     // exposed support surface. Face Paint/Erase always use one layer.
     int FaceDepth = 1;
+    // Required only for SmartGeometry::Line. Point A is captured on MouseDown;
+    // Placement.Target remains the live endpoint B.
+    std::optional<Asset::Voxel::VoxelPosition> LineStart;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
     // A transient overlay revision. It is zero for ordinary preview/commit
@@ -100,6 +103,7 @@ struct SmartToolRequestKey final
     std::optional<std::uint8_t> ReplacePaletteIndex;
     std::optional<SmartToolFaceSeed> FaceSeed;
     int FaceDepth = 1;
+    std::optional<Asset::Voxel::VoxelPosition> LineStart;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
     std::uint64_t VirtualRevision = 0U;
@@ -121,6 +125,7 @@ struct SmartToolRequestKey final
             ReplacePaletteIndex == other.ReplacePaletteIndex &&
             FaceSeed == other.FaceSeed &&
             FaceDepth == other.FaceDepth &&
+            LineStart == other.LineStart &&
             SourceIdentity == other.SourceIdentity &&
             SourceRevision == other.SourceRevision &&
             VirtualRevision == other.VirtualRevision &&
@@ -154,7 +159,6 @@ struct SmartToolRequestKey final
     SmartBrushState state = request.BrushRequest.State;
     if (request.Mode)
     {
-        geometry = SmartGeometry::Pencil;
         state.Dimension = SmartBrushDimension::Volume3D;
         state.Orientation = SmartBrushOrientation::Auto;
         switch (*request.Mode)
@@ -188,6 +192,7 @@ struct SmartToolRequestKey final
         request.ReplacePaletteIndex,
         request.FaceSeed,
         request.FaceDepth,
+        request.LineStart,
         request.SourceIdentity, request.SourceRevision, request.VirtualRevision,
         request.SourceGeneration,
         request.SourceSubModelIndex, request.ActiveProfileUuid,

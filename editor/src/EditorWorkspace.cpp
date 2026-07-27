@@ -13564,6 +13564,7 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
 
     const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
     const bool faceGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Face;
+    const bool lineGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Line;
     // A Face is anchored exclusively to an actual exposed voxel face. A
     // construction plane has no supporting voxel and therefore cannot seed it.
     const bool usesWorkplane = !faceGeometry && action == SmartAction::Add &&
@@ -13602,12 +13603,12 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
     request.Action = action;
     request.BrushRequest = {*dimensions, state, {*target, normal}, {}};
     request.ReadVoxel =
-        [document, stroke, faceGeometry](const Asset::Voxel::VoxelPosition position)
+        [document, stroke, faceGeometry, lineGeometry](const Asset::Voxel::VoxelPosition position)
         {
             // A Face depth plan is always source-relative. Its current depth
             // replaces the prior drag depth, so virtual stroke cells must not
             // turn former layers into permanent input geometry.
-            if (!faceGeometry && stroke != nullptr && stroke->IsActive())
+            if (!faceGeometry && !lineGeometry && stroke != nullptr && stroke->IsActive())
                 return stroke->ReadVoxel(position);
             const auto voxel = document->GetVoxel(position, 0U);
             return SmartToolVoxelState{
@@ -13625,7 +13626,8 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
     // Face depth plans use the source snapshot rather than the stroke's
     // virtual overlay, so a replacement depth must not invalidate the cache
     // merely because the pending transaction revision changed.
-    request.VirtualRevision = !faceGeometry && stroke != nullptr && stroke->IsActive()
+    request.VirtualRevision = !faceGeometry && !lineGeometry &&
+        stroke != nullptr && stroke->IsActive()
         ? stroke->Revision() : 0U;
     request.SourceGeneration = voxelDocumentSession_.Generation();
     request.SourceSubModelIndex = 0U;
@@ -13658,6 +13660,8 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
         }
         request.FaceDepth = action == SmartAction::Add ? faceDepthLayers_ : 1;
     }
+    if (lineGeometry && smartLineLockedStart_)
+        request.LineStart = *smartLineLockedStart_;
     return request;
 }
 
@@ -13686,6 +13690,12 @@ bool EditorWorkspace::BeginSmartToolStroke()
                 static_cast<float>(normal.Z)}, currentViewportRectangle_,
             viewportCamera_.GetViewProjection());
     }
+    if (initialRequest->Geometry == SmartGeometry::Line)
+    {
+        smartLineLockedStart_ = initialRequest->BrushRequest.Placement.Target;
+        smartLinePlannedEnd_.reset();
+        smartLineEndpointValid_ = false;
+    }
     if (!smartToolStroke_.Begin({reinterpret_cast<std::uintptr_t>(document),
             document->GetRevision(), voxelDocumentSession_.Generation(), 0U,
             [document](const Asset::Voxel::VoxelPosition position)
@@ -13706,7 +13716,8 @@ bool EditorWorkspace::BeginSmartToolStroke()
     const SmartToolResult result = smartToolController_.ResolvePreview(
         smartToolSession_, *request);
     if (!result.HasPlan() || result.Code == SmartBrushResultCode::OutOfBounds ||
-        !(request->Geometry == SmartGeometry::Face
+        !((request->Geometry == SmartGeometry::Face ||
+            request->Geometry == SmartGeometry::Line)
             ? smartToolStroke_.ReplaceWithPlan(*result.Plan)
             : smartToolStroke_.Accumulate(*result.Plan)))
     {
@@ -13716,6 +13727,11 @@ bool EditorWorkspace::BeginSmartToolStroke()
     smartToolStrokePreviewPlan_ = result.Plan;
     if (request->Geometry == SmartGeometry::Face)
         faceDepthPlannedLayers_ = request->FaceDepth;
+    if (request->Geometry == SmartGeometry::Line)
+    {
+        smartLinePlannedEnd_ = request->BrushRequest.Placement.Target;
+        smartLineEndpointValid_ = true;
+    }
     return true;
 }
 
@@ -13736,6 +13752,19 @@ bool EditorWorkspace::ContinueSmartToolStroke()
         BuildSmartPencilRequest(&smartToolStroke_);
     if (!current)
     {
+        if (smartLineLockedStart_)
+        {
+            // Preserve A so the user can return to a valid B, but make the
+            // last line plan inapplicable. MouseUp must not commit stale
+            // changes while the endpoint is invalid.
+            smartLineEndpointValid_ = false;
+            smartLinePlannedEnd_.reset();
+            smartToolStrokePreviewPlan_.reset();
+            smartToolStrokePreviewMesh_ = {};
+            smartToolStrokePreviewPlanId_ = 0U;
+            smartToolStrokePreviewPlanRevision_ = 0U;
+            smartToolStrokePreviewStrokeRevision_ = 0U;
+        }
         smartToolStroke_.Suspend();
         return false;
     }
@@ -13764,6 +13793,40 @@ bool EditorWorkspace::ContinueSmartToolStroke()
         }
         smartToolStrokePreviewPlan_ = result.Plan;
         faceDepthPlannedLayers_ = request.FaceDepth;
+        return true;
+    }
+    if (current->Geometry == SmartGeometry::Line)
+    {
+        if (smartLinePlannedEnd_ &&
+            *smartLinePlannedEnd_ == current->BrushRequest.Placement.Target)
+            return false;
+        SmartToolRequest request = *current;
+        request.VirtualRevision = 0U;
+        const SmartToolResult result = smartToolController_.ResolvePreview(
+            smartToolSession_, request);
+        if (!result.HasPlan() || result.Code == SmartBrushResultCode::OutOfBounds)
+        {
+            // The endpoint is not applicable even though it was resolved
+            // from a request (for example, the complete line is outside the
+            // document). Do not leave a prior valid B commit-ready.
+            smartLineEndpointValid_ = false;
+            smartLinePlannedEnd_.reset();
+            smartToolStrokePreviewPlan_.reset();
+            smartToolStrokePreviewMesh_ = {};
+            smartToolStrokePreviewPlanId_ = 0U;
+            smartToolStrokePreviewPlanRevision_ = 0U;
+            smartToolStrokePreviewStrokeRevision_ = 0U;
+            smartToolStroke_.Suspend();
+            return false;
+        }
+        if (!smartToolStroke_.ReplaceWithPlan(*result.Plan))
+        {
+            CancelSmartToolStroke();
+            return false;
+        }
+        smartToolStrokePreviewPlan_ = result.Plan;
+        smartLinePlannedEnd_ = request.BrushRequest.Placement.Target;
+        smartLineEndpointValid_ = true;
         return true;
     }
     const std::vector<Asset::Voxel::VoxelPosition> samples = smartToolStroke_.Advance(
@@ -13797,6 +13860,11 @@ bool EditorWorkspace::ContinueSmartToolStroke()
 bool EditorWorkspace::CommitSmartToolStroke()
 {
     if (!smartToolStroke_.IsActive()) return false;
+    if (smartLineLockedStart_ && !smartLineEndpointValid_)
+    {
+        CancelSmartToolStroke();
+        return false;
+    }
     Asset::Voxel::VoxelDocument* const document = voxelDocumentSession_.ActiveDocument();
     const SmartToolStrokeContext& context = smartToolStroke_.Context();
     if (document == nullptr || reinterpret_cast<std::uintptr_t>(document) !=
@@ -13857,6 +13925,9 @@ void EditorWorkspace::CancelSmartToolStroke() noexcept
     faceDepthDragAxis_.reset();
     faceDepthLayers_ = 1;
     faceDepthPlannedLayers_ = 0;
+    smartLineLockedStart_.reset();
+    smartLinePlannedEnd_.reset();
+    smartLineEndpointValid_ = false;
 }
 
 bool EditorWorkspace::ApplyVoxelPencil()
@@ -15468,7 +15539,9 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             // interpolated across.
             const Asset::Voxel::VoxelDocument* const document =
                 voxelDocumentSession_.ActiveDocument();
-            if (activeStroke != nullptr && document != nullptr &&
+            const bool invalidLineEndpoint = smartLineLockedStart_ &&
+                !smartLineEndpointValid_;
+            if (!invalidLineEndpoint && activeStroke != nullptr && document != nullptr &&
                 smartToolStrokePreviewPlan_ != nullptr)
             {
                 exactSmartToolPlan = smartToolStrokePreviewPlan_;

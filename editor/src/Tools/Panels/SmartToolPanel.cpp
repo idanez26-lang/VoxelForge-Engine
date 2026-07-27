@@ -16,13 +16,17 @@ bool DrawSmartToolPanel(ToolContext& context)
     ImGui::TextDisabled("SMART TOOL");
     ImGui::TextDisabled("Geometry");
     ImGui::PushID("Geometry");
-    int geometry = tool.Geometry() == SmartGeometry::Face ? 1 : 0;
+    int geometry = tool.Geometry() == SmartGeometry::Face ? 1
+        : tool.Geometry() == SmartGeometry::Line ? 2 : 0;
     changed |= ImGui::RadioButton("Pencil", &geometry, 0);
     ImGui::SameLine();
     changed |= ImGui::RadioButton("Face", &geometry, 1);
+    ImGui::SameLine();
+    changed |= ImGui::RadioButton("Line", &geometry, 2);
     ImGui::PopID();
     const SmartGeometry geometryBefore = tool.Geometry();
-    tool.SetGeometry(geometry == 1 ? SmartGeometry::Face : SmartGeometry::Pencil);
+    tool.SetGeometry(geometry == 1 ? SmartGeometry::Face
+        : geometry == 2 ? SmartGeometry::Line : SmartGeometry::Pencil);
     changed |= tool.Geometry() != geometryBefore;
 
     if (tool.Geometry() == SmartGeometry::Face)
@@ -65,6 +69,8 @@ bool DrawSmartToolPanel(ToolContext& context)
             changed |= tool.Brush().Size != sizeBefore;
             ImGui::TextDisabled("1-64 voxels");
         }
+        if (tool.Geometry() == SmartGeometry::Line)
+            ImGui::TextDisabled("Drag from A to B; release to apply");
     }
 
     ImGui::TextDisabled("Action");

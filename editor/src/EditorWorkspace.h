@@ -515,6 +515,11 @@ private:
     std::optional<SmartToolFaceDepthDragAxis> faceDepthDragAxis_;
     int faceDepthLayers_ = 1;
     int faceDepthPlannedLayers_ = 0;
+    std::optional<Asset::Voxel::VoxelPosition> smartLineLockedStart_;
+    std::optional<Asset::Voxel::VoxelPosition> smartLinePlannedEnd_;
+    // A Line may keep its locked A while the pointer temporarily loses a
+    // valid B. Such a suspended line must never commit its previous plan.
+    bool smartLineEndpointValid_ = false;
     BrushProfileService brushProfileService_;
     SmartBrushSizeFeedback smartBrushSizeFeedback_{};
     bool smartBrushPreviewRefreshRequested_ = false;

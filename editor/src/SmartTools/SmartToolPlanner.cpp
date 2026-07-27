@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <exception>
 #include <limits>
@@ -232,6 +233,139 @@ using Position = Asset::Voxel::VoxelPosition;
     return result;
 }
 
+[[nodiscard]] std::vector<Position> RasterizeLine(const Position pointA,
+    const Position pointB)
+{
+    // Bresenham tie decisions depend on its traversal direction. Canonicalize
+    // the endpoints before rasterizing so A->B and B->A select the same voxel
+    // set; the request itself still retains B as the placement target.
+    const auto before = [](const Position left, const Position right) noexcept
+    {
+        if (left.X != right.X) return left.X < right.X;
+        if (left.Y != right.Y) return left.Y < right.Y;
+        return left.Z < right.Z;
+    };
+    Position start = pointA;
+    Position end = pointB;
+    if (before(end, start)) std::swap(start, end);
+    const std::int64_t dx = std::llabs(static_cast<std::int64_t>(end.X) - start.X);
+    const std::int64_t dy = std::llabs(static_cast<std::int64_t>(end.Y) - start.Y);
+    const std::int64_t dz = std::llabs(static_cast<std::int64_t>(end.Z) - start.Z);
+    const std::int64_t count = std::max({dx, dy, dz}) + 1;
+    if (count > 1'000'000LL)
+        throw std::length_error("Smart Tool Line exceeds the safe sample limit.");
+    const std::int32_t stepX = end.X >= start.X ? 1 : -1;
+    const std::int32_t stepY = end.Y >= start.Y ? 1 : -1;
+    const std::int32_t stepZ = end.Z >= start.Z ? 1 : -1;
+    std::vector<Position> points;
+    points.reserve(static_cast<std::size_t>(count));
+    Position current = start;
+    points.push_back(current);
+    if (dx >= dy && dx >= dz)
+    {
+        std::int64_t errorY = 2 * dy - dx;
+        std::int64_t errorZ = 2 * dz - dx;
+        while (current.X != end.X)
+        {
+            current.X += stepX;
+            if (errorY >= 0) { current.Y += stepY; errorY -= 2 * dx; }
+            if (errorZ >= 0) { current.Z += stepZ; errorZ -= 2 * dx; }
+            errorY += 2 * dy;
+            errorZ += 2 * dz;
+            points.push_back(current);
+        }
+    }
+    else if (dy >= dx && dy >= dz)
+    {
+        std::int64_t errorX = 2 * dx - dy;
+        std::int64_t errorZ = 2 * dz - dy;
+        while (current.Y != end.Y)
+        {
+            current.Y += stepY;
+            if (errorX >= 0) { current.X += stepX; errorX -= 2 * dy; }
+            if (errorZ >= 0) { current.Z += stepZ; errorZ -= 2 * dy; }
+            errorX += 2 * dx;
+            errorZ += 2 * dz;
+            points.push_back(current);
+        }
+    }
+    else
+    {
+        std::int64_t errorX = 2 * dx - dz;
+        std::int64_t errorY = 2 * dy - dz;
+        while (current.Z != end.Z)
+        {
+            current.Z += stepZ;
+            if (errorX >= 0) { current.X += stepX; errorX -= 2 * dz; }
+            if (errorY >= 0) { current.Y += stepY; errorY -= 2 * dz; }
+            errorX += 2 * dx;
+            errorY += 2 * dy;
+            points.push_back(current);
+        }
+    }
+    return points;
+}
+
+[[nodiscard]] SmartBrushResult ResolveLine(const SmartToolRequest& request,
+    VoxelSnapshot& snapshot)
+{
+    SmartBrushResult result;
+    if (!request.LineStart)
+    {
+        result.Code = SmartBrushResultCode::InvalidRequest;
+        result.Error = "Line requires a locked start point.";
+        return result;
+    }
+    std::unordered_set<Position, PositionHash> seenPositions;
+    std::unordered_set<Position, PositionHash> seenClipped;
+    const std::vector<Position> samples = RasterizeLine(*request.LineStart,
+        request.BrushRequest.Placement.Target);
+    result.Positions.reserve(samples.size());
+    for (const Position sample : samples)
+    {
+        SmartBrushRequest brushRequest = request.BrushRequest;
+        brushRequest.Placement.Target = sample;
+        brushRequest.IsOccupied = [&snapshot, &reader = request.ReadVoxel](const Position position)
+        {
+            SmartToolVoxelState state = reader(position);
+            if (!state.Exists) state.PaletteIndex = 0U;
+            snapshot.insert_or_assign(position, state);
+            return state.Exists;
+        };
+        const SmartBrushResult brush = SmartBrushEngine::Resolve(brushRequest);
+        if (brush.Code != SmartBrushResultCode::Valid &&
+            brush.Code != SmartBrushResultCode::OutOfBounds)
+            return brush;
+        for (const Position position : brush.Positions)
+            if (seenPositions.insert(position).second)
+                result.Positions.push_back(position);
+        for (const Position position : brush.ClippedPositions)
+            if (seenClipped.insert(position).second)
+                result.ClippedPositions.push_back(position);
+    }
+    result.Statistics.Total = result.Positions.size() + result.ClippedPositions.size();
+    result.AddablePositions.reserve(result.Positions.size());
+    result.ExistingPositions.reserve(result.Positions.size());
+    for (const Position position : result.Positions)
+    {
+        const SmartToolVoxelState state = ReadSnapshot(request, snapshot, position);
+        if (state.Exists) result.ExistingPositions.push_back(position);
+        else result.AddablePositions.push_back(position);
+    }
+    result.Statistics.New = result.AddablePositions.size();
+    result.Statistics.Existing = result.ExistingPositions.size();
+    result.Statistics.Clipped = result.ClippedPositions.size();
+    if (result.Positions.empty())
+    {
+        result.Code = SmartBrushResultCode::OutOfBounds;
+        return result;
+    }
+    result.RenderPlan.Mode = SmartBrushRenderMode::DetailedCells;
+    result.RenderPlan.Bounds = CalculateBounds(result.Positions);
+    result.Code = SmartBrushResultCode::Valid;
+    return result;
+}
+
 [[nodiscard]] SmartBrushMode ModeForAction(const SmartAction action) noexcept
 {
     switch (action)
@@ -391,15 +525,17 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
     if (request.Geometry != SmartGeometry::Pencil &&
         request.Geometry != SmartGeometry::Cube &&
         request.Geometry != SmartGeometry::Sphere &&
-        request.Geometry != SmartGeometry::Face)
+        request.Geometry != SmartGeometry::Face &&
+        request.Geometry != SmartGeometry::Line)
     {
         return Error(SmartBrushResultCode::Unsupported,
-            "The Smart Tool planner supports only Pencil, Cube, Sphere, and Face geometry.");
+            "The Smart Tool planner supports only Pencil, Cube, Sphere, Face, and Line geometry.");
     }
-    if (request.Mode && request.Geometry != SmartGeometry::Pencil)
+    if (request.Mode && request.Geometry != SmartGeometry::Pencil &&
+        request.Geometry != SmartGeometry::Line)
     {
         return Error(SmartBrushResultCode::Unsupported,
-            "SMART-05 modes require the Pencil Smart Geometry.");
+            "SMART-05 modes require Pencil or Line Smart Geometry.");
     }
     if (request.Action != SmartAction::Add &&
         request.Action != SmartAction::Erase &&
@@ -437,7 +573,8 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
         {
             // The Planner is the business boundary that resolves a Smart Tool
             // mode. Preview and Commit subsequently consume this exact plan.
-            normalized.Geometry = SmartGeometry::Pencil;
+            if (request.Geometry == SmartGeometry::Pencil)
+                normalized.Geometry = SmartGeometry::Pencil;
             normalized.BrushRequest.State.Dimension =
                 SmartBrushDimension::Volume3D;
             normalized.BrushRequest.State.Orientation = SmartBrushOrientation::Auto;
@@ -491,8 +628,11 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
 
         SmartBrushResult brush = request.Geometry == SmartGeometry::Face
             ? ResolveFace(normalized, snapshot)
+            : request.Geometry == SmartGeometry::Line
+            ? ResolveLine(normalized, snapshot)
             : SmartBrushEngine::Resolve(geometryRequest);
-        if (request.Geometry == SmartGeometry::Face &&
+        if ((request.Geometry == SmartGeometry::Face ||
+                request.Geometry == SmartGeometry::Line) &&
             brush.Code == SmartBrushResultCode::InvalidRequest)
             return Error(brush.Code, std::move(brush.Error));
         const SmartBrushResultCode code = brush.Code;
