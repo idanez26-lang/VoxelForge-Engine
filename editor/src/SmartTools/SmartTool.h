@@ -28,6 +28,9 @@ enum class SmartGeometry : std::uint8_t
     Cube,
     Sphere,
     Face,
+    // The first corner and its plane are captured on MouseDown. The planner
+    // expands the immutable rectangle; neither preview nor commit sample it.
+    Rectangle,
     Box,
     Line,
     Cylinder,

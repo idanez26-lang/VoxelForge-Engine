@@ -40,6 +40,23 @@ struct SmartToolFaceSeed final
         default;
 };
 
+// A canonical, grid-aligned plane captured exactly once at Rectangle
+// MouseDown. Origin is the first corner; U/V are the deterministic planar
+// axes used by the planner to expand to the current second corner.
+struct SmartToolRectanglePlane final
+{
+    Asset::Voxel::VoxelPosition Origin{};
+    Asset::Voxel::VoxelPosition Normal{0, 1, 0};
+    Asset::Voxel::VoxelPosition UAxis{1, 0, 0};
+    Asset::Voxel::VoxelPosition VAxis{0, 0, 1};
+    // Geometric face coordinate, distinct from Origin's discrete sampling
+    // coordinate (for example a +X face at voxel X is X + 1).
+    float SurfaceCoordinate = 0.0F;
+
+    [[nodiscard]] bool operator==(const SmartToolRectanglePlane&) const noexcept =
+        default;
+};
+
 // The planner only needs value data and a versioned cell reader.
 // SourceIdentity and SourceRevision are opaque cache/integrity inputs; neither
 // gives this domain layer ownership of a VoxelDocument.
@@ -76,6 +93,10 @@ struct SmartToolRequest final
     // Required only for SmartGeometry::Line. Point A is captured on MouseDown;
     // Placement.Target remains the live endpoint B.
     std::optional<Asset::Voxel::VoxelPosition> LineStart;
+    // Required only for SmartGeometry::Rectangle. Placement.Target is the
+    // current, already projected second corner B.
+    std::optional<SmartToolRectanglePlane> RectanglePlane;
+    std::optional<float> RectangleSurfaceCoordinate;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
     // A transient overlay revision. It is zero for ordinary preview/commit
@@ -104,6 +125,7 @@ struct SmartToolRequestKey final
     std::optional<SmartToolFaceSeed> FaceSeed;
     int FaceDepth = 1;
     std::optional<Asset::Voxel::VoxelPosition> LineStart;
+    std::optional<SmartToolRectanglePlane> RectanglePlane;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
     std::uint64_t VirtualRevision = 0U;
@@ -126,6 +148,7 @@ struct SmartToolRequestKey final
             FaceSeed == other.FaceSeed &&
             FaceDepth == other.FaceDepth &&
             LineStart == other.LineStart &&
+            RectanglePlane == other.RectanglePlane &&
             SourceIdentity == other.SourceIdentity &&
             SourceRevision == other.SourceRevision &&
             VirtualRevision == other.VirtualRevision &&
@@ -193,6 +216,7 @@ struct SmartToolRequestKey final
         request.FaceSeed,
         request.FaceDepth,
         request.LineStart,
+        request.RectanglePlane,
         request.SourceIdentity, request.SourceRevision, request.VirtualRevision,
         request.SourceGeneration,
         request.SourceSubModelIndex, request.ActiveProfileUuid,

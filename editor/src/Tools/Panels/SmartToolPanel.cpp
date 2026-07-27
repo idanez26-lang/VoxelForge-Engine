@@ -17,16 +17,20 @@ bool DrawSmartToolPanel(ToolContext& context)
     ImGui::TextDisabled("Geometry");
     ImGui::PushID("Geometry");
     int geometry = tool.Geometry() == SmartGeometry::Face ? 1
-        : tool.Geometry() == SmartGeometry::Line ? 2 : 0;
+        : tool.Geometry() == SmartGeometry::Line ? 2
+        : tool.Geometry() == SmartGeometry::Rectangle ? 3 : 0;
     changed |= ImGui::RadioButton("Pencil", &geometry, 0);
     ImGui::SameLine();
     changed |= ImGui::RadioButton("Face", &geometry, 1);
     ImGui::SameLine();
     changed |= ImGui::RadioButton("Line", &geometry, 2);
+    ImGui::SameLine();
+    changed |= ImGui::RadioButton("Rectangle", &geometry, 3);
     ImGui::PopID();
     const SmartGeometry geometryBefore = tool.Geometry();
     tool.SetGeometry(geometry == 1 ? SmartGeometry::Face
-        : geometry == 2 ? SmartGeometry::Line : SmartGeometry::Pencil);
+        : geometry == 2 ? SmartGeometry::Line
+        : geometry == 3 ? SmartGeometry::Rectangle : SmartGeometry::Pencil);
     changed |= tool.Geometry() != geometryBefore;
 
     if (tool.Geometry() == SmartGeometry::Face)
@@ -75,6 +79,10 @@ bool DrawSmartToolPanel(ToolContext& context)
                 ImGui::TextDisabled("Line | Axis %s", SmartToolLineAxisLabel(*axis));
             else
                 ImGui::TextDisabled("Drag from A to B; hold Shift to constrain");
+        }
+        else if (tool.Geometry() == SmartGeometry::Rectangle)
+        {
+            ImGui::TextDisabled("Drag from first corner to opposite corner");
         }
     }
 

@@ -306,20 +306,15 @@ using Position = Asset::Voxel::VoxelPosition;
     return points;
 }
 
-[[nodiscard]] SmartBrushResult ResolveLine(const SmartToolRequest& request,
-    VoxelSnapshot& snapshot)
+// All multi-sample geometries delegate their brush expansion to this one
+// helper. It is therefore impossible for Rectangle to diverge from Line in
+// brush shape, clipping, occupancy, statistics, or deterministic dedupe.
+[[nodiscard]] SmartBrushResult ResolveSamples(const SmartToolRequest& request,
+    VoxelSnapshot& snapshot, const std::vector<Position>& samples)
 {
     SmartBrushResult result;
-    if (!request.LineStart)
-    {
-        result.Code = SmartBrushResultCode::InvalidRequest;
-        result.Error = "Line requires a locked start point.";
-        return result;
-    }
     std::unordered_set<Position, PositionHash> seenPositions;
     std::unordered_set<Position, PositionHash> seenClipped;
-    const std::vector<Position> samples = RasterizeLine(*request.LineStart,
-        request.BrushRequest.Placement.Target);
     result.Positions.reserve(samples.size());
     for (const Position sample : samples)
     {
@@ -364,6 +359,80 @@ using Position = Asset::Voxel::VoxelPosition;
     result.RenderPlan.Bounds = CalculateBounds(result.Positions);
     result.Code = SmartBrushResultCode::Valid;
     return result;
+}
+
+[[nodiscard]] SmartBrushResult ResolveLine(const SmartToolRequest& request,
+    VoxelSnapshot& snapshot)
+{
+    if (!request.LineStart)
+    {
+        SmartBrushResult error;
+        error.Code = SmartBrushResultCode::InvalidRequest;
+        error.Error = "Line requires a locked start point.";
+        return error;
+    }
+    return ResolveSamples(request, snapshot, RasterizeLine(*request.LineStart,
+        request.BrushRequest.Placement.Target));
+}
+
+[[nodiscard]] std::vector<Position> RasterizeRectangle(
+    const SmartToolRectanglePlane& plane, const Position pointB)
+{
+    const auto component = [](const Position value, const Position axis) noexcept
+    {
+        return static_cast<std::int64_t>(value.X) * axis.X +
+            static_cast<std::int64_t>(value.Y) * axis.Y +
+            static_cast<std::int64_t>(value.Z) * axis.Z;
+    };
+    const std::int64_t u = component(pointB, plane.UAxis) -
+        component(plane.Origin, plane.UAxis);
+    const std::int64_t v = component(pointB, plane.VAxis) -
+        component(plane.Origin, plane.VAxis);
+    const std::int64_t minU = std::min<std::int64_t>(0, u);
+    const std::int64_t maxU = std::max<std::int64_t>(0, u);
+    const std::int64_t minV = std::min<std::int64_t>(0, v);
+    const std::int64_t maxV = std::max<std::int64_t>(0, v);
+    const std::int64_t countU = maxU - minU + 1;
+    const std::int64_t countV = maxV - minV + 1;
+    if (countU > 1'000'000LL || countV > 1'000'000LL ||
+        countU > 1'000'000LL / countV)
+        throw std::length_error("Smart Tool Rectangle exceeds the safe sample limit.");
+    std::vector<Position> samples;
+    samples.reserve(static_cast<std::size_t>(countU * countV));
+    for (std::int64_t offsetV = minV; offsetV <= maxV; ++offsetV)
+        for (std::int64_t offsetU = minU; offsetU <= maxU; ++offsetU)
+        {
+            const std::int64_t x = static_cast<std::int64_t>(plane.Origin.X) +
+                offsetU * plane.UAxis.X + offsetV * plane.VAxis.X;
+            const std::int64_t y = static_cast<std::int64_t>(plane.Origin.Y) +
+                offsetU * plane.UAxis.Y + offsetV * plane.VAxis.Y;
+            const std::int64_t z = static_cast<std::int64_t>(plane.Origin.Z) +
+                offsetU * plane.UAxis.Z + offsetV * plane.VAxis.Z;
+            if (x < std::numeric_limits<std::int32_t>::min() ||
+                x > std::numeric_limits<std::int32_t>::max() ||
+                y < std::numeric_limits<std::int32_t>::min() ||
+                y > std::numeric_limits<std::int32_t>::max() ||
+                z < std::numeric_limits<std::int32_t>::min() ||
+                z > std::numeric_limits<std::int32_t>::max())
+                throw std::length_error("Smart Tool Rectangle exceeds coordinate limits.");
+            samples.push_back({static_cast<std::int32_t>(x),
+                static_cast<std::int32_t>(y), static_cast<std::int32_t>(z)});
+        }
+    return samples;
+}
+
+[[nodiscard]] SmartBrushResult ResolveRectangle(const SmartToolRequest& request,
+    VoxelSnapshot& snapshot)
+{
+    if (!request.RectanglePlane)
+    {
+        SmartBrushResult error;
+        error.Code = SmartBrushResultCode::InvalidRequest;
+        error.Error = "Rectangle requires a locked plane and first corner.";
+        return error;
+    }
+    return ResolveSamples(request, snapshot, RasterizeRectangle(*request.RectanglePlane,
+        request.BrushRequest.Placement.Target));
 }
 
 [[nodiscard]] SmartBrushMode ModeForAction(const SmartAction action) noexcept
@@ -515,6 +584,36 @@ using Position = Asset::Voxel::VoxelPosition;
 }
 }
 
+std::optional<SmartToolRectanglePlane> SmartToolPlanner::MakeRectanglePlane(
+    const Position origin, const Position normal,
+    const float surfaceCoordinate) noexcept
+{
+    if (!IsUnitAxisNormal(normal) || !std::isfinite(surfaceCoordinate))
+        return std::nullopt;
+    if (normal.X != 0)
+        return SmartToolRectanglePlane{origin, normal, {0, 1, 0}, {0, 0, 1},
+            surfaceCoordinate};
+    if (normal.Y != 0)
+        return SmartToolRectanglePlane{origin, normal, {1, 0, 0}, {0, 0, 1},
+            surfaceCoordinate};
+    return SmartToolRectanglePlane{origin, normal, {1, 0, 0}, {0, 1, 0},
+        surfaceCoordinate};
+}
+
+Asset::Voxel::VoxelPosition SmartToolPlanner::ProjectRectangleEndpoint(
+    const SmartToolRectanglePlane& plane, Position endpoint) noexcept
+{
+    // The normal is a signed unit axis. Retaining Origin on it locks the
+    // interaction plane even while the pointer hovers another surface.
+    if (plane.Normal.X != 0) endpoint.X = static_cast<std::int32_t>(
+        std::floor(plane.SurfaceCoordinate));
+    else if (plane.Normal.Y != 0) endpoint.Y = static_cast<std::int32_t>(
+        std::floor(plane.SurfaceCoordinate));
+    else if (plane.Normal.Z != 0) endpoint.Z = static_cast<std::int32_t>(
+        std::floor(plane.SurfaceCoordinate));
+    return endpoint;
+}
+
 SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
 {
     if (request.SourceIdentity == 0U)
@@ -526,16 +625,18 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
         request.Geometry != SmartGeometry::Cube &&
         request.Geometry != SmartGeometry::Sphere &&
         request.Geometry != SmartGeometry::Face &&
-        request.Geometry != SmartGeometry::Line)
+        request.Geometry != SmartGeometry::Line &&
+        request.Geometry != SmartGeometry::Rectangle)
     {
         return Error(SmartBrushResultCode::Unsupported,
-            "The Smart Tool planner supports only Pencil, Cube, Sphere, Face, and Line geometry.");
+            "The Smart Tool planner supports only Pencil, Cube, Sphere, Face, Line, and Rectangle geometry.");
     }
     if (request.Mode && request.Geometry != SmartGeometry::Pencil &&
-        request.Geometry != SmartGeometry::Line)
+        request.Geometry != SmartGeometry::Line &&
+        request.Geometry != SmartGeometry::Rectangle)
     {
         return Error(SmartBrushResultCode::Unsupported,
-            "SMART-05 modes require Pencil or Line Smart Geometry.");
+            "Smart Tool brush modes require Pencil, Line, or Rectangle geometry.");
     }
     if (request.Action != SmartAction::Add &&
         request.Action != SmartAction::Erase &&
@@ -630,9 +731,12 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
             ? ResolveFace(normalized, snapshot)
             : request.Geometry == SmartGeometry::Line
             ? ResolveLine(normalized, snapshot)
+            : request.Geometry == SmartGeometry::Rectangle
+            ? ResolveRectangle(normalized, snapshot)
             : SmartBrushEngine::Resolve(geometryRequest);
         if ((request.Geometry == SmartGeometry::Face ||
-                request.Geometry == SmartGeometry::Line) &&
+                request.Geometry == SmartGeometry::Line ||
+                request.Geometry == SmartGeometry::Rectangle) &&
             brush.Code == SmartBrushResultCode::InvalidRequest)
             return Error(brush.Code, std::move(brush.Error));
         const SmartBrushResultCode code = brush.Code;

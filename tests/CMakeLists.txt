@@ -585,6 +585,36 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolLineTests>
 )
 add_executable(
+    VoxelForgeEditorSmartToolRectangleTests
+    Editor/SmartToolRectangleTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolRectangleTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolRectangleTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolRectangle
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolRectangleTests>
+)
+add_executable(
+    VoxelForgeEditorSmartToolRectangleSmokeTests
+    Editor/SmartToolRectangleSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolRectangleSmokeTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorSmartToolRectangleSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolRectangleSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolRectangleSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.SmartToolRectangleSmoke
+    PROPERTIES LABELS "Smoke"
+)
+add_executable(
     VoxelForgeEditorSmartToolLineConstraintResolverTests
     Editor/SmartToolLineConstraintResolverTests.cpp
 )

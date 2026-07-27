@@ -522,6 +522,12 @@ private:
     // A Line may keep its locked A while the pointer temporarily loses a
     // valid B. Such a suspended line must never commit its previous plan.
     bool smartLineEndpointValid_ = false;
+    // Rectangle locks its first corner and full plane on MouseDown. Only the
+    // second corner changes while dragging; an invalid endpoint cannot commit
+    // a stale prior plan.
+    std::optional<SmartToolRectanglePlane> smartRectanglePlane_;
+    std::optional<Asset::Voxel::VoxelPosition> smartRectanglePlannedEnd_;
+    bool smartRectangleEndpointValid_ = false;
     BrushProfileService brushProfileService_;
     SmartBrushSizeFeedback smartBrushSizeFeedback_{};
     bool smartBrushPreviewRefreshRequested_ = false;

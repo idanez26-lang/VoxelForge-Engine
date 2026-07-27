@@ -4,6 +4,7 @@
 #include "SmartTools/SmartToolRequest.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace VoxelForge::Editor
 {
@@ -13,6 +14,17 @@ class SmartToolPlanner final
 {
 public:
     [[nodiscard]] SmartToolResult Plan(const SmartToolRequest& request);
+
+    // Rectangle interaction helpers deliberately live beside the sole
+    // geometry authority. They only canonicalize the locked plane and B;
+    // sampling remains private to Plan().
+    [[nodiscard]] static std::optional<SmartToolRectanglePlane>
+        MakeRectanglePlane(Asset::Voxel::VoxelPosition origin,
+            Asset::Voxel::VoxelPosition normal,
+            float surfaceCoordinate) noexcept;
+    [[nodiscard]] static Asset::Voxel::VoxelPosition ProjectRectangleEndpoint(
+        const SmartToolRectanglePlane& plane,
+        Asset::Voxel::VoxelPosition endpoint) noexcept;
 
 private:
     std::uint64_t nextPlanId_ = 1U;
