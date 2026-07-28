@@ -19,7 +19,8 @@ bool DrawSmartToolPanel(ToolContext& context)
     int geometry = tool.Geometry() == SmartGeometry::Face ? 1
         : tool.Geometry() == SmartGeometry::Line ? 2
         : tool.Geometry() == SmartGeometry::Geometry ? 3
-        : tool.Geometry() == SmartGeometry::Surface ? 4 : 0;
+        : tool.Geometry() == SmartGeometry::Surface ? 4
+        : tool.Geometry() == SmartGeometry::Fill ? 5 : 0;
     changed |= ImGui::RadioButton("Pencil", &geometry, 0);
     ImGui::SameLine();
     changed |= ImGui::RadioButton("Face", &geometry, 1);
@@ -29,18 +30,39 @@ bool DrawSmartToolPanel(ToolContext& context)
     changed |= ImGui::RadioButton("Geometry", &geometry, 3);
     ImGui::NewLine();
     changed |= ImGui::RadioButton("Surface", &geometry, 4);
+    ImGui::SameLine();
+    changed |= ImGui::RadioButton("Fill", &geometry, 5);
     ImGui::PopID();
     const SmartGeometry geometryBefore = tool.Geometry();
     tool.SetGeometry(geometry == 1 ? SmartGeometry::Face
         : geometry == 2 ? SmartGeometry::Line
         : geometry == 3 ? SmartGeometry::Geometry
-        : geometry == 4 ? SmartGeometry::Surface : SmartGeometry::Pencil);
+        : geometry == 4 ? SmartGeometry::Surface
+        : geometry == 5 ? SmartGeometry::Fill : SmartGeometry::Pencil);
     changed |= tool.Geometry() != geometryBefore;
 
     if (tool.Geometry() == SmartGeometry::Face)
     {
         ImGui::TextDisabled("Face: connected exposed surface");
         ImGui::TextDisabled("Size and shape are not used");
+    }
+    else if (tool.Geometry() == SmartGeometry::Fill)
+    {
+        ImGui::TextDisabled("Fill Mode");
+        ImGui::PushID("FillMode");
+        int fillMode = static_cast<int>(tool.FillMode());
+        changed |= ImGui::RadioButton("Connected", &fillMode,
+            static_cast<int>(SmartFillMode::Connected));
+        ImGui::SameLine();
+        changed |= ImGui::RadioButton("Plane", &fillMode,
+            static_cast<int>(SmartFillMode::Plane));
+        ImGui::PopID();
+        const SmartFillMode fillModeBefore = tool.FillMode();
+        tool.SetFillMode(static_cast<SmartFillMode>(fillMode));
+        changed |= tool.FillMode() != fillModeBefore;
+        ImGui::TextDisabled(tool.FillMode() == SmartFillMode::Connected
+            ? "Click a connected color region"
+            : "Click a visible face to fill its plane");
     }
     else
     {

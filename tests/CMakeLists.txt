@@ -625,6 +625,36 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolSurfaceTests>
 )
 add_executable(
+    VoxelForgeEditorSmartToolFillTests
+    Editor/SmartToolFillTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolFillTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolFillTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolFill
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolFillTests>
+)
+add_executable(
+    VoxelForgeEditorSmartToolFillSmokeTests
+    Editor/SmartToolFillSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolFillSmokeTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorSmartToolFillSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolFillSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolFillSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.SmartToolFillSmoke
+    PROPERTIES LABELS "Smoke"
+)
+add_executable(
     VoxelForgeEditorSmartToolSurfaceSmokeTests
     Editor/SmartToolSurfaceSmokeTests.cpp
 )

@@ -79,6 +79,14 @@ int main()
             tool.Geometry() != SmartGeometry::Geometry)
             throw std::runtime_error("geometry transition");
         tool.SetGeometry(SmartGeometry::Pencil);
+        tool.SetGeometry(SmartGeometry::Fill);
+        tool.SetFillMode(SmartFillMode::Plane);
+        if (!tool.IsOperational() ||
+            tool.Geometry() != SmartGeometry::Fill ||
+            tool.FillMode() != SmartFillMode::Plane)
+            throw std::runtime_error("fill mode transition");
+        tool.SetFillMode(SmartFillMode::Connected);
+        tool.SetGeometry(SmartGeometry::Pencil);
 
         SmartBrushSizeFeedback feedback;
         if (feedback.IsVisible(0U))

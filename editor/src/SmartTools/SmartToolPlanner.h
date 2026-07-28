@@ -13,6 +13,11 @@ namespace VoxelForge::Editor
 class SmartToolPlanner final
 {
 public:
+    explicit SmartToolPlanner(
+        std::size_t fillCellLimit = MaximumSmartFillCells) noexcept
+        : fillCellLimit_(fillCellLimit == 0U ? 1U : fillCellLimit)
+    {
+    }
     [[nodiscard]] SmartToolResult Plan(const SmartToolRequest& request);
 
     // Geometry interaction helpers deliberately live beside the sole
@@ -27,6 +32,7 @@ public:
         Asset::Voxel::VoxelPosition endpoint) noexcept;
 
 private:
+    std::size_t fillCellLimit_ = MaximumSmartFillCells;
     std::uint64_t nextPlanId_ = 1U;
 };
 } // namespace VoxelForge::Editor

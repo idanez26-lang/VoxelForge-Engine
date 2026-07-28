@@ -20,6 +20,13 @@ enum class SmartToolMode : std::uint8_t
 
 inline constexpr int MaximumSmartToolBrushSize = MaximumSmartBrushRequestSize;
 inline constexpr int MaximumSmartGeometryHeight = 64;
+inline constexpr std::size_t MaximumSmartFillCells = 1'000'000U;
+
+enum class SmartFillMode : std::uint8_t
+{
+    Connected,
+    Plane
+};
 
 enum class SmartGeometry : std::uint8_t
 {
@@ -36,6 +43,7 @@ enum class SmartGeometry : std::uint8_t
     // from Geometry: it locks an exposed component, then applies local 2D
     // brush footprints through the shared Planner/Plan/Stroke pipeline.
     Surface,
+    Fill,
     Box,
     Line,
     Cylinder,
@@ -124,9 +132,11 @@ public:
     [[nodiscard]] SmartGeometry Geometry() const noexcept;
     [[nodiscard]] SmartToolMode Mode() const noexcept;
     [[nodiscard]] SmartAction Action() const noexcept;
+    [[nodiscard]] SmartFillMode FillMode() const noexcept;
     void SetGeometry(SmartGeometry geometry) noexcept;
     void SetMode(SmartToolMode mode) noexcept;
     void SetAction(SmartAction action) noexcept;
+    void SetFillMode(SmartFillMode mode) noexcept;
     [[nodiscard]] SmartBrushState& Brush() noexcept;
     [[nodiscard]] const SmartBrushState& Brush() const noexcept;
     [[nodiscard]] const SmartToolPreview& Preview() const noexcept;
@@ -146,6 +156,7 @@ private:
     SmartGeometry geometry_ = SmartGeometry::Pencil;
     SmartToolMode mode_ = SmartToolMode::SingleVoxel;
     SmartAction action_ = SmartAction::Add;
+    SmartFillMode fillMode_ = SmartFillMode::Connected;
     SmartBrushState brush_{};
     SmartToolPreview preview_{};
     SmartToolStatistics statistics_{};

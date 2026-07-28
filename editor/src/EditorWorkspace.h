@@ -376,6 +376,7 @@ private:
     [[nodiscard]] bool ContinueSmartToolStroke();
     [[nodiscard]] bool CommitSmartToolStroke();
     void CancelSmartToolStroke() noexcept;
+    [[nodiscard]] bool ApplySmartFill();
     [[nodiscard]] bool ApplyVoxelPencil();
     [[nodiscard]] bool ApplyVoxelEraser();
     [[nodiscard]] bool ApplyVoxelPaintBrush();

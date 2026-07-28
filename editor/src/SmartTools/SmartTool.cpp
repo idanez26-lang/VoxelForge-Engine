@@ -7,6 +7,7 @@ namespace VoxelForge::Editor
 SmartGeometry SmartTool::Geometry() const noexcept { return geometry_; }
 SmartToolMode SmartTool::Mode() const noexcept { return mode_; }
 SmartAction SmartTool::Action() const noexcept { return action_; }
+SmartFillMode SmartTool::FillMode() const noexcept { return fillMode_; }
 
 void SmartTool::SetGeometry(const SmartGeometry geometry) noexcept
 {
@@ -29,6 +30,14 @@ void SmartTool::SetAction(const SmartAction action) noexcept
 {
     if (action_ == action) return;
     action_ = action;
+    preview_ = {};
+    statistics_ = {};
+}
+
+void SmartTool::SetFillMode(const SmartFillMode mode) noexcept
+{
+    if (fillMode_ == mode) return;
+    fillMode_ = mode;
     preview_ = {};
     statistics_ = {};
 }
@@ -81,7 +90,7 @@ bool SmartTool::IsOperational() const noexcept
 {
     return (geometry_ == SmartGeometry::Pencil || geometry_ == SmartGeometry::Face ||
         geometry_ == SmartGeometry::Line || geometry_ == SmartGeometry::Geometry ||
-        geometry_ == SmartGeometry::Surface) &&
+        geometry_ == SmartGeometry::Surface || geometry_ == SmartGeometry::Fill) &&
         (action_ == SmartAction::Add || action_ == SmartAction::Erase ||
          action_ == SmartAction::Paint);
 }

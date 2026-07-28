@@ -10,6 +10,7 @@
 #include <deque>
 #include <exception>
 #include <limits>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -599,6 +600,117 @@ using Position = Asset::Voxel::VoxelPosition;
     }
 }
 
+[[nodiscard]] SmartBrushResult FillError(std::string message)
+{
+    SmartBrushResult result;
+    result.Code = SmartBrushResultCode::InvalidRequest;
+    result.Error = std::move(message);
+    return result;
+}
+
+[[nodiscard]] SmartBrushResult ResolveFill(const SmartToolRequest& request,
+    VoxelSnapshot& snapshot, const std::size_t fillCellLimit)
+{
+    const Position seed = request.BrushRequest.Placement.Target;
+    if (!IsInside(seed, request.BrushRequest.Dimensions))
+        return FillError("Fill requires a target inside the active model.");
+    const SmartToolVoxelState source = ReadSnapshot(request, snapshot, seed);
+    if (!source.Exists)
+        return FillError("Fill requires an existing source voxel.");
+
+    Position normal{};
+    std::array<Position, 6U> connectedOffsets{{
+        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+        {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}};
+    std::span<const Position> offsets{connectedOffsets};
+    std::array<Position, 4U> planeOffsets{};
+    if (request.FillMode == SmartFillMode::Plane)
+    {
+        if (!request.FaceSeed || request.FaceSeed->Position != seed ||
+            !IsUnitAxisNormal(request.FaceSeed->Normal))
+            return FillError(
+                "Plane Fill requires a locked visible voxel face.");
+        normal = request.FaceSeed->Normal;
+        const std::optional<Position> outward = Offset(seed, normal);
+        if (outward && IsInside(*outward, request.BrushRequest.Dimensions) &&
+            ReadSnapshot(request, snapshot, *outward).Exists)
+            return FillError(
+                "Plane Fill requires a locked visible voxel face.");
+        planeOffsets = PlanarOffsets(normal);
+        offsets = planeOffsets;
+    }
+
+    const auto belongsToRegion = [&](const Position position)
+    {
+        if (!IsInside(position, request.BrushRequest.Dimensions))
+            return false;
+        const SmartToolVoxelState state =
+            ReadSnapshot(request, snapshot, position);
+        return state.Exists && state.PaletteIndex == source.PaletteIndex;
+    };
+
+    std::deque<Position> pending;
+    std::unordered_set<Position, PositionHash> visited;
+    std::vector<Position> region;
+    pending.push_back(seed);
+    visited.insert(seed);
+    while (!pending.empty())
+    {
+        const Position current = pending.front();
+        pending.pop_front();
+        region.push_back(current);
+        for (const Position delta : offsets)
+        {
+            const std::optional<Position> neighbor = Offset(current, delta);
+            if (!neighbor || !visited.insert(*neighbor).second ||
+                !belongsToRegion(*neighbor))
+                continue;
+            if (region.size() + pending.size() >= fillCellLimit)
+                return FillError(
+                    "Fill region exceeds the 1,000,000 cell safety limit.");
+            pending.push_back(*neighbor);
+        }
+    }
+
+    SmartBrushResult result;
+    result.Positions.reserve(region.size());
+    if (request.FillMode == SmartFillMode::Plane &&
+        request.Action == SmartAction::Add)
+    {
+        for (const Position sourcePosition : region)
+        {
+            const std::optional<Position> destination =
+                Offset(sourcePosition, normal);
+            if (!destination ||
+                !IsInside(*destination, request.BrushRequest.Dimensions))
+                continue;
+            if (!ReadSnapshot(request, snapshot, *destination).Exists)
+                result.Positions.push_back(*destination);
+        }
+    }
+    else
+    {
+        result.Positions = std::move(region);
+    }
+
+    result.Statistics.Total = result.Positions.size();
+    result.AddablePositions.reserve(result.Positions.size());
+    result.ExistingPositions.reserve(result.Positions.size());
+    for (const Position position : result.Positions)
+    {
+        if (ReadSnapshot(request, snapshot, position).Exists)
+            result.ExistingPositions.push_back(position);
+        else
+            result.AddablePositions.push_back(position);
+    }
+    result.Statistics.New = result.AddablePositions.size();
+    result.Statistics.Existing = result.ExistingPositions.size();
+    result.RenderPlan.Mode = SmartBrushRenderMode::DetailedCells;
+    result.RenderPlan.Bounds = CalculateBounds(result.Positions);
+    result.Code = SmartBrushResultCode::Valid;
+    return result;
+}
+
 [[nodiscard]] SmartBrushResult ResolveSurfaceFootprint(
     const SmartToolRequest& request, VoxelSnapshot& snapshot)
 {
@@ -963,10 +1075,11 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
         request.Geometry != SmartGeometry::Face &&
         request.Geometry != SmartGeometry::Line &&
         request.Geometry != SmartGeometry::Geometry &&
-        request.Geometry != SmartGeometry::Surface)
+        request.Geometry != SmartGeometry::Surface &&
+        request.Geometry != SmartGeometry::Fill)
     {
         return Error(SmartBrushResultCode::Unsupported,
-            "The Smart Tool planner supports only Pencil, Cube, Sphere, Face, Line, Geometry, and Surface geometry.");
+            "The Smart Tool planner supports only Pencil, Cube, Sphere, Face, Line, Geometry, Surface, and Fill geometry.");
     }
     if (request.Mode &&
         request.Geometry != SmartGeometry::Pencil &&
@@ -1092,10 +1205,13 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
             brush = ResolveLine(normalized, snapshot);
         }
         else if (request.Geometry == SmartGeometry::Geometry ||
-                 request.Geometry == SmartGeometry::Surface)
+                 request.Geometry == SmartGeometry::Surface ||
+                 request.Geometry == SmartGeometry::Fill)
         {
             brush = request.Geometry == SmartGeometry::Surface
                 ? ResolveSurface(normalized, snapshot)
+                : request.Geometry == SmartGeometry::Fill
+                ? ResolveFill(normalized, snapshot, fillCellLimit_)
                 : ResolveGeometry(normalized, snapshot);
         }
         else
@@ -1105,7 +1221,8 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
         if ((request.Geometry == SmartGeometry::Face ||
                 request.Geometry == SmartGeometry::Line ||
                 request.Geometry == SmartGeometry::Geometry ||
-                request.Geometry == SmartGeometry::Surface) &&
+                request.Geometry == SmartGeometry::Surface ||
+                request.Geometry == SmartGeometry::Fill) &&
             brush.Code == SmartBrushResultCode::InvalidRequest)
             return Error(brush.Code, std::move(brush.Error));
         const SmartBrushResultCode code = brush.Code;
@@ -1113,8 +1230,16 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
         std::vector<SmartToolDiagnostic> diagnostics;
         if (!error.empty())
             diagnostics.push_back({SmartToolStatusFrom(code), error});
+        SmartToolRequest cellRequest = normalized;
+        // Connected Create is deliberately the same region recolour as Paint.
+        // The immutable Plan retains the user's Add action while its cells
+        // capture the exact paint operations consumed by preview and commit.
+        if (normalized.Geometry == SmartGeometry::Fill &&
+            normalized.FillMode == SmartFillMode::Connected &&
+            normalized.Action == SmartAction::Add)
+            cellRequest.Action = SmartAction::Paint;
         std::vector<SmartToolPlanCell> cells =
-            BuildCells(brush, normalized, snapshot);
+            BuildCells(brush, cellRequest, snapshot);
         const std::uint64_t planId = nextPlanId_++;
         const SmartToolPlanPtr plan(new SmartToolPlan(
             normalized, std::move(brush), planId, std::move(cells),

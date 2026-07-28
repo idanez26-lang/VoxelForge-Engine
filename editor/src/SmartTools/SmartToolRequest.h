@@ -63,6 +63,7 @@ struct SmartToolGeometryPlane final
 struct SmartToolRequest final
 {
     SmartGeometry Geometry = SmartGeometry::Pencil;
+    SmartFillMode FillMode = SmartFillMode::Connected;
     // Optional only to preserve isolated legacy callers during migration.
     // The active Smart Tool always supplies an explicit SMART-05 mode.
     std::optional<SmartToolMode> Mode;
@@ -123,6 +124,7 @@ struct SmartToolRequest final
 struct SmartToolRequestKey final
 {
     SmartGeometry Geometry = SmartGeometry::Pencil;
+    SmartFillMode FillMode = SmartFillMode::Connected;
     std::optional<SmartToolMode> Mode;
     SmartAction Action = SmartAction::Add;
     Asset::Voxel::VoxelDimensions Dimensions{};
@@ -146,7 +148,7 @@ struct SmartToolRequestKey final
 
     [[nodiscard]] bool operator==(const SmartToolRequestKey& other) const noexcept
     {
-        return Geometry == other.Geometry &&
+        return Geometry == other.Geometry && FillMode == other.FillMode &&
             Mode == other.Mode && Action == other.Action &&
             Dimensions.X == other.Dimensions.X &&
             Dimensions.Y == other.Dimensions.Y &&
@@ -233,7 +235,7 @@ struct SmartToolRequestKey final
     case SmartAction::Add:
     default: state.Mode = SmartBrushMode::Add; break;
     }
-    return {geometry, request.Mode, request.Action,
+    return {geometry, request.FillMode, request.Mode, request.Action,
         request.BrushRequest.Dimensions,
         state, request.BrushRequest.Placement,
         request.ReplacePaletteIndex,
