@@ -136,7 +136,9 @@ void Require(const bool condition, const std::string_view message)
 SmartToolRequest Request(const SmartToolStroke& stroke, const SmartAction action,
     const Position target, const Position normal = {0, 1, 0},
     const SmartToolMode mode = SmartToolMode::SingleVoxel, const int size = 1,
-    const std::uint8_t palette = 7U)
+    const std::uint8_t palette = 7U,
+    const SmartBrushDimension dimension = SmartBrushDimension::Volume3D,
+    const SmartBrushOrientation orientation = SmartBrushOrientation::Auto)
 {
     SmartToolRequest request;
     request.Geometry = SmartGeometry::Pencil;
@@ -144,7 +146,7 @@ SmartToolRequest Request(const SmartToolStroke& stroke, const SmartAction action
     request.Action = action;
     request.BrushRequest.Dimensions = {16U, 16U, 16U};
     request.BrushRequest.State = {SmartBrushShape::Cube,
-        SmartBrushDimension::Volume3D, SmartBrushOrientation::Auto,
+        dimension, orientation,
         size, palette, SmartBrushMode::Add};
     request.BrushRequest.Placement = {target, normal};
     request.SourceIdentity = stroke.Context().DocumentIdentity;
@@ -176,12 +178,15 @@ SmartToolStroke Begin(const States& source, const SmartAction action = SmartActi
 bool PlanAndAccumulate(SmartToolStroke& stroke, const SmartAction action,
     const Position target, const Position normal = {0, 1, 0},
     const SmartToolMode mode = SmartToolMode::SingleVoxel, const int size = 1,
-    const std::uint8_t palette = 7U)
+    const std::uint8_t palette = 7U,
+    const SmartBrushDimension dimension = SmartBrushDimension::Volume3D,
+    const SmartBrushOrientation orientation = SmartBrushOrientation::Auto)
 {
     SmartToolController controller;
     SmartToolSession session;
     const SmartToolResult result = controller.ResolvePreview(session,
-        Request(stroke, action, target, normal, mode, size, palette));
+        Request(stroke, action, target, normal, mode, size, palette,
+            dimension, orientation));
     return result.HasPlan() && stroke.Accumulate(*result.Plan);
 }
 
@@ -563,6 +568,146 @@ void TestBrushModesAndCancellation()
     Require(!cancelled.IsActive() && !cancelled.HasChanges(),
         "Cancelling a stroke retained transient changes.");
 }
+
+void TestPencilSurface2DPlannerAndCache()
+{
+    const States empty;
+    const Position target{8, 8, 8};
+    const std::array<Position, 3U> normals{
+        Position{1, 0, 0}, Position{0, 1, 0}, Position{0, 0, 1}};
+
+    for (const Position normal : normals)
+    {
+        for (const SmartToolMode mode : {SmartToolMode::SingleVoxel,
+                 SmartToolMode::CubeBrush, SmartToolMode::SphereBrush,
+                 SmartToolMode::CylinderBrush})
+        {
+            SmartToolStroke stroke = Begin(empty, SmartAction::Add, target);
+            SmartToolController controller;
+            SmartToolSession session;
+            const SmartToolResult preview = controller.ResolvePreview(session,
+                Request(stroke, SmartAction::Add, target, normal, mode, 3, 7U,
+                    SmartBrushDimension::Surface2D, SmartBrushOrientation::Z));
+            Require(preview.HasPlan() &&
+                    preview.Plan->BrushState().Dimension ==
+                        SmartBrushDimension::Surface2D &&
+                    preview.Plan->BrushState().Orientation ==
+                        SmartBrushOrientation::Auto &&
+                    preview.Plan->CacheKey().State.Dimension ==
+                        SmartBrushDimension::Surface2D &&
+                    preview.Plan->CacheKey().State.Orientation ==
+                        SmartBrushOrientation::Auto,
+                "The Pencil planner did not preserve 2D mode or resolve Auto orientation.");
+            Require(!preview.Plan->Cells().empty(),
+                "A supported 2D Pencil mode did not produce a plan.");
+            if (mode == SmartToolMode::SingleVoxel)
+                Require(preview.Plan->Cells().size() == 1U,
+                    "A 2D Single Pencil mode did not remain one voxel.");
+            for (const SmartToolPlanCell& cell : preview.Plan->Cells())
+            {
+                if (normal.X != 0) Require(cell.WorldPosition.X == target.X,
+                    "2D Auto X did not resolve to the placement plane.");
+                if (normal.Y != 0) Require(cell.WorldPosition.Y == target.Y,
+                    "2D Auto Y did not resolve to the placement plane.");
+                if (normal.Z != 0) Require(cell.WorldPosition.Z == target.Z,
+                    "2D Auto Z did not resolve to the placement plane.");
+            }
+            const SmartToolResult commit = controller.ResolveCommit(session);
+            Require(commit.Plan == preview.Plan && stroke.Accumulate(*commit.Plan),
+                "2D Pencil commit did not consume the preview plan.");
+        }
+    }
+
+    SmartToolStroke cacheStroke = Begin(empty, SmartAction::Add, target);
+    const SmartToolRequest volume = Request(cacheStroke, SmartAction::Add,
+        target, {0, 1, 0}, SmartToolMode::CubeBrush, 3, 7U,
+        SmartBrushDimension::Volume3D);
+    const SmartToolRequest surface = Request(cacheStroke, SmartAction::Add,
+        target, {0, 1, 0}, SmartToolMode::CubeBrush, 3, 7U,
+        SmartBrushDimension::Surface2D);
+    Require(!(MakeSmartToolRequestKey(volume) == MakeSmartToolRequestKey(surface)),
+        "The 2D Pencil mode was omitted from the planner cache key.");
+    const SmartToolRequest surfaceWithLegacyAxis = Request(cacheStroke,
+        SmartAction::Add, target, {0, 1, 0}, SmartToolMode::CubeBrush, 3,
+        7U, SmartBrushDimension::Surface2D, SmartBrushOrientation::X);
+    Require(MakeSmartToolRequestKey(surface) ==
+            MakeSmartToolRequestKey(surfaceWithLegacyAxis),
+        "The Pencil cache key did not use the resolved Auto orientation.");
+    SmartToolController controller;
+    SmartToolSession session;
+    const SmartToolResult volumePlan = controller.ResolvePreview(session, volume);
+    const SmartToolResult surfacePlan = controller.ResolvePreview(session, surface);
+    Require(volumePlan.HasPlan() && surfacePlan.HasPlan() &&
+            volumePlan.Plan->PlanId() != surfacePlan.Plan->PlanId(),
+        "Changing Pencil brush dimension reused a stale cached plan.");
+}
+
+void TestPencilSurface2DActionsStrokeUndoRedoAndDiagnostics()
+{
+    const Position target{6, 6, 6};
+    const States paintable{{target, {true, 2U}}};
+    for (const SmartAction action : {SmartAction::Add, SmartAction::Paint,
+             SmartAction::Erase})
+    {
+        const States& source = action == SmartAction::Add ? States{} : paintable;
+        SmartToolStroke stroke = Begin(source, action, target);
+        Require(PlanAndAccumulate(stroke, action, target, {0, 1, 0},
+                    SmartToolMode::SingleVoxel, 1, 8U,
+                    SmartBrushDimension::Surface2D),
+            "A supported 2D Pencil action did not accumulate its plan.");
+        Require(action != SmartAction::Add || stroke.HasChanges(),
+            "A 2D Pencil Add plan did not change empty source state.");
+    }
+
+    Asset::Voxel::VoxelDocument document = Document({});
+    TestEditSession editSession(document);
+    VoxelEditHistory history;
+    SmartToolStroke stroke;
+    Require(stroke.Begin({reinterpret_cast<std::uintptr_t>(&document),
+                document.GetRevision(), editSession.VoxelModelGeneration(), 0U,
+                [&document](const Position position)
+                {
+                    const auto voxel = document.GetVoxel(position);
+                    return SmartToolVoxelState{voxel.has_value(),
+                        voxel ? voxel->PaletteIndex : 0U};
+                }}, SmartAction::Add, target, {0, 1, 0}),
+        "Unable to begin the 2D Pencil transaction.");
+    Require(PlanAndAccumulate(stroke, SmartAction::Add, target, {0, 1, 0},
+                SmartToolMode::CubeBrush, 3, 7U,
+                SmartBrushDimension::Surface2D),
+        "A 2D Pencil stroke could not accumulate its first planar sample.");
+    const std::vector<Position> samples = stroke.Advance({8, 6, 6}, {0, 1, 0});
+    Require(samples == std::vector<Position>{{7, 6, 6}, {8, 6, 6}},
+        "A 2D Pencil stroke did not interpolate its planar segment.");
+    for (const Position sample : samples)
+        Require(PlanAndAccumulate(stroke, SmartAction::Add, sample, {0, 1, 0},
+                    SmartToolMode::CubeBrush, 3, 7U,
+                    SmartBrushDimension::Surface2D),
+            "A continuous 2D Pencil stroke could not accumulate an interpolated sample.");
+    const auto changes = stroke.Changes();
+    Require(!changes.empty() && VoxelPencilTool::ApplyChanges(
+                {&editSession, &document, 0U, editSession.VoxelModelGeneration(),
+                    &history, std::nullopt, nullptr, nullptr}, SmartAction::Add,
+                {8, 6, 6}, changes).Code == VoxelToolResultCode::Applied &&
+            history.Undo(editSession) && history.Redo(editSession),
+        "A 2D Pencil stroke did not preserve atomic Undo/Redo.");
+
+    const States occupiedSource{{{6, 6, 6}, {true, 2U}}};
+    SmartToolStroke occupied = Begin(occupiedSource);
+    Require(PlanAndAccumulate(occupied, SmartAction::Add, {6, 6, 6},
+                {0, 1, 0}, SmartToolMode::SingleVoxel, 1, 7U,
+                SmartBrushDimension::Surface2D) && !occupied.HasChanges(),
+        "A 2D Pencil no-change Add plan mutated the pending stroke.");
+    const States emptySource;
+    SmartToolStroke outside = Begin(emptySource);
+    SmartToolController planner;
+    SmartToolSession planning;
+    const SmartToolResult outOfBounds = planner.ResolvePreview(planning,
+        Request(outside, SmartAction::Add, {16, 6, 6}, {1, 0, 0},
+            SmartToolMode::CubeBrush, 3, 7U, SmartBrushDimension::Surface2D));
+    Require(outOfBounds.Code == SmartBrushResultCode::OutOfBounds,
+        "A fully outside 2D Pencil plan did not report its bounds diagnostic.");
+}
 }
 
 int main()
@@ -580,6 +725,8 @@ int main()
         TestNoChangeAndOutOfBoundsPlansDoNotMutateTheStroke();
         TestSafeSuspensionAndSurfaceTransition();
         TestBrushModesAndCancellation();
+        TestPencilSurface2DPlannerAndCache();
+        TestPencilSurface2DActionsStrokeUndoRedoAndDiagnostics();
         std::cout << "Smart Tool stroke tests passed.\n";
         return 0;
     }

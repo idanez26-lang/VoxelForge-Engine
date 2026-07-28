@@ -35,17 +35,20 @@ SmartToolRequest Request(const SmartToolMode mode, const SmartAction action,
     const States& states = {}, const int size = 1,
     const Position target = {16, 16, 16},
     const Asset::Voxel::VoxelDimensions dimensions = {128U, 128U, 128U},
-    const Position normal = {0, 0, 0})
+    const Position normal = {0, 0, 0},
+    const SmartBrushDimension dimension = SmartBrushDimension::Volume3D,
+    const SmartBrushOrientation orientation = SmartBrushOrientation::Auto)
 {
     SmartToolRequest request;
     request.Geometry = SmartGeometry::Pencil;
     request.Mode = mode;
     request.Action = action;
     request.BrushRequest.Dimensions = dimensions;
-    // Deliberately hostile values demonstrate planner-boundary normalization.
+    // Shape is mode-owned. Dimension remains a Pencil brush setting, whereas
+    // orientation is resolved to face/workplane Auto by the planner.
     request.BrushRequest.State.Shape = SmartBrushShape::Sphere;
-    request.BrushRequest.State.Dimension = SmartBrushDimension::Surface2D;
-    request.BrushRequest.State.Orientation = SmartBrushOrientation::Z;
+    request.BrushRequest.State.Dimension = dimension;
+    request.BrushRequest.State.Orientation = orientation;
     request.BrushRequest.State.Size = size;
     request.BrushRequest.State.PaletteIndex = 7U;
     request.BrushRequest.Placement = {target, normal};
@@ -62,6 +65,43 @@ SmartToolRequest Request(const SmartToolMode mode, const SmartAction action,
     request.PaletteColors[3U] = {0.12F, 0.33F, 0.72F, 1.0F};
     request.PaletteColors[7U] = {0.86F, 0.24F, 0.38F, 1.0F};
     return request;
+}
+
+SmartToolResult Resolve(const SmartToolRequest& request);
+
+void TestPencilSurface2DModes()
+{
+    constexpr Asset::Voxel::VoxelDimensions dimensions{64U, 64U, 64U};
+    const Position target{24, 24, 24};
+    for (const Position normal : {Position{1, 0, 0}, Position{0, 1, 0},
+             Position{0, 0, 1}})
+    {
+        for (const SmartToolMode mode : {SmartToolMode::SingleVoxel,
+                 SmartToolMode::CubeBrush, SmartToolMode::SphereBrush,
+                 SmartToolMode::CylinderBrush})
+        {
+            const SmartToolResult result = Resolve(Request(mode, SmartAction::Add,
+                {}, 3, target, dimensions, normal, SmartBrushDimension::Surface2D,
+                SmartBrushOrientation::Z));
+            Require(result.HasPlan() &&
+                    result.Plan->BrushState().Dimension ==
+                        SmartBrushDimension::Surface2D &&
+                    result.Plan->BrushState().Orientation == SmartBrushOrientation::Auto,
+                "Pencil Surface2D did not preserve dimension or resolve Auto orientation.");
+            if (mode == SmartToolMode::SingleVoxel)
+                Require(result.Plan->Cells().size() == 1U,
+                    "Pencil Surface2D Single is no longer one voxel.");
+            for (const SmartToolPlanCell& cell : result.Plan->Cells())
+            {
+                if (normal.X != 0) Require(cell.WorldPosition.X == target.X,
+                    "Pencil Surface2D did not project onto the X face.");
+                if (normal.Y != 0) Require(cell.WorldPosition.Y == target.Y,
+                    "Pencil Surface2D did not project onto the Y face.");
+                if (normal.Z != 0) Require(cell.WorldPosition.Z == target.Z,
+                    "Pencil Surface2D did not project onto the Z face.");
+            }
+        }
+    }
 }
 
 SmartToolResult Resolve(const SmartToolRequest& request)
@@ -371,6 +411,7 @@ int main()
         TestSphereAndCylinderShapes();
         TestDiagnosticsCacheAndPreview();
         TestEngineSafetyCap();
+        TestPencilSurface2DModes();
         std::cout << "Smart Tool mode tests passed.\n";
         return 0;
     }

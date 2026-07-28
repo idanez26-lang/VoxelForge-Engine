@@ -851,11 +851,25 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
             // mode. Preview and Commit subsequently consume this exact plan.
             if (request.Geometry == SmartGeometry::Pencil)
                 normalized.Geometry = SmartGeometry::Pencil;
-            normalized.BrushRequest.State.Dimension =
-                request.Geometry == SmartGeometry::Surface
-                ? SmartBrushDimension::Surface2D
-                : SmartBrushDimension::Volume3D;
-            normalized.BrushRequest.State.Orientation = SmartBrushOrientation::Auto;
+            // Pencil deliberately preserves its selected 3D/2D brush mode.
+            // V1 resolves Pencil Surface2D from the placement face/workplane;
+            // a fixed axis carried by a legacy brush profile must not override
+            // that face. This planner remains the one source of final
+            // geometry for both preview and commit.
+            // Existing specialised geometries keep their established fixed
+            // normalisation.
+            if (request.Geometry == SmartGeometry::Pencil)
+            {
+                normalized.BrushRequest.State.Orientation = SmartBrushOrientation::Auto;
+            }
+            else
+            {
+                normalized.BrushRequest.State.Dimension =
+                    request.Geometry == SmartGeometry::Surface
+                    ? SmartBrushDimension::Surface2D
+                    : SmartBrushDimension::Volume3D;
+                normalized.BrushRequest.State.Orientation = SmartBrushOrientation::Auto;
+            }
             switch (*request.Mode)
             {
             case SmartToolMode::SingleVoxel:

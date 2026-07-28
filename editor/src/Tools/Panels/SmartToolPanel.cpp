@@ -63,6 +63,20 @@ bool DrawSmartToolPanel(ToolContext& context)
         tool.SetMode(static_cast<SmartToolMode>(mode));
         changed |= tool.Mode() != modeBefore;
 
+        if (tool.Geometry() == SmartGeometry::Pencil)
+        {
+            ImGui::TextDisabled("Brush Mode");
+            ImGui::PushID("PencilBrushMode");
+            int dimension = static_cast<int>(tool.Brush().Dimension);
+            changed |= ImGui::RadioButton("3D", &dimension,
+                static_cast<int>(SmartBrushDimension::Volume3D));
+            ImGui::SameLine();
+            changed |= ImGui::RadioButton("2D", &dimension,
+                static_cast<int>(SmartBrushDimension::Surface2D));
+            tool.Brush().Dimension = static_cast<SmartBrushDimension>(dimension);
+            ImGui::PopID();
+        }
+
         if (tool.Mode() == SmartToolMode::SingleVoxel)
         {
             ImGui::TextDisabled("Size: 1 voxel");

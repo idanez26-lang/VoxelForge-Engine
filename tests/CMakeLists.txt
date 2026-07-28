@@ -726,6 +726,23 @@ set_tests_properties(
     VoxelForge.Editor.SmartToolModesSmoke
     PROPERTIES LABELS "Smoke"
 )
+add_executable(
+    VoxelForgeEditorSmartToolBrushMode2DSmokeTests
+    Editor/SmartToolBrushMode2DSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolBrushMode2DSmokeTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolBrushMode2DSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolBrushMode2DSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolBrushMode2DSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.SmartToolBrushMode2DSmoke
+    PROPERTIES LABELS "Smoke"
+)
 set_tests_properties(
     VoxelForge.Editor.SmartToolPlanStateSmoke
     PROPERTIES LABELS "Smoke"

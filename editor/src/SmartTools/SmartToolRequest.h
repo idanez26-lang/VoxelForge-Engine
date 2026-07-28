@@ -187,8 +187,21 @@ struct SmartToolRequestKey final
     SmartBrushState state = request.BrushRequest.State;
     if (request.Mode)
     {
-        state.Dimension = SmartBrushDimension::Volume3D;
-        state.Orientation = SmartBrushOrientation::Auto;
+        // Pencil owns its selected dimension.  Its V1 Surface2D mode is
+        // always face/workplane-projected, however, so Auto is the resolved
+        // orientation even when a legacy profile still contains a fixed axis.
+        // This keeps preview, cached plan, and commit on the same slice.
+        if (request.Geometry == SmartGeometry::Pencil)
+        {
+            state.Orientation = SmartBrushOrientation::Auto;
+        }
+        else
+        {
+            state.Dimension = request.Geometry == SmartGeometry::Surface
+                ? SmartBrushDimension::Surface2D
+                : SmartBrushDimension::Volume3D;
+            state.Orientation = SmartBrushOrientation::Auto;
+        }
         switch (*request.Mode)
         {
         case SmartToolMode::SingleVoxel:
