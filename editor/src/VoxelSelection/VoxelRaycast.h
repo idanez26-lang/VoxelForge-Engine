@@ -67,6 +67,26 @@ struct VoxelRaycastOptions final
     std::uint64_t MaximumSteps = MaximumVoxelRaycastSteps;
 };
 
+// Supplies virtual occupancy for a document-sized raycast. It is a non-owning
+// view so per-frame picking performs neither allocation nor type erasure. The
+// reader must not throw; a null context or reader is an invalid view.
+struct VoxelRaycastOccupancy final
+{
+    const void* Context = nullptr;
+    std::optional<std::uint8_t> (*Read)(const void*,
+        Asset::Voxel::VoxelPosition) noexcept = nullptr;
+
+    [[nodiscard]] bool IsValid() const noexcept
+    {
+        return Context != nullptr && Read != nullptr;
+    }
+    [[nodiscard]] std::optional<std::uint8_t> At(
+        const Asset::Voxel::VoxelPosition position) const noexcept
+    {
+        return IsValid() ? Read(Context, position) : std::nullopt;
+    }
+};
+
 [[nodiscard]] std::optional<VoxelRaycastHit> RaycastVoxelGrid(
     const Voxel::VoxelGrid& grid,
     const VoxelRay& ray) noexcept;
@@ -74,6 +94,12 @@ struct VoxelRaycastOptions final
 [[nodiscard]] std::optional<VoxelRaycastHit> RaycastVoxelDocument(
     const Asset::Voxel::VoxelDocument& document,
     const VoxelRay& worldRay,
+    const VoxelRaycastOptions& options = {}) noexcept;
+
+[[nodiscard]] std::optional<VoxelRaycastHit> RaycastVoxelDocumentWithOccupancy(
+    const Asset::Voxel::VoxelDocument& document,
+    const VoxelRay& worldRay,
+    VoxelRaycastOccupancy occupancy,
     const VoxelRaycastOptions& options = {}) noexcept;
 
 [[nodiscard]] Asset::Voxel::VoxelPosition VoxelHitFaceIntegerNormal(

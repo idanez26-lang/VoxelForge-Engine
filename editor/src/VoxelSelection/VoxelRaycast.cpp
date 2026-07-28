@@ -76,6 +76,20 @@ struct TraversalHit final
     std::uint8_t ColorIndex = 0U;
 };
 
+struct DocumentOccupancyContext final
+{
+    const Asset::Voxel::VoxelSubModel* Model = nullptr;
+};
+
+std::optional<std::uint8_t> ReadDocumentOccupancy(
+    const void* const context, const Asset::Voxel::VoxelPosition position) noexcept
+{
+    const auto* const document = static_cast<const DocumentOccupancyContext*>(context);
+    if (document == nullptr || document->Model == nullptr) return std::nullopt;
+    const auto voxel = document->Model->GetVoxel(position);
+    return voxel ? std::optional<std::uint8_t>(voxel->PaletteIndex) : std::nullopt;
+}
+
 VoxelHitFace StartingFace(
     const Vec3 point,
     const Vec3 direction,
@@ -285,9 +299,22 @@ std::optional<VoxelRaycastHit> RaycastVoxelDocument(
     const VoxelRay& worldRay,
     const VoxelRaycastOptions& options) noexcept
 {
+    const Asset::Voxel::VoxelSubModel* const model =
+        document.GetModel(options.SubModelIndex);
+    if (model == nullptr) return std::nullopt;
+    const DocumentOccupancyContext occupancy{model};
+    return RaycastVoxelDocumentWithOccupancy(document, worldRay,
+        {&occupancy, ReadDocumentOccupancy}, options);
+}
+
+std::optional<VoxelRaycastHit> RaycastVoxelDocumentWithOccupancy(
+    const Asset::Voxel::VoxelDocument& document,
+    const VoxelRay& worldRay, const VoxelRaycastOccupancy occupancy,
+    const VoxelRaycastOptions& options) noexcept
+{
     const Asset::Voxel::VoxelSubModel* model =
         document.GetModel(options.SubModelIndex);
-    if (model == nullptr || !TransformPairIsValid(options.Transform) ||
+    if (model == nullptr || !occupancy.IsValid() || !TransformPairIsValid(options.Transform) ||
         !IsFinite(worldRay.Origin) || !IsFinite(worldRay.Direction))
     {
         return std::nullopt;
@@ -303,16 +330,12 @@ std::optional<VoxelRaycastHit> RaycastVoxelDocument(
     const auto hit = TraverseGrid(
         dimensions.X, dimensions.Y, dimensions.Z, localRay,
         options.MaximumDistance, options.MaximumSteps,
-        [model](const VoxelCoordinates coordinates)
+        [occupancy](const VoxelCoordinates coordinates)
             -> std::optional<std::uint8_t>
         {
-            const auto voxel = model->GetVoxel({
-                static_cast<std::int32_t>(coordinates.X),
+            return occupancy.At({static_cast<std::int32_t>(coordinates.X),
                 static_cast<std::int32_t>(coordinates.Y),
                 static_cast<std::int32_t>(coordinates.Z)});
-            return voxel
-                ? std::optional<std::uint8_t>(voxel->PaletteIndex)
-                : std::nullopt;
         });
     if (!hit) return std::nullopt;
 

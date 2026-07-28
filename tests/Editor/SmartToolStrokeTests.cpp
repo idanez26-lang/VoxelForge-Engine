@@ -3,6 +3,7 @@
 #include "SmartTools/SmartToolStroke.h"
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
+#include "VoxelSelection/VoxelRaycast.h"
 #include "VoxelTools/VoxelPencilTool.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
@@ -34,6 +35,28 @@ struct PositionHash final
     }
 };
 using States = std::unordered_map<Position, SmartToolVoxelState, PositionHash>;
+
+struct StrokeOccupancyContext final
+{
+    const SmartToolStroke* Stroke = nullptr;
+};
+
+std::optional<std::uint8_t> ReadStrokeOccupancy(
+    const void* const context, const Position position) noexcept
+{
+    const auto* const occupancy = static_cast<const StrokeOccupancyContext*>(context);
+    if (occupancy == nullptr || occupancy->Stroke == nullptr) return std::nullopt;
+    try
+    {
+        const SmartToolVoxelState voxel = occupancy->Stroke->ReadVoxel(position);
+        return voxel.Exists ? std::optional<std::uint8_t>(voxel.PaletteIndex)
+                            : std::nullopt;
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+}
 
 void Require(bool condition, std::string_view message);
 
@@ -342,6 +365,120 @@ void TestCreateDeduplicationAndRevisit()
         "Revisiting a create target produced duplicate or inconsistent changes.");
 }
 
+void TestVirtualPickingStacksAndContinuousExtension()
+{
+    Asset::Voxel::VoxelDocument document = Document({{4U, 4U, 3U, 2U}});
+    TestEditSession session(document);
+    VoxelEditHistory history;
+    const Position first{4, 4, 4};
+    const Position normal{0, 0, 1};
+    SmartToolStroke stroke;
+    Require(stroke.Begin({reinterpret_cast<std::uintptr_t>(&document),
+            document.GetRevision(), session.VoxelModelGeneration(), 0U,
+            [&document](const Position position)
+            {
+                const auto voxel = document.GetVoxel(position);
+                return SmartToolVoxelState{voxel.has_value(),
+                    voxel ? voxel->PaletteIndex : 0U};
+            }}, SmartAction::Add, first, normal),
+        "Unable to begin the virtual picking stroke.");
+
+    SmartToolController controller;
+    SmartToolSession planning;
+    const auto resolve = [&](const Position target) -> SmartToolPlanPtr
+    {
+        const SmartToolResult result = controller.ResolvePreview(
+            planning, Request(stroke, SmartAction::Add, target, normal));
+        Require(result.HasPlan(), "Unable to build the stacking preview plan.");
+        return result.Plan;
+    };
+
+    const SmartToolPlanPtr firstPlan = resolve(first);
+    Require(stroke.Accumulate(*firstPlan), "Unable to accumulate the first stacked voxel.");
+    const StrokeOccupancyContext virtualOccupancy{&stroke};
+    const auto virtualHit = RaycastVoxelDocumentWithOccupancy(
+        document, {{4.5F, 4.5F, 20.0F}, {0.0F, 0.0F, -1.0F}},
+        {&virtualOccupancy, ReadStrokeOccupancy});
+    Require(virtualHit && virtualHit->Coordinates ==
+            VoxelCoordinates{4U, 4U, 4U} &&
+            virtualHit->Face == VoxelHitFace::PositiveZ &&
+            virtualHit->AdjacentPosition == Position{4, 4, 5},
+        "The pending voxel did not immediately become the next visible picking face.");
+
+    const Position stackedTarget = virtualHit->AdjacentPosition;
+    const std::vector<Position> vertical = stroke.Advance(stackedTarget, normal);
+    Require(vertical == std::vector<Position>{stackedTarget},
+        "A one-cell virtual stack was not sampled without a large screen movement.");
+    const SmartToolPlanPtr stackedPlan = resolve(stackedTarget);
+    Require(stackedPlan->Placement().Target == stackedTarget &&
+            stackedPlan->PlanId() != firstPlan->PlanId() &&
+            stroke.Accumulate(*stackedPlan),
+        "The plan cache retained the stale first stacking target.");
+
+    const std::vector<Position> lateral = stroke.Advance({6, 4, 5}, normal);
+    Require(lateral == std::vector<Position>{{5, 4, 5}, {6, 4, 5}},
+        "Continuous lateral Pencil motion was not interpolated from the virtual face.");
+    for (const Position target : lateral)
+        Require(stroke.Accumulate(*resolve(target)),
+            "Unable to accumulate a continuous lateral Pencil sample.");
+    Require(stroke.Advance({6, 4, 5}, normal).empty() &&
+            stroke.Changes().size() == 4U,
+        "An unchanged target created a duplicate pending voxel change.");
+
+    const std::vector<Asset::Voxel::VoxelDocumentChange> changes = stroke.Changes();
+    Require(VoxelPencilTool::ApplyChanges({&session, &document, 0U,
+                session.VoxelModelGeneration(), &history, std::nullopt,
+                nullptr, nullptr}, SmartAction::Add, {6, 4, 5}, changes).Code ==
+            VoxelToolResultCode::Applied && history.UndoCount() == 1U &&
+            session.rebuilds_ == 1U && history.Undo(session) &&
+            history.Redo(session),
+        "A held Pencil stroke did not remain one atomic Undo/Redo transaction.");
+}
+
+void TestRepeatedClicksFollowCommittedFaces()
+{
+    Asset::Voxel::VoxelDocument document = Document({{4U, 4U, 3U, 2U}});
+    TestEditSession session(document);
+    VoxelEditHistory history;
+    const Position normal{0, 0, 1};
+    const auto applyClick = [&](const Position target)
+    {
+        SmartToolStroke click;
+        Require(click.Begin({reinterpret_cast<std::uintptr_t>(&document),
+                document.GetRevision(), session.VoxelModelGeneration(), 0U,
+                [&document](const Position position)
+                {
+                    const auto voxel = document.GetVoxel(position);
+                    return SmartToolVoxelState{voxel.has_value(),
+                        voxel ? voxel->PaletteIndex : 0U};
+                }}, SmartAction::Add, target, normal),
+            "Unable to begin repeated Pencil click.");
+        Require(PlanAndAccumulate(click, SmartAction::Add, target, normal),
+            "Unable to plan repeated Pencil click.");
+        const std::vector<Asset::Voxel::VoxelDocumentChange> changes = click.Changes();
+        Require(changes.size() == 1U && VoxelPencilTool::ApplyChanges(
+                    {&session, &document, 0U, session.VoxelModelGeneration(),
+                        &history, std::nullopt, nullptr, nullptr},
+                    SmartAction::Add, target, changes).Code ==
+                VoxelToolResultCode::Applied,
+            "A simple Pencil click did not produce one applied voxel change.");
+    };
+
+    const Editor::VoxelRay ray{{4.5F, 4.5F, 20.0F}, {0.0F, 0.0F, -1.0F}};
+    const auto firstHit = RaycastVoxelDocument(document, ray);
+    Require(firstHit && firstHit->AdjacentPosition == Position{4, 4, 4},
+        "Initial click did not resolve its exposed document face.");
+    applyClick(firstHit->AdjacentPosition);
+    const auto secondHit = RaycastVoxelDocument(document, ray);
+    Require(secondHit && secondHit->Coordinates == VoxelCoordinates{4U, 4U, 4U} &&
+            secondHit->AdjacentPosition == Position{4, 4, 5},
+        "The first committed click did not immediately expose its next face.");
+    applyClick(secondHit->AdjacentPosition);
+    Require(document.GetVoxel({4, 4, 4}).has_value() &&
+            document.GetVoxel({4, 4, 5}).has_value() && history.UndoCount() == 2U,
+        "Repeated clicks did not stack distinct document voxels atomically.");
+}
+
 void TestVirtualPaintAndRemoveState()
 {
     const States source{{{4, 4, 4}, {true, 2U}}, {{5, 4, 4}, {true, 3U}}};
@@ -405,7 +542,8 @@ void TestSafeSuspensionAndSurfaceTransition()
 void TestBrushModesAndCancellation()
 {
     const States empty;
-    for (const SmartToolMode mode : {SmartToolMode::CubeBrush,
+    for (const SmartToolMode mode : {SmartToolMode::SingleVoxel,
+             SmartToolMode::CubeBrush,
              SmartToolMode::SphereBrush, SmartToolMode::CylinderBrush})
     {
         for (const int size : {3, 7})
@@ -436,6 +574,8 @@ int main()
         TestAtomicCommitUndoRedoAndExactAggregatePreview();
         TestSingleClickIsOneAtomicHistoryOperation();
         TestCreateDeduplicationAndRevisit();
+        TestVirtualPickingStacksAndContinuousExtension();
+        TestRepeatedClicksFollowCommittedFaces();
         TestVirtualPaintAndRemoveState();
         TestNoChangeAndOutOfBoundsPlansDoNotMutateTheStroke();
         TestSafeSuspensionAndSurfaceTransition();

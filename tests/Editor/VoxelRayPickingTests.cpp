@@ -59,6 +59,23 @@ Asset::Vox::VoxModelMetadata Model(
     return {dimensions, std::move(voxels)};
 }
 
+struct VirtualOccupancyContext final
+{
+    Asset::Voxel::VoxelPosition Position{};
+    std::uint8_t PaletteIndex = 0U;
+    bool Occupied = false;
+};
+
+std::optional<std::uint8_t> ReadVirtualOccupancy(
+    const void* const context, const Asset::Voxel::VoxelPosition position) noexcept
+{
+    const auto* const occupancy = static_cast<const VirtualOccupancyContext*>(context);
+    return occupancy != nullptr && occupancy->Occupied &&
+            occupancy->Position == position
+        ? std::optional<std::uint8_t>(occupancy->PaletteIndex)
+        : std::nullopt;
+}
+
 Editor::VoxelRay WorldRayForLocal(
     const Editor::VoxelModelTransform& transform,
     const Editor::Vec3 localOrigin,
@@ -335,6 +352,42 @@ void TestTransformsAndMultipleModels()
         "Replacement document did not produce its own nearest hit.");
 }
 
+void TestVirtualDocumentOccupancy()
+{
+    Asset::Voxel::VoxelDocument document = Document({
+        Model({8U, 4U, 4U}, {{1U, 1U, 1U, 3U}})});
+    const Editor::VoxelRay ray{{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}};
+
+    // The source voxel is deliberately hidden and the pending stroke voxel is
+    // exposed one cell farther along the same ray. Virtual picking must target
+    // that exact pending result without touching the document.
+    const VirtualOccupancyContext virtualOccupancy{{2, 1, 1}, 9U, true};
+    const auto virtualHit = Editor::RaycastVoxelDocumentWithOccupancy(
+        document, ray, {&virtualOccupancy, ReadVirtualOccupancy});
+    Require(virtualHit && virtualHit->Coordinates ==
+            Editor::VoxelCoordinates{2U, 1U, 1U} &&
+            virtualHit->AdjacentPosition == Asset::Voxel::VoxelPosition{1, 1, 1} &&
+            virtualHit->ColorIndex == 9U,
+        "Virtual occupancy did not replace the stale document picking target.");
+    Require(document.GetVoxel({1, 1, 1}).has_value() &&
+            !document.GetVoxel({2, 1, 1}).has_value(),
+        "Virtual picking mutated the source document.");
+
+    // Paint and Erase retain the physical document picker. In particular, an
+    // erased pending cell must not make the pointer tunnel to a farther voxel.
+    Asset::Voxel::VoxelDocument layered = Document({
+        Model({5U, 3U, 3U}, {{1U, 1U, 1U, 4U}, {3U, 1U, 1U, 5U}})});
+    const auto physical = Editor::RaycastVoxelDocument(layered,
+        {{-2.0F, 1.5F, 1.5F}, {1.0F, 0.0F, 0.0F}});
+    Require(physical && physical->Coordinates == Editor::VoxelCoordinates{1U, 1U, 1U},
+        "Physical picking no longer preserves the nearest Paint/Erase target.");
+
+    const auto failed = Editor::RaycastVoxelDocumentWithOccupancy(
+        document, ray, {});
+    Require(!failed,
+        "An invalid virtual occupancy view selected a potentially stale deeper voxel.");
+}
+
 void TestInteractionStateAndRevisionInvalidation()
 {
     Editor::VoxelSelectionState state;
@@ -393,6 +446,7 @@ int main()
         TestViewportRayBuilder();
         TestBoundsDdaAndResult();
         TestTransformsAndMultipleModels();
+        TestVirtualDocumentOccupancy();
         TestInteractionStateAndRevisionInvalidation();
         return 0;
     }
