@@ -36,28 +36,6 @@ struct PositionHash final
 };
 using States = std::unordered_map<Position, SmartToolVoxelState, PositionHash>;
 
-struct StrokeOccupancyContext final
-{
-    const SmartToolStroke* Stroke = nullptr;
-};
-
-std::optional<std::uint8_t> ReadStrokeOccupancy(
-    const void* const context, const Position position) noexcept
-{
-    const auto* const occupancy = static_cast<const StrokeOccupancyContext*>(context);
-    if (occupancy == nullptr || occupancy->Stroke == nullptr) return std::nullopt;
-    try
-    {
-        const SmartToolVoxelState voxel = occupancy->Stroke->ReadVoxel(position);
-        return voxel.Exists ? std::optional<std::uint8_t>(voxel.PaletteIndex)
-                            : std::nullopt;
-    }
-    catch (...)
-    {
-        return std::nullopt;
-    }
-}
-
 void Require(bool condition, std::string_view message);
 
 Asset::Voxel::VoxelDocument Document(std::vector<Asset::Vox::VoxVoxel> voxels,
@@ -162,7 +140,10 @@ SmartToolRequest Request(const SmartToolStroke& stroke, const SmartAction action
 }
 
 SmartToolStroke Begin(const States& source, const SmartAction action = SmartAction::Add,
-    const Position target = {4, 4, 4})
+    const Position target = {4, 4, 4},
+    const Position normal = {0, 1, 0},
+    const SmartToolStrokeSurfacePolicy surfacePolicy =
+        SmartToolStrokeSurfacePolicy::Unlocked)
 {
     SmartToolStroke stroke;
     const bool begun = stroke.Begin({0x51U, 9U, 3U, 0U,
@@ -170,7 +151,7 @@ SmartToolStroke Begin(const States& source, const SmartAction action = SmartActi
         {
             const auto found = source.find(position);
             return found == source.end() ? SmartToolVoxelState{} : found->second;
-        }}, action, target, {0, 1, 0});
+        }}, action, target, normal, surfacePolicy);
     Require(begun, "Unable to begin Smart Tool stroke.");
     return stroke;
 }
@@ -370,7 +351,7 @@ void TestCreateDeduplicationAndRevisit()
         "Revisiting a create target produced duplicate or inconsistent changes.");
 }
 
-void TestVirtualPickingStacksAndContinuousExtension()
+void TestSourcePickingAndPencilSurfaceLock()
 {
     Asset::Voxel::VoxelDocument document = Document({{4U, 4U, 3U, 2U}});
     TestEditSession session(document);
@@ -385,8 +366,9 @@ void TestVirtualPickingStacksAndContinuousExtension()
                 const auto voxel = document.GetVoxel(position);
                 return SmartToolVoxelState{voxel.has_value(),
                     voxel ? voxel->PaletteIndex : 0U};
-            }}, SmartAction::Add, first, normal),
-        "Unable to begin the virtual picking stroke.");
+            }}, SmartAction::Add, first, normal,
+            SmartToolStrokeSurfacePolicy::LockPencilSurface),
+        "Unable to begin the source-picked Pencil stroke.");
 
     SmartToolController controller;
     SmartToolSession planning;
@@ -394,50 +376,130 @@ void TestVirtualPickingStacksAndContinuousExtension()
     {
         const SmartToolResult result = controller.ResolvePreview(
             planning, Request(stroke, SmartAction::Add, target, normal));
-        Require(result.HasPlan(), "Unable to build the stacking preview plan.");
+        Require(result.HasPlan(), "Unable to build the Pencil preview plan.");
         return result.Plan;
     };
 
     const SmartToolPlanPtr firstPlan = resolve(first);
-    Require(stroke.Accumulate(*firstPlan), "Unable to accumulate the first stacked voxel.");
-    const StrokeOccupancyContext virtualOccupancy{&stroke};
-    const auto virtualHit = RaycastVoxelDocumentWithOccupancy(
-        document, {{4.5F, 4.5F, 20.0F}, {0.0F, 0.0F, -1.0F}},
-        {&virtualOccupancy, ReadStrokeOccupancy});
-    Require(virtualHit && virtualHit->Coordinates ==
-            VoxelCoordinates{4U, 4U, 4U} &&
-            virtualHit->Face == VoxelHitFace::PositiveZ &&
-            virtualHit->AdjacentPosition == Position{4, 4, 5},
-        "The pending voxel did not immediately become the next visible picking face.");
+    Require(stroke.Accumulate(*firstPlan),
+        "Unable to accumulate the first source-picked voxel.");
+    const auto sourceHit = RaycastVoxelDocument(
+        document, {{4.5F, 4.5F, 20.0F}, {0.0F, 0.0F, -1.0F}});
+    Require(sourceHit && sourceHit->Coordinates ==
+            VoxelCoordinates{4U, 4U, 3U} &&
+            sourceHit->Face == VoxelHitFace::PositiveZ &&
+            sourceHit->AdjacentPosition == first,
+        "Pending Pencil cells incorrectly replaced the source-document picking face.");
 
-    const Position stackedTarget = virtualHit->AdjacentPosition;
-    const std::vector<Position> vertical = stroke.Advance(stackedTarget, normal);
-    Require(vertical == std::vector<Position>{stackedTarget},
-        "A one-cell virtual stack was not sampled without a large screen movement.");
-    const SmartToolPlanPtr stackedPlan = resolve(stackedTarget);
-    Require(stackedPlan->Placement().Target == stackedTarget &&
-            stackedPlan->PlanId() != firstPlan->PlanId() &&
-            stroke.Accumulate(*stackedPlan),
-        "The plan cache retained the stale first stacking target.");
-
+    Require(stroke.Advance({4, 4, 5}, normal).empty(),
+        "A same-normal target shifted by pending preview occupancy auto-stacked.");
     const std::vector<Position> lateral = stroke.Advance({6, 4, 5}, normal);
-    Require(lateral == std::vector<Position>{{5, 4, 5}, {6, 4, 5}},
-        "Continuous lateral Pencil motion was not interpolated from the virtual face.");
+    Require(lateral == std::vector<Position>{{5, 4, 4}, {6, 4, 4}},
+        "Continuous Pencil motion escaped its locked source face plane.");
     for (const Position target : lateral)
         Require(stroke.Accumulate(*resolve(target)),
             "Unable to accumulate a continuous lateral Pencil sample.");
-    Require(stroke.Advance({6, 4, 5}, normal).empty() &&
-            stroke.Changes().size() == 4U,
+    Require(stroke.Advance({6, 4, 8}, normal).empty() &&
+            stroke.Changes().size() == 3U,
         "An unchanged target created a duplicate pending voxel change.");
 
     const std::vector<Asset::Voxel::VoxelDocumentChange> changes = stroke.Changes();
     Require(VoxelPencilTool::ApplyChanges({&session, &document, 0U,
                 session.VoxelModelGeneration(), &history, std::nullopt,
-                nullptr, nullptr}, SmartAction::Add, {6, 4, 5}, changes).Code ==
+                nullptr, nullptr}, SmartAction::Add, {6, 4, 4}, changes).Code ==
             VoxelToolResultCode::Applied && history.UndoCount() == 1U &&
             session.rebuilds_ == 1U && history.Undo(session) &&
             history.Redo(session),
         "A held Pencil stroke did not remain one atomic Undo/Redo transaction.");
+}
+
+void TestPencilHorizontalVerticalLocksTransitionsAndSuspension()
+{
+    const States empty;
+    SmartToolStroke horizontal = Begin(empty, SmartAction::Add,
+        {3, 4, 5}, {0, 1, 0},
+        SmartToolStrokeSurfacePolicy::LockPencilSurface);
+    Require(horizontal.Advance({7, 9, 5}, {0, 1, 0}) ==
+            std::vector<Position>{{4, 4, 5}, {5, 4, 5},
+                {6, 4, 5}, {7, 4, 5}},
+        "Horizontal Pencil motion did not preserve its locked Y plane.");
+
+    SmartToolStroke vertical = Begin(empty, SmartAction::Add,
+        {4, 3, 5}, {1, 0, 0},
+        SmartToolStrokeSurfacePolicy::LockPencilSurface);
+    Require(vertical.Advance({9, 7, 5}, {1, 0, 0}) ==
+            std::vector<Position>{{4, 4, 5}, {4, 5, 5},
+                {4, 6, 5}, {4, 7, 5}},
+        "Vertical Pencil motion did not preserve its locked X plane.");
+
+    const std::vector<Position> transition =
+        vertical.Advance({8, 7, 6}, {0, 0, 1});
+    Require(transition == std::vector<Position>{{8, 7, 6}},
+        "A deliberate source-face normal change bridged two Pencil surfaces.");
+    Require(vertical.Advance({10, 9, 12}, {0, 0, 1}) ==
+            std::vector<Position>{{9, 8, 6}, {10, 9, 6}},
+        "The transitioned Pencil segment did not lock its new Z plane.");
+    vertical.Suspend();
+    Require(vertical.Advance({14, 12, 20}, {0, 0, 1}) ==
+            std::vector<Position>{{14, 12, 6}},
+        "A suspended Pencil segment bridged an invalid picking gap.");
+}
+
+void TestPencilPolicyAcrossActionsDimensionsAndModes()
+{
+    States occupied;
+    for (int z = 2; z <= 12; ++z)
+        for (int y = 2; y <= 12; ++y)
+            for (int x = 2; x <= 12; ++x)
+                occupied.emplace(Position{x, y, z},
+                    SmartToolVoxelState{true, 2U});
+    const States empty;
+    const std::array<SmartToolMode, 4U> modes{{
+        SmartToolMode::SingleVoxel, SmartToolMode::CubeBrush,
+        SmartToolMode::SphereBrush, SmartToolMode::CylinderBrush}};
+    for (const SmartAction action : {
+             SmartAction::Add, SmartAction::Paint, SmartAction::Erase})
+    {
+        const States& source =
+            action == SmartAction::Add ? empty : occupied;
+        for (const SmartBrushDimension dimension : {
+                 SmartBrushDimension::Volume3D,
+                 SmartBrushDimension::Surface2D})
+        {
+            for (const SmartToolMode mode : modes)
+            {
+                SmartToolStroke stroke = Begin(source, action,
+                    {6, 6, 6}, {0, 1, 0},
+                    SmartToolStrokeSurfacePolicy::LockPencilSurface);
+                const std::vector<Position> samples =
+                    stroke.Advance({8, 10, 6}, {0, 1, 0});
+                Require(samples == std::vector<Position>{
+                            {7, 6, 6}, {8, 6, 6}},
+                    "A Pencil action/mode escaped its locked anchor plane.");
+                SmartToolController controller;
+                SmartToolSession session;
+                for (const Position sample : samples)
+                {
+                    const SmartToolResult preview = controller.ResolvePreview(
+                        session, Request(stroke, action, sample, {0, 1, 0},
+                            mode, mode == SmartToolMode::SingleVoxel ? 1 : 3,
+                            8U, dimension));
+                    Require(preview.HasPlan() &&
+                            preview.Plan->Placement().Target.Y == 6,
+                        "Planner placement diverged from the locked Pencil anchor.");
+                    if (dimension == SmartBrushDimension::Surface2D)
+                        for (const SmartToolPlanCell& cell :
+                            preview.Plan->Cells())
+                            Require(cell.WorldPosition.Y == 6,
+                                "A 2D Pencil plan escaped its locked plane.");
+                    const SmartToolResult commit =
+                        controller.ResolveCommit(session);
+                    Require(commit.Plan == preview.Plan,
+                        "Pencil Preview and Commit consumed different plans.");
+                }
+            }
+        }
+    }
 }
 
 void TestRepeatedClicksFollowCommittedFaces()
@@ -456,7 +518,8 @@ void TestRepeatedClicksFollowCommittedFaces()
                     const auto voxel = document.GetVoxel(position);
                     return SmartToolVoxelState{voxel.has_value(),
                         voxel ? voxel->PaletteIndex : 0U};
-                }}, SmartAction::Add, target, normal),
+            }}, SmartAction::Add, target, normal,
+                SmartToolStrokeSurfacePolicy::LockPencilSurface),
             "Unable to begin repeated Pencil click.");
         Require(PlanAndAccumulate(click, SmartAction::Add, target, normal),
             "Unable to plan repeated Pencil click.");
@@ -719,7 +782,9 @@ int main()
         TestAtomicCommitUndoRedoAndExactAggregatePreview();
         TestSingleClickIsOneAtomicHistoryOperation();
         TestCreateDeduplicationAndRevisit();
-        TestVirtualPickingStacksAndContinuousExtension();
+        TestSourcePickingAndPencilSurfaceLock();
+        TestPencilHorizontalVerticalLocksTransitionsAndSuspension();
+        TestPencilPolicyAcrossActionsDimensionsAndModes();
         TestRepeatedClicksFollowCommittedFaces();
         TestVirtualPaintAndRemoveState();
         TestNoChangeAndOutOfBoundsPlansDoNotMutateTheStroke();

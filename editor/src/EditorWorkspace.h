@@ -366,11 +366,10 @@ private:
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
     [[nodiscard]] bool AddAdjacentVoxel();
-    // Re-picks against either the committed document or the current Smart
-    // Tool stroke overlay. This keeps the next Pencil target aligned with the
-    // exact virtual preview without mutating the document during a drag.
-    [[nodiscard]] bool RefreshSmartToolHover(
-        const SmartToolStroke* stroke = nullptr) noexcept;
+    // Re-picks exclusively against committed source geometry. Pending Smart
+    // Tool cells remain planner input through SmartToolStroke::ReadVoxel, but
+    // never become picking faces during the same gesture.
+    [[nodiscard]] bool RefreshSmartToolHover() noexcept;
     [[nodiscard]] std::optional<SmartToolRequest> BuildSmartPencilRequest(
         const SmartToolStroke* stroke = nullptr);
     [[nodiscard]] bool BeginSmartToolStroke();

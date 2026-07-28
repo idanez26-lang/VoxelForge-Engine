@@ -128,7 +128,8 @@ std::vector<Asset::Voxel::VoxelDocumentChange> BuildStroke(
                 const auto voxel = document.GetVoxel(position);
                 return SmartToolVoxelState{voxel.has_value(),
                     voxel ? voxel->PaletteIndex : 0U};
-            }}, action, targets.front(), {0, 1, 0}),
+            }}, action, targets.front(), {0, 1, 0},
+            SmartToolStrokeSurfacePolicy::LockPencilSurface),
         "Unable to begin the smoke stroke.");
     SmartToolController controller;
     SmartToolSession plannerSession;

@@ -68,17 +68,23 @@ std::size_t SmartToolStroke::PositionHash::operator()(
 }
 
 bool SmartToolStroke::Begin(SmartToolStrokeContext context, const SmartAction action,
-    const Position target, const Position normal)
+    const Position target, const Position normal,
+    const SmartToolStrokeSurfacePolicy surfacePolicy)
 {
     Cancel();
     if (!context.ReadSourceVoxel ||
         (action != SmartAction::Add && action != SmartAction::Paint &&
-         action != SmartAction::Erase))
+         action != SmartAction::Erase) ||
+        (surfacePolicy == SmartToolStrokeSurfacePolicy::LockPencilSurface &&
+         !IsUnitAxisNormal(normal)))
         return false;
     context_ = std::move(context);
     action_ = action;
+    surfacePolicy_ = surfacePolicy;
     active_ = true;
     suspended_ = false;
+    if (surfacePolicy_ == SmartToolStrokeSurfacePolicy::LockPencilSurface)
+        LockPencilSurface(target, normal);
     SetAnchor(target, normal);
     ++revision_;
     return true;
@@ -90,6 +96,9 @@ void SmartToolStroke::Cancel() noexcept
     cells_.clear();
     lastTarget_.reset();
     lastNormal_.reset();
+    pencilSurfaceNormal_.reset();
+    pencilSurfaceCoordinate_ = 0;
+    surfacePolicy_ = SmartToolStrokeSurfacePolicy::Unlocked;
     active_ = false;
     suspended_ = false;
     ++revision_;
@@ -114,22 +123,38 @@ std::vector<Position> SmartToolStroke::Advance(
     const Position target, const Position normal)
 {
     if (!active_) return {};
+    Position constrainedTarget = target;
+    bool startsNewSurfaceSegment = false;
+    if (surfacePolicy_ == SmartToolStrokeSurfacePolicy::LockPencilSurface)
+    {
+        if (!IsUnitAxisNormal(normal)) return {};
+        if (!pencilSurfaceNormal_ || *pencilSurfaceNormal_ != normal)
+        {
+            LockPencilSurface(target, normal);
+            startsNewSurfaceSegment = true;
+        }
+        else
+        {
+            constrainedTarget = ConstrainToPencilSurface(target);
+        }
+    }
     if (!suspended_ && lastTarget_ && lastNormal_ &&
-        *lastTarget_ == target && SameNormal(*lastNormal_, normal))
+        *lastTarget_ == constrainedTarget && SameNormal(*lastNormal_, normal))
         return {};
     std::vector<Position> samples;
-    if (!suspended_ && lastTarget_ && lastNormal_ &&
+    if (!startsNewSurfaceSegment && !suspended_ && lastTarget_ && lastNormal_ &&
         SameNormal(*lastNormal_, normal))
     {
-        samples = SmartToolStrokeInterpolator::Sample(*lastTarget_, target);
+        samples = SmartToolStrokeInterpolator::Sample(
+            *lastTarget_, constrainedTarget);
         if (!samples.empty()) samples.erase(samples.begin());
     }
     // A duplicate first sample is intentionally omitted; every cell is then
     // planned exactly once per movement segment. If the point did not move,
     // the early return above prevents a cache revision or preview rebuild.
-    if (samples.empty()) samples.push_back(target);
+    if (samples.empty()) samples.push_back(constrainedTarget);
     suspended_ = false;
-    SetAnchor(target, normal);
+    SetAnchor(constrainedTarget, normal);
     ++revision_;
     return samples;
 }
@@ -265,5 +290,37 @@ void SmartToolStroke::SetAnchor(const Position target, const Position normal) no
 {
     lastTarget_ = target;
     lastNormal_ = normal;
+}
+
+bool SmartToolStroke::IsUnitAxisNormal(const Position normal) noexcept
+{
+    const auto isAxisComponent = [](const std::int32_t value) noexcept
+    {
+        return value >= -1 && value <= 1;
+    };
+    return isAxisComponent(normal.X) && isAxisComponent(normal.Y) &&
+        isAxisComponent(normal.Z) &&
+        normal.X * normal.X + normal.Y * normal.Y + normal.Z * normal.Z == 1;
+}
+
+void SmartToolStroke::LockPencilSurface(
+    const Position target, const Position normal) noexcept
+{
+    pencilSurfaceNormal_ = normal;
+    pencilSurfaceCoordinate_ = normal.X != 0
+        ? target.X : normal.Y != 0 ? target.Y : target.Z;
+}
+
+Position SmartToolStroke::ConstrainToPencilSurface(
+    Position target) const noexcept
+{
+    if (!pencilSurfaceNormal_) return target;
+    if (pencilSurfaceNormal_->X != 0)
+        target.X = pencilSurfaceCoordinate_;
+    else if (pencilSurfaceNormal_->Y != 0)
+        target.Y = pencilSurfaceCoordinate_;
+    else
+        target.Z = pencilSurfaceCoordinate_;
+    return target;
 }
 } // namespace VoxelForge::Editor

@@ -61,31 +61,6 @@ constexpr const char* ImportCollisionPopupName = "Model Already Exists";
 constexpr const char* OpenImportedModelPopupName = "Open Imported Model";
 constexpr const char* DeleteProjectPopupName = "Delete VoxelForge Project";
 
-struct SmartToolStrokeOccupancyContext final
-{
-    const SmartToolStroke* Stroke = nullptr;
-};
-
-std::optional<std::uint8_t> ReadSmartToolStrokeOccupancy(
-    const void* const context, const Asset::Voxel::VoxelPosition position) noexcept
-{
-    const auto* const occupancy =
-        static_cast<const SmartToolStrokeOccupancyContext*>(context);
-    if (occupancy == nullptr || occupancy->Stroke == nullptr) return std::nullopt;
-    try
-    {
-        const SmartToolVoxelState voxel = occupancy->Stroke->ReadVoxel(position);
-        return voxel.Exists ? std::optional<std::uint8_t>(voxel.PaletteIndex)
-                            : std::nullopt;
-    }
-    catch (...)
-    {
-        // The picking boundary must remain noexcept even if a legacy stroke
-        // source callback fails. A later frame can safely rebuild the hover.
-        return std::nullopt;
-    }
-}
-
 bool HasAllCreateWorkspaceSettings() noexcept
 {
     constexpr std::array<const char*, 10U> officialWindowNames = {
@@ -13580,8 +13555,7 @@ bool EditorWorkspace::AddAdjacentVoxel()
     return true;
 }
 
-bool EditorWorkspace::RefreshSmartToolHover(
-    const SmartToolStroke* const stroke) noexcept
+bool EditorWorkspace::RefreshSmartToolHover() noexcept
 {
     Asset::Voxel::VoxelDocument* const document =
         voxelDocumentSession_.ActiveDocument();
@@ -13597,31 +13571,21 @@ bool EditorWorkspace::RefreshSmartToolHover(
 
     VoxelRaycastOptions options;
     options.Transform = CenteredVoxelModelTransform(voxelModelCenter_);
-    std::optional<VoxelRaycastHit> hit;
     try
     {
-        if (stroke != nullptr && stroke->IsActive() &&
-            stroke->Action() == SmartAction::Add &&
-            toolContext_.Smart.Geometry() == SmartGeometry::Pencil)
-        {
-            const SmartToolStrokeOccupancyContext occupancy{stroke};
-            hit = RaycastVoxelDocumentWithOccupancy(*document, *ray.Ray,
-                {&occupancy, ReadSmartToolStrokeOccupancy}, options);
-        }
-        else
-        {
-            hit = RaycastVoxelDocument(*document, *ray.Ray, options);
-        }
+        std::optional<VoxelRaycastHit> hit =
+            RaycastVoxelDocument(*document, *ray.Ray, options);
+        return voxelSelection_.SetHovered(
+            hit ? VoxelPickingInteractionState::Hit
+                : VoxelPickingInteractionState::NoHit,
+            std::move(hit));
     }
     catch (...)
     {
-        // A transient virtual-picker allocation failure must not leave an old
-        // hit active; the next frame can safely reconstruct it.
+        // A transient source-picker failure must not leave an old hit active;
+        // the next frame can safely reconstruct it.
         return voxelSelection_.SetHovered(VoxelPickingInteractionState::NoHit);
     }
-    return voxelSelection_.SetHovered(
-        hit ? VoxelPickingInteractionState::Hit : VoxelPickingInteractionState::NoHit,
-        std::move(hit));
 }
 
 std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
@@ -13646,13 +13610,11 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
         state.PaletteIndex = toolContext_.Smart.Brush().PaletteIndex;
     }
 
-    // The document remains immutable during an Add gesture. Re-pick through
-    // its virtual stroke before resolving the next target so a newly previewed
-    // voxel immediately becomes the visible face under the cursor. Paint and
-    // Erase deliberately retain document picking: an erased overlay must not
-    // tunnel the cursor through to a farther physical layer.
+    // Picking remains source-document based for the whole gesture. Pending
+    // cells still participate below through stroke->ReadVoxel, but never
+    // become a new hover face that could stack a held Pencil stroke.
     if (stroke != nullptr && stroke->IsActive())
-        static_cast<void>(RefreshSmartToolHover(stroke));
+        static_cast<void>(RefreshSmartToolHover());
     const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
     const bool faceGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Face;
     const bool lineGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Line;
@@ -13991,7 +13953,10 @@ bool EditorWorkspace::BeginSmartToolStroke()
                 return SmartToolVoxelState{
                     voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
             }}, action, initialRequest->BrushRequest.Placement.Target,
-            initialRequest->BrushRequest.Placement.Normal))
+            initialRequest->BrushRequest.Placement.Normal,
+            initialRequest->Geometry == SmartGeometry::Pencil
+                ? SmartToolStrokeSurfacePolicy::LockPencilSurface
+                : SmartToolStrokeSurfacePolicy::Unlocked))
         return false;
     const std::optional<SmartToolRequest> request =
         BuildSmartPencilRequest(&smartToolStroke_);
@@ -14029,7 +13994,7 @@ bool EditorWorkspace::BeginSmartToolStroke()
     {
         smartSurfaceEndpointValid_ = true;
     }
-    static_cast<void>(RefreshSmartToolHover(&smartToolStroke_));
+    static_cast<void>(RefreshSmartToolHover());
     return true;
 }
 
@@ -14050,9 +14015,8 @@ bool EditorWorkspace::ContinueSmartToolStroke()
     if (!smartToolStroke_.IsSuspended() && mouseDelta.x == 0.0F &&
         mouseDelta.y == 0.0F)
     {
-        // Virtual picking may expose the next face at the same screen point.
-        // It must not turn a held-but-motionless click into an unbounded stack;
-        // a real (even one-pixel) pointer movement expresses the next sample.
+        // A held-but-motionless click must not create another stroke sample.
+        // A real (even one-pixel) pointer movement expresses the next sample.
         return false;
     }
     const std::optional<SmartToolRequest> current =
@@ -14199,7 +14163,7 @@ bool EditorWorkspace::ContinueSmartToolStroke()
     {
         smartSurfaceEndpointValid_ = true;
     }
-    if (changed) static_cast<void>(RefreshSmartToolHover(&smartToolStroke_));
+    if (changed) static_cast<void>(RefreshSmartToolHover());
     return changed;
 }
 

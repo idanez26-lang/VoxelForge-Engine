@@ -30,6 +30,12 @@ struct SmartToolStrokeContext final
     std::function<SmartToolVoxelState(Asset::Voxel::VoxelPosition)> ReadSourceVoxel;
 };
 
+enum class SmartToolStrokeSurfacePolicy : std::uint8_t
+{
+    Unlocked,
+    LockPencilSurface
+};
+
 // Accumulates planner-owned cells without mutating the document. A single
 // logical change is retained for every world voxel: its initial Before state
 // is immutable, while the latest planner-provided After state wins.
@@ -38,7 +44,9 @@ class SmartToolStroke final
 public:
     [[nodiscard]] bool Begin(SmartToolStrokeContext context,
         SmartAction action, Asset::Voxel::VoxelPosition target,
-        Asset::Voxel::VoxelPosition normal);
+        Asset::Voxel::VoxelPosition normal,
+        SmartToolStrokeSurfacePolicy surfacePolicy =
+            SmartToolStrokeSurfacePolicy::Unlocked);
     void Cancel() noexcept;
     void Suspend() noexcept;
 
@@ -84,13 +92,23 @@ private:
         const Asset::Voxel::VoxelDocumentChange& change);
     void SetAnchor(Asset::Voxel::VoxelPosition target,
         Asset::Voxel::VoxelPosition normal) noexcept;
+    [[nodiscard]] static bool IsUnitAxisNormal(
+        Asset::Voxel::VoxelPosition normal) noexcept;
+    void LockPencilSurface(Asset::Voxel::VoxelPosition target,
+        Asset::Voxel::VoxelPosition normal) noexcept;
+    [[nodiscard]] Asset::Voxel::VoxelPosition ConstrainToPencilSurface(
+        Asset::Voxel::VoxelPosition target) const noexcept;
 
     SmartToolStrokeContext context_{};
     SmartAction action_ = SmartAction::Add;
+    SmartToolStrokeSurfacePolicy surfacePolicy_ =
+        SmartToolStrokeSurfacePolicy::Unlocked;
     bool active_ = false;
     bool suspended_ = false;
     std::optional<Asset::Voxel::VoxelPosition> lastTarget_;
     std::optional<Asset::Voxel::VoxelPosition> lastNormal_;
+    std::optional<Asset::Voxel::VoxelPosition> pencilSurfaceNormal_;
+    std::int32_t pencilSurfaceCoordinate_ = 0;
     std::unordered_map<Asset::Voxel::VoxelPosition, AccumulatedCell, PositionHash>
         cells_;
     std::uint64_t revision_ = 0U;
