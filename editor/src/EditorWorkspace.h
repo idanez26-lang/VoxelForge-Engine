@@ -528,6 +528,12 @@ private:
     std::optional<SmartToolRectanglePlane> smartRectanglePlane_;
     std::optional<Asset::Voxel::VoxelPosition> smartRectanglePlannedEnd_;
     bool smartRectangleEndpointValid_ = false;
+    // Surface is not a Rectangle alias. It locks an exposed source component
+    // and a projection plane so its local brush extensions can remain on that
+    // component while dragging through empty viewport space.
+    std::optional<SmartToolFaceSeed> smartSurfaceLockedSeed_;
+    std::optional<SmartToolRectanglePlane> smartSurfacePlane_;
+    bool smartSurfaceEndpointValid_ = false;
     BrushProfileService brushProfileService_;
     SmartBrushSizeFeedback smartBrushSizeFeedback_{};
     bool smartBrushPreviewRefreshRequested_ = false;

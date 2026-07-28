@@ -129,10 +129,10 @@ void TestRefusalsAndAdaptivePlan()
     Require(Resolve(state, {{-4, -4, -4}, {0, 1, 0}}).Code ==
             Editor::SmartBrushResultCode::OutOfBounds,
         "A fully outside Surface brush was not refused.");
-    state.Shape = Editor::SmartBrushShape::Cylinder;
+    state.Shape = Editor::SmartBrushShape::Diamond;
     Require(Resolve(state, {{3, 3, 3}, {0, 1, 0}}).Code ==
             Editor::SmartBrushResultCode::Unsupported,
-        "Prepared unsupported shape was not refused.");
+        "An unimplemented Smart Brush shape was not refused.");
     state.Shape = Editor::SmartBrushShape::Cube;
     state.Mode = Editor::SmartBrushMode::Erase;
     const auto erase = Resolve(state, {{3, 3, 3}, {0, 1, 0}},
@@ -254,9 +254,28 @@ void TestCylinderVolume()
     }
     cylinder.Dimension = Editor::SmartBrushDimension::Surface2D;
     request.State = cylinder;
-    Require(Editor::SmartBrushEngine::Resolve(request).Code ==
-            Editor::SmartBrushResultCode::Unsupported,
-        "Cylinder accepted an unsupported 2D surface request.");
+    const Editor::SmartBrushResult surface =
+        Editor::SmartBrushEngine::Resolve(request);
+    Require(surface.Code == Editor::SmartBrushResultCode::Valid &&
+            surface.Statistics.Total == surface.Positions.size() &&
+            Editor::SmartBrushEngine::EstimateTotal(cylinder) ==
+                surface.Positions.size(),
+        "Surface Cylinder statistics are inconsistent.");
+    for (const Position position : surface.Positions)
+    {
+        const int dx = 2 * (position.X - 8) - evenCenterOffset;
+        const int dz = 2 * (position.Z - 8) - evenCenterOffset;
+        Require(dx * dx + dz * dz <= 16 && position.Y == 8,
+            "Surface Cylinder generated a non-planar circular footprint.");
+    }
+    cylinder.Orientation = Editor::SmartBrushOrientation::X;
+    request.State = cylinder;
+    const Editor::SmartBrushResult xSurface =
+        Editor::SmartBrushEngine::Resolve(request);
+    Require(xSurface.Code == Editor::SmartBrushResultCode::Valid &&
+            std::all_of(xSurface.Positions.begin(), xSurface.Positions.end(),
+                [](const Position position) { return position.X == 8; }),
+        "Surface Cylinder did not respect its selected planar orientation.");
 }
 }
 

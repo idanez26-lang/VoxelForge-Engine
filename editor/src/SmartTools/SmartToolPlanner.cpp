@@ -435,6 +435,178 @@ using Position = Asset::Voxel::VoxelPosition;
         request.BrushRequest.Placement.Target));
 }
 
+[[nodiscard]] SmartBrushResult ResolveSurfaceFootprint(
+    const SmartToolRequest& request, VoxelSnapshot& snapshot)
+{
+    SmartBrushRequest brushRequest = request.BrushRequest;
+    brushRequest.State.Dimension = SmartBrushDimension::Surface2D;
+    brushRequest.State.Orientation = SmartBrushOrientation::Auto;
+    brushRequest.IsOccupied = [&request, &snapshot](const Position position)
+    {
+        return ReadSnapshot(request, snapshot, position).Exists;
+    };
+    return SmartBrushEngine::Resolve(brushRequest);
+}
+
+void ClassifySurfacePositions(SmartBrushResult& result,
+    const SmartToolRequest& request, VoxelSnapshot& snapshot)
+{
+    result.AddablePositions.clear();
+    result.ExistingPositions.clear();
+    result.AddablePositions.reserve(result.Positions.size());
+    result.ExistingPositions.reserve(result.Positions.size());
+    for (const Position position : result.Positions)
+    {
+        if (ReadSnapshot(request, snapshot, position).Exists)
+        {
+            result.ExistingPositions.push_back(position);
+        }
+        else
+        {
+            result.AddablePositions.push_back(position);
+        }
+    }
+    result.Statistics.Total = result.Positions.size() +
+        result.ClippedPositions.size();
+    result.Statistics.New = result.AddablePositions.size();
+    result.Statistics.Existing = result.ExistingPositions.size();
+    result.Statistics.Clipped = result.ClippedPositions.size();
+    if (result.Positions.empty())
+    {
+        result.Code = result.ClippedPositions.empty()
+            ? SmartBrushResultCode::Valid
+            : SmartBrushResultCode::OutOfBounds;
+        return;
+    }
+    result.RenderPlan.Mode = SmartBrushRenderMode::DetailedCells;
+    result.RenderPlan.Bounds = CalculateBounds(result.Positions);
+    result.Code = SmartBrushResultCode::Valid;
+}
+
+[[nodiscard]] SmartBrushResult ResolveSurface(const SmartToolRequest& request,
+    VoxelSnapshot& snapshot)
+{
+    // The Face resolver remains the one authority for finding a complete,
+    // exposed, 4-connected source component. Surface changes only what is
+    // done with that locked component; it never reimplements the flood fill.
+    SmartToolRequest sourceRequest = request;
+    sourceRequest.Action = SmartAction::Paint;
+    SmartBrushResult sourceSurface = ResolveFace(sourceRequest, snapshot);
+    if (sourceSurface.Code != SmartBrushResultCode::Valid)
+    {
+        return sourceSurface;
+    }
+
+    std::unordered_set<Position, PositionHash> lockedSurface;
+    lockedSurface.reserve(sourceSurface.Positions.size());
+    for (const Position position : sourceSurface.Positions)
+    {
+        lockedSurface.insert(position);
+    }
+
+    // Paint is intentionally a one-gesture operation on the full locked
+    // component. Pointer motion cannot turn it into a partial or rear-layer
+    // paint operation.
+    if (request.Action == SmartAction::Paint)
+    {
+        ClassifySurfacePositions(sourceSurface, request, snapshot);
+        return sourceSurface;
+    }
+
+    SmartBrushResult footprint = ResolveSurfaceFootprint(request, snapshot);
+    if (footprint.Code != SmartBrushResultCode::Valid &&
+        footprint.Code != SmartBrushResultCode::OutOfBounds)
+    {
+        return footprint;
+    }
+
+    SmartBrushResult result;
+    result.ClippedPositions = std::move(footprint.ClippedPositions);
+    if (request.Action == SmartAction::Erase)
+    {
+        // Remove can never step behind the captured surface: only positions
+        // in the original exposed component are made available to the plan.
+        for (const Position position : footprint.Positions)
+        {
+            if (lockedSurface.contains(position))
+            {
+                result.Positions.push_back(position);
+            }
+        }
+        ClassifySurfacePositions(result, request, snapshot);
+        return result;
+    }
+
+    if (request.Action != SmartAction::Add)
+    {
+        result.Code = SmartBrushResultCode::Unsupported;
+        result.Error = "Surface supports Add, Remove, and Paint only.";
+        return result;
+    }
+
+    std::unordered_set<Position, PositionHash> candidates;
+    candidates.reserve(footprint.Positions.size());
+    for (const Position position : footprint.Positions)
+    {
+        // Existing unrelated document voxels cannot connect a detached island.
+        // Earlier Add cells are exposed separately by the stroke callback.
+        const bool extension = request.ReadSurfaceExtensionVoxel &&
+            request.ReadSurfaceExtensionVoxel(position).Exists;
+        if (!extension && !ReadSnapshot(request, snapshot, position).Exists)
+        {
+            candidates.insert(position);
+        }
+    }
+
+    const auto isAnchor = [&lockedSurface, &request](const Position position)
+    {
+        return lockedSurface.contains(position) ||
+            (request.ReadSurfaceExtensionVoxel &&
+             request.ReadSurfaceExtensionVoxel(position).Exists);
+    };
+    const Position normal = request.FaceSeed->Normal;
+    const std::array<Position, 4U> offsets = PlanarOffsets(normal);
+    std::deque<Position> pending;
+    std::unordered_set<Position, PositionHash> accepted;
+    accepted.reserve(candidates.size());
+    for (const Position candidate : candidates)
+    {
+        for (const Position offset : offsets)
+        {
+            const std::optional<Position> neighbor = Offset(candidate, offset);
+            if (neighbor && isAnchor(*neighbor))
+            {
+                accepted.insert(candidate);
+                pending.push_back(candidate);
+                break;
+            }
+        }
+    }
+    while (!pending.empty())
+    {
+        const Position current = pending.front();
+        pending.pop_front();
+        for (const Position offset : offsets)
+        {
+            const std::optional<Position> neighbor = Offset(current, offset);
+            if (neighbor && candidates.contains(*neighbor) &&
+                accepted.insert(*neighbor).second)
+            {
+                pending.push_back(*neighbor);
+            }
+        }
+    }
+    for (const Position position : footprint.Positions)
+    {
+        if (accepted.contains(position))
+        {
+            result.Positions.push_back(position);
+        }
+    }
+    ClassifySurfacePositions(result, request, snapshot);
+    return result;
+}
+
 [[nodiscard]] SmartBrushMode ModeForAction(const SmartAction action) noexcept
 {
     switch (action)
@@ -626,17 +798,20 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
         request.Geometry != SmartGeometry::Sphere &&
         request.Geometry != SmartGeometry::Face &&
         request.Geometry != SmartGeometry::Line &&
-        request.Geometry != SmartGeometry::Rectangle)
+        request.Geometry != SmartGeometry::Rectangle &&
+        request.Geometry != SmartGeometry::Surface)
     {
         return Error(SmartBrushResultCode::Unsupported,
-            "The Smart Tool planner supports only Pencil, Cube, Sphere, Face, Line, and Rectangle geometry.");
+            "The Smart Tool planner supports only Pencil, Cube, Sphere, Face, Line, Rectangle, and Surface geometry.");
     }
-    if (request.Mode && request.Geometry != SmartGeometry::Pencil &&
+    if (request.Mode &&
+        request.Geometry != SmartGeometry::Pencil &&
         request.Geometry != SmartGeometry::Line &&
-        request.Geometry != SmartGeometry::Rectangle)
+        request.Geometry != SmartGeometry::Rectangle &&
+        request.Geometry != SmartGeometry::Surface)
     {
         return Error(SmartBrushResultCode::Unsupported,
-            "Smart Tool brush modes require Pencil, Line, or Rectangle geometry.");
+            "Smart Tool brush modes require Pencil, Line, Rectangle, or Surface geometry.");
     }
     if (request.Action != SmartAction::Add &&
         request.Action != SmartAction::Erase &&
@@ -677,7 +852,9 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
             if (request.Geometry == SmartGeometry::Pencil)
                 normalized.Geometry = SmartGeometry::Pencil;
             normalized.BrushRequest.State.Dimension =
-                SmartBrushDimension::Volume3D;
+                request.Geometry == SmartGeometry::Surface
+                ? SmartBrushDimension::Surface2D
+                : SmartBrushDimension::Volume3D;
             normalized.BrushRequest.State.Orientation = SmartBrushOrientation::Auto;
             switch (*request.Mode)
             {
@@ -727,16 +904,30 @@ SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)
                 return state.Exists;
             };
 
-        SmartBrushResult brush = request.Geometry == SmartGeometry::Face
-            ? ResolveFace(normalized, snapshot)
-            : request.Geometry == SmartGeometry::Line
-            ? ResolveLine(normalized, snapshot)
-            : request.Geometry == SmartGeometry::Rectangle
-            ? ResolveRectangle(normalized, snapshot)
-            : SmartBrushEngine::Resolve(geometryRequest);
+        SmartBrushResult brush;
+        if (request.Geometry == SmartGeometry::Face)
+        {
+            brush = ResolveFace(normalized, snapshot);
+        }
+        else if (request.Geometry == SmartGeometry::Line)
+        {
+            brush = ResolveLine(normalized, snapshot);
+        }
+        else if (request.Geometry == SmartGeometry::Rectangle ||
+                 request.Geometry == SmartGeometry::Surface)
+        {
+            brush = request.Geometry == SmartGeometry::Surface
+                ? ResolveSurface(normalized, snapshot)
+                : ResolveRectangle(normalized, snapshot);
+        }
+        else
+        {
+            brush = SmartBrushEngine::Resolve(geometryRequest);
+        }
         if ((request.Geometry == SmartGeometry::Face ||
                 request.Geometry == SmartGeometry::Line ||
-                request.Geometry == SmartGeometry::Rectangle) &&
+                request.Geometry == SmartGeometry::Rectangle ||
+                request.Geometry == SmartGeometry::Surface) &&
             brush.Code == SmartBrushResultCode::InvalidRequest)
             return Error(brush.Code, std::move(brush.Error));
         const SmartBrushResultCode code = brush.Code;

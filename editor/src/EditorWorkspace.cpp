@@ -2853,7 +2853,9 @@ void EditorWorkspace::DrawScenePanel()
              (smartLineLockedStart_ &&
                  toolContext_.Smart.Geometry() != SmartGeometry::Line) ||
              (smartRectanglePlane_ &&
-                 toolContext_.Smart.Geometry() != SmartGeometry::Rectangle)))
+                 toolContext_.Smart.Geometry() != SmartGeometry::Rectangle) ||
+             (smartSurfacePlane_ &&
+                 toolContext_.Smart.Geometry() != SmartGeometry::Surface)))
             CancelSmartToolStroke();
         if (!doubleClickFocus && smartContinuousTool)
         {
@@ -13570,11 +13572,13 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
     const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
     const bool faceGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Face;
     const bool lineGeometry = toolContext_.Smart.Geometry() == SmartGeometry::Line;
-    const bool rectangleGeometry =
-        toolContext_.Smart.Geometry() == SmartGeometry::Rectangle;
-    // A Face is anchored exclusively to an actual exposed voxel face. A
+    const SmartGeometry geometry = toolContext_.Smart.Geometry();
+    const bool rectangleGeometry = geometry == SmartGeometry::Rectangle;
+    const bool surfaceGeometry = geometry == SmartGeometry::Surface;
+    // Face and Surface are anchored exclusively to an exposed voxel face. A
     // construction plane has no supporting voxel and therefore cannot seed it.
-    const bool usesWorkplane = !faceGeometry && !hit && workplaneHit_.has_value() &&
+    const bool usesWorkplane = !faceGeometry && !surfaceGeometry && !hit &&
+        workplaneHit_.has_value() &&
         (action == SmartAction::Add || rectangleGeometry);
     std::optional<Asset::Voxel::VoxelPosition> target = usesWorkplane
         ? std::optional<Asset::Voxel::VoxelPosition>{workplaneHit_->Position}
@@ -13585,6 +13589,23 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
                 static_cast<std::int32_t>(hit->Coordinates.Z)}}
             : std::optional<Asset::Voxel::VoxelPosition>{hit->AdjacentPosition}
         : std::nullopt;
+    if (surfaceGeometry)
+    {
+        // MouseDown must start from an exposed voxel face. Once that seed and
+        // its plane are locked, dragging may continue through empty viewport
+        // space: the locked ray/plane intersection below supplies B.
+        if (!hit && (!smartSurfaceLockedSeed_ || !smartSurfacePlane_))
+        {
+            return std::nullopt;
+        }
+        if (hit)
+        {
+            target = Asset::Voxel::VoxelPosition{
+                static_cast<std::int32_t>(hit->Coordinates.X),
+                static_cast<std::int32_t>(hit->Coordinates.Y),
+                static_cast<std::int32_t>(hit->Coordinates.Z)};
+        }
+    }
     const Asset::Voxel::VoxelPosition workplaneNormal =
         workplaneService_.Definition().Axis == WorkplaneAxis::X
             ? Asset::Voxel::VoxelPosition{1, 0, 0}
@@ -13613,7 +13634,13 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
         rectangleSurfaceCoordinate = static_cast<float>(
             workplaneService_.Definition().Coordinate);
     }
-    if (rectangleGeometry && smartRectanglePlane_)
+    const SmartToolRectanglePlane* const lockedPlanarPlane = rectangleGeometry &&
+            smartRectanglePlane_
+        ? &*smartRectanglePlane_
+        : surfaceGeometry && smartSurfacePlane_
+        ? &*smartSurfacePlane_
+        : nullptr;
+    if (lockedPlanarPlane != nullptr)
     {
         // Once A has locked the plane, B comes from the current pointer ray
         // against that plane—not from a new face hit or the default
@@ -13632,10 +13659,10 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
             const Vec3 direction = TransformVector(transform.InverseModelMatrix,
                 ray.Ray->Direction);
             const Asset::Voxel::VoxelPosition& planeNormal =
-                smartRectanglePlane_->Normal;
+                lockedPlanarPlane->Normal;
             const float denominator = direction.X * planeNormal.X +
                 direction.Y * planeNormal.Y + direction.Z * planeNormal.Z;
-            const float planeCoordinate = smartRectanglePlane_->SurfaceCoordinate;
+            const float planeCoordinate = lockedPlanarPlane->SurfaceCoordinate;
             const float rayCoordinate = planeNormal.X != 0 ? origin.X :
                 planeNormal.Y != 0 ? origin.Y : origin.Z;
             const float distance = std::abs(denominator) > 1.0e-6F
@@ -13680,11 +13707,31 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
     {
         toolContext_.Smart.SetLineConstraintAxis(std::nullopt);
     }
-    if (rectangleGeometry && smartRectanglePlane_ && target)
+    if (lockedPlanarPlane != nullptr && target)
     {
-        normal = smartRectanglePlane_->Normal;
+        normal = lockedPlanarPlane->Normal;
         target = SmartToolPlanner::ProjectRectangleEndpoint(
-            *smartRectanglePlane_, *target);
+            *lockedPlanarPlane, *target);
+        if (surfaceGeometry && smartSurfaceLockedSeed_)
+        {
+            // Surface samples the existing voxel layer, while ray picking
+            // must use the visible face plane. Keep those two coordinates
+            // explicit so +X/+Y/+Z cannot accidentally extrude one layer.
+            const Asset::Voxel::VoxelPosition& seed =
+                smartSurfaceLockedSeed_->Position;
+            if (normal.X != 0)
+            {
+                target->X = seed.X;
+            }
+            else if (normal.Y != 0)
+            {
+                target->Y = seed.Y;
+            }
+            else
+            {
+                target->Z = seed.Z;
+            }
+        }
     }
     state.Mode = action == SmartAction::Erase
         ? SmartBrushMode::Erase
@@ -13716,6 +13763,18 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
             return SmartToolVoxelState{
                 voxel.has_value(), voxel ? voxel->PaletteIndex : 0U};
         };
+    request.ReadSurfaceExtensionVoxel =
+        [document, stroke](const Asset::Voxel::VoxelPosition position)
+        {
+            if (stroke == nullptr || !stroke->IsActive())
+            {
+                return SmartToolVoxelState{};
+            }
+            const auto sourceVoxel = document->GetVoxel(position, 0U);
+            const SmartToolVoxelState strokeVoxel = stroke->ReadVoxel(position);
+            return SmartToolVoxelState{!sourceVoxel.has_value() &&
+                strokeVoxel.Exists, strokeVoxel.PaletteIndex};
+        };
     request.SourceIdentity = reinterpret_cast<std::uintptr_t>(document);
     request.SourceRevision = document->GetRevision();
     // Face depth plans use the source snapshot rather than the stroke's
@@ -13742,10 +13801,13 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
         ? std::optional<SmartBrushPlacement>{
             SmartBrushPlacement{*target, normal}}
         : std::nullopt;
-    if (faceGeometry)
+    if (faceGeometry || surfaceGeometry)
     {
-        if (faceDepthLockedSeed_)
-            request.FaceSeed = *faceDepthLockedSeed_;
+        const std::optional<SmartToolFaceSeed>& lockedSeed = faceGeometry
+            ? faceDepthLockedSeed_
+            : smartSurfaceLockedSeed_;
+        if (lockedSeed)
+            request.FaceSeed = *lockedSeed;
         else
         {
             if (!hit) return std::nullopt;
@@ -13753,7 +13815,9 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
                     static_cast<std::int32_t>(hit->Coordinates.Y),
                     static_cast<std::int32_t>(hit->Coordinates.Z)}, normal};
         }
-        request.FaceDepth = action == SmartAction::Add ? faceDepthLayers_ : 1;
+        request.FaceDepth = faceGeometry && action == SmartAction::Add
+            ? faceDepthLayers_
+            : 1;
     }
     if (lineGeometry && smartLineLockedStart_)
         request.LineStart = *smartLineLockedStart_;
@@ -13809,6 +13873,32 @@ bool EditorWorkspace::BeginSmartToolStroke()
         smartRectanglePlannedEnd_.reset();
         smartRectangleEndpointValid_ = false;
     }
+    if (initialRequest->Geometry == SmartGeometry::Surface)
+    {
+        if (!initialRequest->FaceSeed)
+        {
+            return false;
+        }
+        smartSurfaceLockedSeed_ = *initialRequest->FaceSeed;
+        const Asset::Voxel::VoxelPosition surface =
+            smartSurfaceLockedSeed_->Position;
+        const Asset::Voxel::VoxelPosition normal = smartSurfaceLockedSeed_->Normal;
+        const std::int32_t layerCoordinate = normal.X != 0
+            ? surface.X
+            : normal.Y != 0
+            ? surface.Y
+            : surface.Z;
+        const float coordinate = static_cast<float>(layerCoordinate +
+            ((normal.X > 0 || normal.Y > 0 || normal.Z > 0) ? 1 : 0));
+        const auto plane = SmartToolPlanner::MakeRectanglePlane(
+            surface, normal, coordinate);
+        if (!plane)
+        {
+            return false;
+        }
+        smartSurfacePlane_ = *plane;
+        smartSurfaceEndpointValid_ = false;
+    }
     if (!smartToolStroke_.Begin({reinterpret_cast<std::uintptr_t>(document),
             document->GetRevision(), voxelDocumentSession_.Generation(), 0U,
             [document](const Asset::Voxel::VoxelPosition position)
@@ -13851,6 +13941,10 @@ bool EditorWorkspace::BeginSmartToolStroke()
         smartRectanglePlannedEnd_ = request->BrushRequest.Placement.Target;
         smartRectangleEndpointValid_ = true;
     }
+    if (request->Geometry == SmartGeometry::Surface)
+    {
+        smartSurfaceEndpointValid_ = true;
+    }
     return true;
 }
 
@@ -13871,7 +13965,7 @@ bool EditorWorkspace::ContinueSmartToolStroke()
         BuildSmartPencilRequest(&smartToolStroke_);
     if (!current)
     {
-        if (smartLineLockedStart_ || smartRectanglePlane_)
+        if (smartLineLockedStart_ || smartRectanglePlane_ || smartSurfacePlane_)
         {
             // Preserve A so the user can return to a valid B, but make the
             // last line plan inapplicable. MouseUp must not commit stale
@@ -13885,6 +13979,7 @@ bool EditorWorkspace::ContinueSmartToolStroke()
             smartToolStrokePreviewStrokeRevision_ = 0U;
             smartRectangleEndpointValid_ = false;
             smartRectanglePlannedEnd_.reset();
+            smartSurfaceEndpointValid_ = false;
         }
         smartToolStroke_.Suspend();
         return false;
@@ -14006,6 +14101,10 @@ bool EditorWorkspace::ContinueSmartToolStroke()
         smartToolStrokePreviewPlan_ = result.Plan;
         changed = true;
     }
+    if (changed && current->Geometry == SmartGeometry::Surface)
+    {
+        smartSurfaceEndpointValid_ = true;
+    }
     return changed;
 }
 
@@ -14013,7 +14112,8 @@ bool EditorWorkspace::CommitSmartToolStroke()
 {
     if (!smartToolStroke_.IsActive()) return false;
     if ((smartLineLockedStart_ && !smartLineEndpointValid_) ||
-        (smartRectanglePlane_ && !smartRectangleEndpointValid_))
+        (smartRectanglePlane_ && !smartRectangleEndpointValid_) ||
+        (smartSurfacePlane_ && !smartSurfaceEndpointValid_))
     {
         CancelSmartToolStroke();
         return false;
@@ -14084,6 +14184,9 @@ void EditorWorkspace::CancelSmartToolStroke() noexcept
     smartRectanglePlane_.reset();
     smartRectanglePlannedEnd_.reset();
     smartRectangleEndpointValid_ = false;
+    smartSurfaceLockedSeed_.reset();
+    smartSurfacePlane_.reset();
+    smartSurfaceEndpointValid_ = false;
     smartToolLineConstraintResolver_.Reset();
     toolContext_.Smart.SetLineConstraintAxis(std::nullopt);
 }

@@ -73,6 +73,11 @@ struct SmartToolRequest final
     // beginning of a stroke. The ordinary reader may include stroke-local
     // virtual edits so it remains the authoritative Before/After reader.
     SmartToolVoxelReader ReadFaceSupportVoxel;
+    // Surface Add accepts only cells connected to the locked source surface
+    // or to an earlier Add from this same stroke. This callback exposes that
+    // transient extension layer without allowing unrelated document voxels to
+    // bridge an island into the locked component.
+    SmartToolVoxelReader ReadSurfaceExtensionVoxel;
     // A value snapshot captured at the planning boundary.  The plan copies the
     // exact Before/After colours it needs, so downstream preview code never
     // reads a palette or document.

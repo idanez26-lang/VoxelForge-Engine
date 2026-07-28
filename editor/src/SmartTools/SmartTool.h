@@ -31,6 +31,10 @@ enum class SmartGeometry : std::uint8_t
     // The first corner and its plane are captured on MouseDown. The planner
     // expands the immutable rectangle; neither preview nor commit sample it.
     Rectangle,
+    // A face-seeded, connected voxel surface. It is intentionally distinct
+    // from Rectangle: it locks an exposed component, then applies local 2D
+    // brush footprints through the shared Planner/Plan/Stroke pipeline.
+    Surface,
     Box,
     Line,
     Cylinder,

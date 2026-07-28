@@ -77,7 +77,8 @@ std::vector<Asset::Voxel::VoxelPosition> GenerateSurface(
     {
         for (int first = minimumOffset; first <= maximumOffset; ++first)
         {
-            if (shape == SmartBrushShape::Sphere)
+            if (shape == SmartBrushShape::Sphere ||
+                shape == SmartBrushShape::Cylinder)
             {
                 const int dx = 2 * first - evenCenterOffset;
                 const int dy = 2 * second - evenCenterOffset;
@@ -276,9 +277,6 @@ std::size_t SmartBrushEngine::EstimateTotal(
     {
         return 0U;
     }
-    if (state.Shape == SmartBrushShape::Cylinder &&
-        state.Dimension != SmartBrushDimension::Volume3D)
-        return 0U;
     if (state.Dimension == SmartBrushDimension::Surface2D)
         return EstimateSurface(state.Shape, state.Size);
     return EstimateVolume(state.Shape, state.Size);
@@ -301,13 +299,6 @@ SmartBrushResult SmartBrushEngine::Resolve(const SmartBrushRequest& request)
     {
         result.Code = SmartBrushResultCode::Unsupported;
         result.Error = "The selected Smart Brush shape is not implemented.";
-        return result;
-    }
-    if (request.State.Shape == SmartBrushShape::Cylinder &&
-        request.State.Dimension != SmartBrushDimension::Volume3D)
-    {
-        result.Code = SmartBrushResultCode::Unsupported;
-        result.Error = "Cylinder Brush supports only a vertical 3D volume.";
         return result;
     }
     if (request.MaximumSize < 1 ||

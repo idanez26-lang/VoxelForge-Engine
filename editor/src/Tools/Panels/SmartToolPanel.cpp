@@ -18,7 +18,8 @@ bool DrawSmartToolPanel(ToolContext& context)
     ImGui::PushID("Geometry");
     int geometry = tool.Geometry() == SmartGeometry::Face ? 1
         : tool.Geometry() == SmartGeometry::Line ? 2
-        : tool.Geometry() == SmartGeometry::Rectangle ? 3 : 0;
+        : tool.Geometry() == SmartGeometry::Rectangle ? 3
+        : tool.Geometry() == SmartGeometry::Surface ? 4 : 0;
     changed |= ImGui::RadioButton("Pencil", &geometry, 0);
     ImGui::SameLine();
     changed |= ImGui::RadioButton("Face", &geometry, 1);
@@ -26,11 +27,14 @@ bool DrawSmartToolPanel(ToolContext& context)
     changed |= ImGui::RadioButton("Line", &geometry, 2);
     ImGui::SameLine();
     changed |= ImGui::RadioButton("Rectangle", &geometry, 3);
+    ImGui::NewLine();
+    changed |= ImGui::RadioButton("Surface", &geometry, 4);
     ImGui::PopID();
     const SmartGeometry geometryBefore = tool.Geometry();
     tool.SetGeometry(geometry == 1 ? SmartGeometry::Face
         : geometry == 2 ? SmartGeometry::Line
-        : geometry == 3 ? SmartGeometry::Rectangle : SmartGeometry::Pencil);
+        : geometry == 3 ? SmartGeometry::Rectangle
+        : geometry == 4 ? SmartGeometry::Surface : SmartGeometry::Pencil);
     changed |= tool.Geometry() != geometryBefore;
 
     if (tool.Geometry() == SmartGeometry::Face)
@@ -80,9 +84,12 @@ bool DrawSmartToolPanel(ToolContext& context)
             else
                 ImGui::TextDisabled("Drag from A to B; hold Shift to constrain");
         }
-        else if (tool.Geometry() == SmartGeometry::Rectangle)
+        else if (tool.Geometry() == SmartGeometry::Rectangle ||
+            tool.Geometry() == SmartGeometry::Surface)
         {
-            ImGui::TextDisabled("Drag from first corner to opposite corner");
+            ImGui::TextDisabled(tool.Geometry() == SmartGeometry::Surface
+                ? "Drag to extend the locked surface"
+                : "Drag from first corner to opposite corner");
         }
     }
 
