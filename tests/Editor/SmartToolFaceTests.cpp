@@ -1,13 +1,16 @@
 #include "SmartTools/SmartToolController.h"
 #include "SmartTools/SmartToolFaceDepthDrag.h"
+#include "SmartTools/SmartPreviewEngine.h"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace
 {
@@ -197,6 +200,102 @@ void TestAddDepthUsesWholeLockedFaceLayers()
         "Face Add accepted a zero depth instead of rejecting the invalid request.");
 }
 
+void TestLockedIrregularFaceDepthRegression()
+{
+    const Position seed{6, 6, 6};
+    const Position normal{0, 1, 0};
+    const std::array<Position, 7U> support{{
+        seed,
+        {5, 6, 6}, {7, 6, 6},
+        {6, 6, 5}, {6, 6, 7},
+        {5, 6, 5}, {7, 6, 7}}};
+    States states;
+    std::unordered_set<Position, PositionHash> expectedTangentialFootprint;
+    for (const Position position : support)
+    {
+        states.emplace(position, SmartToolVoxelState{true, 2U});
+        expectedTangentialFootprint.insert({position.X, 0, position.Z});
+    }
+
+    SmartToolController controller;
+    SmartToolSession session;
+    constexpr std::array<int, 11U> depthSequence{
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 2};
+    for (const int depth : depthSequence)
+    {
+        SmartToolRequest request = Request(
+            SmartAction::Add, states, seed, normal, 1, 9U, depth);
+        request.BrushRequest.Dimensions = {20U, 20U, 20U};
+        const SmartToolResult preview =
+            controller.ResolvePreview(session, request);
+        Require(preview.HasPlan() &&
+                preview.Code == SmartBrushResultCode::Valid,
+            "Locked irregular Face preview did not resolve at every depth.");
+        const SmartToolResult commit = controller.ResolveCommit(session);
+        Require(commit.HasPlan() && commit.Plan == preview.Plan,
+            "Face Preview and Commit did not retain the same immutable plan.");
+
+        const SmartToolPlan& plan = *preview.Plan;
+        Require(plan.Cells().size() ==
+                expectedTangentialFootprint.size() *
+                    static_cast<std::size_t>(depth) &&
+                plan.Bounds().Minimum.X == 5 &&
+                plan.Bounds().Maximum.X == 7 &&
+                plan.Bounds().Minimum.Z == 5 &&
+                plan.Bounds().Maximum.Z == 7 &&
+                plan.Bounds().Minimum.Y == seed.Y + 1 &&
+                plan.Bounds().Maximum.Y == seed.Y + depth &&
+                plan.Bounds().Dimensions.Y ==
+                    static_cast<std::uint32_t>(depth),
+            "Face depth changed tangential bounds or used a non-integral "
+            "normal extent.");
+
+        std::unordered_map<int,
+            std::unordered_set<Position, PositionHash>> footprintsByLayer;
+        std::unordered_set<Position, PositionHash> plannedPositions;
+        for (const SmartToolPlanCell& cell : plan.Cells())
+        {
+            const Position position = cell.WorldPosition;
+            Require(cell.HasChange() &&
+                    cell.Operation == SmartToolCellOperation::Add &&
+                    std::floor(static_cast<float>(position.X)) ==
+                        static_cast<float>(position.X) &&
+                    std::floor(static_cast<float>(position.Y)) ==
+                        static_cast<float>(position.Y) &&
+                    std::floor(static_cast<float>(position.Z)) ==
+                        static_cast<float>(position.Z),
+                "Face produced a non-integral or non-Add planned position.");
+            footprintsByLayer[position.Y].insert(
+                {position.X, 0, position.Z});
+            plannedPositions.insert(position);
+        }
+        Require(footprintsByLayer.size() ==
+                static_cast<std::size_t>(depth),
+            "Face depth did not materialize the exact number of integer layers.");
+        for (int layer = 1; layer <= depth; ++layer)
+        {
+            const auto found = footprintsByLayer.find(seed.Y + layer);
+            Require(found != footprintsByLayer.end() &&
+                    found->second == expectedTangentialFootprint,
+                "A Face depth layer changed the locked irregular footprint.");
+        }
+
+        const SmartPreviewData presentation =
+            SmartPreviewEngine::Build(plan);
+        Require(presentation.AffectedPositions.size() ==
+                    plannedPositions.size() &&
+                presentation.GhostVoxels.size() ==
+                    plannedPositions.size(),
+            "Face plan presentation and commit coordinate counts diverged.");
+        for (const Position position : presentation.AffectedPositions)
+            Require(plannedPositions.contains(position),
+                "Face commit positions diverged from the planned cells.");
+        for (const GhostVoxel& ghost : presentation.GhostVoxels)
+            Require(plannedPositions.contains(ghost.Position),
+                "Face preview positions diverged from the commit plan.");
+    }
+}
+
 void TestProjectedFaceDepthDragAxes()
 {
     const ViewportRectangle viewport{0.0F, 0.0F, 240.0F, 160.0F};
@@ -272,6 +371,7 @@ int main()
         TestSquareMaskFiltersHolesAndHiddenCells();
         TestSizeAndShapeAreIgnoredForCompleteSurface();
         TestAddDepthUsesWholeLockedFaceLayers();
+        TestLockedIrregularFaceDepthRegression();
         TestProjectedFaceDepthDragAxes();
         TestNoChangeAndOutOfBounds();
         TestHiddenSeedIsRejected();

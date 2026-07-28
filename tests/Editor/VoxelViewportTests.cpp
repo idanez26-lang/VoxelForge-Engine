@@ -1,13 +1,16 @@
 #include "EditorCamera.h"
 #include "VoxelModelTransform.h"
+#include "ViewportDepthFormatPolicy.h"
 #include "VoxelViewportState.h"
 
 #include "VoxelForge/Mesh/VoxelMeshBuilder.h"
 
 #include <cmath>
 #include <array>
+#include <cstdint>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -36,6 +39,28 @@ bool IsFinite(const std::array<float, 16>& matrix)
         if (!std::isfinite(value)) return false;
     }
     return true;
+}
+
+std::array<float, 6U> MeshBounds(
+    const VoxelForge::Mesh::MeshData& mesh)
+{
+    std::array<float, 6U> bounds{
+        mesh.Vertices().front().Position[0],
+        mesh.Vertices().front().Position[1],
+        mesh.Vertices().front().Position[2],
+        mesh.Vertices().front().Position[0],
+        mesh.Vertices().front().Position[1],
+        mesh.Vertices().front().Position[2]};
+    for (const VoxelForge::Mesh::MeshVertex& vertex : mesh.Vertices())
+    {
+        for (std::size_t axis = 0U; axis < 3U; ++axis)
+        {
+            bounds[axis] = std::min(bounds[axis], vertex.Position[axis]);
+            bounds[axis + 3U] =
+                std::max(bounds[axis + 3U], vertex.Position[axis]);
+        }
+    }
+    return bounds;
 }
 
 float ProjectDepth(
@@ -80,6 +105,12 @@ int main()
     const Mesh::MeshBuildResult mesh =
         Mesh::VoxelMeshBuilder::Build(*model.GetGrid(0U));
     passed &= Check(mesh.Succeeded && mesh.Mesh.has_value(), "Mesh build failed.");
+    const auto unitVoxelBounds = MeshBounds(*mesh.Mesh);
+    passed &= Check(
+        Near(unitVoxelBounds[3] - unitVoxelBounds[0], 1.0F) &&
+        Near(unitVoxelBounds[4] - unitVoxelBounds[1], 1.0F) &&
+        Near(unitVoxelBounds[5] - unitVoxelBounds[2], 1.0F),
+        "A 1x1x1 occupied voxel must remain exactly one world unit on every axis.");
     passed &= Check(SamePoint(
         Editor::CalculateVoxelMeshCenter(*mesh.Mesh), {0.5F, 0.5F, 0.5F}),
         "The occupied mesh center is incorrect for an asymmetric grid.");
@@ -149,6 +180,10 @@ int main()
         "Palette conversion is incorrect.");
 
     Editor::EditorCamera camera;
+    const std::vector<Mesh::MeshVertex> cameraIndependentVertices =
+        mesh.Mesh->Vertices();
+    const std::vector<std::uint32_t> cameraIndependentIndices =
+        mesh.Mesh->Indices();
     camera.Frame(2.0F, 3.0F, 4.0F);
     passed &= Check(camera.GetTarget().X == 0.0F &&
         camera.GetTarget().Y == 0.0F && camera.GetTarget().Z == 0.0F,
@@ -178,6 +213,17 @@ int main()
         camera.CreateViewportRay(1.0F, 0.0F).Direction, camera.GetRight());
     passed &= Check(wideHorizontal > verticalHorizontal,
         "Wide and vertical viewport ray aspects are inconsistent.");
+    camera.SetAspectRatio(1.0F);
+    const float squareHorizontal = Editor::Dot(
+        camera.CreateViewportRay(1.0F, 0.0F).Direction, camera.GetRight());
+    camera.SetAspectRatio(16.0F / 9.0F);
+    const float resizedWideHorizontal = Editor::Dot(
+        camera.CreateViewportRay(1.0F, 0.0F).Direction, camera.GetRight());
+    passed &= Check(verticalHorizontal < squareHorizontal &&
+            squareHorizontal < resizedWideHorizontal &&
+            resizedWideHorizontal < wideHorizontal,
+        "Vertical, square, resized-wide and ultra-wide aspect projections "
+        "must preserve their expected horizontal ordering.");
     for (const Editor::EditorCameraView view : {
              Editor::EditorCameraView::Front,
              Editor::EditorCameraView::Top,
@@ -244,6 +290,10 @@ int main()
     passed &= Check(camera.GetView() == Editor::EditorCameraView::Perspective &&
         SamePoint(camera.GetTarget(), pannedTarget),
         "Perspective view is incorrect or changed the target.");
+    passed &= Check(mesh.Mesh->Vertices() == cameraIndependentVertices &&
+            mesh.Mesh->Indices() == cameraIndependentIndices,
+        "Camera distance, orientation and aspect changes must never mutate "
+        "VoxelMeshBuilder world geometry.");
 
     camera.Frame(10000.0F, 1.0F, 1.0F);
     camera.SetAspectRatio(0.01F);
@@ -253,6 +303,19 @@ int main()
         ProjectDepth(longModelMatrix, camera.GetTarget()) > 0.0F &&
         ProjectDepth(longModelMatrix, camera.GetTarget()) < 1.0F,
         "Long model framing or extreme aspect ratio is unstable.");
+
+    using Editor::ViewportDepthFormat;
+    using Editor::ViewportDepthFormatSupport;
+    passed &= Check(Editor::SelectViewportDepthFormat({true, true, true}) ==
+            ViewportDepthFormat::D32Float &&
+        Editor::SelectViewportDepthFormat({false, true, true}) ==
+            ViewportDepthFormat::D24Unorm &&
+        Editor::SelectViewportDepthFormat({false, false, true}) ==
+            ViewportDepthFormat::D16Unorm &&
+        Editor::SelectViewportDepthFormat({}) ==
+            ViewportDepthFormat::Unavailable,
+        "Viewport depth format policy must prefer D32, then D24, with D16 "
+        "only as the final supported fallback.");
 
     state.Clear();
     passed &= Check(!state.HasModel() && state.Name().empty(),

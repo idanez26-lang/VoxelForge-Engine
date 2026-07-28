@@ -2916,7 +2916,13 @@ void EditorWorkspace::DrawScenePanel()
                         {drag.x, drag.y}, 1, MaximumSmartToolBrushSize,
                         pixelsPerFaceLayer);
                 }
-                if (ContinueSmartToolStroke()) UpdateVoxelHighlights();
+                const bool previewPlanWasAvailable =
+                    smartToolStrokePreviewPlan_ != nullptr;
+                const bool strokeChanged = ContinueSmartToolStroke();
+                if (strokeChanged ||
+                    (previewPlanWasAvailable &&
+                     smartToolStrokePreviewPlan_ == nullptr))
+                    UpdateVoxelHighlights();
             }
             else CancelSmartToolStroke();
         }
@@ -15827,6 +15833,12 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         toolContext_.Smart.Action() == SmartAction::Paint;
     const bool smartEraseActive = smartGeometryActive &&
         toolContext_.Smart.Action() == SmartAction::Erase;
+    const bool faceAddPlanGhostPresentation =
+        ShouldPresentFaceAddAsPlanGhosts(
+            smartGeometryActive &&
+                toolContext_.Smart.Geometry() == SmartGeometry::Face,
+            smartAddActive,
+            smartToolStroke_.IsActive());
     if (!smartAddActive && !smartEraseActive && !smartPaintActive)
         pencilPreviewCacheValid_ = false;
     if (!smartPaintActive && !voxelToolState_.IsFillActive())
@@ -15841,12 +15853,25 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     {
         const SmartToolStroke* const activeStroke = smartToolStroke_.IsActive()
             ? &smartToolStroke_ : nullptr;
-        const std::optional<SmartToolRequest> request =
-            BuildSmartPencilRequest(activeStroke);
-        const SmartToolResult planning = request
-            ? smartToolController_.ResolvePreview(smartToolSession_, *request)
-            : SmartToolResult{};
-        const SmartToolPlanPtr plan = planning.Plan;
+        SmartToolPlanPtr plan;
+        if (ShouldResolvePreviewForPresentation(activeStroke != nullptr))
+        {
+            const std::optional<SmartToolRequest> request =
+                BuildSmartPencilRequest();
+            const SmartToolResult planning = request
+                ? smartToolController_.ResolvePreview(
+                    smartToolSession_, *request)
+                : SmartToolResult{};
+            plan = planning.Plan;
+        }
+        else
+        {
+            // ContinueSmartToolStroke already resolved and accepted this
+            // immutable plan. Replanning from the raw hover here would make
+            // the cursor outrun the actual stroke and duplicate expensive
+            // planner work on every pointer update.
+            plan = smartToolStrokePreviewPlan_;
+        }
         const std::optional<Asset::Voxel::VoxelPosition> anchor = plan != nullptr
             ? std::optional<Asset::Voxel::VoxelPosition>{plan->Placement().Target}
             : std::nullopt;
@@ -15860,19 +15885,25 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             if (document != nullptr)
             {
                 exactSmartToolPlan = plan;
-                if (activeStroke != nullptr)
+                if (faceAddPlanGhostPresentation)
+                {
+                    // Face depth replaces the stroke with one complete,
+                    // immutable plan. Present those exact cells directly:
+                    // rebuilding a private copy of the entire document and
+                    // remeshing it on every depth step is unnecessary.
+                }
+                else if (activeStroke != nullptr)
                 {
                     const bool rebuild = smartToolStrokePreviewPlanId_ !=
                             plan->PlanId() ||
                         smartToolStrokePreviewPlanRevision_ != plan->Revision() ||
                         smartToolStrokePreviewStrokeRevision_ !=
                             activeStroke->Revision();
-                    smartToolStrokePreviewPlan_ = plan;
                     if (rebuild)
                     {
                         smartToolStrokePreviewMesh_ =
                             SmartToolExactPreviewComposer::Compose(*document,
-                                activeStroke->PreviewChanges(*plan));
+                                activeStroke->Changes());
                         smartToolStrokePreviewPlanId_ = plan->PlanId();
                         smartToolStrokePreviewPlanRevision_ = plan->Revision();
                         smartToolStrokePreviewStrokeRevision_ =
@@ -15889,7 +15920,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         }
         else
         {
-            smartToolSession_.Clear();
+            if (activeStroke == nullptr) smartToolSession_.Clear();
             smartToolExactPreviewCache_.Clear();
             // Keep the accumulated exact state visible while a target is
             // temporarily invalid. The stroke remains suspended and the next
@@ -15920,6 +15951,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         if (smartBrushGhostPreview_ != nullptr)
         {
             const SmartPreviewData& preview = *smartBrushGhostPreview_;
+            if (faceAddPlanGhostPresentation)
+                smartBrushGhostPreview = preview.GhostVoxels;
             voxelPlacementPreview_.Tool = smartEraseActive
                 ? VoxelPreviewTool::Eraser : VoxelPreviewTool::Pencil;
             voxelPlacementPreview_.Position = anchor;
@@ -16128,43 +16161,83 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             placementStyle = VoxelPlacementPreviewStyle::PencilValid;
         }
     }
+    const UniversalCursorPreviewSubject previewSubject =
+        smartGeometryActive &&
+            toolContext_.Smart.Geometry() == SmartGeometry::Pencil
+        ? toolContext_.Smart.Mode() == SmartToolMode::SingleVoxel
+            ? UniversalCursorPreviewSubject::PencilSingleVoxel
+            : UniversalCursorPreviewSubject::PencilBrush
+        : UniversalCursorPreviewSubject::Geometric;
     const bool universalCursorToolActive =
         smartGeometryActive || voxelToolState_.IsFillActive();
     if (universalCursorToolActive)
     {
+        std::optional<UniversalCursor2DTarget> hoveredCursorTarget;
         const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
         if (hit && hit->Face != VoxelHitFace::None)
         {
-            const Vec3 faceNormal = VoxelHitFaceNormal(hit->Face);
-            const Vec3 voxelCenter{
-                static_cast<float>(hit->Coordinates.X) + 0.5F -
-                    voxelModelCenter_.X,
-                static_cast<float>(hit->Coordinates.Y) + 0.5F -
-                    voxelModelCenter_.Y,
-                static_cast<float>(hit->Coordinates.Z) + 0.5F -
-                    voxelModelCenter_.Z};
-            universalCursor2DTarget_ = UniversalCursor2DTarget{
-                voxelCenter + faceNormal * 0.5F, faceNormal};
+            hoveredCursorTarget = MakeVoxelFaceCursor2DTarget(
+                {static_cast<std::int32_t>(hit->Coordinates.X),
+                 static_cast<std::int32_t>(hit->Coordinates.Y),
+                 static_cast<std::int32_t>(hit->Coordinates.Z)},
+                VoxelHitFaceIntegerNormal(hit->Face), voxelModelCenter_);
         }
-        else if (exactSmartToolPlan != nullptr)
+
+        const SmartToolPlan* plannedCursorPlan = exactSmartToolPlan.get();
+        const bool activeStrokeCursor = smartToolStroke_.IsActive();
+        const bool lockedFaceStroke = activeStrokeCursor &&
+            toolContext_.Smart.Geometry() == SmartGeometry::Face &&
+            faceDepthLockedSeed_.has_value();
+        if (plannedCursorPlan == nullptr && activeStrokeCursor &&
+            smartToolStrokePreviewPlan_ != nullptr)
+            plannedCursorPlan = smartToolStrokePreviewPlan_.get();
+        std::optional<UniversalCursor2DTarget> plannedCursorTarget;
+        if (plannedCursorPlan != nullptr)
         {
             const SmartBrushPlacement& placement =
-                exactSmartToolPlan->Placement();
-            const Vec3 normal{
-                static_cast<float>(placement.Normal.X),
-                static_cast<float>(placement.Normal.Y),
-                static_cast<float>(placement.Normal.Z)};
-            const Vec3 targetCenter{
-                static_cast<float>(placement.Target.X) + 0.5F -
-                    voxelModelCenter_.X,
-                static_cast<float>(placement.Target.Y) + 0.5F -
-                    voxelModelCenter_.Y,
-                static_cast<float>(placement.Target.Z) + 0.5F -
-                    voxelModelCenter_.Z};
-            const float faceOffset = smartAddActive ? -0.5F : 0.5F;
-            universalCursor2DTarget_ = UniversalCursor2DTarget{
-                targetCenter + normal * faceOffset, normal};
+                plannedCursorPlan->Placement();
+            Asset::Voxel::VoxelPosition cursorVoxel = placement.Target;
+            if (lockedFaceStroke && faceDepthLockedSeed_)
+            {
+                cursorVoxel = faceDepthLockedSeed_->Position;
+                if (plannedCursorPlan->Action() == SmartAction::Add)
+                {
+                    const Asset::Voxel::VoxelPosition normal =
+                        faceDepthLockedSeed_->Normal;
+                    const auto presentedTarget =
+                        MakeOutermostVoxelFaceCursor2DTarget(
+                            smartBrushGhostPreview_ != nullptr
+                                ? std::span<const Asset::Voxel::VoxelPosition>{
+                                    smartBrushGhostPreview_->AffectedPositions}
+                                : std::span<const Asset::Voxel::VoxelPosition>{
+                                    plannedCursorPlan->AffectedPositions()},
+                            faceDepthLockedSeed_->Position,
+                            normal, voxelModelCenter_);
+                    if (presentedTarget)
+                        plannedCursorTarget = *presentedTarget;
+                }
+                if (!plannedCursorTarget)
+                    plannedCursorTarget = MakeVoxelFaceCursor2DTarget(
+                        cursorVoxel, faceDepthLockedSeed_->Normal,
+                        voxelModelCenter_);
+            }
+            else
+            {
+                if (plannedCursorPlan->Action() == SmartAction::Add)
+                {
+                    cursorVoxel.X -= placement.Normal.X;
+                    cursorVoxel.Y -= placement.Normal.Y;
+                    cursorVoxel.Z -= placement.Normal.Z;
+                }
+                plannedCursorTarget = MakeVoxelFaceCursor2DTarget(
+                    cursorVoxel, placement.Normal, voxelModelCenter_);
+            }
         }
+        universalCursor2DTarget_ = SelectUniversalCursor2DTarget(
+            hoveredCursorTarget, plannedCursorTarget,
+            activeStrokeCursor
+                ? UniversalCursorAnchorPolicy::PreferPlannedTarget
+                : UniversalCursorAnchorPolicy::PreferHoveredTarget);
     }
     if (universalCursorToolActive)
     {
@@ -16215,17 +16288,15 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         boxPreview,
         linePreview,
         spherePreview,
-        std::span<const GhostVoxel>{},
+        smartBrushGhostPreview,
+        faceAddPlanGhostPresentation
+            ? SmartBrushGhostGeometryStyle::ExposedFaceSurface
+            : SmartBrushGhostGeometryStyle::VoxelBoxes,
         voxelModelCenter_);
     const Asset::Voxel::VoxelDocument* const activeDocument =
         voxelDocumentSession_.ActiveDocument();
-    const UniversalCursorPreviewSubject previewSubject =
-        smartGeometryActive &&
-        toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
-        toolContext_.Smart.Mode() == SmartToolMode::SingleVoxel
-        ? UniversalCursorPreviewSubject::PencilSingleVoxel
-        : UniversalCursorPreviewSubject::Geometric;
-    if (ShouldRenderExactPreviewGeometry(previewSubject) &&
+    if (ShouldRenderExactPreviewGeometry(
+            previewSubject, smartToolStroke_.IsActive()) &&
         exactSmartToolPreview != nullptr && exactSmartToolPlan != nullptr &&
         exactSmartToolPreview->Succeeded())
     {
@@ -16237,7 +16308,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             exactSmartToolPlan->PlanId(), smartToolStroke_.IsActive()
                 ? smartToolStroke_.Revision() : exactSmartToolPlan->Revision()));
     }
-    else
+    else if (!ShouldRetainExactPreviewOnMissingFrame(
+                 previewSubject, smartToolStroke_.IsActive()))
     {
         static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
             nullptr, nullptr, {}, false, 0U, 0U, 0U, 0U));

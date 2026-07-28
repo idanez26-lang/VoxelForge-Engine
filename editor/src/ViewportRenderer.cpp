@@ -1,4 +1,5 @@
 #include "ViewportRenderer.h"
+#include "Preview/FacePlanGhostSurface.h"
 #include "VoxelModelTransform.h"
 #include "VoxelViewportState.h"
 
@@ -55,6 +56,23 @@ constexpr std::int64_t ViewportStencilClearValue = 0;
 static_assert(
     ViewportDepthClearValue >= 0.0F && ViewportDepthClearValue <= 1.0F);
 
+[[nodiscard]] SDL_GPUTextureFormat ToSDLDepthFormat(
+    const ViewportDepthFormat format) noexcept
+{
+    switch (format)
+    {
+    case ViewportDepthFormat::D32Float:
+        return SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    case ViewportDepthFormat::D24Unorm:
+        return SDL_GPU_TEXTUREFORMAT_D24_UNORM;
+    case ViewportDepthFormat::D16Unorm:
+        return SDL_GPU_TEXTUREFORMAT_D16_UNORM;
+    case ViewportDepthFormat::Unavailable:
+    default:
+        return SDL_GPU_TEXTUREFORMAT_INVALID;
+    }
+}
+
 void AppendBox(
     std::vector<GPUVertex>& vertices,
     std::vector<std::uint32_t>& indices,
@@ -62,7 +80,8 @@ void AppendBox(
     const std::array<float, 3>& maximum,
     const std::array<float, 4>& color)
 {
-    for (const GuideFace& face : GuideFaces)
+    const auto appendFace = [&vertices, &indices, &minimum, &maximum, &color](
+        const GuideFace& face)
     {
         const auto first = static_cast<std::uint32_t>(vertices.size());
         for (const auto& corner : face.Corners)
@@ -76,7 +95,37 @@ void AppendBox(
         }
         constexpr std::array<std::uint32_t, 6> local{0U, 1U, 2U, 0U, 2U, 3U};
         for (const std::uint32_t index : local) indices.push_back(first + index);
+    };
+    for (const GuideFace& face : GuideFaces) appendFace(face);
+}
+
+void AppendBoxFace(
+    std::vector<GPUVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const std::array<float, 3>& minimum,
+    const std::array<float, 3>& maximum,
+    const std::array<float, 4>& color,
+    const FacePlanGhostSide side)
+{
+    const GuideFace& face = GuideFaces[static_cast<std::size_t>(side)];
+    const auto first = static_cast<std::uint32_t>(vertices.size());
+    for (const auto& corner : face.Corners)
+    {
+        const std::array<float, 3U> position =
+            OffsetFacePlanGhostPointOutward({
+                minimum[0] + (maximum[0] - minimum[0]) * corner[0],
+                minimum[1] + (maximum[1] - minimum[1]) * corner[1],
+                minimum[2] + (maximum[2] - minimum[2]) * corner[2]},
+                side);
+        vertices.push_back({
+            position,
+            face.Normal,
+            color});
     }
+    constexpr std::array<std::uint32_t, 6> local{
+        0U, 1U, 2U, 0U, 2U, 3U};
+    for (const std::uint32_t index : local)
+        indices.push_back(first + index);
 }
 
 void AppendTriangle(
@@ -417,6 +466,26 @@ bool ViewportRenderer::EnsurePipeline()
     SetError("Voxel viewport v1 requires Windows and SDL GPU DXIL support.");
     return false;
 #endif
+    if (depthFormat_ == ViewportDepthFormat::Unavailable)
+    {
+        const auto supported = [this](const SDL_GPUTextureFormat format)
+        {
+            return SDL_GPUTextureSupportsFormat(device_, format,
+                SDL_GPU_TEXTURETYPE_2D,
+                SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET);
+        };
+        depthFormat_ = SelectViewportDepthFormat({
+            supported(SDL_GPU_TEXTUREFORMAT_D32_FLOAT),
+            supported(SDL_GPU_TEXTUREFORMAT_D24_UNORM),
+            supported(SDL_GPU_TEXTUREFORMAT_D16_UNORM)});
+        if (depthFormat_ == ViewportDepthFormat::Unavailable)
+        {
+            SetError("No supported viewport depth target format is available.");
+            return false;
+        }
+    }
+    const SDL_GPUTextureFormat depthFormat =
+        ToSDLDepthFormat(depthFormat_);
     if ((SDL_GetGPUShaderFormats(device_) & SDL_GPU_SHADERFORMAT_DXIL) == 0)
     {
         SetError("Voxel viewport v1 requires SDL GPU DXIL shader support.");
@@ -458,7 +527,7 @@ bool ViewportRenderer::EnsurePipeline()
     pipelineInfo.rasterizer_state.enable_depth_clip = true;
     pipelineInfo.target_info.color_target_descriptions = &colorDescription;
     pipelineInfo.target_info.num_color_targets = 1U;
-    pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
+    pipelineInfo.target_info.depth_stencil_format = depthFormat;
     pipelineInfo.target_info.has_depth_stencil_target = true;
 
     pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
@@ -789,6 +858,7 @@ void ViewportRenderer::ConfigureHighlights(
     const std::span<const Asset::Voxel::VoxelPosition> linePreview,
     std::optional<VoxelSpherePreview> spherePreview,
     const std::span<const GhostVoxel> smartBrushGhostPreview,
+    const SmartBrushGhostGeometryStyle smartBrushGhostGeometryStyle,
     const Vec3 modelCenter) noexcept
 {
     if (hovered)
@@ -819,6 +889,7 @@ void ViewportRenderer::ConfigureHighlights(
         boxPreviewHighlight_ == boxPreview &&
         equals(linePreviewHighlights_, linePreview) &&
         spherePreviewHighlight_ == spherePreview &&
+        smartBrushGhostGeometryStyle_ == smartBrushGhostGeometryStyle &&
         smartBrushGhostPreview_.size() == smartBrushGhostPreview.size() &&
         std::equal(smartBrushGhostPreview_.begin(), smartBrushGhostPreview_.end(),
             smartBrushGhostPreview.begin(), smartBrushGhostPreview.end(),
@@ -849,6 +920,7 @@ void ViewportRenderer::ConfigureHighlights(
     boxPreviewHighlight_ = boxPreview;
     linePreviewHighlights_.assign(linePreview.begin(), linePreview.end());
     spherePreviewHighlight_ = spherePreview;
+    smartBrushGhostGeometryStyle_ = smartBrushGhostGeometryStyle;
     smartBrushGhostPreview_.assign(
         smartBrushGhostPreview.begin(), smartBrushGhostPreview.end());
     modelCenter_ = modelCenter;
@@ -1227,19 +1299,69 @@ bool ViewportRenderer::EnsureHighlights()
     const std::size_t ghostPreviewCount = smartBrushGhostPreview_.size() +
         voxelPreviewGhosts_.size();
     const bool drawIndividualGhostOutlines =
+        smartBrushGhostGeometryStyle_ ==
+            SmartBrushGhostGeometryStyle::VoxelBoxes &&
         ghostPreviewCount <= IndividualGhostOutlineLimit;
-    const std::size_t ghostBoxCount = ghostPreviewCount *
-        (drawIndividualGhostOutlines ? 13U : 1U) +
-        (drawIndividualGhostOutlines || ghostPreviewCount == 0U ? 0U : 12U);
-    ghostVertices.reserve(ghostBoxCount * 24U);
-    ghostIndices.reserve(ghostBoxCount * 36U);
-    for (const GhostVoxel& ghost : smartBrushGhostPreview_)
-        AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
-            drawIndividualGhostOutlines);
+    const bool drawIndividualVoxelPreviewOutlines =
+        smartBrushGhostGeometryStyle_ ==
+            SmartBrushGhostGeometryStyle::ExposedFaceSurface
+        ? voxelPreviewGhosts_.size() <= IndividualGhostOutlineLimit
+        : drawIndividualGhostOutlines;
+    if (smartBrushGhostGeometryStyle_ ==
+        SmartBrushGhostGeometryStyle::ExposedFaceSurface)
+    {
+        const FacePlanGhostSurface surface =
+            BuildFacePlanGhostSurface(smartBrushGhostPreview_);
+        ghostVertices.reserve(
+            ghostVertices.size() + surface.ExposedFaceCount * 4U);
+        ghostIndices.reserve(
+            ghostIndices.size() + surface.ExposedFaceCount * 6U);
+        for (const FacePlanGhostSurfaceCell& cell : surface.Cells)
+        {
+            const GhostVoxel& ghost =
+                smartBrushGhostPreview_[cell.GhostIndex];
+            const FacePlanGhostVoxelBounds voxelBounds =
+                MakeFacePlanGhostVoxelBounds(ghost.Position);
+            std::array<float, 4> fillColor = ghost.Color;
+            fillColor[3] = std::clamp(ghost.Alpha, 0.0F, 1.0F);
+            const std::array<float, 3> minimum{
+                voxelBounds.Minimum[0] - modelCenter_.X,
+                voxelBounds.Minimum[1] - modelCenter_.Y,
+                voxelBounds.Minimum[2] - modelCenter_.Z};
+            const std::array<float, 3> maximum{
+                voxelBounds.Maximum[0] - modelCenter_.X,
+                voxelBounds.Maximum[1] - modelCenter_.Y,
+                voxelBounds.Maximum[2] - modelCenter_.Z};
+            for (std::size_t side = 0U; side < GuideFaces.size(); ++side)
+            {
+                const auto ghostSide =
+                    static_cast<FacePlanGhostSide>(side);
+                if ((cell.ExposedFaceMask &
+                    FacePlanGhostSideBit(ghostSide)) != 0U)
+                    AppendBoxFace(ghostVertices, ghostIndices,
+                        minimum, maximum, fillColor,
+                        ghostSide);
+            }
+        }
+    }
+    else
+    {
+        const std::size_t ghostBoxCount = ghostPreviewCount *
+            (drawIndividualGhostOutlines ? 13U : 1U) +
+            (drawIndividualGhostOutlines ||
+                ghostPreviewCount == 0U ? 0U : 12U);
+        ghostVertices.reserve(ghostBoxCount * 24U);
+        ghostIndices.reserve(ghostBoxCount * 36U);
+        for (const GhostVoxel& ghost : smartBrushGhostPreview_)
+            AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
+                drawIndividualGhostOutlines);
+    }
     for (const GhostVoxel& ghost : voxelPreviewGhosts_)
         AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
-            drawIndividualGhostOutlines);
-    if (!drawIndividualGhostOutlines && ghostPreviewCount != 0U)
+            drawIndividualVoxelPreviewOutlines);
+    if (smartBrushGhostGeometryStyle_ ==
+            SmartBrushGhostGeometryStyle::VoxelBoxes &&
+        !drawIndividualGhostOutlines && ghostPreviewCount != 0U)
     {
         const GhostVoxel* first = !smartBrushGhostPreview_.empty()
             ? &smartBrushGhostPreview_.front()
@@ -1257,6 +1379,25 @@ bool ViewportRenderer::EnsureHighlights()
         };
         for (const GhostVoxel& ghost : smartBrushGhostPreview_) extendBounds(ghost);
         for (const GhostVoxel& ghost : voxelPreviewGhosts_) extendBounds(ghost);
+        AppendVoxelBoxOutline(ghostVertices, ghostIndices, {minimum, maximum},
+            modelCenter_, {0.92F, 0.96F, 1.0F, 0.72F}, 0.024F, 0.022F);
+    }
+    else if (smartBrushGhostGeometryStyle_ ==
+            SmartBrushGhostGeometryStyle::ExposedFaceSurface &&
+        !drawIndividualVoxelPreviewOutlines && !voxelPreviewGhosts_.empty())
+    {
+        Asset::Voxel::VoxelPosition minimum =
+            voxelPreviewGhosts_.front().Position;
+        Asset::Voxel::VoxelPosition maximum = minimum;
+        for (const GhostVoxel& ghost : voxelPreviewGhosts_)
+        {
+            minimum.X = std::min(minimum.X, ghost.Position.X);
+            minimum.Y = std::min(minimum.Y, ghost.Position.Y);
+            minimum.Z = std::min(minimum.Z, ghost.Position.Z);
+            maximum.X = std::max(maximum.X, ghost.Position.X);
+            maximum.Y = std::max(maximum.Y, ghost.Position.Y);
+            maximum.Z = std::max(maximum.Z, ghost.Position.Z);
+        }
         AppendVoxelBoxOutline(ghostVertices, ghostIndices, {minimum, maximum},
             modelCenter_, {0.92F, 0.96F, 1.0F, 0.72F}, 0.024F, 0.022F);
     }
@@ -1495,7 +1636,7 @@ bool ViewportRenderer::EnsureTargets(
         return false;
     }
     const SDL_GPUTextureCreateInfo depthInfo{
-        SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_D16_UNORM,
+        SDL_GPU_TEXTURETYPE_2D, ToSDLDepthFormat(depthFormat_),
         SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
         width, height, 1U, 1U, SDL_GPU_SAMPLECOUNT_1, depthProperties};
     colorTarget_ = SDL_CreateGPUTexture(device_, &colorInfo);
@@ -1691,7 +1832,8 @@ void ViewportRenderer::ClearModel() noexcept
         std::span<const Asset::Voxel::VoxelPosition>{}, std::nullopt,
         std::nullopt,
         std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
-        std::nullopt, std::span<const GhostVoxel>{}, {});
+        std::nullopt, std::span<const GhostVoxel>{},
+        SmartBrushGhostGeometryStyle::VoxelBoxes, {});
     highlightGeometry_.reset();
     smartBrushGhostGeometry_.reset();
 }
@@ -1806,6 +1948,7 @@ void ViewportRenderer::Shutdown() noexcept
     smartBrushGhostPipeline_ = nullptr;
     transformGizmoVisiblePipeline_ = nullptr;
     transformGizmoOccludedPipeline_ = nullptr;
+    depthFormat_ = ViewportDepthFormat::Unavailable;
     device_ = nullptr;
 }
 

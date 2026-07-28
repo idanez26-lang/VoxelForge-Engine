@@ -1,4 +1,5 @@
 #include "Preview/UniversalCursor2D.h"
+#include "Preview/FacePlanGhostSurface.h"
 
 #include <cmath>
 #include <iostream>
@@ -112,11 +113,220 @@ void TestInvalidTargetIsHidden()
 void TestExactPreviewPresentationPolicy()
 {
     Require(!ShouldRenderExactPreviewGeometry(
-                UniversalCursorPreviewSubject::PencilSingleVoxel),
-        "Single Voxel Pencil must render only the universal cursor.");
+                UniversalCursorPreviewSubject::PencilSingleVoxel, false) &&
+            ShouldRenderExactPreviewGeometry(
+                UniversalCursorPreviewSubject::PencilSingleVoxel, true),
+        "Single Voxel must be cursor-only while idle and exact during a stroke.");
     Require(ShouldRenderExactPreviewGeometry(
-                UniversalCursorPreviewSubject::Geometric),
+                UniversalCursorPreviewSubject::PencilBrush, false),
+        "Pencil brushes must preserve their exact preview.");
+    Require(ShouldRenderExactPreviewGeometry(
+                UniversalCursorPreviewSubject::Geometric, false),
         "Tool and brush geometry must preserve exact previews.");
+    Require(ShouldRetainExactPreviewOnMissingFrame(
+                UniversalCursorPreviewSubject::PencilBrush, true) &&
+            ShouldRetainExactPreviewOnMissingFrame(
+                UniversalCursorPreviewSubject::PencilSingleVoxel, true) &&
+            !ShouldRetainExactPreviewOnMissingFrame(
+                UniversalCursorPreviewSubject::PencilBrush, false) &&
+            !ShouldRetainExactPreviewOnMissingFrame(
+                UniversalCursorPreviewSubject::Geometric, true),
+        "Only an active Pencil stroke may retain a transiently missing preview.");
+    Require(ShouldResolvePreviewForPresentation(false) &&
+            !ShouldResolvePreviewForPresentation(true),
+        "Presentation must reuse the accepted plan instead of replanning an active stroke.");
+    Require(ShouldPresentFaceAddAsPlanGhosts(true, true, true),
+        "An active Face Add must use its exact accepted plan ghosts.");
+    Require(!ShouldPresentFaceAddAsPlanGhosts(true, true, false) &&
+            !ShouldPresentFaceAddAsPlanGhosts(true, false, true) &&
+            !ShouldPresentFaceAddAsPlanGhosts(false, true, true),
+        "Plan-ghost presentation must remain exclusive to an active Face Add.");
+}
+
+void TestLockedFaceAnchorPolicy()
+{
+    const UniversalCursor2DTarget hovered{
+        {1.0F, 2.0F, 3.0F}, {1.0F, 0.0F, 0.0F}};
+    const UniversalCursor2DTarget planned{
+        {7.0F, 8.0F, 9.0F}, {0.0F, 1.0F, 0.0F}};
+    Require(SelectUniversalCursor2DTarget(hovered, planned,
+                UniversalCursorAnchorPolicy::PreferHoveredTarget) == hovered,
+        "Ordinary cursor targeting must continue to follow the hovered face.");
+    Require(SelectUniversalCursor2DTarget(hovered, planned,
+                UniversalCursorAnchorPolicy::PreferPlannedTarget) == planned,
+        "An active stroke must share the accepted preview plan anchor.");
+    Require(SelectUniversalCursor2DTarget(hovered, std::nullopt,
+                UniversalCursorAnchorPolicy::PreferPlannedTarget) == hovered,
+        "A missing planned anchor must safely fall back to the hovered face.");
+}
+
+void TestVoxelFaceTargetMatchesVisiblePreviewFace()
+{
+    using Position = VoxelForge::Asset::Voxel::VoxelPosition;
+    constexpr Position seed{3, 3, 3};
+    constexpr Vec3 modelCenter{1.0F, 1.0F, 1.0F};
+    const std::array<Position, 6U> normals{{
+        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+        {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}};
+    for (const Position normal : normals)
+    {
+        const UniversalCursor2DTarget sourceFace =
+            MakeVoxelFaceCursor2DTarget(seed, normal, modelCenter);
+        constexpr int depth = 3;
+        const Position outerVoxel{
+            seed.X + normal.X * depth,
+            seed.Y + normal.Y * depth,
+            seed.Z + normal.Z * depth};
+        const UniversalCursor2DTarget addPreviewOuterFace =
+            MakeVoxelFaceCursor2DTarget(outerVoxel, normal, modelCenter);
+        const Vec3 expectedDelta{
+            static_cast<float>(normal.X * depth),
+            static_cast<float>(normal.Y * depth),
+            static_cast<float>(normal.Z * depth)};
+        Require(addPreviewOuterFace.SurfaceWorldPosition -
+                    sourceFace.SurfaceWorldPosition == expectedDelta &&
+                sourceFace.FaceNormal == addPreviewOuterFace.FaceNormal,
+            "Face Add cursor must move to the visible outer face of its planned depth.");
+    }
+
+    const UniversalCursor2DTarget paintEraseFace =
+        MakeVoxelFaceCursor2DTarget(seed, {0, 1, 0}, modelCenter);
+    Require(paintEraseFace.SurfaceWorldPosition == Vec3{2.5F, 3.0F, 2.5F},
+        "Face Paint/Erase cursor must remain on the clicked exposed seed face.");
+
+    const std::array<Position, 4U> presented{{
+        {-50, 4, -80}, {100, 4, 200}, {-50, 5, -80}, {100, 5, 200}}};
+    const auto outermost = MakeOutermostVoxelFaceCursor2DTarget(
+        presented, seed, {0, 1, 0}, modelCenter);
+    Require(outermost &&
+            outermost->SurfaceWorldPosition.X == 2.5F &&
+            outermost->SurfaceWorldPosition.Y == 5.0F &&
+            outermost->SurfaceWorldPosition.Z == 2.5F &&
+            outermost->FaceNormal == Vec3{0.0F, 1.0F, 0.0F},
+        "Face Add cursor must keep the locked seed's tangential coordinates "
+        "and use only the presented outward depth.");
+    Require(!MakeOutermostVoxelFaceCursor2DTarget(
+                std::span<const Position>{}, seed, {0, 1, 0}, modelCenter),
+        "An empty Face Add presentation must not synthesize a cursor anchor.");
+
+    const std::array<Position, 2U> shallowFace{{
+        {-100, 4, 200}, {100, 4, -200}}};
+    const std::array<Position, 2U> deepFace{{
+        {500, 9, -700}, {-500, 9, 700}}};
+    const auto shallowCursor = MakeOutermostVoxelFaceCursor2DTarget(
+        shallowFace, seed, {0, 1, 0}, modelCenter);
+    const auto deepCursor = MakeOutermostVoxelFaceCursor2DTarget(
+        deepFace, seed, {0, 1, 0}, modelCenter);
+    Require(shallowCursor && deepCursor &&
+            shallowCursor->SurfaceWorldPosition.X ==
+                deepCursor->SurfaceWorldPosition.X &&
+            shallowCursor->SurfaceWorldPosition.Z ==
+                deepCursor->SurfaceWorldPosition.Z &&
+            shallowCursor->SurfaceWorldPosition.Y !=
+                deepCursor->SurfaceWorldPosition.Y,
+        "Face depth changes must alter only the locked normal coordinate; "
+        "tangential cursor bounds must remain camera-independent.");
+}
+
+void TestFacePlanGhostSurfaceCullsSharedFaces()
+{
+    using Position = VoxelForge::Asset::Voxel::VoxelPosition;
+    const auto ghost = [](const Position position,
+        const GhostVoxelState state = GhostVoxelState::Added)
+    {
+        return GhostVoxel{
+            position, state, {0.2F, 0.4F, 0.8F, 1.0F}, 0.5F};
+    };
+
+    const std::array<GhostVoxel, 1U> single{{ghost({2, 3, 4})}};
+    const FacePlanGhostSurface singleSurface =
+        BuildFacePlanGhostSurface(single);
+    Require(singleSurface.Cells.size() == 1U &&
+            singleSurface.ExposedFaceCount == 6U &&
+            singleSurface.Cells.front().ExposedFaceMask == 0x3FU,
+        "One Face ghost voxel must expose all six faces.");
+
+    const std::array<GhostVoxel, 2U> pair{{
+        ghost({2, 3, 4}), ghost({3, 3, 4}, GhostVoxelState::Painted)}};
+    const FacePlanGhostSurface pairSurface = BuildFacePlanGhostSurface(pair);
+    Require(pairSurface.Cells.size() == 2U &&
+            pairSurface.ExposedFaceCount == 10U &&
+            (pairSurface.Cells[0].ExposedFaceMask &
+                FacePlanGhostSideBit(FacePlanGhostSide::PositiveX)) == 0U &&
+            (pairSurface.Cells[1].ExposedFaceMask &
+                FacePlanGhostSideBit(FacePlanGhostSide::NegativeX)) == 0U &&
+            pair[pairSurface.Cells[1].GhostIndex].State ==
+                GhostVoxelState::Painted,
+        "Adjacent Face ghosts must cull only their shared faces and retain "
+        "the source ghost used for colour/state.");
+
+    std::array<GhostVoxel, 8U> block{};
+    std::size_t index = 0U;
+    for (int z = 0; z < 2; ++z)
+        for (int y = 0; y < 2; ++y)
+            for (int x = 0; x < 2; ++x)
+                block[index++] = ghost({x, y, z});
+    const FacePlanGhostSurface blockSurface =
+        BuildFacePlanGhostSurface(block);
+    Require(blockSurface.Cells.size() == 8U &&
+            blockSurface.ExposedFaceCount == 24U,
+        "A dense 2x2x2 Face ghost must emit its exact 24-quad envelope, "
+        "not 48 per-voxel faces.");
+
+    const std::array<GhostVoxel, 2U> duplicate{{
+        ghost({7, 8, 9}), ghost({7, 8, 9}, GhostVoxelState::Erased)}};
+    const FacePlanGhostSurface duplicateSurface =
+        BuildFacePlanGhostSurface(duplicate);
+    Require(duplicateSurface.Cells.size() == 1U &&
+            duplicateSurface.ExposedFaceCount == 6U &&
+            duplicateSurface.Cells.front().GhostIndex == 0U,
+        "Duplicate Face ghost coordinates must remain stable and must not "
+        "duplicate surface geometry.");
+
+    const FacePlanGhostVoxelBounds left =
+        MakeFacePlanGhostVoxelBounds({10, 20, 30});
+    const FacePlanGhostVoxelBounds right =
+        MakeFacePlanGhostVoxelBounds({11, 20, 30});
+    Require(left.Maximum[0] == right.Minimum[0] &&
+            left.Minimum[1] == right.Minimum[1] &&
+            left.Maximum[1] == right.Maximum[1] &&
+            left.Minimum[2] == right.Minimum[2] &&
+            left.Maximum[2] == right.Maximum[2],
+        "Adjacent Face ghost cells must share one exact edge plane with "
+        "identical tangential bounds and no overlap.");
+
+    constexpr std::array<FacePlanGhostSide, 6U> sides{{
+        FacePlanGhostSide::NegativeX, FacePlanGhostSide::PositiveX,
+        FacePlanGhostSide::NegativeY, FacePlanGhostSide::PositiveY,
+        FacePlanGhostSide::NegativeZ, FacePlanGhostSide::PositiveZ}};
+    constexpr std::array<float, 3U> point{{4.0F, 5.0F, 6.0F}};
+    for (const FacePlanGhostSide side : sides)
+    {
+        const auto normal = FacePlanGhostSideNormal(side);
+        const auto offset = OffsetFacePlanGhostPointOutward(point, side);
+        for (std::size_t axis = 0U; axis < 3U; ++axis)
+        {
+            const float expected =
+                point[axis] + normal[axis] * FacePlanGhostOutwardOffset;
+            Require(std::abs(offset[axis] - expected) < 0.000001F,
+                "Each exposed Face quad coordinate must move exactly by the "
+                "configured epsilon along its outward normal.");
+            if (normal[axis] == 0.0F)
+                Require(offset[axis] == point[axis],
+                    "The Face anti-z-fighting offset must never alter a "
+                    "tangential coordinate.");
+        }
+    }
+
+    const auto leftSharedEdge = OffsetFacePlanGhostPointOutward(
+        {left.Maximum[0], left.Maximum[1], left.Minimum[2]},
+        FacePlanGhostSide::PositiveY);
+    const auto rightSharedEdge = OffsetFacePlanGhostPointOutward(
+        {right.Minimum[0], right.Maximum[1], right.Minimum[2]},
+        FacePlanGhostSide::PositiveY);
+    Require(leftSharedEdge == rightSharedEdge,
+        "Coplanar neighboring Face quads must retain one identical shared "
+        "edge after the normal-only offset.");
 }
 }
 
@@ -129,6 +339,9 @@ int main()
         TestProjectedFaceOrientationIsPreserved();
         TestInvalidTargetIsHidden();
         TestExactPreviewPresentationPolicy();
+        TestLockedFaceAnchorPolicy();
+        TestVoxelFaceTargetMatchesVisiblePreviewFace();
+        TestFacePlanGhostSurfaceCullsSharedFaces();
         std::cout << "Universal Cursor 2D tests passed.\n";
         return 0;
     }

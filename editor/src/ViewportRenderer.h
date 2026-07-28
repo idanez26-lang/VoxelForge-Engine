@@ -6,6 +6,7 @@
 #include "SmartTools/SmartBrushPreviewResolver.h"
 #include "Transform/TransformPreviewModel.h"
 #include "TransformGizmo/TransformGizmoModel.h"
+#include "ViewportDepthFormatPolicy.h"
 #include "VoxelSelection/VoxelRaycast.h"
 #include "VoxelTools/VoxelBoxService.h"
 #include "VoxelTools/VoxelSphereService.h"
@@ -45,6 +46,12 @@ enum class SelectionBoxVisualState : std::uint8_t
     Normal,
     Hovered,
     Moving
+};
+
+enum class SmartBrushGhostGeometryStyle : std::uint8_t
+{
+    VoxelBoxes,
+    ExposedFaceSurface
 };
 
 class ViewportRenderer final
@@ -95,6 +102,7 @@ public:
         std::span<const Asset::Voxel::VoxelPosition> linePreview,
         std::optional<VoxelSpherePreview> spherePreview,
         std::span<const GhostVoxel> smartBrushGhostPreview,
+        SmartBrushGhostGeometryStyle smartBrushGhostGeometryStyle,
         Vec3 modelCenter) noexcept;
     void ConfigureTransformPreview(
         const TransformPreviewRenderData* preview) noexcept;
@@ -166,6 +174,7 @@ private:
     void SetError(std::string message);
 
     SDL_GPUDevice* device_ = nullptr;
+    ViewportDepthFormat depthFormat_ = ViewportDepthFormat::Unavailable;
     SDL_GPUGraphicsPipeline* pipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* smartBrushGhostPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* transformGizmoVisiblePipeline_ = nullptr;
@@ -223,6 +232,8 @@ private:
     std::optional<VoxelBoxBounds> boxPreviewHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> linePreviewHighlights_;
     std::vector<GhostVoxel> smartBrushGhostPreview_;
+    SmartBrushGhostGeometryStyle smartBrushGhostGeometryStyle_ =
+        SmartBrushGhostGeometryStyle::VoxelBoxes;
     std::vector<GhostVoxel> voxelPreviewGhosts_;
     std::uint64_t voxelPreviewRevision_ = 0U;
     std::unique_ptr<HighlightGeometryCache> highlightGeometry_;
