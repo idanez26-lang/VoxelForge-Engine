@@ -2291,6 +2291,7 @@ void EditorWorkspace::DrawScenePanel()
             available,
             ImVec2(0.0F, 0.0F),
             ImVec2(1.0F, 1.0F));
+        DrawUniversalPreviewCursor2D();
         DrawTransformGizmoVisibilityAnchor();
         const bool imageHovered = ImGui::IsItemHovered();
         const ImGuiIO& io = ImGui::GetIO();
@@ -8538,7 +8539,8 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
             voxelPlacementPreview_.Position == hit->AdjacentPosition &&
             GetBackendDisplayName() == "Direct3D 12" &&
             viewportRenderer_.HasModelMesh() &&
-            viewportRenderer_.HasExactPreviewMesh();
+            !viewportRenderer_.HasExactPreviewMesh() &&
+            universalCursor2DTarget_.has_value();
         voxelToolSmokeInput_.Reset();
     }
     else if (frame == 1U)
@@ -15752,6 +15754,7 @@ std::size_t EditorWorkspace::VoxelHighlightRenderCount() const noexcept
 
 void EditorWorkspace::UpdateVoxelHighlights() noexcept
 {
+    universalCursor2DTarget_.reset();
     const auto coordinates = [](const std::optional<VoxelRaycastHit>& hit)
         -> std::optional<VoxelCoordinates>
     {
@@ -16125,6 +16128,50 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             placementStyle = VoxelPlacementPreviewStyle::PencilValid;
         }
     }
+    const bool universalCursorToolActive =
+        smartGeometryActive || voxelToolState_.IsFillActive();
+    if (universalCursorToolActive)
+    {
+        const std::optional<VoxelRaycastHit>& hit = voxelSelection_.Hovered();
+        if (hit && hit->Face != VoxelHitFace::None)
+        {
+            const Vec3 faceNormal = VoxelHitFaceNormal(hit->Face);
+            const Vec3 voxelCenter{
+                static_cast<float>(hit->Coordinates.X) + 0.5F -
+                    voxelModelCenter_.X,
+                static_cast<float>(hit->Coordinates.Y) + 0.5F -
+                    voxelModelCenter_.Y,
+                static_cast<float>(hit->Coordinates.Z) + 0.5F -
+                    voxelModelCenter_.Z};
+            universalCursor2DTarget_ = UniversalCursor2DTarget{
+                voxelCenter + faceNormal * 0.5F, faceNormal};
+        }
+        else if (exactSmartToolPlan != nullptr)
+        {
+            const SmartBrushPlacement& placement =
+                exactSmartToolPlan->Placement();
+            const Vec3 normal{
+                static_cast<float>(placement.Normal.X),
+                static_cast<float>(placement.Normal.Y),
+                static_cast<float>(placement.Normal.Z)};
+            const Vec3 targetCenter{
+                static_cast<float>(placement.Target.X) + 0.5F -
+                    voxelModelCenter_.X,
+                static_cast<float>(placement.Target.Y) + 0.5F -
+                    voxelModelCenter_.Y,
+                static_cast<float>(placement.Target.Z) + 0.5F -
+                    voxelModelCenter_.Z};
+            const float faceOffset = smartAddActive ? -0.5F : 0.5F;
+            universalCursor2DTarget_ = UniversalCursor2DTarget{
+                targetCenter + normal * faceOffset, normal};
+        }
+    }
+    if (universalCursorToolActive)
+    {
+        // The universal cursor replaces only the legacy volumetric hover
+        // marker. Tool geometry remains an independent preview layer.
+        hoveredCoordinates.reset();
+    }
     // Smart Add/Erase/Paint render exclusively from the immutable planner
     // output through the exact final-state preview.
     if (exactSmartToolPreview == nullptr) smartToolExactPreviewCache_.Clear();
@@ -16172,7 +16219,14 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         voxelModelCenter_);
     const Asset::Voxel::VoxelDocument* const activeDocument =
         voxelDocumentSession_.ActiveDocument();
-    if (exactSmartToolPreview != nullptr && exactSmartToolPlan != nullptr &&
+    const UniversalCursorPreviewSubject previewSubject =
+        smartGeometryActive &&
+        toolContext_.Smart.Geometry() == SmartGeometry::Pencil &&
+        toolContext_.Smart.Mode() == SmartToolMode::SingleVoxel
+        ? UniversalCursorPreviewSubject::PencilSingleVoxel
+        : UniversalCursorPreviewSubject::Geometric;
+    if (ShouldRenderExactPreviewGeometry(previewSubject) &&
+        exactSmartToolPreview != nullptr && exactSmartToolPlan != nullptr &&
         exactSmartToolPreview->Succeeded())
     {
         static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
@@ -16201,6 +16255,45 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     {
         viewportRenderer_.ConfigureTransformPreview(nullptr);
     }
+}
+
+void EditorWorkspace::DrawUniversalPreviewCursor2D() const noexcept
+{
+    if (!universalCursor2DTarget_) return;
+    const std::optional<PaletteColorSelection> activeColor =
+        paletteService_.ActiveColor();
+    if (!activeColor) return;
+    const UniversalCursor2DGeometry cursor = ProjectUniversalCursor2D(
+        *universalCursor2DTarget_, currentViewportRectangle_,
+        viewportCamera_.GetViewProjection());
+    if (!cursor.Visible) return;
+
+    std::array<ImVec2, 4U> points{};
+    for (std::size_t index = 0U; index < points.size(); ++index)
+        points[index] = {cursor.Corners[index].X, cursor.Corners[index].Y};
+    const Asset::Voxel::VoxelColor& color = activeColor->Color;
+    const ImU32 fillColor =
+        IM_COL32(color.Red, color.Green, color.Blue, 72);
+    const ImU32 darkKeyline = IM_COL32(8, 12, 18, 220);
+    const ImU32 lightKeyline = IM_COL32(245, 248, 255, 235);
+    ImDrawList* const drawList = ImGui::GetWindowDrawList();
+    // Keep the overlay inside the rendered image, away from Scene chrome.
+    drawList->PushClipRect(
+        {currentViewportRectangle_.X, currentViewportRectangle_.Y},
+        {currentViewportRectangle_.X + currentViewportRectangle_.Width,
+         currentViewportRectangle_.Y + currentViewportRectangle_.Height},
+        true);
+    drawList->AddConvexPolyFilled(
+        points.data(), static_cast<int>(points.size()), fillColor);
+    // Dual contrast keeps the face boundary readable over both light and
+    // dark voxels while the translucent fill retains the active palette.
+    drawList->AddPolyline(
+        points.data(), static_cast<int>(points.size()), darkKeyline,
+        ImDrawFlags_Closed, 3.0F);
+    drawList->AddPolyline(
+        points.data(), static_cast<int>(points.size()), lightKeyline,
+        ImDrawFlags_Closed, 1.0F);
+    drawList->PopClipRect();
 }
 
 void EditorWorkspace::UpdateTransformGizmo(

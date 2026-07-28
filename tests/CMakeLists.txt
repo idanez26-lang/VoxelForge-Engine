@@ -166,6 +166,20 @@ add_test(
 )
 
 add_executable(
+    VoxelForgeEditorUniversalCursor2DTests
+    Editor/UniversalCursor2DTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorUniversalCursor2DTests
+    PRIVATE VoxelForgeEditorVoxelPreview
+)
+vf_configure_test(VoxelForgeEditorUniversalCursor2DTests)
+add_test(
+    NAME VoxelForge.Editor.UniversalCursor2D
+    COMMAND $<TARGET_FILE:VoxelForgeEditorUniversalCursor2DTests>
+)
+
+add_executable(
     VoxelForgeEditorDoubleClickCameraTests
     Editor/DoubleClickCameraTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp

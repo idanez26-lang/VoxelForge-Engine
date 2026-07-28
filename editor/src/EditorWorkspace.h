@@ -22,6 +22,7 @@
 #include "Project/ProjectDialogPreferences.h"
 #include "Project/QualityOfLifeLogic.h"
 #include "ProjectSession/ProjectSessionService.h"
+#include "Preview/UniversalCursor2D.h"
 #include "Preview/VoxelPreview.h"
 #include "Selection/SelectionService.h"
 #include "Selection/SelectionInteraction.h"
@@ -360,6 +361,7 @@ private:
     void UpdateVoxelHighlights() noexcept;
     void UpdateTransformGizmo(float viewportHeightPixels) noexcept;
     void DrawTransformGizmoVisibilityAnchor() const noexcept;
+    void DrawUniversalPreviewCursor2D() const noexcept;
     [[nodiscard]] bool SynchronizeVoxelDocumentRendering();
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
@@ -549,6 +551,8 @@ private:
     VoxelLineInteraction voxelLineInteraction_;
     VoxelSphereInteraction voxelSphereInteraction_;
     VoxelPlacementPreview voxelPlacementPreview_;
+    // Current frame target for the universal screen-space cursor overlay.
+    std::optional<UniversalCursor2DTarget> universalCursor2DTarget_;
     const Asset::Voxel::VoxelDocument* pencilPreviewDocument_ = nullptr;
     std::uint64_t pencilPreviewRevision_ = 0U;
     std::uint64_t pencilPreviewGeneration_ = 0U;

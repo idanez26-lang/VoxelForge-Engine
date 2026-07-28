@@ -295,7 +295,11 @@ else()
         VoxelForgeEditorPalette PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_library(VoxelForgeEditorVoxelPreview STATIC src/Preview/VoxelPreview.cpp)
+add_library(
+    VoxelForgeEditorVoxelPreview STATIC
+    src/Preview/VoxelPreview.cpp
+    src/Preview/UniversalCursor2D.cpp
+)
 target_include_directories(VoxelForgeEditorVoxelPreview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(VoxelForgeEditorVoxelPreview PUBLIC VoxelForgeAsset VoxelForgeCore)
 target_compile_features(VoxelForgeEditorVoxelPreview PUBLIC cxx_std_20)
