@@ -80,7 +80,7 @@ void SmartTool::SetLineConstraintAxis(
 bool SmartTool::IsOperational() const noexcept
 {
     return (geometry_ == SmartGeometry::Pencil || geometry_ == SmartGeometry::Face ||
-        geometry_ == SmartGeometry::Line || geometry_ == SmartGeometry::Rectangle ||
+        geometry_ == SmartGeometry::Line || geometry_ == SmartGeometry::Geometry ||
         geometry_ == SmartGeometry::Surface) &&
         (action_ == SmartAction::Add || action_ == SmartAction::Erase ||
          action_ == SmartAction::Paint);

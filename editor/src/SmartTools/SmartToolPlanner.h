@@ -15,15 +15,15 @@ class SmartToolPlanner final
 public:
     [[nodiscard]] SmartToolResult Plan(const SmartToolRequest& request);
 
-    // Rectangle interaction helpers deliberately live beside the sole
+    // Geometry interaction helpers deliberately live beside the sole
     // geometry authority. They only canonicalize the locked plane and B;
     // sampling remains private to Plan().
-    [[nodiscard]] static std::optional<SmartToolRectanglePlane>
-        MakeRectanglePlane(Asset::Voxel::VoxelPosition origin,
+    [[nodiscard]] static std::optional<SmartToolGeometryPlane>
+        MakeGeometryPlane(Asset::Voxel::VoxelPosition origin,
             Asset::Voxel::VoxelPosition normal,
             float surfaceCoordinate) noexcept;
-    [[nodiscard]] static Asset::Voxel::VoxelPosition ProjectRectangleEndpoint(
-        const SmartToolRectanglePlane& plane,
+    [[nodiscard]] static Asset::Voxel::VoxelPosition ProjectGeometryEndpoint(
+        const SmartToolGeometryPlane& plane,
         Asset::Voxel::VoxelPosition endpoint) noexcept;
 
 private:

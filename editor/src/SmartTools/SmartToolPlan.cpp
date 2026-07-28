@@ -10,7 +10,9 @@ SmartToolPlan::SmartToolPlan(
     const std::uint64_t planId,
     std::vector<SmartToolPlanCell> cells,
     std::vector<SmartToolDiagnostic> diagnostics)
-    : geometry_(request.Geometry), mode_(request.Mode), action_(request.Action),
+    : geometry_(request.Geometry), geometryHeight_(request.GeometryHeight),
+      mode_(request.Mode),
+      action_(request.Action),
       brushState_(request.BrushRequest.State),
       activeProfileUuid_(request.ActiveProfileUuid),
       placement_(request.BrushRequest.Placement),
@@ -81,6 +83,7 @@ SmartToolPlan::SmartToolPlan(
 }
 
 SmartGeometry SmartToolPlan::Geometry() const noexcept { return geometry_; }
+int SmartToolPlan::GeometryHeight() const noexcept { return geometryHeight_; }
 std::optional<SmartToolMode> SmartToolPlan::Mode() const noexcept { return mode_; }
 SmartAction SmartToolPlan::Action() const noexcept { return action_; }
 const SmartBrushState& SmartToolPlan::BrushState() const noexcept { return brushState_; }

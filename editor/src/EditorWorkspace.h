@@ -528,17 +528,30 @@ private:
     // A Line may keep its locked A while the pointer temporarily loses a
     // valid B. Such a suspended line must never commit its previous plan.
     bool smartLineEndpointValid_ = false;
-    // Rectangle locks its first corner and full plane on MouseDown. Only the
-    // second corner changes while dragging; an invalid endpoint cannot commit
-    // a stale prior plan.
-    std::optional<SmartToolRectanglePlane> smartRectanglePlane_;
-    std::optional<Asset::Voxel::VoxelPosition> smartRectanglePlannedEnd_;
-    bool smartRectangleEndpointValid_ = false;
-    // Surface is not a Rectangle alias. It locks an exposed source component
+    enum class SmartGeometryInteractionPhase : std::uint8_t
+    {
+        Base,
+        Height
+    };
+    // Geometry locks its first point and full plane on MouseDown. Only B
+    // changes during the base drag. Cylinder then freezes B and enters a
+    // signed-height phase before the second click commits the exact plan.
+    std::optional<SmartToolGeometryPlane> smartGeometryPlane_;
+    std::optional<Asset::Voxel::VoxelPosition> smartGeometryPlannedEnd_;
+    bool smartGeometryEndpointValid_ = false;
+    SmartGeometryInteractionPhase smartGeometryPhase_ =
+        SmartGeometryInteractionPhase::Base;
+    SmartToolMode smartGeometryLockedMode_ = SmartToolMode::SingleVoxel;
+    SmartAction smartGeometryLockedAction_ = SmartAction::Add;
+    std::optional<SmartToolFaceDepthDragAxis> smartGeometryHeightDragAxis_;
+    Vec2 smartGeometryHeightStartMouse_{};
+    int smartGeometryHeight_ = 1;
+    int smartGeometryPlannedHeight_ = 0;
+    // Surface is not a Geometry alias. It locks an exposed source component
     // and a projection plane so its local brush extensions can remain on that
     // component while dragging through empty viewport space.
     std::optional<SmartToolFaceSeed> smartSurfaceLockedSeed_;
-    std::optional<SmartToolRectanglePlane> smartSurfacePlane_;
+    std::optional<SmartToolGeometryPlane> smartSurfacePlane_;
     bool smartSurfaceEndpointValid_ = false;
     BrushProfileService brushProfileService_;
     SmartBrushSizeFeedback smartBrushSizeFeedback_{};

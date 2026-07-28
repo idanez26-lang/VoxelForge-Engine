@@ -74,6 +74,11 @@ int main()
                 throw std::runtime_error("removed smart geometry remains operational");
         }
         tool.SetGeometry(SmartGeometry::Pencil);
+        tool.SetGeometry(SmartGeometry::Geometry);
+        if (!tool.IsOperational() ||
+            tool.Geometry() != SmartGeometry::Geometry)
+            throw std::runtime_error("geometry transition");
+        tool.SetGeometry(SmartGeometry::Pencil);
 
         SmartBrushSizeFeedback feedback;
         if (feedback.IsVisible(0U))

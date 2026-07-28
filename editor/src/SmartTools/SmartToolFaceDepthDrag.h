@@ -58,4 +58,26 @@ struct SmartToolFaceDepthDragAxis final
         projectedPixels / pixelsPerLayer));
     return std::clamp(layers, minimumLayers, maximumLayers);
 }
+
+// Geometry Cylinder reuses the frozen projected normal, but unlike Face its
+// height is signed and never zero. The base disk is layer zero; additional
+// layers follow the sign of this value.
+[[nodiscard]] inline int ResolveSmartToolGeometryHeight(
+    const SmartToolFaceDepthDragAxis& axis, const Vec2 mouseDragPixels,
+    const int maximumLayers = 64,
+    const float pixelsPerLayer = 24.0F) noexcept
+{
+    if (maximumLayers < 1 ||
+        !std::isfinite(mouseDragPixels.X) || !std::isfinite(mouseDragPixels.Y) ||
+        !std::isfinite(axis.ScreenDirection.X) ||
+        !std::isfinite(axis.ScreenDirection.Y) ||
+        !std::isfinite(pixelsPerLayer) || pixelsPerLayer <= 0.0F)
+        return 1;
+    const float projectedPixels = mouseDragPixels.X * axis.ScreenDirection.X +
+        mouseDragPixels.Y * axis.ScreenDirection.Y;
+    const int magnitude = 1 + static_cast<int>(std::floor(
+        std::abs(projectedPixels) / pixelsPerLayer));
+    return (projectedPixels < 0.0F ? -1 : 1) *
+        std::clamp(magnitude, 1, maximumLayers);
+}
 } // namespace VoxelForge::Editor

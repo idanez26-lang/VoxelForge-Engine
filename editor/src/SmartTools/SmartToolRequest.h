@@ -40,10 +40,10 @@ struct SmartToolFaceSeed final
         default;
 };
 
-// A canonical, grid-aligned plane captured exactly once at Rectangle
-// MouseDown. Origin is the first corner; U/V are the deterministic planar
-// axes used by the planner to expand to the current second corner.
-struct SmartToolRectanglePlane final
+// A canonical, grid-aligned plane captured exactly once at Geometry
+// MouseDown. Origin is the first point; U/V are the deterministic planar
+// axes used by the planner to expand the selected shape.
+struct SmartToolGeometryPlane final
 {
     Asset::Voxel::VoxelPosition Origin{};
     Asset::Voxel::VoxelPosition Normal{0, 1, 0};
@@ -53,7 +53,7 @@ struct SmartToolRectanglePlane final
     // coordinate (for example a +X face at voxel X is X + 1).
     float SurfaceCoordinate = 0.0F;
 
-    [[nodiscard]] bool operator==(const SmartToolRectanglePlane&) const noexcept =
+    [[nodiscard]] bool operator==(const SmartToolGeometryPlane&) const noexcept =
         default;
 };
 
@@ -98,10 +98,12 @@ struct SmartToolRequest final
     // Required only for SmartGeometry::Line. Point A is captured on MouseDown;
     // Placement.Target remains the live endpoint B.
     std::optional<Asset::Voxel::VoxelPosition> LineStart;
-    // Required only for SmartGeometry::Rectangle. Placement.Target is the
-    // current, already projected second corner B.
-    std::optional<SmartToolRectanglePlane> RectanglePlane;
-    std::optional<float> RectangleSurfaceCoordinate;
+    // Required only for SmartGeometry::Geometry. Placement.Target is the
+    // current, already projected point B. Cylinder height is signed along the
+    // locked plane normal and always has a non-zero magnitude.
+    std::optional<SmartToolGeometryPlane> GeometryPlane;
+    std::optional<float> GeometrySurfaceCoordinate;
+    int GeometryHeight = 1;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
     // A transient overlay revision. It is zero for ordinary preview/commit
@@ -130,7 +132,8 @@ struct SmartToolRequestKey final
     std::optional<SmartToolFaceSeed> FaceSeed;
     int FaceDepth = 1;
     std::optional<Asset::Voxel::VoxelPosition> LineStart;
-    std::optional<SmartToolRectanglePlane> RectanglePlane;
+    std::optional<SmartToolGeometryPlane> GeometryPlane;
+    int GeometryHeight = 1;
     std::uintptr_t SourceIdentity = 0U;
     std::uint64_t SourceRevision = 0U;
     std::uint64_t VirtualRevision = 0U;
@@ -143,7 +146,8 @@ struct SmartToolRequestKey final
 
     [[nodiscard]] bool operator==(const SmartToolRequestKey& other) const noexcept
     {
-        return Geometry == other.Geometry && Mode == other.Mode && Action == other.Action &&
+        return Geometry == other.Geometry &&
+            Mode == other.Mode && Action == other.Action &&
             Dimensions.X == other.Dimensions.X &&
             Dimensions.Y == other.Dimensions.Y &&
             Dimensions.Z == other.Dimensions.Z && State == other.State &&
@@ -153,7 +157,8 @@ struct SmartToolRequestKey final
             FaceSeed == other.FaceSeed &&
             FaceDepth == other.FaceDepth &&
             LineStart == other.LineStart &&
-            RectanglePlane == other.RectanglePlane &&
+            GeometryPlane == other.GeometryPlane &&
+            GeometryHeight == other.GeometryHeight &&
             SourceIdentity == other.SourceIdentity &&
             SourceRevision == other.SourceRevision &&
             VirtualRevision == other.VirtualRevision &&
@@ -228,13 +233,15 @@ struct SmartToolRequestKey final
     case SmartAction::Add:
     default: state.Mode = SmartBrushMode::Add; break;
     }
-    return {geometry, request.Mode, request.Action, request.BrushRequest.Dimensions,
+    return {geometry, request.Mode, request.Action,
+        request.BrushRequest.Dimensions,
         state, request.BrushRequest.Placement,
         request.ReplacePaletteIndex,
         request.FaceSeed,
         request.FaceDepth,
         request.LineStart,
-        request.RectanglePlane,
+        request.GeometryPlane,
+        request.GeometryHeight,
         request.SourceIdentity, request.SourceRevision, request.VirtualRevision,
         request.SourceGeneration,
         request.SourceSubModelIndex, request.ActiveProfileUuid,

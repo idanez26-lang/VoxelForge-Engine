@@ -28,6 +28,9 @@ struct ToolContext final
     BrushProfileService* BrushProfiles = nullptr;
     std::function<std::optional<std::size_t>()> ActivePaletteIndex;
     std::function<bool(std::size_t)> SelectPaletteIndex;
+    // Presentation-only query; the interaction phase remains owned by the
+    // workspace and is never mirrored into Smart Tool business state.
+    std::function<bool()> IsGeometryCylinderHeightPhase;
     ScaleToolOptions Scale{};
     ConstraintSettings* Constraints = nullptr;
     TransformPivotManager* PivotManager = nullptr;

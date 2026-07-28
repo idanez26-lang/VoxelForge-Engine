@@ -163,6 +163,7 @@ class SmartToolPlan final
 {
 public:
     [[nodiscard]] SmartGeometry Geometry() const noexcept;
+    [[nodiscard]] int GeometryHeight() const noexcept;
     [[nodiscard]] std::optional<SmartToolMode> Mode() const noexcept;
     [[nodiscard]] SmartAction Action() const noexcept;
     [[nodiscard]] const SmartBrushState& BrushState() const noexcept;
@@ -190,6 +191,7 @@ private:
         std::vector<SmartToolDiagnostic> diagnostics);
 
     SmartGeometry geometry_ = SmartGeometry::Pencil;
+    int geometryHeight_ = 1;
     std::optional<SmartToolMode> mode_;
     SmartAction action_ = SmartAction::Add;
     SmartBrushState brushState_{};

@@ -19,6 +19,7 @@ enum class SmartToolMode : std::uint8_t
 };
 
 inline constexpr int MaximumSmartToolBrushSize = MaximumSmartBrushRequestSize;
+inline constexpr int MaximumSmartGeometryHeight = 64;
 
 enum class SmartGeometry : std::uint8_t
 {
@@ -28,11 +29,11 @@ enum class SmartGeometry : std::uint8_t
     Cube,
     Sphere,
     Face,
-    // The first corner and its plane are captured on MouseDown. The planner
-    // expands the immutable rectangle; neither preview nor commit sample it.
-    Rectangle,
+    // The first point and its plane are captured on MouseDown. The planner
+    // expands the selected immutable shape; neither preview nor commit samples it.
+    Geometry,
     // A face-seeded, connected voxel surface. It is intentionally distinct
-    // from Rectangle: it locks an exposed component, then applies local 2D
+    // from Geometry: it locks an exposed component, then applies local 2D
     // brush footprints through the shared Planner/Plan/Stroke pipeline.
     Surface,
     Box,
