@@ -11,6 +11,7 @@
 #include <system_error>
 #include <unordered_map>
 #include <utility>
+#include "EditorPathCompare.h"
 
 namespace VoxelForge::Editor
 {
@@ -233,7 +234,8 @@ MetadataReadResult ModelAssetMetadataService::ReadMetadata(
     const auto absoluteMetadata =
         std::filesystem::absolute(metadataPath, pathError).lexically_normal();
     if (pathError || (!modelsDirectory_.empty() &&
-            absoluteMetadata.parent_path() != modelsDirectory_))
+            !IsSameDirectoryAsCanonical(
+                absoluteMetadata.parent_path(), modelsDirectory_)))
         return {false, {}, "Metadata path must stay inside Assets/Models."};
     const auto linkStatus = std::filesystem::symlink_status(
         absoluteMetadata, pathError);
@@ -726,7 +728,8 @@ bool ModelAssetMetadataService::ResolveModelPath(
     if (modelsDirectory_.empty()) { errorMessage = "No Models directory is configured."; return false; }
     std::error_code error;
     const auto absolute = std::filesystem::absolute(modelPath, error).lexically_normal();
-    if (error || absolute.parent_path() != modelsDirectory_)
+    if (error ||
+        !IsSameDirectoryAsCanonical(absolute.parent_path(), modelsDirectory_))
     { errorMessage = "Model must be a direct child of Assets/Models."; return false; }
     const auto linkStatus = std::filesystem::symlink_status(absolute, error);
     if (error || std::filesystem::is_symlink(linkStatus) ||

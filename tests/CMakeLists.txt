@@ -1807,6 +1807,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.TransformPanelSmoke
         VoxelForge.Editor.SaveOnExitSmoke
         PROPERTIES
+        LABELS "EditorApp"
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             ENVIRONMENT

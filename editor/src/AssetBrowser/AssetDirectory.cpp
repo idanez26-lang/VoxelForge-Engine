@@ -9,6 +9,7 @@
 #include <optional>
 #include <system_error>
 #include <utility>
+#include "EditorPathCompare.h"
 
 namespace VoxelForge::Editor
 {
@@ -31,7 +32,7 @@ std::string FoldCase(const std::string_view text)
 
 bool ContainsInvalidWindowsCharacter(const std::string_view name)
 {
-    constexpr std::string_view InvalidCharacters = "<>:\"/\\|?*";
+    static constexpr std::string_view InvalidCharacters = "<>:\"/\\|?*";
 
     return std::any_of(
         name.begin(),
@@ -629,7 +630,9 @@ AssetOperationResult AssetDirectory::RenameEntry(
     const bool isManagedVox = freshSource.IsRegularFile &&
         !freshSource.IsSymbolicLink &&
         FoldCase(freshSource.OperationPath.extension().string()) == ".vox" &&
-        freshSource.OperationPath.parent_path() == assetsRoot_ / "Models";
+        IsSameDirectoryAsCanonical(
+            freshSource.OperationPath.parent_path(),
+            std::filesystem::weakly_canonical(assetsRoot_ / "Models"));
     ModelAssetMetadataService metadataService;
     std::filesystem::path sourceMetadata;
     std::filesystem::path destinationMetadata;
@@ -802,7 +805,9 @@ AssetOperationResult AssetDirectory::DeleteEntry(
     const bool isManagedVox = freshEntry.IsRegularFile &&
         !freshEntry.IsSymbolicLink &&
         FoldCase(freshEntry.OperationPath.extension().string()) == ".vox" &&
-        freshEntry.OperationPath.parent_path() == assetsRoot_ / "Models";
+        IsSameDirectoryAsCanonical(
+            freshEntry.OperationPath.parent_path(),
+            std::filesystem::weakly_canonical(assetsRoot_ / "Models"));
     std::filesystem::path metadataPath;
     std::filesystem::path metadataTemporary;
     std::string thumbnailAssetId;

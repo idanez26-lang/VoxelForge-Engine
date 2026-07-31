@@ -341,7 +341,8 @@ void TestFileStoreLoadTransactionsAndRollback(TemporaryProject& project)
 {
     StampJsonCatalogStore store;
     Require(store.SetProjectRoot(project.Root()), "Catalogue store must configure a valid isolated project root.");
-    Require(store.Path() == project.Root() / ProjectForgeLibraryRelativePath / "ForgeCatalog.json",
+    Require(fs::weakly_canonical(store.Path()) ==
+            fs::weakly_canonical(project.Root() / ProjectForgeLibraryRelativePath / "ForgeCatalog.json"),
         "Catalogue store must use the official portable Project Library catalogue path.");
     Require(store.LoadCatalogue().Error == StampCatalogError::Missing,
         "An absent project catalogue must report Missing without creating an asset.");

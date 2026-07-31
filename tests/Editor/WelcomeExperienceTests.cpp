@@ -156,7 +156,9 @@ void TestDeletionValidationAndRecycleFailure()
 
     backend.Succeed = true;
     const ProjectDeletionResult succeeded = service.DeleteProject(request);
-    Require(succeeded.Succeeded() && backend.LastDirectory == projectRoot &&
+    Require(succeeded.Succeeded() &&
+            fs::weakly_canonical(backend.LastDirectory) ==
+                fs::weakly_canonical(projectRoot) &&
             fs::is_directory(projectRoot),
         "Valid deletion did not target exactly the validated project root.");
 }

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <system_error>
+#include "EditorPathCompare.h"
 
 namespace VoxelForge::Editor
 {
@@ -57,7 +58,9 @@ bool VoxThumbnailService::SetProjectRoot(
     }
     projectRoot_ = absolute;
     modelsDirectory_ = projectRoot_ / "Assets" / "Models";
-    cacheDirectory_ = projectRoot_ / "Cache" / "Thumbnails";
+    cacheDirectory_ = std::filesystem::weakly_canonical(
+        projectRoot_ / "Cache" / "Thumbnails", error);
+    if (error) cacheDirectory_ = projectRoot_ / "Cache" / "Thumbnails";
     if (!metadataService_.SetModelsDirectory(modelsDirectory_))
     {
         lastError_ = "Unable to configure model metadata for thumbnails.";
@@ -393,7 +396,8 @@ bool VoxThumbnailService::IsSafeCachePath(
 {
     errorMessage.clear();
     if (cacheDirectory_.empty() ||
-        path.lexically_normal().parent_path() != cacheDirectory_ ||
+        !IsSameDirectoryAsCanonical(
+            path.lexically_normal().parent_path(), cacheDirectory_) ||
         !IsRecognizedCacheFile(path))
     {
         errorMessage = "Thumbnail destination is outside Cache/Thumbnails.";

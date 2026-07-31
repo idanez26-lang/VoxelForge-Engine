@@ -7,6 +7,7 @@
 #include <fstream>
 #include <system_error>
 #include <utility>
+#include "EditorPathCompare.h"
 
 namespace VoxelForge::Editor
 {
@@ -415,7 +416,8 @@ bool VoxelDocumentSaveService::ValidatePath(
     const std::filesystem::path absolute =
         std::filesystem::absolute(document.SourcePath(), filesystemError)
             .lexically_normal();
-    if (filesystemError || absolute.parent_path() != modelsDirectory_)
+    if (filesystemError ||
+        !IsSameDirectoryAsCanonical(absolute.parent_path(), modelsDirectory_))
     {
         error = "VOX save path must be a direct child of Assets/Models.";
         return false;
