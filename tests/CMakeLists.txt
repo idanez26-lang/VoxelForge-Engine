@@ -572,6 +572,39 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolModeTests>
 )
 
+# Viewport Interaction V2 Phase B: procedural compact Pencil planning is
+# isolated from the legacy Smart Tool and deliberately has no CTest smoke/UI.
+add_executable(
+    VoxelForgeEditorPencilCompactPlanTests
+    Editor/PencilCompactPlanTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorPencilCompactPlanTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorPencilCompactPlanTests)
+add_test(
+    NAME VoxelForge.Editor.PencilCompactPlan
+    COMMAND $<TARGET_FILE:VoxelForgeEditorPencilCompactPlanTests>
+)
+
+add_executable(VoxelForgeEditorPencilInteractionV2Tests Editor/PencilInteractionV2Tests.cpp)
+target_link_libraries(VoxelForgeEditorPencilInteractionV2Tests PRIVATE VoxelForgeEditorViewportInteractionV2)
+vf_configure_test(VoxelForgeEditorPencilInteractionV2Tests)
+add_test(NAME VoxelForge.Editor.PencilInteractionV2 COMMAND $<TARGET_FILE:VoxelForgeEditorPencilInteractionV2Tests>)
+
+# Reproducible Pencil V2 scalability measurement.  It stays outside CTest:
+# timing must not become a machine-dependent correctness gate.
+add_executable(
+    VoxelForgeEditorPencilInteractionV2Benchmark
+    Editor/PencilInteractionV2Benchmark.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorPencilInteractionV2Benchmark
+    PRIVATE VoxelForgeEditorViewportInteractionV2
+)
+vf_configure_test(VoxelForgeEditorPencilInteractionV2Benchmark)
+
 add_executable(
     VoxelForgeEditorSmartToolFaceTests
     Editor/SmartToolFaceTests.cpp
@@ -861,6 +894,63 @@ add_test(
     NAME VoxelForge.Editor.TransformPreview
     COMMAND $<TARGET_FILE:VoxelForgeEditorTransformPreviewTests>
 )
+add_executable(
+    VoxelForgeEditorViewportInteractionV2Tests
+    Editor/ViewportInteractionV2Tests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorViewportInteractionV2Tests
+    PRIVATE VoxelForgeEditorViewportInteractionV2
+)
+vf_configure_test(VoxelForgeEditorViewportInteractionV2Tests)
+add_test(
+    NAME VoxelForge.Editor.ViewportInteractionV2
+    COMMAND $<TARGET_FILE:VoxelForgeEditorViewportInteractionV2Tests>
+)
+set_tests_properties(
+    VoxelForge.Editor.ViewportInteractionV2 PROPERTIES TIMEOUT 120)
+
+# Reproducible scalability benchmark. It is intentionally not registered with
+# CTest because timing data must remain separate from correctness gates.
+add_executable(
+    VoxelForgeEditorViewportInteractionV2MoveBenchmark
+    Editor/ViewportInteractionV2MoveBenchmark.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorViewportInteractionV2MoveBenchmark
+    PRIVATE VoxelForgeEditorViewportInteractionV2
+)
+vf_configure_test(VoxelForgeEditorViewportInteractionV2MoveBenchmark)
+
+# Deterministic 36,000-frame (10-minute equivalent at 60 FPS) soak
+# instrumentation. It remains outside CTest because timing is a diagnostic,
+# not a machine-dependent correctness gate.
+add_executable(
+    VoxelForgeEditorViewportInteractionV2SoakBenchmark
+    Editor/ViewportInteractionV2SoakBenchmark.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorViewportInteractionV2SoakBenchmark
+    PRIVATE VoxelForgeEditorViewportInteractionV2
+)
+vf_configure_test(VoxelForgeEditorViewportInteractionV2SoakBenchmark)
+
+add_executable(
+    VoxelForgeEditorViewportInteractionV2SmokeTests
+    Editor/ViewportInteractionV2SmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorViewportInteractionV2SmokeTests
+    PRIVATE VoxelForgeEditorViewportInteractionV2
+)
+vf_configure_test(VoxelForgeEditorViewportInteractionV2SmokeTests)
+add_test(
+    NAME VoxelForge.Editor.ViewportInteractionV2Smoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorViewportInteractionV2SmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.ViewportInteractionV2Smoke
+    PROPERTIES LABELS "Smoke" TIMEOUT 30)
 add_executable(
     VoxelForgeEditorTransformGizmoTests
     Editor/TransformGizmoTests.cpp

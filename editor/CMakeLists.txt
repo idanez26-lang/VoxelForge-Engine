@@ -373,10 +373,13 @@ target_sources(
         src/VoxelHistory/VoxelEditOperation.cpp
         src/VoxelHistory/VoxelHistoryInput.cpp
         src/BrushEngine/SmartBrushEngine.cpp
+        # Phase B compact Pencil footprint: procedural only, no legacy routing.
+        src/BrushEngine/SmartBrushCompactFootprint.cpp
         src/SmartTools/SmartTool.cpp
         src/SmartTools/SmartToolController.cpp
         src/SmartTools/SmartToolLineConstraintResolver.cpp
         src/SmartTools/SmartToolPlan.cpp
+        src/SmartTools/PencilCompactPlan.cpp
         src/SmartTools/SmartToolPlanner.cpp
         src/SmartTools/SmartToolSession.cpp
         src/SmartTools/SmartToolStroke.cpp
@@ -415,6 +418,40 @@ if(MSVC)
 else()
     target_compile_options(
         VoxelForgeEditorCommands PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_library(VoxelForgeEditorViewportInteractionV2 STATIC)
+target_sources(
+    VoxelForgeEditorViewportInteractionV2
+    PRIVATE
+        src/ViewportInteractionV2/ManipulationGestureSession.cpp
+        src/ViewportInteractionV2/PencilCompactChangeResolver.cpp
+        src/ViewportInteractionV2/PencilCompactCommitGateway.cpp
+        src/ViewportInteractionV2/PencilGestureSession.cpp
+        src/ViewportInteractionV2/PencilInteractionHandler.cpp
+        src/ViewportInteractionV2/PencilViewportInteractionController.cpp
+        src/ViewportInteractionV2/SelectionMoveInteractionHandler.cpp
+        src/ViewportInteractionV2/SelectionProjectionCache.cpp
+        src/ViewportInteractionV2/ViewportInteractionController.cpp
+        src/ViewportInteractionV2/ViewportPresentation.cpp
+)
+target_include_directories(
+    VoxelForgeEditorViewportInteractionV2
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(
+    VoxelForgeEditorViewportInteractionV2
+    PUBLIC VoxelForgeEditorCommands
+)
+target_compile_features(
+    VoxelForgeEditorViewportInteractionV2 PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorViewportInteractionV2 PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorViewportInteractionV2
+        PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 add_library(VoxelForgeEditorQualityOfLife STATIC)
@@ -726,6 +763,7 @@ target_link_libraries(
         VoxelForgeEditorVoxelStamps
         VoxelForgeEditorVoxelSave
         VoxelForgeEditorWelcome
+        VoxelForgeEditorViewportInteractionV2
         VoxelForgeProject
         VoxelForgeRenderer
         VoxelForgeScene

@@ -1,5 +1,6 @@
 #include "ViewportRenderer.h"
 #include "Preview/FacePlanGhostSurface.h"
+#include "ViewportInteractionV2/ViewportPresentation.h"
 #include "VoxelModelTransform.h"
 #include "VoxelViewportState.h"
 
@@ -822,6 +823,188 @@ bool ViewportRenderer::UploadBufferPair(
     return true;
 }
 
+bool ViewportRenderer::UploadInteractionV2Highlights(
+    const void* vertexData,
+    const std::size_t vertexBytes,
+    const std::uint32_t* indexData,
+    const std::size_t indexBytes)
+{
+    const auto grow = [](const std::size_t current,
+                         const std::size_t required) noexcept
+    {
+        std::size_t capacity = std::max<std::size_t>(current, 4096U);
+        while (capacity < required &&
+               capacity <= std::numeric_limits<std::size_t>::max() / 2U)
+            capacity *= 2U;
+        return std::max(capacity, required);
+    };
+    const std::size_t vertexCapacity = grow(
+        interactionV2HighlightVertexCapacity_, vertexBytes);
+    const std::size_t indexCapacity = grow(
+        interactionV2HighlightIndexCapacity_, indexBytes);
+    const std::size_t transferCapacity = grow(
+        interactionV2HighlightTransferCapacity_, vertexBytes + indexBytes);
+    if (vertexCapacity > std::numeric_limits<std::uint32_t>::max() ||
+        indexCapacity > std::numeric_limits<std::uint32_t>::max() ||
+        transferCapacity > std::numeric_limits<std::uint32_t>::max())
+    {
+        SetError("Viewport Interaction V2 highlight data is too large.");
+        return false;
+    }
+
+    SDL_GPUBuffer* vertex = highlightVertexBuffer_;
+    SDL_GPUBuffer* index = highlightIndexBuffer_;
+    SDL_GPUTransferBuffer* transfer =
+        interactionV2HighlightTransferBuffer_;
+    const bool replaceVertex = vertex == nullptr ||
+        vertexCapacity != interactionV2HighlightVertexCapacity_;
+    const bool replaceIndex = index == nullptr ||
+        indexCapacity != interactionV2HighlightIndexCapacity_;
+    const bool replaceTransfer = transfer == nullptr ||
+        transferCapacity != interactionV2HighlightTransferCapacity_;
+    if (replaceVertex)
+    {
+        const SDL_GPUBufferCreateInfo info{
+            SDL_GPU_BUFFERUSAGE_VERTEX,
+            static_cast<std::uint32_t>(vertexCapacity), 0U};
+        vertex = SDL_CreateGPUBuffer(device_, &info);
+    }
+    if (replaceIndex)
+    {
+        const SDL_GPUBufferCreateInfo info{
+            SDL_GPU_BUFFERUSAGE_INDEX,
+            static_cast<std::uint32_t>(indexCapacity), 0U};
+        index = SDL_CreateGPUBuffer(device_, &info);
+    }
+    if (replaceTransfer)
+    {
+        const SDL_GPUTransferBufferCreateInfo info{
+            SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            static_cast<std::uint32_t>(transferCapacity), 0U};
+        transfer = SDL_CreateGPUTransferBuffer(device_, &info);
+    }
+    const auto releaseNew = [this, replaceVertex, replaceIndex,
+                             replaceTransfer, vertex, index, transfer]()
+    {
+        if (replaceVertex && vertex != nullptr)
+            SDL_ReleaseGPUBuffer(device_, vertex);
+        if (replaceIndex && index != nullptr)
+            SDL_ReleaseGPUBuffer(device_, index);
+        if (replaceTransfer && transfer != nullptr)
+            SDL_ReleaseGPUTransferBuffer(device_, transfer);
+    };
+    if (vertex == nullptr || index == nullptr || transfer == nullptr)
+    {
+        releaseNew();
+        SetError(std::string(
+            "Unable to create persistent V2 highlight buffers: ") +
+            SDL_GetError());
+        return false;
+    }
+
+    void* mapped = SDL_MapGPUTransferBuffer(
+        device_, transfer, !replaceTransfer);
+    if (mapped == nullptr)
+    {
+        releaseNew();
+        SetError(std::string(
+            "Unable to map persistent V2 highlight buffer: ") +
+            SDL_GetError());
+        return false;
+    }
+    std::memcpy(mapped, vertexData, vertexBytes);
+    std::memcpy(static_cast<unsigned char*>(mapped) + vertexBytes,
+        indexData, indexBytes);
+    SDL_UnmapGPUTransferBuffer(device_, transfer);
+
+    SDL_GPUCommandBuffer* commandBuffer =
+        SDL_AcquireGPUCommandBuffer(device_);
+    if (commandBuffer == nullptr)
+    {
+        releaseNew();
+        SetError(std::string(
+            "Unable to acquire V2 highlight upload command buffer: ") +
+            SDL_GetError());
+        return false;
+    }
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    if (copyPass == nullptr)
+    {
+        const std::string error = SDL_GetError();
+        SDL_CancelGPUCommandBuffer(commandBuffer);
+        releaseNew();
+        SetError("Unable to begin V2 highlight upload pass: " + error);
+        return false;
+    }
+    const SDL_GPUTransferBufferLocation vertexSource{transfer, 0U};
+    const SDL_GPUBufferRegion vertexDestination{
+        vertex, 0U, static_cast<std::uint32_t>(vertexBytes)};
+    const SDL_GPUTransferBufferLocation indexSource{
+        transfer, static_cast<std::uint32_t>(vertexBytes)};
+    const SDL_GPUBufferRegion indexDestination{
+        index, 0U, static_cast<std::uint32_t>(indexBytes)};
+    SDL_UploadToGPUBuffer(
+        copyPass, &vertexSource, &vertexDestination, !replaceVertex);
+    SDL_UploadToGPUBuffer(
+        copyPass, &indexSource, &indexDestination, !replaceIndex);
+    SDL_EndGPUCopyPass(copyPass);
+    if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
+    {
+        releaseNew();
+        SetError(std::string("Unable to submit V2 highlight upload: ") +
+            SDL_GetError());
+        return false;
+    }
+
+    if (replaceVertex)
+    {
+        if (highlightVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, highlightVertexBuffer_);
+        highlightVertexBuffer_ = vertex;
+        interactionV2HighlightVertexCapacity_ = vertexCapacity;
+        ++interactionV2BufferRecreationCount_;
+    }
+    if (replaceIndex)
+    {
+        if (highlightIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, highlightIndexBuffer_);
+        highlightIndexBuffer_ = index;
+        interactionV2HighlightIndexCapacity_ = indexCapacity;
+        ++interactionV2BufferRecreationCount_;
+    }
+    if (replaceTransfer)
+    {
+        if (interactionV2HighlightTransferBuffer_ != nullptr)
+            SDL_ReleaseGPUTransferBuffer(
+                device_, interactionV2HighlightTransferBuffer_);
+        interactionV2HighlightTransferBuffer_ = transfer;
+        interactionV2HighlightTransferCapacity_ = transferCapacity;
+        ++interactionV2BufferRecreationCount_;
+    }
+    ++interactionV2UploadCount_;
+    interactionV2UploadedBytes_ += vertexBytes + indexBytes;
+    return true;
+}
+
+bool ViewportRenderer::UploadInteractionV2MoveSource(
+    const void* vertexData,
+    const std::size_t vertexBytes,
+    const std::uint32_t* indexData,
+    const std::size_t indexBytes)
+{
+    if (!UploadBufferPair(
+            vertexData, vertexBytes, indexData, indexBytes,
+            interactionV2MoveVertexBuffer_, interactionV2MoveIndexBuffer_,
+            "Viewport Interaction V2 Move source"))
+        return false;
+    ++interactionV2MoveSourceUploadCount_;
+    interactionV2MoveSourceUploadedBytes_ += vertexBytes + indexBytes;
+    // UploadBufferPair creates one vertex, one index and one transient
+    // transfer buffer for a changed selection source.
+    interactionV2BufferRecreationCount_ += 3U;
+    return true;
+}
+
 void ViewportRenderer::ConfigureGuides(
     const float width,
     const float height,
@@ -986,6 +1169,109 @@ void ViewportRenderer::ConfigureTransformPreview(
     if (!highlightsDirty_) ReleaseHighlights();
 }
 
+void ViewportRenderer::ConfigureInteractionV2(
+    const std::span<const Asset::Voxel::VoxelPosition> selectedDetail,
+    const std::optional<SelectionBounds> selectionBounds,
+    const InteractionV2::MovePreviewPresentation* movePreview,
+    const Vec3 modelCenter,
+    const std::uint64_t presentationRevision,
+    const bool active) noexcept
+{
+    if (!active)
+    {
+        if (interactionV2Revision_ == 0U) return;
+        interactionV2Revision_ = 0U;
+        selectedHighlights_.clear();
+        editableSelectionBoundsHighlight_.reset();
+        selectionBoundsHighlight_.reset();
+        transformPreview_.reset();
+        transformGizmo_.reset();
+        interactionV2MoveActive_ = false;
+        interactionV2MoveSourceIdentity_ = 0U;
+        ReleaseInteractionV2MoveSource();
+        highlightsDirty_ = true;
+        return;
+    }
+    if (interactionV2Revision_ == presentationRevision) return;
+    interactionV2Revision_ = presentationRevision;
+    hoveredHighlight_.reset();
+    selectedHighlights_.assign(
+        selectedDetail.begin(), selectedDetail.end());
+    editableSelectionBoundsHighlight_ = selectionBounds;
+    selectionBoundsHighlight_.reset();
+    selectionToolStyle_ = true;
+    selectionBoxVisualState_ =
+        movePreview == nullptr ? SelectionBoxVisualState::Normal
+        : movePreview->Validation ==
+            InteractionV2::MoveValidationState::Deferred
+            ? SelectionBoxVisualState::MovingPending
+        : movePreview->Validation ==
+                InteractionV2::MoveValidationState::Valid
+            ? SelectionBoxVisualState::Moving
+            : SelectionBoxVisualState::MovingInvalid;
+    placementPreviewHighlight_.reset();
+    brushPreviewHighlights_.clear();
+    brushOccupiedPreviewHighlights_.clear();
+    brushAggregatePreviewHighlight_.reset();
+    brushAggregateSpherePreviewHighlight_.reset();
+    boxPreviewHighlight_.reset();
+    linePreviewHighlights_.clear();
+    spherePreviewHighlight_.reset();
+    smartBrushGhostPreview_.clear();
+    voxelPreviewGhosts_.clear();
+    transformGizmo_.reset();
+    modelCenter_ = modelCenter;
+
+    transformPreview_.reset();
+    interactionV2MoveActive_ = movePreview != nullptr;
+    if (movePreview == nullptr)
+    {
+        interactionV2MoveDelta_ = {};
+    }
+    else
+    {
+        if (interactionV2MoveDelta_ != movePreview->Delta)
+        {
+            interactionV2MoveDelta_ = movePreview->Delta;
+            ++interactionV2MoveDeltaUpdateCount_;
+        }
+        if (interactionV2MoveSourceIdentity_ !=
+            movePreview->SourceIdentity)
+        {
+            interactionV2MoveSourceIdentity_ =
+                movePreview->SourceIdentity;
+            if (!interactionV2MoveGeometry_)
+                interactionV2MoveGeometry_ =
+                    std::make_unique<HighlightGeometryCache>();
+            auto& vertices = interactionV2MoveGeometry_->Vertices;
+            auto& indices = interactionV2MoveGeometry_->Indices;
+            vertices.clear();
+            indices.clear();
+            if (movePreview->SourcePositions.size() <=
+                TransformPreviewRenderPolicy::IndividualVoxelLimit)
+            {
+                constexpr std::array<float, 4> moveColor{
+                    0.18F, 0.86F, 1.0F, 1.0F};
+                constexpr std::size_t boxesPerOutline = 12U;
+                vertices.reserve(
+                    movePreview->SourcePositions.size() *
+                    boxesPerOutline * 24U);
+                indices.reserve(
+                    movePreview->SourcePositions.size() *
+                    boxesPerOutline * 36U);
+                for (const auto position : movePreview->SourcePositions)
+                    AppendVoxelOutline(
+                        vertices, indices, position, modelCenter, moveColor);
+            }
+            interactionV2MoveSourceDirty_ = true;
+        }
+    }
+    highlightsDirty_ = !selectedHighlights_.empty() ||
+        editableSelectionBoundsHighlight_.has_value() ||
+        interactionV2MoveActive_;
+    if (!highlightsDirty_) ReleaseHighlights();
+}
+
 void ViewportRenderer::ConfigureVoxelPreview(const VoxelPreviewData* preview) noexcept
 {
     if (preview == nullptr || !preview->IsActive())
@@ -1057,6 +1343,31 @@ void ViewportRenderer::ConfigureTransformGizmo(
 bool ViewportRenderer::EnsureHighlights()
 {
     if (!highlightsDirty_) return true;
+    if (interactionV2MoveSourceDirty_)
+    {
+        if (!interactionV2MoveGeometry_ ||
+            interactionV2MoveGeometry_->Indices.empty())
+        {
+            ReleaseInteractionV2MoveSource();
+        }
+        else if (!UploadInteractionV2MoveSource(
+            interactionV2MoveGeometry_->Vertices.data(),
+            interactionV2MoveGeometry_->Vertices.size() *
+                sizeof(GPUVertex),
+            interactionV2MoveGeometry_->Indices.data(),
+            interactionV2MoveGeometry_->Indices.size() *
+                sizeof(std::uint32_t)))
+        {
+            return false;
+        }
+        else
+        {
+            interactionV2MoveIndexCount_ =
+                static_cast<std::uint32_t>(
+                    interactionV2MoveGeometry_->Indices.size());
+        }
+        interactionV2MoveSourceDirty_ = false;
+    }
     if (!highlightGeometry_)
         highlightGeometry_ = std::make_unique<HighlightGeometryCache>();
     std::vector<GPUVertex>& vertices = highlightGeometry_->Vertices;
@@ -1171,17 +1482,27 @@ bool ViewportRenderer::EnsureHighlights()
         const SelectionBounds& bounds = *editableSelectionBoundsHighlight_;
         const bool moving = selectionBoxVisualState_ ==
             SelectionBoxVisualState::Moving;
+        const bool movingPending = selectionBoxVisualState_ ==
+            SelectionBoxVisualState::MovingPending;
+        const bool movingInvalid = selectionBoxVisualState_ ==
+            SelectionBoxVisualState::MovingInvalid;
         const bool hovered = selectionBoxVisualState_ ==
             SelectionBoxVisualState::Hovered;
         AppendVoxelBoxOutline(vertices, indices,
             {bounds.Minimum, bounds.Maximum}, modelCenter_,
-            moving
+            movingInvalid
+                ? std::array<float, 4>{1.0F, 0.18F, 0.12F, 1.0F}
+            : movingPending
+                ? std::array<float, 4>{1.0F, 0.64F, 0.10F, 1.0F}
+            : moving
                 ? std::array<float, 4>{0.22F, 1.0F, 0.84F, 1.0F}
                 : hovered
                 ? std::array<float, 4>{0.12F, 1.0F, 0.78F, 1.0F}
                 : std::array<float, 4>{0.08F, 0.98F, 0.72F, 1.0F},
-            moving ? 0.080F : hovered ? 0.072F : 0.065F,
-            moving ? 0.085F : hovered ? 0.078F : 0.070F);
+            (moving || movingPending || movingInvalid)
+                ? 0.080F : hovered ? 0.072F : 0.065F,
+            (moving || movingPending || movingInvalid)
+                ? 0.085F : hovered ? 0.078F : 0.070F);
     }
     if (transformPreview_)
     {
@@ -1262,22 +1583,36 @@ bool ViewportRenderer::EnsureHighlights()
     }
     if (indices.empty())
     {
-        if (device_ != nullptr)
+        if (interactionV2Revision_ == 0U && device_ != nullptr)
         {
             if (highlightVertexBuffer_ != nullptr)
                 SDL_ReleaseGPUBuffer(device_, highlightVertexBuffer_);
             if (highlightIndexBuffer_ != nullptr)
                 SDL_ReleaseGPUBuffer(device_, highlightIndexBuffer_);
+            if (interactionV2HighlightTransferBuffer_ != nullptr)
+                SDL_ReleaseGPUTransferBuffer(
+                    device_, interactionV2HighlightTransferBuffer_);
         }
-        highlightVertexBuffer_ = nullptr;
-        highlightIndexBuffer_ = nullptr;
+        if (interactionV2Revision_ == 0U)
+        {
+            highlightVertexBuffer_ = nullptr;
+            highlightIndexBuffer_ = nullptr;
+            interactionV2HighlightTransferBuffer_ = nullptr;
+            interactionV2HighlightVertexCapacity_ = 0U;
+            interactionV2HighlightIndexCapacity_ = 0U;
+            interactionV2HighlightTransferCapacity_ = 0U;
+        }
         highlightIndexCount_ = 0U;
     }
-    else if (!UploadBufferPair(
-            vertices.data(), vertices.size() * sizeof(GPUVertex),
-            indices.data(), indices.size() * sizeof(std::uint32_t),
-            highlightVertexBuffer_, highlightIndexBuffer_,
-            "voxel selection highlights"))
+    else if (!(interactionV2Revision_ != 0U
+            ? UploadInteractionV2Highlights(
+                vertices.data(), vertices.size() * sizeof(GPUVertex),
+                indices.data(), indices.size() * sizeof(std::uint32_t))
+            : UploadBufferPair(
+                vertices.data(), vertices.size() * sizeof(GPUVertex),
+                indices.data(), indices.size() * sizeof(std::uint32_t),
+                highlightVertexBuffer_, highlightIndexBuffer_,
+                "voxel selection highlights")))
     {
         return false;
     }
@@ -1746,6 +2081,34 @@ bool ViewportRenderer::Render(
         SDL_DrawGPUIndexedPrimitives(pass, visibleIndexCount, 1U, 0U, 0, 0U);
         ++modelRenderCount_;
     }
+    if (interactionV2MoveActive_ &&
+        interactionV2MoveIndexCount_ > 0U &&
+        interactionV2MoveVertexBuffer_ != nullptr &&
+        interactionV2MoveIndexBuffer_ != nullptr)
+    {
+        const Vec3 translation{
+            static_cast<float>(interactionV2MoveDelta_.X),
+            static_cast<float>(interactionV2MoveDelta_.Y),
+            static_cast<float>(interactionV2MoveDelta_.Z)};
+        const Matrix4 translatedViewProjection = MultiplyMatrix(
+            viewProjection, TranslationMatrix(translation));
+        SDL_PushGPUVertexUniformData(
+            commandBuffer, 0U, translatedViewProjection.data(),
+            sizeof(translatedViewProjection));
+        const SDL_GPUBufferBinding vertexBinding{
+            interactionV2MoveVertexBuffer_, 0U};
+        const SDL_GPUBufferBinding indexBinding{
+            interactionV2MoveIndexBuffer_, 0U};
+        SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+        SDL_BindGPUIndexBuffer(
+            pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        SDL_DrawGPUIndexedPrimitives(
+            pass, interactionV2MoveIndexCount_, 1U, 0U, 0, 0U);
+        ++interactionV2MoveDrawCount_;
+        // Every following presentation element remains in document space.
+        SDL_PushGPUVertexUniformData(
+            commandBuffer, 0U, viewProjection.data(), sizeof(viewProjection));
+    }
     if (smartBrushGhostIndexCount_ > 0U)
     {
         SDL_BindGPUGraphicsPipeline(pass, smartBrushGhostPipeline_);
@@ -1857,14 +2220,33 @@ void ViewportRenderer::ClearExactPreviewMesh() noexcept
     exactPreviewPlanRevision_ = 0U;
 }
 
+void ViewportRenderer::ReleaseInteractionV2MoveSource() noexcept
+{
+    if (device_ != nullptr)
+    {
+        if (interactionV2MoveVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, interactionV2MoveVertexBuffer_);
+        if (interactionV2MoveIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, interactionV2MoveIndexBuffer_);
+    }
+    interactionV2MoveVertexBuffer_ = nullptr;
+    interactionV2MoveIndexBuffer_ = nullptr;
+    interactionV2MoveIndexCount_ = 0U;
+    interactionV2MoveSourceDirty_ = false;
+}
+
 void ViewportRenderer::ReleaseHighlights() noexcept
 {
+    ReleaseInteractionV2MoveSource();
     if (device_ != nullptr)
     {
         if (highlightVertexBuffer_ != nullptr)
             SDL_ReleaseGPUBuffer(device_, highlightVertexBuffer_);
         if (highlightIndexBuffer_ != nullptr)
             SDL_ReleaseGPUBuffer(device_, highlightIndexBuffer_);
+        if (interactionV2HighlightTransferBuffer_ != nullptr)
+            SDL_ReleaseGPUTransferBuffer(
+                device_, interactionV2HighlightTransferBuffer_);
         if (smartBrushGhostVertexBuffer_ != nullptr)
             SDL_ReleaseGPUBuffer(device_, smartBrushGhostVertexBuffer_);
         if (smartBrushGhostIndexBuffer_ != nullptr)
@@ -1884,9 +2266,13 @@ void ViewportRenderer::ReleaseHighlights() noexcept
     }
     highlightVertexBuffer_ = nullptr;
     highlightIndexBuffer_ = nullptr;
+    interactionV2HighlightTransferBuffer_ = nullptr;
     smartBrushGhostVertexBuffer_ = nullptr;
     smartBrushGhostIndexBuffer_ = nullptr;
     highlightIndexCount_ = 0U;
+    interactionV2HighlightVertexCapacity_ = 0U;
+    interactionV2HighlightIndexCapacity_ = 0U;
+    interactionV2HighlightTransferCapacity_ = 0U;
     smartBrushGhostIndexCount_ = 0U;
     transformGizmoVisibleVertexBuffer_ = nullptr;
     transformGizmoVisibleIndexBuffer_ = nullptr;
@@ -1965,6 +2351,45 @@ const std::string& ViewportRenderer::LastError() const noexcept
 std::size_t ViewportRenderer::HighlightUploadCount() const noexcept
 {
     return highlightUploadCount_;
+}
+
+std::size_t ViewportRenderer::InteractionV2UploadCount() const noexcept
+{
+    return interactionV2UploadCount_;
+}
+
+std::size_t
+ViewportRenderer::InteractionV2BufferRecreationCount() const noexcept
+{
+    return interactionV2BufferRecreationCount_;
+}
+
+std::size_t ViewportRenderer::InteractionV2UploadedBytes() const noexcept
+{
+    return interactionV2UploadedBytes_;
+}
+
+std::size_t
+ViewportRenderer::InteractionV2MoveSourceUploadCount() const noexcept
+{
+    return interactionV2MoveSourceUploadCount_;
+}
+
+std::size_t
+ViewportRenderer::InteractionV2MoveSourceUploadedBytes() const noexcept
+{
+    return interactionV2MoveSourceUploadedBytes_;
+}
+
+std::size_t
+ViewportRenderer::InteractionV2MoveDeltaUpdateCount() const noexcept
+{
+    return interactionV2MoveDeltaUpdateCount_;
+}
+
+std::size_t ViewportRenderer::InteractionV2MoveDrawCount() const noexcept
+{
+    return interactionV2MoveDrawCount_;
 }
 
 std::size_t ViewportRenderer::HighlightRenderCount() const noexcept

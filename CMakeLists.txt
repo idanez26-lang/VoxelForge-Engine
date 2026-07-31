@@ -31,7 +31,8 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG release-3.4.10
+    # Épinglé sur le commit exact du tag release-3.4.10 (build reproductible).
+    GIT_TAG 8e37db5e797b6167f3a00d697d816a684bd259c7
     GIT_SHALLOW TRUE
 )
 
@@ -40,7 +41,8 @@ FetchContent_MakeAvailable(SDL3)
 FetchContent_Declare(
     DearImGui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.92.8-docking
+    # Épinglé sur le commit exact du tag v1.92.8-docking (build reproductible).
+    GIT_TAG b61e56346a92cfcaf1f43a545ca37b0b32239654
     GIT_SHALLOW TRUE
 )
 

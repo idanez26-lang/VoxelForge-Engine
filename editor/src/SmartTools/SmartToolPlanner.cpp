@@ -56,6 +56,76 @@ using Position = Asset::Voxel::VoxelPosition;
     return absolute(normal.X) + absolute(normal.Y) + absolute(normal.Z) == 1;
 }
 
+[[nodiscard]] SmartBrushOrientation ResolveCompactOrientation(
+    const SmartBrushOrientation orientation, const Position normal) noexcept
+{
+    if (orientation != SmartBrushOrientation::Auto) return orientation;
+    const std::int64_t absoluteX = std::llabs(static_cast<std::int64_t>(normal.X));
+    const std::int64_t absoluteY = std::llabs(static_cast<std::int64_t>(normal.Y));
+    const std::int64_t absoluteZ = std::llabs(static_cast<std::int64_t>(normal.Z));
+    if (absoluteX == 0 && absoluteY == 0 && absoluteZ == 0)
+        return SmartBrushOrientation::Y;
+    if (absoluteX >= absoluteY && absoluteX >= absoluteZ)
+        return SmartBrushOrientation::X;
+    if (absoluteZ >= absoluteY) return SmartBrushOrientation::Z;
+    return SmartBrushOrientation::Y;
+}
+
+[[nodiscard]] std::optional<Position> CompactVolumeAnchor(
+    const SmartBrushPlacement placement, const int size) noexcept
+{
+    const std::int64_t depthOffset = (size - 1) / 2;
+    const std::int64_t x = static_cast<std::int64_t>(placement.Target.X) +
+        static_cast<std::int64_t>(placement.Normal.X) * depthOffset;
+    const std::int64_t y = static_cast<std::int64_t>(placement.Target.Y) +
+        static_cast<std::int64_t>(placement.Normal.Y) * depthOffset;
+    const std::int64_t z = static_cast<std::int64_t>(placement.Target.Z) +
+        static_cast<std::int64_t>(placement.Normal.Z) * depthOffset;
+    if (x < std::numeric_limits<std::int32_t>::min() ||
+        x > std::numeric_limits<std::int32_t>::max() ||
+        y < std::numeric_limits<std::int32_t>::min() ||
+        y > std::numeric_limits<std::int32_t>::max() ||
+        z < std::numeric_limits<std::int32_t>::min() ||
+        z > std::numeric_limits<std::int32_t>::max())
+        return std::nullopt;
+    return Position{static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+        static_cast<std::int32_t>(z)};
+}
+
+[[nodiscard]] std::optional<SmartBrushBounds> TranslateCompactBounds(
+    const SmartBrushCompactLocalBounds& localBounds, const Position anchor) noexcept
+{
+    const auto translate = [anchor](const Position local)
+        -> std::optional<Position>
+    {
+        const std::int64_t x = static_cast<std::int64_t>(anchor.X) + local.X;
+        const std::int64_t y = static_cast<std::int64_t>(anchor.Y) + local.Y;
+        const std::int64_t z = static_cast<std::int64_t>(anchor.Z) + local.Z;
+        if (x < std::numeric_limits<std::int32_t>::min() ||
+            x > std::numeric_limits<std::int32_t>::max() ||
+            y < std::numeric_limits<std::int32_t>::min() ||
+            y > std::numeric_limits<std::int32_t>::max() ||
+            z < std::numeric_limits<std::int32_t>::min() ||
+            z > std::numeric_limits<std::int32_t>::max())
+            return std::nullopt;
+        return Position{static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+            static_cast<std::int32_t>(z)};
+    };
+    const std::optional<Position> minimum = translate(localBounds.Minimum);
+    const std::optional<Position> maximum = translate(localBounds.Maximum);
+    if (!minimum || !maximum) return std::nullopt;
+    return SmartBrushBounds{*minimum, *maximum};
+}
+
+[[nodiscard]] bool IsCompactBoundsInside(const SmartBrushBounds& bounds,
+    const Asset::Voxel::VoxelDimensions dimensions) noexcept
+{
+    return bounds.Minimum.X >= 0 && bounds.Minimum.Y >= 0 && bounds.Minimum.Z >= 0 &&
+        static_cast<std::uint64_t>(bounds.Maximum.X) < dimensions.X &&
+        static_cast<std::uint64_t>(bounds.Maximum.Y) < dimensions.Y &&
+        static_cast<std::uint64_t>(bounds.Maximum.Z) < dimensions.Z;
+}
+
 [[nodiscard]] std::optional<Position> Offset(const Position position,
     const Position delta) noexcept
 {
@@ -1060,6 +1130,132 @@ Asset::Voxel::VoxelPosition SmartToolPlanner::ProjectGeometryEndpoint(
     else if (plane.Normal.Z != 0) endpoint.Z = static_cast<std::int32_t>(
         std::floor(plane.SurfaceCoordinate));
     return endpoint;
+}
+
+PencilCompactPlanResult SmartToolPlanner::PlanPencilCompact(
+    const PencilCompactRequest& request)
+{
+    const bool supportedAction = request.Action == SmartAction::Add ||
+        request.Action == SmartAction::Erase ||
+        request.Action == SmartAction::Paint;
+    const bool paletteRequired = request.Action == SmartAction::Add ||
+        request.Action == SmartAction::Paint;
+    const bool knownBrushMode = request.Brush.Mode == SmartBrushMode::Add ||
+        request.Brush.Mode == SmartBrushMode::Erase ||
+        request.Brush.Mode == SmartBrushMode::Paint ||
+        request.Brush.Mode == SmartBrushMode::Replace;
+    if (request.Dimensions.X == 0U || request.Dimensions.Y == 0U ||
+        request.Dimensions.Z == 0U)
+    {
+        return {PencilCompactPlanCode::InvalidRequest, nullptr,
+            "Pencil Compact requires non-zero document dimensions."};
+    }
+    if (!IsUnitAxisNormal(request.Placement.Normal))
+    {
+        return {PencilCompactPlanCode::InvalidRequest, nullptr,
+            "Pencil Compact requires a unit axis placement normal."};
+    }
+    if (!supportedAction)
+    {
+        return {PencilCompactPlanCode::InvalidRequest, nullptr,
+            "Pencil Compact supports Add, Erase, and Paint only."};
+    }
+    if (paletteRequired && (request.PaletteIndex == 0U ||
+        request.PaletteIndex > std::numeric_limits<std::uint8_t>::max()))
+    {
+        return {PencilCompactPlanCode::InvalidRequest, nullptr,
+            "Pencil Compact Add and Paint require a palette index from 1 to 255."};
+    }
+    if (!knownBrushMode || request.Brush.PreviewMode !=
+            SmartBrushPreviewMode::Adaptive)
+    {
+        return {PencilCompactPlanCode::InvalidRequest, nullptr,
+            "Pencil Compact received an unsupported brush state."};
+    }
+    SmartBrushCompactDescriptor descriptor;
+    descriptor.Shape = request.Brush.Shape;
+    descriptor.Dimension = request.Brush.Dimension;
+    descriptor.Orientation = request.Brush.Dimension ==
+            SmartBrushDimension::Surface2D
+        ? ResolveCompactOrientation(request.Brush.Orientation,
+            request.Placement.Normal)
+        : SmartBrushOrientation::Y;
+    descriptor.Size = request.Brush.Size;
+    descriptor.ProfileIdentity = request.ProfileIdentity;
+    descriptor.ProfileRevision = request.ProfileRevision;
+    if (!SmartBrushCompactFootprint::IsValid(descriptor))
+    {
+        return {PencilCompactPlanCode::InvalidRequest, nullptr,
+            "Pencil Compact requires Cube, Sphere, or Cylinder with a size between 1 and 256."};
+    }
+    const std::optional<Position> anchor = descriptor.Dimension ==
+            SmartBrushDimension::Volume3D
+        ? CompactVolumeAnchor(request.Placement, descriptor.Size)
+        : std::optional<Position>{request.Placement.Target};
+    if (!anchor)
+    {
+        return {PencilCompactPlanCode::InvalidRequest, nullptr,
+            "Pencil Compact anchor exceeds voxel coordinate limits."};
+    }
+
+    const SmartBrushCompactCacheKey cacheKey{descriptor};
+    std::shared_ptr<const SmartBrushCompactFootprint> footprint;
+    const auto found = pencilCompactFootprints_.find(cacheKey);
+    if (found != pencilCompactFootprints_.end()) footprint = found->second;
+    else
+    {
+        // A fixed, small cache is intentional: it caches scalar procedural
+        // descriptors only and cannot grow with pointer movement or strokes.
+        if (pencilCompactFootprints_.size() >= 16U)
+            pencilCompactFootprints_.clear();
+        try
+        {
+            footprint = std::make_shared<SmartBrushCompactFootprint>(
+                SmartBrushCompactFootprint::Create(descriptor));
+        }
+        catch (const std::exception& exception)
+        {
+            return {PencilCompactPlanCode::InvalidRequest, nullptr,
+                exception.what()};
+        }
+        pencilCompactFootprints_.emplace(cacheKey, footprint);
+    }
+    const std::optional<SmartBrushBounds> bounds = TranslateCompactBounds(
+        footprint->LocalBounds(), *anchor);
+    if (!bounds)
+    {
+        return {PencilCompactPlanCode::InvalidRequest, nullptr,
+            "Pencil Compact bounds exceed voxel coordinate limits."};
+    }
+    const bool insideDocument = IsCompactBoundsInside(*bounds, request.Dimensions);
+    const PencilCompactPlanPtr plan(new PencilCompactPlan(cacheKey,
+        std::move(footprint), request.Placement, *anchor, *bounds,
+        nextPencilCompactPlanId_++, insideDocument, request.Action,
+        request.PaletteIndex, request.DocumentGeneration, request.DocumentRevision));
+    return {insideDocument ? PencilCompactPlanCode::Valid :
+            PencilCompactPlanCode::OutOfBounds,
+        plan, insideDocument ? std::string{} :
+            "Pencil Compact footprint extends outside the document."};
+}
+
+std::vector<PencilCompactPlanResult> SmartToolPlanner::PlanPencilCompactBatch(
+    const PencilCompactRequest& request,
+    const std::span<const Position> centres)
+{
+    std::vector<PencilCompactPlanResult> results;
+    results.reserve(centres.size());
+    for (const Position centre : centres)
+    {
+        PencilCompactRequest centredRequest = request;
+        centredRequest.Placement.Target = centre;
+        results.push_back(PlanPencilCompact(centredRequest));
+    }
+    return results;
+}
+
+std::size_t SmartToolPlanner::PencilCompactFootprintCacheSize() const noexcept
+{
+    return pencilCompactFootprints_.size();
 }
 
 SmartToolResult SmartToolPlanner::Plan(const SmartToolRequest& request)

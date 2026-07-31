@@ -28,6 +28,7 @@
 #include <chrono>
 #include <ctime>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <optional>
 #include <memory>
@@ -1021,6 +1022,50 @@ void EditorWorkspace::DrawMainMenuBar()
         ImGui::MenuItem("Console", nullptr, &showConsole_);
         ImGui::MenuItem("Profiler", nullptr, &showProfiler_);
         ImGui::MenuItem("ImGui Demo", nullptr, &showImGuiDemo_);
+        if (ImGui::BeginMenu("Viewport Interaction"))
+        {
+            ImGui::TextDisabled("Selection / Move");
+            const bool legacy = !useViewportInteractionV2_;
+            if (ImGui::MenuItem("Legacy", nullptr, legacy))
+            {
+                useViewportInteractionV2_ = false;
+                viewportInteractionV2_.Reset();
+                viewportRenderer_.ConfigureInteractionV2(
+                    {}, std::nullopt, nullptr, voxelModelCenter_, 0U, false);
+                UpdateVoxelHighlights();
+            }
+            if (ImGui::MenuItem(
+                    "V2 Selection + Move", nullptr,
+                    useViewportInteractionV2_))
+            {
+                CancelSelectionInteraction();
+                CancelTransformGizmoInteraction();
+                useViewportInteractionV2_ = true;
+                viewportInteractionV2_.Reset();
+            }
+            ImGui::Separator();
+            ImGui::TextDisabled("Pencil");
+            if (ImGui::MenuItem("Pencil Legacy", nullptr,
+                    !usePencilViewportInteractionV2_))
+            {
+                usePencilViewportInteractionV2_ = false;
+                pencilViewportInteractionV2_.Reset();
+                pencilV2PreviewPositions_.clear();
+                pencilV2RenderedPresentationRevision_ = 0U;
+                UpdateVoxelHighlights();
+            }
+            if (ImGui::MenuItem("Pencil V2", nullptr,
+                    usePencilViewportInteractionV2_))
+            {
+                CancelSmartToolStroke();
+                usePencilViewportInteractionV2_ = true;
+                pencilViewportInteractionV2_.Reset();
+                pencilV2PreviewPositions_.clear();
+                pencilV2RenderedPresentationRevision_ = 0U;
+                UpdateVoxelHighlights();
+            }
+            ImGui::EndMenu();
+        }
         ImGui::Separator();
 
         if (ImGui::MenuItem("Reset Layout"))
@@ -2277,7 +2322,8 @@ void EditorWorkspace::DrawScenePanel()
         const ImGuiIO& io = ImGui::GetIO();
         SelectionHandles selectionHandles{};
         std::optional<SelectionHandle> hoveredSelectionHandle;
-        if ((voxelToolState_.IsSelectionActive() ||
+        if (!useViewportInteractionV2_ &&
+            (voxelToolState_.IsSelectionActive() ||
              voxelToolState_.IsMoveActive() ||
              voxelToolState_.IsDuplicateActive() ||
              voxelToolState_.IsRotateActive() ||
@@ -2368,16 +2414,26 @@ void EditorWorkspace::DrawScenePanel()
         const bool selectionPointerTracking =
             selectionInteraction_.IsActive() &&
             ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        const bool pencilV2Active = usePencilViewportInteractionV2_ &&
+            voxelToolState_.IsPencilActive() &&
+            toolContext_.Smart.IsOperational() &&
+            toolContext_.Smart.Geometry() == SmartGeometry::Pencil;
+        const bool interactionV2PointerTracking =
+            ((useViewportInteractionV2_ && viewportInteractionV2_.OwnsPointer()) ||
+             (pencilV2Active && pencilViewportInteractionV2_.OwnsPointer())) &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left);
         const bool gizmoPointerTracking =
             transformGizmoManager_.IsDragging() &&
             ImGui::IsMouseDown(ImGuiMouseButton_Left);
         // ImGui keeps the viewport item active after MouseDown. A Smart Tool
         // stroke owns that same pointer until MouseUp, so it must be treated
         // like selection/gizmo tracking rather than as an unrelated UI edit.
-        const bool smartStrokePointerTracking = smartToolStroke_.IsActive() &&
+        const bool smartStrokePointerTracking = !pencilV2Active &&
+            smartToolStroke_.IsActive() &&
             ImGui::IsMouseDown(ImGuiMouseButton_Left);
         const bool inputBlocked =
             (ImGui::IsAnyItemActive() && !selectionPointerTracking &&
+             !interactionV2PointerTracking &&
              !gizmoPointerTracking && !smartStrokePointerTracking) ||
             io.WantTextInput || incompatiblePopupOpen;
         const bool smartBrushOptionsChanged = std::exchange(
@@ -2482,7 +2538,7 @@ void EditorWorkspace::DrawScenePanel()
         gizmoPointerInput.Viewport = currentViewportRectangle_;
         gizmoPointerInput.ViewProjection = viewportCamera_.GetViewProjection();
         gizmoPointerInput.Ray = viewportRay;
-        const bool gizmoToolAvailable =
+        const bool gizmoToolAvailable = !useViewportInteractionV2_ &&
             (voxelToolState_.IsMoveActive() && CanMoveSelection()) ||
             (voxelToolState_.IsRotateActive() && CanRotateSelection()) ||
             (voxelToolState_.IsScaleActive() && CanScaleSelection());
@@ -2589,7 +2645,122 @@ void EditorWorkspace::DrawScenePanel()
             CancelTransformGizmoInteraction();
         const bool gizmoConsumesPointer = gizmoCaptured || gizmoAxisHovered ||
             transformGizmoManager_.IsDragging();
-        const bool doubleClickFocus = !gizmoConsumesPointer &&
+        const bool interactionV2ToolActive = useViewportInteractionV2_ &&
+            (voxelToolState_.IsSelectionActive() ||
+             voxelToolState_.IsMoveActive());
+        if (interactionV2ToolActive)
+        {
+            InteractionV2::ViewportInputFrame interactionInput;
+            interactionInput.Frame =
+                static_cast<std::uint64_t>(ImGui::GetFrameCount());
+            interactionInput.MouseScreen = {io.MousePos.x, io.MousePos.y};
+            interactionInput.PrimaryPressed =
+                ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+            interactionInput.PrimaryHeld =
+                ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            interactionInput.PrimaryReleased =
+                ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+            interactionInput.EscapePressed =
+                ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+            interactionInput.Control = io.KeyCtrl;
+            interactionInput.Shift = io.KeyShift;
+            interactionInput.ViewportHovered = imageHovered ||
+                viewportInteractionV2_.OwnsPointer();
+            interactionInput.ViewportFocused = sceneFocused;
+            interactionInput.UiCapturesPointer = inputBlocked &&
+                !viewportInteractionV2_.OwnsPointer();
+            interactionInput.CameraActive = cameraControl;
+            interactionInput.SelectionToolActive =
+                voxelToolState_.IsSelectionActive();
+            interactionInput.MoveToolActive =
+                voxelToolState_.IsMoveActive();
+            interactionInput.Viewport = currentViewportRectangle_;
+            interactionInput.ViewProjection =
+                viewportCamera_.GetViewProjection();
+            interactionInput.CameraWorldPosition =
+                viewportCamera_.GetPosition();
+            interactionInput.ModelCenter = voxelModelCenter_;
+            interactionInput.FramebufferScale =
+                std::max(1.0F, io.DisplayFramebufferScale.x);
+            interactionInput.DocumentGeneration =
+                voxelDocumentSession_.Generation();
+            interactionInput.DocumentRevision =
+                document != nullptr ? document->GetRevision() : 0U;
+            interactionInput.PointerRay = viewportRay;
+            viewportInteractionV2_.SubmitInput(std::move(interactionInput));
+            viewportInteractionV2_.Tick(
+                document,
+                selectionService_);
+            CommitViewportInteractionV2Move();
+
+            const InteractionV2::ViewportPresentation& presentation =
+                viewportInteractionV2_.Presentation();
+            const std::optional<SelectionBounds> renderedBounds =
+                presentation.Phase == InteractionV2::InteractionPhase::Selecting
+                ? std::nullopt : presentation.SelectionBox;
+            viewportRenderer_.ConfigureInteractionV2(
+                presentation.SelectionDetail, renderedBounds,
+                presentation.MovePreview, voxelModelCenter_,
+                presentation.Revision, true);
+            viewportInteractionV2_.SetPresentationGpuMetrics(
+                viewportRenderer_.InteractionV2UploadCount(),
+                viewportRenderer_.InteractionV2BufferRecreationCount(),
+                viewportRenderer_.InteractionV2UploadedBytes(),
+                viewportRenderer_.InteractionV2MoveSourceUploadCount(),
+                viewportRenderer_.InteractionV2MoveSourceUploadedBytes(),
+                viewportRenderer_.InteractionV2MoveDeltaUpdateCount());
+            DrawViewportInteractionV2Overlay();
+        }
+        else if (useViewportInteractionV2_)
+        {
+            viewportInteractionV2_.Reset();
+            viewportRenderer_.ConfigureInteractionV2(
+                {}, std::nullopt, nullptr, voxelModelCenter_, 0U, false);
+        }
+        if (pencilV2Active)
+        {
+            InteractionV2::PencilViewportInputFrame pencilInput;
+            pencilInput.Frame = static_cast<std::uint64_t>(ImGui::GetFrameCount());
+            pencilInput.PrimaryPressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+            pencilInput.PrimaryHeld = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            pencilInput.PrimaryReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+            pencilInput.EscapePressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+            pencilInput.PencilToolActive = true;
+            pencilInput.Interaction = {imageHovered ||
+                    pencilViewportInteractionV2_.OwnsPointer(),
+                sceneFocused, inputBlocked && !pencilViewportInteractionV2_.OwnsPointer(),
+                cameraControl, !sceneFocused};
+            if (const std::optional<PencilCompactRequest> request =
+                    BuildPencilCompactRequest())
+            {
+                pencilInput.Request = *request;
+                pencilInput.Target = request->Placement.Target;
+            }
+            pencilViewportInteractionV2_.SubmitInput(std::move(pencilInput));
+            pencilViewportInteractionV2_.Tick(document);
+            CommitPencilViewportInteractionV2();
+            const InteractionV2::PencilCompactPresentation& presentation =
+                pencilViewportInteractionV2_.Presentation();
+            if (pencilV2RenderedPresentationRevision_ != presentation.Revision)
+                UpdateVoxelHighlights();
+            // Pencil V2 deliberately reuses the existing highlight renderer.
+            // These are observed renderer counters only: the controller never
+            // asks the renderer to calculate a footprint or materialize a
+            // compact preview.  There is currently no dedicated Pencil V2
+            // GPU buffer, so unavailable source/delta counters stay zero.
+            pencilViewportInteractionV2_.SetRendererMetrics(
+                viewportRenderer_.HighlightUploadCount(), 0U,
+                viewportRenderer_.HighlightRenderCount(), 0U, 0U);
+        }
+        else if (usePencilViewportInteractionV2_)
+        {
+            pencilViewportInteractionV2_.Reset();
+            pencilV2PreviewPositions_.clear();
+            pencilV2RenderedPresentationRevision_ = 0U;
+        }
+        const bool doubleClickFocus = !useViewportInteractionV2_ &&
+            !pencilV2Active &&
+            !gizmoConsumesPointer &&
             selectionInputAvailable &&
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
             voxelSelection_.Hovered().has_value();
@@ -2606,7 +2777,8 @@ void EditorWorkspace::DrawScenePanel()
                 SelectionNavigationBounds()));
         }
         std::optional<SelectionBoxRayHit> hoveredSelectionInterior;
-        if ((voxelToolState_.IsSelectionActive() ||
+        if (!useViewportInteractionV2_ &&
+            (voxelToolState_.IsSelectionActive() ||
              voxelToolState_.IsMoveActive() ||
              voxelToolState_.IsDuplicateActive()) &&
             selectionInteraction_.Mode() == SelectionInteractionMode::Idle &&
@@ -2838,7 +3010,8 @@ void EditorWorkspace::DrawScenePanel()
                 cameraInteraction,
                 voxelEditInProgress_,
                 voxelDocumentSession_.Generation()});
-        const bool smartContinuousTool = voxelToolState_.IsPencilActive() &&
+        const bool smartContinuousTool = !pencilV2Active &&
+            voxelToolState_.IsPencilActive() &&
             toolContext_.Smart.IsOperational() &&
             toolContext_.Smart.Geometry() != SmartGeometry::Fill &&
             (toolContext_.Smart.Action() == SmartAction::Add ||
@@ -2949,7 +3122,8 @@ void EditorWorkspace::DrawScenePanel()
             }
             else CancelSmartToolStroke();
         }
-        else if (!doubleClickFocus && toolDecision == VoxelToolInputDecision::Apply)
+        else if (!pencilV2Active && !doubleClickFocus &&
+                 toolDecision == VoxelToolInputDecision::Apply)
         {
             if (voxelToolState_.IsPencilActive())
             {
@@ -3031,6 +3205,8 @@ void EditorWorkspace::DrawScenePanel()
             }
         }
 
+        if (!useViewportInteractionV2_)
+        {
         const SelectionPointerTarget selectionPointerTarget =
             ResolveSelectionPointerTarget(
                 hoveredSelectionHandle.has_value(), interiorHovered);
@@ -3300,6 +3476,7 @@ void EditorWorkspace::DrawScenePanel()
             }
             voxelSelectionClickCandidate_ = false;
             selectionPointerAnchor_.reset();
+        }
         }
         if (imageHovered && !transformGizmoManager_.IsDragging())
         {
@@ -13949,6 +14126,31 @@ std::optional<SmartToolRequest> EditorWorkspace::BuildSmartPencilRequest(
     return request;
 }
 
+std::optional<PencilCompactRequest>
+EditorWorkspace::BuildPencilCompactRequest()
+{
+    // Reuse the established Workspace adapter for the live document, palette,
+    // source-only picking and workplane resolution.  Pencil V2 only changes
+    // planning/commit ownership; it never writes or mutates Brush Profiles.
+    const std::optional<SmartToolRequest> source = BuildSmartPencilRequest();
+    if (!source || source->Geometry != SmartGeometry::Pencil) return std::nullopt;
+
+    PencilCompactRequest request;
+    request.Dimensions = source->BrushRequest.Dimensions;
+    request.Brush = source->BrushRequest.State;
+    request.Placement = source->BrushRequest.Placement;
+    request.Action = source->Action;
+    request.PaletteIndex = request.Brush.PaletteIndex;
+    request.DocumentGeneration = source->SourceGeneration;
+    request.DocumentRevision = source->SourceRevision;
+    if (const BrushProfile* const profile = brushProfileService_.ActiveProfile())
+    {
+        request.ProfileIdentity = std::hash<std::string_view>{}(profile->Uuid);
+        request.ProfileRevision = profile->Timestamp;
+    }
+    return request;
+}
+
 bool EditorWorkspace::BeginSmartToolStroke()
 {
     const std::optional<SmartToolRequest> initialRequest = BuildSmartPencilRequest();
@@ -15936,8 +16138,14 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     smartBrushGhostPreview_ = nullptr;
     VoxelPlacementPreviewStyle placementStyle =
         VoxelPlacementPreviewStyle::PencilInvalid;
-    const bool smartGeometryActive = voxelToolState_.IsPencilActive() &&
-        toolContext_.Smart.IsOperational();
+    // Pencil V2 owns the Pencil preview when explicitly enabled.  Keep the
+    // legacy Smart Tool presentation entirely dormant in that mode: having
+    // both paths resolve the same hover would violate the one-preview rule.
+    const bool pencilV2ToolActive = usePencilViewportInteractionV2_ &&
+        voxelToolState_.IsPencilActive() && toolContext_.Smart.IsOperational() &&
+        toolContext_.Smart.Geometry() == SmartGeometry::Pencil;
+    const bool smartGeometryActive = !pencilV2ToolActive &&
+        voxelToolState_.IsPencilActive() && toolContext_.Smart.IsOperational();
     const bool smartAddActive = smartGeometryActive &&
         toolContext_.Smart.Action() == SmartAction::Add;
     const bool smartPaintActive = smartGeometryActive &&
@@ -16272,15 +16480,66 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             placementStyle = VoxelPlacementPreviewStyle::PencilValid;
         }
     }
+    if (pencilV2ToolActive)
+    {
+        // Presentation LOD only: the immutable compact plans remain the exact
+        // commit source.  Small footprints are rendered as exact cells;
+        // larger ones never expand into millions of CPU ghost voxels.
+        const InteractionV2::PencilCompactPresentation& presentation =
+            pencilViewportInteractionV2_.Presentation();
+        if (pencilV2RenderedPresentationRevision_ != presentation.Revision)
+        {
+            pencilV2PreviewPositions_.clear();
+            const Asset::Voxel::VoxelDocument* const document =
+                voxelDocumentSession_.ActiveDocument();
+            if (document && presentation.Detail ==
+                    InteractionV2::PencilPreviewDetail::Exact)
+            {
+                // Presentation and commit both consume this pure shared
+                // resolver.  Paint/Erase/overlap previews therefore expose
+                // exactly the resulting cells, never the raw footprint.
+                const auto resolved = InteractionV2::PencilCompactChangeResolver::
+                    Resolve(*document, voxelDocumentSession_.Generation(),
+                        presentation.Plans);
+                if (resolved)
+                {
+                    pencilV2PreviewPositions_.reserve(resolved->size());
+                    for (const VoxelChange& change : *resolved)
+                        pencilV2PreviewPositions_.push_back(change.Position);
+                }
+            }
+            pencilV2RenderedPresentationRevision_ = presentation.Revision;
+        }
+        if (!pencilV2PreviewPositions_.empty())
+            brushPreview = pencilV2PreviewPositions_;
+        else if (presentation.Bounds &&
+                 (presentation.Detail ==
+                      InteractionV2::PencilPreviewDetail::CompactDeferred ||
+                  presentation.Validity ==
+                      InteractionV2::PencilPreviewValidity::OutOfBounds))
+            brushAggregatePreview = VoxelBoxBounds{
+                presentation.Bounds->Minimum, presentation.Bounds->Maximum};
+        placementPosition.reset();
+        placementStyle = presentation.Validity ==
+                InteractionV2::PencilPreviewValidity::OutOfBounds
+            ? VoxelPlacementPreviewStyle::PencilInvalid
+            : presentation.Detail ==
+                    InteractionV2::PencilPreviewDetail::CompactDeferred
+            ? VoxelPlacementPreviewStyle::PencilOccupied
+            : presentation.Detail == InteractionV2::PencilPreviewDetail::Exact &&
+                    pencilV2PreviewPositions_.empty()
+            ? VoxelPlacementPreviewStyle::PencilOccupied
+            : VoxelPlacementPreviewStyle::PencilValid;
+    }
     const UniversalCursorPreviewSubject previewSubject =
-        smartGeometryActive &&
+        (smartGeometryActive || pencilV2ToolActive) &&
             toolContext_.Smart.Geometry() == SmartGeometry::Pencil
         ? toolContext_.Smart.Mode() == SmartToolMode::SingleVoxel
             ? UniversalCursorPreviewSubject::PencilSingleVoxel
             : UniversalCursorPreviewSubject::PencilBrush
         : UniversalCursorPreviewSubject::Geometric;
-    const bool universalCursorToolActive =
-        smartGeometryActive || voxelToolState_.IsFillActive();
+    const bool universalCursorToolActive = smartGeometryActive ||
+        pencilV2ToolActive || voxelToolState_.IsFillActive();
     if (universalCursorToolActive)
     {
         std::optional<UniversalCursor2DTarget> hoveredCursorTarget;
@@ -16479,9 +16738,163 @@ void EditorWorkspace::DrawUniversalPreviewCursor2D() const noexcept
     drawList->PopClipRect();
 }
 
+void EditorWorkspace::DrawViewportInteractionV2Overlay() const noexcept
+{
+    if (!useViewportInteractionV2_) return;
+    const InteractionV2::ViewportPresentation& presentation =
+        viewportInteractionV2_.Presentation();
+    ImDrawList* const drawList = ImGui::GetWindowDrawList();
+    drawList->PushClipRect(
+        {currentViewportRectangle_.X, currentViewportRectangle_.Y},
+        {currentViewportRectangle_.X + currentViewportRectangle_.Width,
+         currentViewportRectangle_.Y + currentViewportRectangle_.Height},
+        true);
+    if (presentation.GestureOverlay2D)
+    {
+        const auto& rectangle = *presentation.GestureOverlay2D;
+        const ImVec2 minimum{rectangle.MinimumX, rectangle.MinimumY};
+        const ImVec2 maximum{rectangle.MaximumX, rectangle.MaximumY};
+        drawList->AddRectFilled(
+            minimum, maximum, IM_COL32(58, 143, 230, 38));
+        drawList->AddRect(
+            minimum, maximum, IM_COL32(104, 190, 255, 255), 0.0F, 0, 1.5F);
+    }
+    if (presentation.SelectionScreenBounds &&
+        presentation.Phase != InteractionV2::InteractionPhase::Selecting)
+    {
+        const auto& rectangle = *presentation.SelectionScreenBounds;
+        const ImVec2 minimum{rectangle.MinimumX, rectangle.MinimumY};
+        const ImVec2 maximum{rectangle.MaximumX, rectangle.MaximumY};
+        drawList->AddRect(
+            minimum, maximum, IM_COL32(116, 205, 255, 235), 2.0F, 0, 1.5F);
+        if (presentation.DrawCompactHandles)
+        {
+            const ImVec2 center{
+                (minimum.x + maximum.x) * 0.5F,
+                (minimum.y + maximum.y) * 0.5F};
+            constexpr float halfSize = 4.0F;
+            drawList->AddRectFilled(
+                {center.x - halfSize, center.y - halfSize},
+                {center.x + halfSize, center.y + halfSize},
+                IM_COL32(205, 237, 255, 235), 1.0F);
+            drawList->AddRect(
+                {center.x - halfSize, center.y - halfSize},
+                {center.x + halfSize, center.y + halfSize},
+                IM_COL32(12, 25, 38, 255), 1.0F);
+        }
+    }
+    const InteractionV2::ViewportInteractionMetrics& metrics =
+        viewportInteractionV2_.Metrics();
+    const char* const phase =
+        presentation.Phase == InteractionV2::InteractionPhase::Selecting
+            ? "Selecting"
+        : presentation.Phase == InteractionV2::InteractionPhase::SelectionReady
+            ? "SelectionReady"
+        : presentation.Phase == InteractionV2::InteractionPhase::Moving
+            ? "Moving" : "Idle";
+    const std::string diagnostic =
+        "V2 " + std::string(phase) +
+        "  session " + std::to_string(presentation.SessionId) +
+        "  plan " + std::to_string(presentation.PlanId) +
+        "  selected " + std::to_string(presentation.ExactSelectionCount) +
+        "  resolves " + std::to_string(metrics.BusinessResolves) +
+        "  move plans " + std::to_string(metrics.MovePlanBuilds) +
+        "/" + std::to_string(metrics.MovePlanReuses) +
+        "  projection " + std::to_string(metrics.ProjectionBuilds) +
+        "  uploads " + std::to_string(metrics.PresentationUploads) +
+        "  buffers " +
+        std::to_string(metrics.PresentationBufferRecreations) +
+        "  source uploads " + std::to_string(metrics.MoveSourceUploads) +
+        "  source bytes " +
+        std::to_string(metrics.MoveSourceUploadedBytes) +
+        "  delta updates " +
+        std::to_string(metrics.MoveDeltaGpuUpdates);
+    drawList->AddText(
+        {currentViewportRectangle_.X + 10.0F,
+         currentViewportRectangle_.Y + 10.0F},
+        IM_COL32(174, 219, 250, 225), diagnostic.c_str());
+    drawList->PopClipRect();
+}
+
+void EditorWorkspace::CommitViewportInteractionV2Move()
+{
+    std::optional<VoxelEditOperation> operation =
+        viewportInteractionV2_.TakeCommit();
+    if (!operation) return;
+    Asset::Voxel::VoxelDocument* const document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document == nullptr || voxelEditInProgress_ ||
+        voxelEditHistory_.IsBusy())
+    {
+        viewportInteractionV2_.NotifyCommitApplied(
+            selectionService_, voxelDocumentSession_.Generation(),
+            document ? document->GetRevision() : 0U);
+        return;
+    }
+    voxelEditInProgress_ = true;
+    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
+        static_cast<VoxelEditSession&>(*this), std::move(*operation));
+    voxelEditInProgress_ = false;
+    if (result)
+    {
+        ApplyVoxelHistorySelection(result);
+        AddConsoleMessage("[Edit] V2 moved " +
+            std::to_string(selectionService_.Count()) + " voxel(s).");
+    }
+    else
+    {
+        AddConsoleMessage("[Edit] V2 Move failed: " + result.Message);
+    }
+    viewportInteractionV2_.NotifyCommitApplied(
+        selectionService_, voxelDocumentSession_.Generation(),
+        document->GetRevision());
+}
+
+void EditorWorkspace::CommitPencilViewportInteractionV2()
+{
+    std::optional<VoxelEditOperation> operation =
+        pencilViewportInteractionV2_.TakeCommit();
+    if (!operation) return;
+
+    Asset::Voxel::VoxelDocument* const document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document == nullptr || voxelEditInProgress_ ||
+        voxelEditHistory_.IsBusy())
+    {
+        pencilViewportInteractionV2_.NotifyCommitApplied();
+        return;
+    }
+
+    // The V2 gateway has already converted the immutable gesture plans into
+    // one operation.  Workspace remains only the document/history façade:
+    // no brush geometry, picking, or plan resolution happens at commit time.
+    voxelEditInProgress_ = true;
+    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
+        static_cast<VoxelEditSession&>(*this), std::move(*operation));
+    voxelEditInProgress_ = false;
+    if (result)
+    {
+        ApplyVoxelHistorySelection(result);
+        AddConsoleMessage("[Edit] V2 Pencil stroke committed.");
+    }
+    else
+    {
+        AddConsoleMessage("[Edit] V2 Pencil failed: " + result.Message);
+    }
+    pencilViewportInteractionV2_.NotifyCommitApplied();
+}
+
 void EditorWorkspace::UpdateTransformGizmo(
     const float viewportHeightPixels) noexcept
 {
+    if (useViewportInteractionV2_ &&
+        (voxelToolState_.IsSelectionActive() ||
+         voxelToolState_.IsMoveActive()))
+    {
+        transformPivotManager_.Invalidate();
+        viewportRenderer_.ConfigureTransformGizmo(nullptr);
+        return;
+    }
     const Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
     const SelectionBounds gizmoBounds =

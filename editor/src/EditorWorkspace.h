@@ -54,6 +54,9 @@
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportNavigationController.h"
 #include "ViewportRenderer.h"
+#include "ViewportInteractionV2/PencilCompactChangeResolver.h"
+#include "ViewportInteractionV2/PencilViewportInteractionController.h"
+#include "ViewportInteractionV2/ViewportInteractionController.h"
 #include "VoxelViewportState.h"
 #include "VoxelSave/VoxelSaveState.h"
 #include "VoxelSave/VoxelDocumentSaveService.h"
@@ -362,6 +365,9 @@ private:
     void UpdateTransformGizmo(float viewportHeightPixels) noexcept;
     void DrawTransformGizmoVisibilityAnchor() const noexcept;
     void DrawUniversalPreviewCursor2D() const noexcept;
+    void DrawViewportInteractionV2Overlay() const noexcept;
+    void CommitViewportInteractionV2Move();
+    void CommitPencilViewportInteractionV2();
     [[nodiscard]] bool SynchronizeVoxelDocumentRendering();
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
@@ -372,6 +378,8 @@ private:
     [[nodiscard]] bool RefreshSmartToolHover() noexcept;
     [[nodiscard]] std::optional<SmartToolRequest> BuildSmartPencilRequest(
         const SmartToolStroke* stroke = nullptr);
+    [[nodiscard]] std::optional<PencilCompactRequest>
+        BuildPencilCompactRequest();
     [[nodiscard]] bool BeginSmartToolStroke();
     [[nodiscard]] bool ContinueSmartToolStroke();
     [[nodiscard]] bool CommitSmartToolStroke();
@@ -445,6 +453,8 @@ private:
     EditorCamera viewportCamera_;
     ViewportNavigationController viewportNavigation_{viewportCamera_};
     ViewportRenderer viewportRenderer_;
+    InteractionV2::ViewportInteractionController viewportInteractionV2_;
+    InteractionV2::PencilViewportInteractionController pencilViewportInteractionV2_;
     VoxelViewportState viewportState_;
     VoxelDocumentSession voxelDocumentSession_;
     Mesh::VoxelDocumentMeshCache voxelDocumentMeshCache_;
@@ -679,6 +689,10 @@ private:
     bool showConsole_ = true;
     bool showProfiler_ = false;
     bool showImGuiDemo_ = false;
+    bool useViewportInteractionV2_ = false;
+    bool usePencilViewportInteractionV2_ = false;
+    std::uint64_t pencilV2RenderedPresentationRevision_ = 0U;
+    std::vector<Asset::Voxel::VoxelPosition> pencilV2PreviewPositions_;
     bool showAboutPopup_ = false;
     bool showNewProjectPopup_ = false;
     bool showOpenProjectPopup_ = false;

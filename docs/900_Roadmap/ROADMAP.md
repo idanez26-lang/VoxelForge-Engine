@@ -1,52 +1,14 @@
-# Roadmap initiale
+# Roadmap (archivée)
 
-## v0.0.x — Fondations
-- documentation ;
-- modèle métier ;
-- architecture ;
-- choix technologiques ;
-- format de projet ;
-- premiers contrats.
+> ⚠️ **Cette roadmap « générateur d'abord » est obsolète.**
+> Elle datait des fondations du projet (Intent Engine en v0.2, édition
+> conversationnelle en v1.0) et ne reflète plus la direction actée en 2026 :
+> **éditeur d'abord** — la v1.0 est un atelier d'édition professionnel sans IA,
+> la génération vient ensuite.
+>
+> **Roadmap en vigueur : [`docs/010_Roadmap/V1-ROADMAP.md`](../010_Roadmap/V1-ROADMAP.md)**
+> Vision : [`docs/000_Vision/GRAND-LIVRE-DE-LA-FORGE.md`](../000_Vision/GRAND-LIVRE-DE-LA-FORGE.md)
+> État courant : [`docs/020_Status/CURRENT-STATE.md`](../020_Status/CURRENT-STATE.md)
 
-## v0.1 — Atelier minimal
-- création et sauvegarde de projet ;
-- scène voxel ;
-- viewport ;
-- édition manuelle minimale ;
-- génération procédurale d’un asset simple ;
-- export VOX.
-
-## v0.2 — Texte vers plan
-- Intent Engine initial ;
-- Creative Planner ;
-- Blueprint ;
-- variantes par seed.
-
-## v0.3 — Systèmes artistiques
-- palettes ;
-- matériaux ;
-- styles ;
-- premières passes qualité.
-
-## v0.5 — Image vers voxel
-- analyse d’image ;
-- reconstruction d’un objet simple ;
-- texte + image ;
-- comparaison avec référence.
-
-## v1.0 — Atelier professionnel initial
-- édition conversationnelle ;
-- historique créatif ;
-- plusieurs familles d’assets ;
-- profils d’export ;
-- rendu professionnel ;
-- documentation utilisateur et SDK initial.
-
-## Futures versions
-- vidéo ;
-- plans et blueprints ;
-- scènes étendues ;
-- villes ;
-- plugins communautaires ;
-- collaboration ;
-- cloud optionnel.
+Le contenu d'origine reste consultable dans l'historique git de ce fichier
+(`git log -- docs/900_Roadmap/ROADMAP.md`).

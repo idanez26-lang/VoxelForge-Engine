@@ -29,9 +29,15 @@ struct SDL_GPUBuffer;
 struct SDL_GPUDevice;
 struct SDL_GPUGraphicsPipeline;
 struct SDL_GPUTexture;
+struct SDL_GPUTransferBuffer;
 
 namespace VoxelForge::Editor
 {
+
+namespace InteractionV2
+{
+struct MovePreviewPresentation;
+}
 
 enum class VoxelPlacementPreviewStyle
 {
@@ -45,7 +51,9 @@ enum class SelectionBoxVisualState : std::uint8_t
 {
     Normal,
     Hovered,
-    Moving
+    Moving,
+    MovingPending,
+    MovingInvalid
 };
 
 enum class SmartBrushGhostGeometryStyle : std::uint8_t
@@ -106,6 +114,15 @@ public:
         Vec3 modelCenter) noexcept;
     void ConfigureTransformPreview(
         const TransformPreviewRenderData* preview) noexcept;
+    /// Dedicated presentation entry point for the isolated Selection + Move
+    /// V2 vertical slice. The renderer consumes prepared data only.
+    void ConfigureInteractionV2(
+        std::span<const Asset::Voxel::VoxelPosition> selectedDetail,
+        std::optional<SelectionBounds> selectionBounds,
+        const InteractionV2::MovePreviewPresentation* movePreview,
+        Vec3 modelCenter,
+        std::uint64_t presentationRevision,
+        bool active) noexcept;
     /// Consumes a prepared generic snapshot. It never receives a document or
     /// participates in picking, history, or asset mutation.
     void ConfigureVoxelPreview(const VoxelPreviewData* preview) noexcept;
@@ -124,6 +141,17 @@ public:
     [[nodiscard]] SDL_GPUTexture* Texture() const noexcept;
     [[nodiscard]] const std::string& LastError() const noexcept;
     [[nodiscard]] std::size_t HighlightUploadCount() const noexcept;
+    [[nodiscard]] std::size_t InteractionV2UploadCount() const noexcept;
+    [[nodiscard]] std::size_t InteractionV2BufferRecreationCount()
+        const noexcept;
+    [[nodiscard]] std::size_t InteractionV2UploadedBytes() const noexcept;
+    [[nodiscard]] std::size_t InteractionV2MoveSourceUploadCount()
+        const noexcept;
+    [[nodiscard]] std::size_t InteractionV2MoveSourceUploadedBytes()
+        const noexcept;
+    [[nodiscard]] std::size_t InteractionV2MoveDeltaUpdateCount()
+        const noexcept;
+    [[nodiscard]] std::size_t InteractionV2MoveDrawCount() const noexcept;
     [[nodiscard]] std::size_t HighlightRenderCount() const noexcept;
     [[nodiscard]] std::size_t ModelRenderCount() const noexcept;
     [[nodiscard]] std::size_t ModelUploadCount() const noexcept;
@@ -159,6 +187,16 @@ private:
         SDL_GPUBuffer*& vertexBuffer,
         SDL_GPUBuffer*& indexBuffer,
         std::string_view label);
+    [[nodiscard]] bool UploadInteractionV2Highlights(
+        const void* vertexData,
+        std::size_t vertexBytes,
+        const std::uint32_t* indexData,
+        std::size_t indexBytes);
+    [[nodiscard]] bool UploadInteractionV2MoveSource(
+        const void* vertexData,
+        std::size_t vertexBytes,
+        const std::uint32_t* indexData,
+        std::size_t indexBytes);
     [[nodiscard]] bool UploadMesh(
         const Mesh::MeshData& mesh,
         const Voxel::VoxelPalette& palette,
@@ -168,6 +206,7 @@ private:
         std::uint32_t& indexCount,
         std::string_view label);
     void ClearExactPreviewMesh() noexcept;
+    void ReleaseInteractionV2MoveSource() noexcept;
     void ReleaseGuides() noexcept;
     void ReleaseHighlights() noexcept;
     void ReleaseTargets() noexcept;
@@ -187,6 +226,9 @@ private:
     SDL_GPUBuffer* guideIndexBuffer_ = nullptr;
     SDL_GPUBuffer* highlightVertexBuffer_ = nullptr;
     SDL_GPUBuffer* highlightIndexBuffer_ = nullptr;
+    SDL_GPUTransferBuffer* interactionV2HighlightTransferBuffer_ = nullptr;
+    SDL_GPUBuffer* interactionV2MoveVertexBuffer_ = nullptr;
+    SDL_GPUBuffer* interactionV2MoveIndexBuffer_ = nullptr;
     SDL_GPUBuffer* smartBrushGhostVertexBuffer_ = nullptr;
     SDL_GPUBuffer* smartBrushGhostIndexBuffer_ = nullptr;
     SDL_GPUBuffer* transformGizmoVisibleVertexBuffer_ = nullptr;
@@ -202,6 +244,10 @@ private:
     std::uint32_t gridIndexCount_ = 0;
     std::uint32_t axesIndexCount_ = 0;
     std::uint32_t highlightIndexCount_ = 0;
+    std::uint32_t interactionV2MoveIndexCount_ = 0U;
+    std::size_t interactionV2HighlightVertexCapacity_ = 0U;
+    std::size_t interactionV2HighlightIndexCapacity_ = 0U;
+    std::size_t interactionV2HighlightTransferCapacity_ = 0U;
     std::uint32_t smartBrushGhostIndexCount_ = 0;
     std::uint32_t transformGizmoVisibleIndexCount_ = 0;
     std::uint32_t transformGizmoOccludedIndexCount_ = 0;
@@ -236,13 +282,26 @@ private:
         SmartBrushGhostGeometryStyle::VoxelBoxes;
     std::vector<GhostVoxel> voxelPreviewGhosts_;
     std::uint64_t voxelPreviewRevision_ = 0U;
+    std::uint64_t interactionV2Revision_ = 0U;
+    std::uint64_t interactionV2MoveSourceIdentity_ = 0U;
+    Asset::Voxel::VoxelPosition interactionV2MoveDelta_{};
+    bool interactionV2MoveSourceDirty_ = false;
+    bool interactionV2MoveActive_ = false;
     std::unique_ptr<HighlightGeometryCache> highlightGeometry_;
+    std::unique_ptr<HighlightGeometryCache> interactionV2MoveGeometry_;
     std::unique_ptr<HighlightGeometryCache> smartBrushGhostGeometry_;
     std::unique_ptr<TransformPreviewSnapshot> transformPreview_;
     std::optional<TransformGizmoView> transformGizmo_;
     std::optional<VoxelSpherePreview> spherePreviewHighlight_;
     Vec3 modelCenter_{};
     std::size_t highlightUploadCount_ = 0U;
+    std::size_t interactionV2UploadCount_ = 0U;
+    std::size_t interactionV2BufferRecreationCount_ = 0U;
+    std::size_t interactionV2UploadedBytes_ = 0U;
+    std::size_t interactionV2MoveSourceUploadCount_ = 0U;
+    std::size_t interactionV2MoveSourceUploadedBytes_ = 0U;
+    std::size_t interactionV2MoveDeltaUpdateCount_ = 0U;
+    std::size_t interactionV2MoveDrawCount_ = 0U;
     std::size_t highlightRenderCount_ = 0U;
     std::size_t modelRenderCount_ = 0U;
     std::size_t modelUploadCount_ = 0U;
