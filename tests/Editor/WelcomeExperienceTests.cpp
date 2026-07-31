@@ -276,7 +276,8 @@ void TestRecycleFailurePreservesRecentEntry()
         {projectFile, std::nullopt, {}, true});
     Require(!result.Succeeded() && fs::is_regular_file(projectFile) &&
             manager.RecentProjectPaths().size() == 1U &&
-            manager.RecentProjectPaths().front() == projectFile,
+            fs::weakly_canonical(manager.RecentProjectPaths().front()) ==
+                fs::weakly_canonical(projectFile),
         "A failed Recycle Bin operation changed the recent-project entry.");
 }
 }

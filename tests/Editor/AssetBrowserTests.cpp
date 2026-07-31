@@ -906,56 +906,78 @@ int main()
     {
         if (const int result = TestEmptyFolder(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestEmptyFolder (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestNavigationAndBack(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestNavigationAndBack (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestSorting(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestSorting (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestFolderCreation(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestFolderCreation (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestMissingFolderAndConfinement(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestMissingFolderAndConfinement (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestExternalCurrentFolderRemoval(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestExternalCurrentFolderRemoval (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestExternalSymlinkConfinement(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestExternalSymlinkConfinement (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestSelectionSurvivesRefresh(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestSelectionSurvivesRefresh (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestRenameOperations(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestRenameOperations (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestRenameSelectionAndValidation(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestRenameSelectionAndValidation (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestDeleteOperations(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestDeleteOperations (code "
+                      << result << ")\n";
             return result;
         }
 
@@ -973,11 +995,15 @@ int main()
 
         if (const int result = TestViewSearchFiltersAndMarkers(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestViewSearchFiltersAndMarkers (code "
+                      << result << ")\n";
             return result;
         }
 
         if (const int result = TestViewSorting(); result != 0)
         {
+            std::cerr << "AssetBrowser sub-test failed: TestViewSorting (code "
+                      << result << ")\n";
             return result;
         }
 
