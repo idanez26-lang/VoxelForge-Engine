@@ -1,0 +1,43 @@
+# Style VoxelForge — dérivé du style existant du code (Allman, 4 espaces,
+# 80 colonnes, paramètres un par ligne en cas de retour à la ligne).
+# Usage recommandé : formater uniquement le code nouveau ou modifié
+# (git clang-format), pas de reformatage massif de l'existant.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+IndentWidth: 4
+ColumnLimit: 80
+UseTab: Never
+
+BreakBeforeBraces: Allman
+NamespaceIndentation: None
+IndentCaseLabels: false
+FixNamespaceComments: false
+
+AlignAfterOpenBracket: AlwaysBreak
+BinPackParameters: false
+BinPackArguments: true
+AllowAllParametersOfDeclarationOnNextLine: false
+PenaltyReturnTypeOnItsOwnLine: 200
+
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: Inline
+AllowShortBlocksOnASingleLine: Never
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+QualifierAlignment: Leave
+
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+Cpp11BracedListStyle: true
+
+EmptyLineBeforeAccessModifier: LogicalBlock
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2

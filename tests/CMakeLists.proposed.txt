@@ -1,0 +1,1133 @@
+# Tests VoxelForge — déclaration compacte.
+# Ce fichier est une réécriture 1:1 de l'ancien tests/CMakeLists.txt :
+# mêmes cibles, mêmes sources, mêmes libs, mêmes noms de tests, mêmes
+# propriétés CTest. Vérifié par comparaison sémantique automatique.
+
+function(vf_configure_test target)
+    target_compile_features(${target} PRIVATE cxx_std_20)
+
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+# Crée l'exécutable de test et le configure.
+#   vf_test_target(<target> SOURCES <src...> [LINK <libs...>] [EDITOR_INCLUDES])
+function(vf_test_target target)
+    cmake_parse_arguments(ARG "EDITOR_INCLUDES" "" "SOURCES;LINK" ${ARGN})
+    add_executable(${target} ${ARG_SOURCES})
+    if(ARG_EDITOR_INCLUDES)
+        target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/editor/src)
+    endif()
+    if(ARG_LINK)
+        target_link_libraries(${target} PRIVATE ${ARG_LINK})
+    endif()
+    vf_configure_test(${target})
+endfunction()
+
+# Enregistre un test CTest sur une cible existante.
+#   vf_test_case(<nom.ctest> <target> [ARGS <args...>] [LABELS <l...>] [TIMEOUT <s>])
+function(vf_test_case name target)
+    cmake_parse_arguments(ARG "" "TIMEOUT" "ARGS;LABELS" ${ARGN})
+    add_test(NAME ${name} COMMAND $<TARGET_FILE:${target}> ${ARG_ARGS})
+    if(ARG_LABELS)
+        set_tests_properties(${name} PROPERTIES LABELS "${ARG_LABELS}")
+    endif()
+    if(ARG_TIMEOUT)
+        set_tests_properties(${name} PROPERTIES TIMEOUT ${ARG_TIMEOUT})
+    endif()
+endfunction()
+
+# Smoke test de l'éditeur complet (exécute VoxelForgeEditor avec un drapeau).
+function(vf_editor_smoke name flag)
+    add_test(NAME ${name} COMMAND $<TARGET_FILE:VoxelForgeEditor> ${flag})
+    set_tests_properties(
+        ${name}
+        PROPERTIES
+            TIMEOUT 30
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            ENVIRONMENT
+                "VOXELFORGE_RECENT_PROJECTS_FILE=${CMAKE_CURRENT_BINARY_DIR}/smoke-recent-projects.txt;VOXELFORGE_PREFERENCES_FILE=${CMAKE_CURRENT_BINARY_DIR}/smoke-preferences.ini"
+    )
+endfunction()
+
+vf_test_target(
+    VoxelForgeCoreEventTests SOURCES Core/EventSystemTests.cpp LINK
+    VoxelForgeCore
+)
+vf_test_case(VoxelForge.Core.Events VoxelForgeCoreEventTests TIMEOUT 10)
+vf_test_target(
+    VoxelForgeCoreLayerTests SOURCES Core/LayerSystemTests.cpp LINK
+    VoxelForgeCore
+)
+vf_test_case(VoxelForge.Core.Layers VoxelForgeCoreLayerTests TIMEOUT 10)
+vf_test_target(
+    VoxelForgeEditorExitRequestTests SOURCES Editor/EditorExitRequestTests.cpp
+    EDITOR_INCLUDES
+)
+vf_test_case(
+    VoxelForge.Editor.ExitRequest VoxelForgeEditorExitRequestTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorSaveOnExitTests SOURCES Editor/SaveOnExitTests.cpp
+    EDITOR_INCLUDES
+)
+vf_test_case(
+    VoxelForge.Editor.SaveOnExit VoxelForgeEditorSaveOnExitTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorWindowTitleTests SOURCES Editor/EditorWindowTitleTests.cpp
+    EDITOR_INCLUDES
+)
+vf_test_case(
+    VoxelForge.Editor.WindowTitle VoxelForgeEditorWindowTitleTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorAssetBrowserTests SOURCES Editor/AssetBrowserTests.cpp LINK
+    VoxelForgeEditorAssetBrowser
+)
+vf_test_case(
+    VoxelForge.Editor.AssetBrowser VoxelForgeEditorAssetBrowserTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorModelImportTests SOURCES Editor/ModelImportTests.cpp
+    Editor/DragDropImportTests.cpp LINK VoxelForgeEditorModelImport
+)
+vf_test_case(
+    VoxelForge.Editor.ModelImport VoxelForgeEditorModelImportTests TIMEOUT 10
+)
+vf_test_case(
+    VoxelForge.Editor.DragDropImport VoxelForgeEditorModelImportTests ARGS
+    --drag-drop-only TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorAssetMetadataTests SOURCES Editor/AssetMetadataTests.cpp
+    LINK VoxelForgeEditorAssetBrowser VoxelForgeEditorModelImport
+)
+vf_test_case(
+    VoxelForge.Editor.AssetMetadata VoxelForgeEditorAssetMetadataTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorAssetInspectorTests SOURCES Editor/AssetInspectorTests.cpp
+    Editor/VoxThumbnailTests.cpp LINK VoxelForgeEditorAssetInspector
+    VoxelForgeEditorModelImport
+)
+vf_test_case(
+    VoxelForge.Editor.AssetInspector VoxelForgeEditorAssetInspectorTests TIMEOUT
+    10
+)
+vf_test_case(
+    VoxelForge.Editor.VoxThumbnail VoxelForgeEditorAssetInspectorTests ARGS
+    --thumbnail-only TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeProjectManagerTests SOURCES Project/ProjectManagerTests.cpp LINK
+    VoxelForgeProject
+)
+vf_test_target(
+    VoxelForgeEditorVoxelViewportTests SOURCES Editor/VoxelViewportTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/VoxelViewportState.cpp EDITOR_INCLUDES LINK
+    VoxelForgeMesh VoxelForgeImGui
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelViewport VoxelForgeEditorVoxelViewportTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorUniversalCursor2DTests SOURCES
+    Editor/UniversalCursor2DTests.cpp LINK VoxelForgeEditorVoxelPreview
+)
+vf_test_case(
+    VoxelForge.Editor.UniversalCursor2D VoxelForgeEditorUniversalCursor2DTests
+)
+vf_test_target(
+    VoxelForgeEditorDoubleClickCameraTests SOURCES
+    Editor/DoubleClickCameraTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportInput/ViewportCameraInput.cpp
+    EDITOR_INCLUDES LINK VoxelForgeEditorVoxelSelection VoxelForgeImGui
+)
+vf_test_case(
+    VoxelForge.Editor.DoubleClickCamera VoxelForgeEditorDoubleClickCameraTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorViewportNavigationTests SOURCES
+    Editor/ViewportNavigationControllerTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportNavigationController.cpp
+    EDITOR_INCLUDES LINK VoxelForgeEditorVoxelSelection VoxelForgeImGui
+)
+vf_test_case(
+    VoxelForge.Editor.ViewportNavigation VoxelForgeEditorViewportNavigationTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelSelectionTests SOURCES Editor/VoxelSelectionTests.cpp
+    LINK VoxelForgeEditorVoxelSelection
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelSelection VoxelForgeEditorVoxelSelectionTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelRayPickingTests SOURCES Editor/VoxelRayPickingTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp EDITOR_INCLUDES LINK
+    VoxelForgeEditorVoxelSelection VoxelForgeImGui
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelRayPicking VoxelForgeEditorVoxelRayPickingTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorCommandHistoryTests SOURCES Editor/CommandHistoryTests.cpp
+    LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.CommandHistory VoxelForgeEditorCommandHistoryTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorEraseVoxelTests SOURCES Editor/EraseVoxelTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.EraseVoxel VoxelForgeEditorEraseVoxelTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorPaintVoxelTests SOURCES Editor/PaintVoxelTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.PaintVoxel VoxelForgeEditorPaintVoxelTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorAddVoxelTests SOURCES Editor/AddVoxelTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh VoxelForgeVoxel
+)
+vf_test_case(
+    VoxelForge.Editor.AddVoxel VoxelForgeEditorAddVoxelTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelPencilTests SOURCES Editor/VoxelPencilTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelPencil VoxelForgeEditorVoxelPencilTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorSmartBrushEngineTests SOURCES
+    Editor/SmartBrushEngineTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.SmartBrushEngine VoxelForgeEditorSmartBrushEngineTests
+)
+vf_test_target(
+    VoxelForgeEditorVoxelEraserTests SOURCES Editor/VoxelEraserTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelEraser VoxelForgeEditorVoxelEraserTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelFillTests SOURCES Editor/VoxelFillTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeEditorPalette
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelFill VoxelForgeEditorVoxelFillTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelPaintBrushTests SOURCES Editor/VoxelPaintBrushTests.cpp
+    LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelPaintBrush VoxelForgeEditorVoxelPaintBrushTests
+)
+vf_test_target(
+    VoxelForgeEditorVoxelBoxTests SOURCES Editor/VoxelBoxTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeEditorPalette
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelBox VoxelForgeEditorVoxelBoxTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelLineTests SOURCES Editor/VoxelLineTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeEditorPalette
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelLine VoxelForgeEditorVoxelLineTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelSphereTests SOURCES Editor/VoxelSphereTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeEditorPalette
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelSphere VoxelForgeEditorVoxelSphereTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorToolbarTests SOURCES Editor/EditorToolbarTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Input/EditorInputService.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Toolbar/EditorToolbarModel.cpp
+    EDITOR_INCLUDES LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.ModernToolbar VoxelForgeEditorToolbarTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeProfessionalToolFrameworkSmoke SOURCES
+    Editor/ToolFrameworkTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Input/EditorInputService.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Tools/ToolManager.cpp EDITOR_INCLUDES LINK
+    VoxelForgeEditorCommands VoxelForgeEditorTransformPivot
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolTests SOURCES Editor/SmartToolTests.cpp LINK
+    VoxelForgeEditorCommands
+)
+vf_test_case(VoxelForge.Editor.SmartTool VoxelForgeEditorSmartToolTests)
+vf_test_target(
+    VoxelForgeEditorSmartToolFoundationTests SOURCES
+    Editor/SmartToolFoundationTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolFoundation
+    VoxelForgeEditorSmartToolFoundationTests
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolPlanStateTests SOURCES
+    Editor/SmartToolPlanStateTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolPlanState VoxelForgeEditorSmartToolPlanStateTests
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolPlanStateSmokeTests SOURCES
+    Editor/SmartToolPlanStateSmokeTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolPlanStateSmoke
+    VoxelForgeEditorSmartToolPlanStateSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartPreviewEngineTests SOURCES
+    Editor/SmartPreviewEngineTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartPreviewEngine VoxelForgeEditorSmartPreviewEngineTests
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolExactPreviewComposerTests SOURCES
+    Editor/SmartToolExactPreviewComposerTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolExactPreviewComposer
+    VoxelForgeEditorSmartToolExactPreviewComposerTests
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolStrokeTests SOURCES Editor/SmartToolStrokeTests.cpp
+    LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolStroke VoxelForgeEditorSmartToolStrokeTests
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolStrokeSmokeTests SOURCES
+    Editor/SmartToolStrokeSmokeTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolStrokeSmoke
+    VoxelForgeEditorSmartToolStrokeSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartPreviewEngineSmokeTests SOURCES
+    Editor/SmartPreviewEngineSmokeTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartPreviewEngineSmoke
+    VoxelForgeEditorSmartPreviewEngineSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolModeTests SOURCES Editor/SmartToolModeTests.cpp
+    LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolModes VoxelForgeEditorSmartToolModeTests
+)
+vf_test_target(
+    VoxelForgeEditorPencilCompactPlanTests SOURCES
+    Editor/PencilCompactPlanTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.PencilCompactPlan VoxelForgeEditorPencilCompactPlanTests
+)
+vf_test_target(
+    VoxelForgeEditorPencilInteractionV2Tests SOURCES
+    Editor/PencilInteractionV2Tests.cpp LINK
+    VoxelForgeEditorViewportInteractionV2
+)
+vf_test_case(
+    VoxelForge.Editor.PencilInteractionV2
+    VoxelForgeEditorPencilInteractionV2Tests
+)
+vf_test_target(
+    VoxelForgeEditorPencilInteractionV2Benchmark SOURCES
+    Editor/PencilInteractionV2Benchmark.cpp LINK
+    VoxelForgeEditorViewportInteractionV2
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolFaceTests SOURCES Editor/SmartToolFaceTests.cpp
+    LINK VoxelForgeEditorCommands
+)
+vf_test_case(VoxelForge.Editor.SmartToolFace VoxelForgeEditorSmartToolFaceTests)
+vf_test_target(
+    VoxelForgeEditorSmartToolLineTests SOURCES Editor/SmartToolLineTests.cpp
+    LINK VoxelForgeEditorCommands
+)
+vf_test_case(VoxelForge.Editor.SmartToolLine VoxelForgeEditorSmartToolLineTests)
+vf_test_target(
+    VoxelForgeEditorSmartToolRectangleTests SOURCES
+    Editor/SmartToolRectangleTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolRectangle VoxelForgeEditorSmartToolRectangleTests
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolSurfaceTests SOURCES
+    Editor/SmartToolSurfaceTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolSurface VoxelForgeEditorSmartToolSurfaceTests
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolFillTests SOURCES Editor/SmartToolFillTests.cpp
+    LINK VoxelForgeEditorCommands
+)
+vf_test_case(VoxelForge.Editor.SmartToolFill VoxelForgeEditorSmartToolFillTests)
+vf_test_target(
+    VoxelForgeEditorSmartToolFillSmokeTests SOURCES
+    Editor/SmartToolFillSmokeTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolFillSmoke VoxelForgeEditorSmartToolFillSmokeTests
+    LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolSurfaceSmokeTests SOURCES
+    Editor/SmartToolSurfaceSmokeTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolSurfaceSmoke
+    VoxelForgeEditorSmartToolSurfaceSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolRectangleSmokeTests SOURCES
+    Editor/SmartToolRectangleSmokeTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolRectangleSmoke
+    VoxelForgeEditorSmartToolRectangleSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolLineConstraintResolverTests SOURCES
+    Editor/SmartToolLineConstraintResolverTests.cpp LINK
+    VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolLineConstraints
+    VoxelForgeEditorSmartToolLineConstraintResolverTests
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolLineSmokeTests SOURCES
+    Editor/SmartToolLineSmokeTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolLineSmoke VoxelForgeEditorSmartToolLineSmokeTests
+    LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolLineConstraintSmokeTests SOURCES
+    Editor/SmartToolLineConstraintSmokeTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolLineConstraintSmoke
+    VoxelForgeEditorSmartToolLineConstraintSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolFaceSmokeTests SOURCES
+    Editor/SmartToolFaceSmokeTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolFaceSmoke VoxelForgeEditorSmartToolFaceSmokeTests
+    LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolModeSmokeTests SOURCES
+    Editor/SmartToolModeSmokeTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolModesSmoke
+    VoxelForgeEditorSmartToolModeSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorSmartToolBrushMode2DSmokeTests SOURCES
+    Editor/SmartToolBrushMode2DSmokeTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.SmartToolBrushMode2DSmoke
+    VoxelForgeEditorSmartToolBrushMode2DSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorBrushProfileTests SOURCES
+    Editor/BrushProfileServiceTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(VoxelForge.Editor.BrushProfiles VoxelForgeEditorBrushProfileTests)
+vf_test_target(
+    VoxelForgeEditorProfessionalGhostPreviewSmoke SOURCES
+    Editor/ProfessionalGhostPreviewSmokeTests.cpp LINK VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.ProfessionalGhostPreviewSmoke
+    VoxelForgeEditorProfessionalGhostPreviewSmoke
+)
+vf_test_case(
+    VoxelForge.Editor.ProfessionalToolFrameworkSmoke
+    VoxelForgeProfessionalToolFrameworkSmoke
+)
+vf_test_target(
+    VoxelForgeEditorInputServiceTests SOURCES Editor/EditorInputServiceTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Input/EditorInputService.cpp
+    EDITOR_INCLUDES
+)
+vf_test_case(
+    VoxelForge.Editor.KeyboardShortcuts VoxelForgeEditorInputServiceTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorSelectionServiceTests SOURCES
+    Editor/SelectionServiceTests.cpp LINK VoxelForgeEditorVoxelSelection
+)
+vf_test_case(
+    VoxelForge.Editor.SelectionService VoxelForgeEditorSelectionServiceTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorTransformPreviewTests SOURCES
+    Editor/TransformPreviewTests.cpp LINK VoxelForgeEditorTransformPreview
+)
+vf_test_case(
+    VoxelForge.Editor.TransformPreview VoxelForgeEditorTransformPreviewTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorViewportInteractionV2Tests SOURCES
+    Editor/ViewportInteractionV2Tests.cpp LINK
+    VoxelForgeEditorViewportInteractionV2
+)
+vf_test_case(
+    VoxelForge.Editor.ViewportInteractionV2
+    VoxelForgeEditorViewportInteractionV2Tests TIMEOUT 120
+)
+vf_test_target(
+    VoxelForgeEditorViewportInteractionV2MoveBenchmark SOURCES
+    Editor/ViewportInteractionV2MoveBenchmark.cpp LINK
+    VoxelForgeEditorViewportInteractionV2
+)
+vf_test_target(
+    VoxelForgeEditorViewportInteractionV2SoakBenchmark SOURCES
+    Editor/ViewportInteractionV2SoakBenchmark.cpp LINK
+    VoxelForgeEditorViewportInteractionV2
+)
+vf_test_target(
+    VoxelForgeEditorViewportInteractionV2SmokeTests SOURCES
+    Editor/ViewportInteractionV2SmokeTests.cpp LINK
+    VoxelForgeEditorViewportInteractionV2
+)
+vf_test_case(
+    VoxelForge.Editor.ViewportInteractionV2Smoke
+    VoxelForgeEditorViewportInteractionV2SmokeTests LABELS Smoke TIMEOUT 30
+)
+vf_test_target(
+    VoxelForgeEditorTransformGizmoTests SOURCES Editor/TransformGizmoTests.cpp
+    LINK VoxelForgeEditorTransformGizmo VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.TransformGizmo VoxelForgeEditorTransformGizmoTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorTransformGizmoManagerTests SOURCES
+    Editor/TransformGizmoManagerTests.cpp LINK VoxelForgeEditorTransformGizmo
+)
+vf_test_case(
+    VoxelForge.Editor.TransformGizmoManager
+    VoxelForgeEditorTransformGizmoManagerTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorTransformPivotTests SOURCES Editor/TransformPivotTests.cpp
+    LINK VoxelForgeEditorTransformPivot
+)
+vf_test_case(
+    VoxelForge.Editor.TransformPivot VoxelForgeEditorTransformPivotTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorTransformPanelTests SOURCES
+    Editor/TransformPanelViewModelTests.cpp LINK VoxelForgeEditorTransformPanel
+)
+vf_test_case(
+    VoxelForge.Editor.TransformPanel VoxelForgeEditorTransformPanelTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorConstraintEngineTests SOURCES
+    Editor/ConstraintEngineTests.cpp LINK VoxelForgeEditorConstraints
+)
+vf_test_case(
+    VoxelForge.Editor.ConstraintEngine VoxelForgeEditorConstraintEngineTests
+)
+vf_test_target(
+    VoxelForgeEditorMoveGizmoTests SOURCES Editor/MoveGizmoTests.cpp LINK
+    VoxelForgeEditorTransformGizmo
+)
+vf_test_case(
+    VoxelForge.Editor.MoveGizmo VoxelForgeEditorMoveGizmoTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorRotateGizmoTests SOURCES Editor/RotateGizmoTests.cpp LINK
+    VoxelForgeEditorTransformGizmo VoxelForgeEditorCommands
+)
+vf_test_case(VoxelForge.Editor.RotateGizmo VoxelForgeEditorRotateGizmoTests)
+vf_test_target(
+    VoxelForgeEditorScaleGizmoTests SOURCES Editor/ScaleGizmoTests.cpp LINK
+    VoxelForgeEditorTransformGizmo VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.ScaleGizmo VoxelForgeEditorScaleGizmoTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorTransformOperationFrameworkTests SOURCES
+    Editor/TransformOperationFrameworkTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.TransformOperationFramework
+    VoxelForgeEditorTransformOperationFrameworkTests
+)
+vf_test_target(
+    VoxelForgeEditorDialogTests SOURCES Editor/EditorDialogTests.cpp LINK
+    VoxelForgeEditorDialogs
+)
+vf_test_case(VoxelForge.Editor.ModernDialogs VoxelForgeEditorDialogTests)
+vf_test_target(
+    VoxelForgeEditorVoxelEditHistoryTests SOURCES
+    Editor/VoxelEditHistoryTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelEditHistory VoxelForgeEditorVoxelEditHistoryTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorCompositeVoxelEditSmokeTests SOURCES
+    Editor/CompositeVoxelEditSmokeTests.cpp LINK VoxelForgeEditorCommands
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.CompositeVoxelEditSmoke
+    VoxelForgeEditorCompositeVoxelEditSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorVoxelMoveTests SOURCES Editor/VoxelMoveTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(VoxelForge.Editor.VoxelMove VoxelForgeEditorVoxelMoveTests)
+vf_test_target(
+    VoxelForgeEditorVoxelDuplicateTests SOURCES Editor/VoxelDuplicateTests.cpp
+    LINK VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelDuplicate VoxelForgeEditorVoxelDuplicateTests
+)
+vf_test_target(
+    VoxelForgeEditorVoxelRotateTests SOURCES Editor/VoxelRotateTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelRotate VoxelForgeEditorVoxelRotateTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelMirrorTests SOURCES Editor/VoxelMirrorTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelMirror VoxelForgeEditorVoxelMirrorTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelScaleTests SOURCES Editor/VoxelScaleTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelScale VoxelForgeEditorVoxelScaleTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelAlignTests SOURCES Editor/VoxelAlignTests.cpp LINK
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelAlign VoxelForgeEditorVoxelAlignTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorQualityOfLifeTests SOURCES Editor/QualityOfLifeTests.cpp
+    LINK VoxelForgeEditorQualityOfLife
+)
+vf_test_case(
+    VoxelForge.Editor.QualityOfLife VoxelForgeEditorQualityOfLifeTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelSaveTests SOURCES Editor/VoxelSaveTests.cpp
+    EDITOR_INCLUDES LINK VoxelForgeVoxel
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelSave VoxelForgeEditorVoxelSaveTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorVoxelDocumentSaveServiceTests SOURCES
+    Editor/VoxelDocumentSaveServiceTests.cpp LINK VoxelForgeEditorVoxelSave
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelDocumentSaveService
+    VoxelForgeEditorVoxelDocumentSaveServiceTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorFirstCreationExperienceTests SOURCES
+    Editor/FirstCreationExperienceTests.cpp LINK VoxelForgeEditorVoxelCreation
+    VoxelForgeEditorVoxelSave VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.FirstCreationExperience
+    VoxelForgeEditorFirstCreationExperienceTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorDirectCreationFlowTests SOURCES
+    Editor/DirectCreationFlowTests.cpp LINK VoxelForgeEditorVoxelCreation
+)
+vf_test_case(
+    VoxelForge.Editor.DirectCreationFlow VoxelForgeEditorDirectCreationFlowTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorNewVoxelModelWorkflowTests SOURCES
+    Editor/NewVoxelModelWorkflowTests.cpp LINK VoxelForgeEditorVoxelCreation
+    VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.NewVoxelModelWorkflow
+    VoxelForgeEditorNewVoxelModelWorkflowTests
+)
+vf_test_target(
+    VoxelForgeEditorWelcomeExperienceTests SOURCES
+    Editor/WelcomeExperienceTests.cpp LINK VoxelForgeEditorWelcome
+    VoxelForgeProject
+)
+vf_test_case(
+    VoxelForge.Editor.WelcomeExperience VoxelForgeEditorWelcomeExperienceTests
+)
+vf_test_target(
+    VoxelForgeEditorPaletteServiceTests SOURCES Editor/PaletteServiceTests.cpp
+    LINK VoxelForgeEditorPalette
+)
+vf_test_case(
+    VoxelForge.Editor.PaletteService VoxelForgeEditorPaletteServiceTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorPersistentWorkplaneTests SOURCES
+    Editor/PersistentWorkplaneTests.cpp LINK VoxelForgeEditorVoxelCreation
+    VoxelForgeEditorVoxelSave VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.PersistentWorkplane
+    VoxelForgeEditorPersistentWorkplaneTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeEditorProjectSessionTests SOURCES Editor/ProjectSessionTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorCamera.cpp EDITOR_INCLUDES LINK
+    VoxelForgeEditorProjectSession VoxelForgeImGui
+)
+vf_test_case(
+    VoxelForge.Editor.ProjectSession VoxelForgeEditorProjectSessionTests TIMEOUT
+    10
+)
+vf_test_target(
+    VoxelForgeEditorLayoutStabilityTests SOURCES Editor/LayoutStabilityTests.cpp
+    LINK VoxelForgeEditorLayout
+)
+vf_test_case(
+    VoxelForge.Editor.LayoutStability VoxelForgeEditorLayoutStabilityTests
+    TIMEOUT 10
+)
+vf_test_case(
+    VoxelForge.Project.Manager VoxelForgeProjectManagerTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeAssetVoxImporterTests SOURCES Asset/VoxImporterTests.cpp LINK
+    VoxelForgeAsset
+)
+vf_test_case(
+    VoxelForge.Asset.VoxImporter VoxelForgeAssetVoxImporterTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeAssetVoxModelAnalyzerTests SOURCES Asset/VoxModelAnalyzerTests.cpp
+    LINK VoxelForgeAsset
+)
+vf_test_case(
+    VoxelForge.Asset.VoxModelAnalyzer VoxelForgeAssetVoxModelAnalyzerTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeAssetVoxelDocumentTests SOURCES Asset/VoxelDocumentTests.cpp LINK
+    VoxelForgeEditorVoxelDocument
+)
+vf_test_case(
+    VoxelForge.Asset.VoxelDocument VoxelForgeAssetVoxelDocumentTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeAssetVoxDocumentWriterTests SOURCES
+    Asset/VoxDocumentWriterTests.cpp LINK VoxelForgeAsset
+)
+vf_test_case(
+    VoxelForge.Asset.VoxDocumentWriter VoxelForgeAssetVoxDocumentWriterTests
+    TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeVoxelCoreTests SOURCES Voxel/VoxelCoreTests.cpp LINK
+    VoxelForgeVoxConversion
+)
+vf_test_case(VoxelForge.Voxel.Core VoxelForgeVoxelCoreTests TIMEOUT 10)
+vf_test_target(
+    VoxelForgeVoxelSerializerTests SOURCES Voxel/VoxelModelSerializerTests.cpp
+    LINK VoxelForgeVoxel
+)
+vf_test_case(
+    VoxelForge.Voxel.Serializer VoxelForgeVoxelSerializerTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeMeshBuilderTests SOURCES Mesh/VoxelMeshBuilderTests.cpp LINK
+    VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Mesh.VoxelMeshBuilder VoxelForgeMeshBuilderTests TIMEOUT 10
+)
+vf_test_target(
+    VoxelForgeMeshDocumentSyncTests SOURCES Mesh/VoxelDocumentMeshSyncTests.cpp
+    LINK VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Mesh.VoxelDocumentSync VoxelForgeMeshDocumentSyncTests TIMEOUT 10
+)
+if(TARGET VoxelForgeEditor)
+vf_editor_smoke(VoxelForge.Editor.Smoke --smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelViewportSmoke --viewport-smoke-test)
+vf_editor_smoke(
+    VoxelForge.Editor.VoxelSelectionSmoke --voxel-selection-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.SelectionSystemSmoke --selection-system-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.TransformPreviewSmoke --transform-preview-smoke-test
+)
+vf_editor_smoke(VoxelForge.Editor.EraseVoxelSmoke --erase-voxel-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.PaintVoxelSmoke --paint-voxel-smoke-test)
+vf_editor_smoke(
+    VoxelForge.Editor.QualityOfLifeSmoke --quality-of-life-smoke-test
+)
+vf_editor_smoke(VoxelForge.Editor.VoxelSaveSmoke --voxel-save-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.AddVoxelSmoke --add-voxel-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.ModelImportSmoke --model-import-smoke-test)
+vf_editor_smoke(
+    VoxelForge.Editor.DragDropImportSmoke --drag-drop-import-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.VoxelDocumentSmoke --voxel-document-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.VoxelRenderSyncSmoke --voxel-render-sync-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.VoxelRayPickingSmoke --voxel-ray-picking-smoke-test
+)
+vf_editor_smoke(VoxelForge.Editor.VoxelPencilSmoke --voxel-pencil-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelEraserSmoke --voxel-eraser-smoke-test)
+vf_editor_smoke(
+    VoxelForge.Editor.VoxelUndoRedoSmoke --voxel-undo-redo-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.FirstCreationExperienceSmoke
+    --first-creation-experience-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.LayoutStabilitySmoke --layout-stability-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.CreateWorkspaceSmoke --create-workspace-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.DoubleClickCameraSmoke --double-click-camera-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.ViewportNavigationSmoke --viewport-navigation-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.PersistentWorkplaneSmoke
+    --persistent-construction-plane-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.ProjectSessionRestoreSmoke
+    --project-session-restore-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.DirectCreationFlowSmoke --direct-creation-flow-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.InstantNewModelSmoke --instant-new-model-smoke-test
+)
+vf_editor_smoke(VoxelForge.Editor.PaletteUiSmoke --palette-ui-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelFillSmoke --voxel-fill-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelBoxSmoke --voxel-box-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelLineSmoke --voxel-line-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelSphereSmoke --voxel-sphere-smoke-test)
+vf_editor_smoke(
+    VoxelForge.Editor.ModernToolbarSmoke --modern-toolbar-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.KeyboardShortcutsSmoke --keyboard-shortcuts-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.ModernDialogsSmoke --modern-dialogs-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.WelcomeScreenSmoke --welcome-screen-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.RemoveRecentProjectSmoke
+    --remove-recent-project-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.SafeProjectDeletionSmoke
+    --safe-project-deletion-smoke-test
+)
+vf_editor_smoke(VoxelForge.Editor.VoxelMoveSmoke --voxel-move-smoke-test)
+vf_editor_smoke(
+    VoxelForge.Editor.VoxelDuplicateSmoke --voxel-duplicate-smoke-test
+)
+vf_editor_smoke(VoxelForge.Editor.VoxelRotateSmoke --voxel-rotate-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelMirrorSmoke --voxel-mirror-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelScaleSmoke --voxel-scale-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.VoxelAlignSmoke --voxel-align-smoke-test)
+vf_editor_smoke(
+    VoxelForge.Editor.TransformGizmoFoundationSmoke
+    --transform-gizmo-foundation-smoke-test
+)
+vf_editor_smoke(VoxelForge.Editor.MoveGizmoSmoke --move-gizmo-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.RotateGizmoSmoke --rotate-gizmo-smoke-test)
+vf_editor_smoke(VoxelForge.Editor.ScaleGizmoSmoke --scale-gizmo-smoke-test)
+vf_editor_smoke(
+    VoxelForge.Editor.TransformGizmoManagerSmoke
+    --transform-gizmo-manager-smoke-test
+)
+vf_editor_smoke(
+    VoxelForge.Editor.TransformPanelSmoke --transform-panel-smoke-test
+)
+vf_editor_smoke(VoxelForge.Editor.SaveOnExitSmoke --save-on-exit-smoke-test)
+endif()
+vf_test_target(
+    VoxelForgeEditorVoxelStampDomainTests SOURCES
+    Editor/VoxelStampDomainTests.cpp LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.VoxelStampDomain VoxelForgeEditorVoxelStampDomainTests
+)
+vf_test_target(
+    VoxelForgeEditorVfstampFormatTests SOURCES Editor/VfstampFormatTests.cpp
+    LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(VoxelForge.Editor.VfstampFormat VoxelForgeEditorVfstampFormatTests)
+vf_test_target(
+    VoxelForgeEditorVfstampValidationTests SOURCES
+    Editor/VfstampValidationTests.cpp LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.VfstampValidation VoxelForgeEditorVfstampValidationTests
+)
+vf_test_target(
+    VoxelForgeEditorStampCaptureTests SOURCES Editor/StampCaptureTests.cpp LINK
+    VoxelForgeEditorVoxelStamps
+)
+vf_test_case(VoxelForge.Editor.StampCapture VoxelForgeEditorStampCaptureTests)
+vf_test_target(
+    VoxelForgeEditorStampAutoPivotTests SOURCES Editor/StampAutoPivotTests.cpp
+    LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.StampAutoPivot VoxelForgeEditorStampAutoPivotTests
+)
+vf_test_target(
+    VoxelForgeEditorStampProjectLibraryTests SOURCES
+    Editor/StampProjectLibraryTests.cpp LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.StampProjectLibrary
+    VoxelForgeEditorStampProjectLibraryTests
+)
+vf_test_target(
+    VoxelForgeEditorStampCatalogTests SOURCES Editor/StampCatalogTests.cpp LINK
+    VoxelForgeEditorVoxelStamps
+)
+vf_test_case(VoxelForge.Editor.StampCatalog VoxelForgeEditorStampCatalogTests)
+vf_test_target(
+    VoxelForgeEditorSaveSelectionAsStampTests SOURCES
+    Editor/SaveSelectionAsStampTests.cpp LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.SaveSelectionAsStamp
+    VoxelForgeEditorSaveSelectionAsStampTests
+)
+vf_test_target(
+    VoxelForgeEditorSaveSelectionAsStampSmokeTests SOURCES
+    Editor/SaveSelectionAsStampSmokeTests.cpp LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.SaveSelectionAsStampSmoke
+    VoxelForgeEditorSaveSelectionAsStampSmokeTests
+)
+vf_test_target(
+    VoxelForgeEditorStampLivePreviewTests SOURCES
+    Editor/StampLivePreviewTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.StampLivePreview VoxelForgeEditorStampLivePreviewTests
+)
+vf_test_target(
+    VoxelForgeEditorStampLivePreviewSmokeTests SOURCES
+    Editor/StampLivePreviewSmokeTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.StampLivePreviewSmoke
+    VoxelForgeEditorStampLivePreviewSmokeTests
+)
+vf_test_target(
+    VoxelForgeEditorPaletteMappingEngineTests SOURCES
+    Editor/PaletteMappingEngineTests.cpp LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.PaletteMappingEngine
+    VoxelForgeEditorPaletteMappingEngineTests
+)
+vf_test_target(
+    VoxelForgeEditorPaletteMappingEngineSmokeTests SOURCES
+    Editor/PaletteMappingEngineSmokeTests.cpp LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.PaletteMappingEngineSmoke
+    VoxelForgeEditorPaletteMappingEngineSmokeTests
+)
+vf_test_target(
+    VoxelForgeEditorPlaceVoxelStampOperationTests SOURCES
+    Editor/PlaceVoxelStampOperationTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.PlaceVoxelStampOperation
+    VoxelForgeEditorPlaceVoxelStampOperationTests
+)
+vf_test_target(
+    VoxelForgeEditorPlaceVoxelStampOperationSmokeTests SOURCES
+    Editor/StampPlacementSmokeTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.PlaceVoxelStampOperationSmoke
+    VoxelForgeEditorPlaceVoxelStampOperationSmokeTests
+)
+vf_test_target(
+    VoxelForgeEditorStampPlacementPlanningTests SOURCES
+    Editor/StampPlacementPlanningTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.StampPlacementPlanning
+    VoxelForgeEditorStampPlacementPlanningTests
+)
+vf_test_target(
+    VoxelForgeEditorStampPlacementPlanningSmokeTests SOURCES
+    Editor/StampPlacementPlanningSmokeTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.StampPlacementPlanningSmoke
+    VoxelForgeEditorStampPlacementPlanningSmokeTests
+)
+vf_test_target(
+    VoxelForgeEditorStampQuarterRotationTests SOURCES
+    Editor/StampQuarterRotationTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands
+)
+vf_test_case(
+    VoxelForge.Editor.StampQuarterRotation
+    VoxelForgeEditorStampQuarterRotationTests
+)
+vf_test_target(
+    VoxelForgeEditorStampQuarterRotationSmokeTests SOURCES
+    Editor/StampQuarterRotationSmokeTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.StampQuarterRotationSmoke
+    VoxelForgeEditorStampQuarterRotationSmokeTests LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorStampMirrorTests SOURCES Editor/StampMirrorTests.cpp LINK
+    VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_test_case(VoxelForge.Editor.StampMirror VoxelForgeEditorStampMirrorTests)
+vf_test_target(
+    VoxelForgeEditorStampMirrorSmokeTests SOURCES
+    Editor/StampMirrorSmokeTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.StampMirrorSmoke VoxelForgeEditorStampMirrorSmokeTests
+    LABELS Smoke
+)
+vf_test_target(
+    VoxelForgeEditorForgeLibraryViewModelTests SOURCES
+    Editor/ForgeLibraryViewModelTests.cpp LINK VoxelForgeEditorVoxelStamps
+)
+vf_test_case(
+    VoxelForge.Editor.ForgeLibrary VoxelForgeEditorForgeLibraryViewModelTests
+)
+vf_test_target(
+    VoxelForgeEditorForgeLibrarySmokeTests SOURCES
+    Editor/ForgeLibrarySmokeTests.cpp LINK VoxelForgeEditorVoxelStamps
+    VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_test_case(
+    VoxelForge.Editor.ForgeLibrarySmoke VoxelForgeEditorForgeLibrarySmokeTests
+    LABELS Smoke
+)
