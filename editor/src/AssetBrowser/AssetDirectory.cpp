@@ -1018,14 +1018,31 @@ bool AssetDirectory::ResolveEntryForOperation(
         ? entryPath
         : assetsRoot_ / entryPath;
     std::error_code error;
-    const std::filesystem::path operationPath =
+    std::filesystem::path operationPath =
         std::filesystem::absolute(candidate, error).lexically_normal();
 
-    if (error || !IsStrictlyWithinAssetsRoot(operationPath))
+    if (error)
     {
         errorMessage =
             "Asset operation cannot leave the Assets root or target its root.";
         return false;
+    }
+
+    if (!IsStrictlyWithinAssetsRoot(operationPath))
+    {
+        // La même entrée peut être épelée autrement (noms courts Windows,
+        // préfixe traversant un lien) : on retente sous forme canonique
+        // avant de refuser. Un lien final pointant hors racine reste refusé
+        // par le contrôle canonique ci-dessous.
+        const std::filesystem::path canonicalSpelling =
+            std::filesystem::weakly_canonical(operationPath, error);
+        if (error || !IsStrictlyWithinAssetsRoot(canonicalSpelling))
+        {
+            errorMessage =
+                "Asset operation cannot leave the Assets root or target its root.";
+            return false;
+        }
+        operationPath = canonicalSpelling;
     }
 
     const std::filesystem::file_status linkStatus =
