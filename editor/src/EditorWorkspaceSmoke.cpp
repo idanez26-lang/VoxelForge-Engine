@@ -399,7 +399,7 @@ void EditorWorkspace::BuildThumbnailVisualLayout(const ImGuiID dockspaceId)
     showScene_ = false;
     showInspector_ = true;
     showAssetBrowser_ = true;
-    showConsole_ = false;
+    console_.SetVisible(false);
 }
 
 bool EditorWorkspace::RunStampLivePreviewVisualStep(const std::size_t)

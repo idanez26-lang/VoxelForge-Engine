@@ -3,6 +3,7 @@
 #include "AssetBrowser/AssetBrowser.h"
 #include "AssetInspector/AssetInspectorViewModel.h"
 #include "Commands/CommandHistory.h"
+#include "Console/EditorConsoleService.h"
 #include "Commands/Voxel/AddVoxelCommand.h"
 #include "Commands/Voxel/AddVoxelTarget.h"
 #include "Commands/Voxel/EraseVoxelCommand.h"
@@ -628,7 +629,7 @@ private:
     CommandHistory commandHistory_;
     std::uint64_t voxelModelGeneration_ = 0U;
     Vec3 voxelModelCenter_{};
-    std::vector<std::string> consoleMessages_;
+    EditorConsoleService console_;
     EditorCloseRequest closeRequest_{};
     EditorExitRequest exitRequest_{};
     std::unique_ptr<FileDialogService> fileDialogService_;
@@ -686,7 +687,6 @@ private:
     bool showPalette_ = true;
     bool showAssetBrowser_ = true;
     bool showForgeLibrary_ = true;
-    bool showConsole_ = true;
     bool showProfiler_ = false;
     bool showImGuiDemo_ = false;
     bool useViewportInteractionV2_ = false;

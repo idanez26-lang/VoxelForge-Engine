@@ -721,6 +721,7 @@ target_sources(
     PRIVATE
         src/EditorCamera.cpp
         src/EditorLayer.cpp
+        src/Console/EditorConsoleService.cpp
         src/EditorWorkspace.cpp
         src/EditorWorkspaceSmoke.cpp
         src/Input/EditorInputService.cpp

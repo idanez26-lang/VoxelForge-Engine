@@ -8,6 +8,21 @@ function(vf_configure_test target)
     endif()
 endfunction()
 
+add_executable(
+    VoxelForgeEditorConsoleServiceTests
+    Editor/EditorConsoleServiceTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/Console/EditorConsoleService.cpp
+)
+target_include_directories(
+    VoxelForgeEditorConsoleServiceTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+vf_configure_test(VoxelForgeEditorConsoleServiceTests)
+add_test(
+    NAME VoxelForge.Editor.ConsoleService
+    COMMAND $<TARGET_FILE:VoxelForgeEditorConsoleServiceTests>
+)
+
 add_executable(VoxelForgeCoreEventTests Core/EventSystemTests.cpp)
 target_link_libraries(VoxelForgeCoreEventTests PRIVATE VoxelForgeCore)
 vf_configure_test(VoxelForgeCoreEventTests)

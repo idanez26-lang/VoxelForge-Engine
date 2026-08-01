@@ -379,11 +379,10 @@ EditorWorkspace::EditorWorkspace(
       transformGizmoManager_(
           transformGizmoModel_, transformGizmoInteraction_,
           transformPivotManager_),
-      consoleMessages_{
-          "Console ready",
-          "VoxelForge Studio initialized"},
       projectDialogPreferences_(std::move(preferencesFilePath))
 {
+    console_.AddMessage("Console ready");
+    console_.AddMessage("VoxelForge Studio initialized");
     toolContext_.Constraints = &constraintSettings_;
     toolContext_.PivotManager = &transformPivotManager_;
     toolContext_.BrushProfiles = &brushProfileService_;
@@ -638,7 +637,7 @@ void EditorWorkspace::Draw()
         ImGui::SetNextWindowSize(ImVec2(325.0F, 330.0F), ImGuiCond_Always);
         DrawInspectorPanel();
     }
-    if (showConsole_) DrawConsolePanel();
+    if (console_.IsVisible()) DrawConsolePanel();
     if (showProfiler_) DrawProfilerPanel();
 
     if (showImGuiDemo_)
@@ -1019,7 +1018,7 @@ void EditorWorkspace::DrawMainMenuBar()
         ImGui::MenuItem("Scene", nullptr, &showExplorer_);
         ImGui::MenuItem("Inspector", nullptr, &showInspector_);
         ImGui::MenuItem("Transform", nullptr, &showTransformPanel_);
-        ImGui::MenuItem("Console", nullptr, &showConsole_);
+        ImGui::MenuItem("Console", nullptr, console_.VisibilityFlag());
         ImGui::MenuItem("Profiler", nullptr, &showProfiler_);
         ImGui::MenuItem("ImGui Demo", nullptr, &showImGuiDemo_);
         if (ImGui::BeginMenu("Viewport Interaction"))
@@ -1921,7 +1920,7 @@ void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
     showPalette_ = true;
     showAssetBrowser_ = true;
     showForgeLibrary_ = true;
-    showConsole_ = true;
+    console_.SetVisible(true);
 }
 
 void EditorWorkspace::DrawExplorerPanel()
@@ -4359,9 +4358,9 @@ void EditorWorkspace::DrawFileDropOverlay(
 
 void EditorWorkspace::DrawConsolePanel()
 {
-    ImGui::Begin("Console", &showConsole_);
+    ImGui::Begin("Console", console_.VisibilityFlag());
 
-    for (const std::string& message : consoleMessages_)
+    for (const std::string& message : console_.Messages())
     {
         ImGui::TextUnformatted(message.c_str());
     }
@@ -10394,13 +10393,7 @@ void EditorWorkspace::UpdateWindowTitle()
 
 void EditorWorkspace::AddConsoleMessage(std::string message)
 {
-    if (consoleMessages_.size() >= MaximumConsoleMessageCount)
-    {
-        consoleMessages_.erase(consoleMessages_.begin());
-    }
-
-    consoleMessages_.push_back(std::move(message));
-    showConsole_ = true;
+    console_.AddMessage(std::move(message));
 }
 
 std::string EditorWorkspace::GetBackendDisplayName() const
