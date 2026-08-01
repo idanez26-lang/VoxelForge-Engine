@@ -74,6 +74,7 @@
 #include "VoxelStamps/Library/StampJsonCatalogStore.h"
 #include "VoxelStamps/Library/StampProjectLibraryRepository.h"
 #include "VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.h"
+#include "VoxelStamps/Workflow/StampPreviewController.h"
 #include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 #include "VoxelStamps/Placement/StampPlacementSession.h"
 #include "VoxelDocument/VoxelDocumentSession.h"
@@ -728,6 +729,7 @@ private:
     bool transformPreviewSmokeDocumentDirty_ = false;
     bool transformPreviewSmokeRendered_ = false;
     bool voxelEditInProgress_ = false;
+    StampPreviewController stampPreview_;
     bool viewportFocusRequested_ = false;
     bool viewportFocusApplied_ = false;
     std::optional<std::size_t> paletteColorEditorIndex_;

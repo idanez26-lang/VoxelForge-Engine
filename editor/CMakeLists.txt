@@ -724,6 +724,7 @@ target_sources(
         src/Console/EditorConsoleService.cpp
         src/EditorWorkspace.cpp
         src/Layout/EditorDockLayout.cpp
+        src/VoxelStamps/Workflow/StampPreviewController.cpp
         src/EditorWorkspaceSmoke.cpp
         src/Input/EditorInputService.cpp
         src/VoxelStamps/Library/ForgeLibraryPanel.cpp

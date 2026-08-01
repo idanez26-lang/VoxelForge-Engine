@@ -380,7 +380,15 @@ EditorWorkspace::EditorWorkspace(
       transformGizmoManager_(
           transformGizmoModel_, transformGizmoInteraction_,
           transformPivotManager_),
-      projectDialogPreferences_(std::move(preferencesFilePath))
+      projectDialogPreferences_(std::move(preferencesFilePath)),
+      stampPreview_(
+          stampPlacementSession_,
+          voxelDocumentSession_,
+          voxelEditHistory_,
+          static_cast<VoxelEditSession&>(*this),
+          console_,
+          voxelEditInProgress_,
+          [this] { UpdateVoxelHighlights(); })
 {
     console_.AddMessage("Console ready");
     console_.AddMessage("VoxelForge Studio initialized");
@@ -4402,205 +4410,33 @@ void EditorWorkspace::BeginSaveSelectionAsStamp()
 void EditorWorkspace::MoveLatestStampPreview(
     const std::int32_t x, const std::int32_t y, const std::int32_t z)
 {
-    Asset::Voxel::VoxelDocument* const document =
-        voxelDocumentSession_.ActiveDocument();
-    if (!stampPlacementSession_.IsActive() || document == nullptr)
-    {
-        return;
-    }
-
-    const Stamps::StampPlacementSessionResult result =
-        stampPlacementSession_.TranslateTarget(
-            x, y, z, *document, voxelDocumentSession_.Generation());
-    if (!result.Succeeded)
-    {
-        AddConsoleMessage(
-            "Live Stamp Preview: " +
-            std::string(Stamps::StampPlacementDiagnosticMessage(
-                result.Diagnostic)));
-        return;
-    }
-    if (result.PreviewChanged)
-    {
-        UpdateVoxelHighlights();
-    }
-
-    const Stamps::StampPlacementPlan* const plan =
-        stampPlacementSession_.CurrentPlan();
-    AddConsoleMessage(plan != nullptr && plan->Statistics.OverlapCount != 0U
-        ? "Live Stamp Preview: overlap is allowed."
-        : "Live Stamp Preview: valid preview active.");
+    stampPreview_.Move(x, y, z);
 }
 
 void EditorWorkspace::RotateLatestStampPreview(const bool clockwise)
 {
-    Asset::Voxel::VoxelDocument* const document =
-        voxelDocumentSession_.ActiveDocument();
-    if (!stampPlacementSession_.IsActive() || document == nullptr)
-    {
-        return;
-    }
-
-    const Stamps::StampPlacementSessionResult result = clockwise
-        ? stampPlacementSession_.RotateClockwise(
-              *document, voxelDocumentSession_.Generation())
-        : stampPlacementSession_.RotateCounterClockwise(
-              *document, voxelDocumentSession_.Generation());
-    if (result.PreviewChanged)
-    {
-        UpdateVoxelHighlights();
-    }
-    if (!result.Succeeded)
-    {
-        AddConsoleMessage(
-            "Live Stamp Preview: " +
-            std::string(Stamps::StampPlacementDiagnosticMessage(
-                result.Diagnostic)));
-        return;
-    }
-
-    AddConsoleMessage(
-        "Live Stamp Preview: rotation " +
-        std::to_string(
-            static_cast<unsigned int>(
-                stampPlacementSession_.QuarterRotation()) *
-            90U) +
-        " degrees.");
+    stampPreview_.Rotate(clockwise);
 }
 
 void EditorWorkspace::MirrorLatestStampPreview(
     const Stamps::StampPlacementMirrorMode mirror)
 {
-    Asset::Voxel::VoxelDocument* const document =
-        voxelDocumentSession_.ActiveDocument();
-    if (!stampPlacementSession_.IsActive() || document == nullptr)
-    {
-        return;
-    }
-
-    const Stamps::StampPlacementSessionResult result =
-        stampPlacementSession_.SetMirror(
-            mirror, *document, voxelDocumentSession_.Generation());
-    if (result.PreviewChanged)
-    {
-        UpdateVoxelHighlights();
-    }
-    if (!result.Succeeded)
-    {
-        AddConsoleMessage(
-            "Live Stamp Preview: " +
-            std::string(Stamps::StampPlacementDiagnosticMessage(
-                result.Diagnostic)));
-        return;
-    }
-
-    const char* label = "None";
-    switch (stampPlacementSession_.Mirror())
-    {
-    case Stamps::StampPlacementMirrorMode::X:
-        label = "X";
-        break;
-    case Stamps::StampPlacementMirrorMode::Z:
-        label = "Z";
-        break;
-    case Stamps::StampPlacementMirrorMode::XZ:
-        label = "XZ";
-        break;
-    case Stamps::StampPlacementMirrorMode::None:
-    default:
-        break;
-    }
-    AddConsoleMessage(
-        "Live Stamp Preview: mirror " + std::string(label) + ".");
+    stampPreview_.Mirror(mirror);
 }
 
 void EditorWorkspace::PlaceLatestStampPreview()
 {
-    Asset::Voxel::VoxelDocument* const document = voxelDocumentSession_.ActiveDocument();
-    const Stamps::StampPlacementPlan* plan =
-        stampPlacementSession_.CurrentPlan();
-    if (plan == nullptr || document == nullptr ||
-        voxelEditInProgress_ || voxelEditHistory_.IsBusy())
-    {
-        return;
-    }
-
-    if (!stampPlacementSession_.IsCurrent(
-            *document, voxelDocumentSession_.Generation()))
-    {
-        const Stamps::StampPlacementSessionResult refreshed =
-            stampPlacementSession_.Rebuild(
-                *document, voxelDocumentSession_.Generation());
-        if (refreshed.PreviewChanged)
-        {
-            UpdateVoxelHighlights();
-        }
-        AddConsoleMessage(
-            "Place Stamp: the document changed; preview refreshed. "
-            "Click again to place.");
-        return;
-    }
-
-    Stamps::PlaceVoxelStampPreparation prepared =
-        Stamps::PreparePlaceVoxelStampOperation(*plan);
-    if (!prepared.IsReady())
-    {
-        if (prepared.IsNoChange())
-        {
-            AddConsoleMessage("Place Stamp: preview already matches the document.");
-            return;
-        }
-        AddConsoleMessage(
-            "Place Stamp: " +
-            std::string(Stamps::PlaceVoxelStampPreparationStatusMessage(prepared.Status)) +
-            (prepared.Status == Stamps::PlaceVoxelStampPreparationStatus::PaletteMappingFailed
-                ? " Palette: " +
-                    std::string(Stamps::PaletteMappingStatusMessage(prepared.PaletteStatus))
-                : ""));
-        return;
-    }
-
-    voxelEditInProgress_ = true;
-    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
-        static_cast<VoxelEditSession&>(*this), std::move(prepared.Operation));
-    voxelEditInProgress_ = false;
-    if (!result)
-    {
-        AddConsoleMessage("Place Stamp failed: " + result.Message);
-        return;
-    }
-
-    stampPlacementSession_.MarkPlacementCommitted();
-    static_cast<void>(RefreshLatestStampPreview());
-    AddConsoleMessage("Placed Stamp: " + result.Label);
+    stampPreview_.Place();
 }
 
 bool EditorWorkspace::RefreshLatestStampPreview()
 {
-    Asset::Voxel::VoxelDocument* const document =
-        voxelDocumentSession_.ActiveDocument();
-    if (!stampPlacementSession_.IsActive() || document == nullptr)
-    {
-        return false;
-    }
-
-    const Stamps::StampPlacementSessionResult result =
-        stampPlacementSession_.Rebuild(
-            *document, voxelDocumentSession_.Generation());
-    if (result.PreviewChanged)
-    {
-        UpdateVoxelHighlights();
-    }
-    return result.Succeeded;
+    return stampPreview_.Refresh();
 }
 
 void EditorWorkspace::ClearLatestStampPreview() noexcept
 {
-    const bool changed = stampPlacementSession_.Cancel();
-    if (changed)
-    {
-        UpdateVoxelHighlights();
-    }
+    stampPreview_.Clear();
 }
 
 void EditorWorkspace::DrawSaveSelectionAsStampDialog()
