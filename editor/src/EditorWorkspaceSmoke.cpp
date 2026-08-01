@@ -374,33 +374,6 @@ std::string FormatSaveTime(
 }
 }
 
-void EditorWorkspace::BuildThumbnailVisualLayout(const ImGuiID dockspaceId)
-{
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const ImVec2 workspaceSize(
-        viewport->WorkSize.x,
-        std::max(1.0F, viewport->WorkSize.y - StatusBarHeight));
-    ImGui::DockBuilderRemoveNode(dockspaceId);
-    const ImGuiDockNodeFlags flags =
-        static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) |
-        ImGuiDockNodeFlags_PassthruCentralNode;
-    ImGui::DockBuilderAddNode(dockspaceId, flags);
-    ImGui::DockBuilderSetNodeSize(dockspaceId, workspaceSize);
-    ImGuiID visibleId = dockspaceId;
-    static_cast<void>(ImGui::DockBuilderSplitNode(
-        visibleId, ImGuiDir_Right, 0.43F, nullptr, &visibleId));
-    ImGuiID browserId = visibleId;
-    const ImGuiID inspectorId = ImGui::DockBuilderSplitNode(
-        browserId, ImGuiDir_Right, 0.36F, nullptr, &browserId);
-    ImGui::DockBuilderDockWindow(AssetsPanelWindowName, browserId);
-    ImGui::DockBuilderDockWindow("Inspector", inspectorId);
-    ImGui::DockBuilderFinish(dockspaceId);
-    showExplorer_ = false;
-    showScene_ = false;
-    showInspector_ = true;
-    showAssetBrowser_ = true;
-    console_.SetVisible(false);
-}
 
 bool EditorWorkspace::RunStampLivePreviewVisualStep(const std::size_t)
 {

@@ -4,6 +4,7 @@
 #include "VoxelSelection/VoxelRaycast.h"
 #include "VoxelSelection/VoxelRayTransform.h"
 #include "EditorWindowTitle.h"
+#include "Layout/EditorDockLayout.h"
 #include "Layout/PalettePanelLayout.h"
 #include "Dialogs/EditorDialogStyle.h"
 #include "Toolbar/EditorToolbar.h"
@@ -583,7 +584,7 @@ void EditorWorkspace::Draw()
     }
 
     const ImGuiID dockspaceId = ImGui::GetID(WorkspaceDockspaceName);
-    DrawDockSpace(dockspaceId);
+    DrawEditorDockSpace(dockspaceId);
 
     bool layoutRebuilt = false;
     if (createWorkspaceSmokeSeedLegacy_)
@@ -599,9 +600,15 @@ void EditorWorkspace::Draw()
     if (migrateOldWorkspace || resetLayoutRequested_)
     {
         if (thumbnailVisualLayoutRequested_)
-            BuildThumbnailVisualLayout(dockspaceId);
+        {
+            BuildThumbnailVisualDockLayout(dockspaceId);
+            ApplyThumbnailVisualLayoutPanelVisibility();
+        }
         else
-            BuildDefaultLayout(dockspaceId);
+        {
+            BuildDefaultDockLayout(dockspaceId);
+            ApplyDefaultLayoutPanelVisibility();
+        }
         resetLayoutRequested_ = false;
         thumbnailVisualLayoutRequested_ = false;
         createWorkspaceMigrationApplied_ |= migrateOldWorkspace;
@@ -1784,144 +1791,7 @@ void EditorWorkspace::ApplyVoxelHistorySelection(
     UpdateVoxelHighlights();
 }
 
-void EditorWorkspace::DrawDockSpace(const ImGuiID dockspaceId)
-{
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const ImVec2 workspaceSize(
-        viewport->WorkSize.x,
-        std::max(1.0F, viewport->WorkSize.y - StatusBarHeight));
 
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(workspaceSize);
-    ImGui::SetNextWindowViewport(viewport->ID);
-
-    constexpr ImGuiWindowFlags windowFlags =
-        ImGuiWindowFlags_NoDocking |
-        ImGuiWindowFlags_NoTitleBar |
-        ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoBringToFrontOnFocus |
-        ImGuiWindowFlags_NoNavFocus |
-        ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoBackground;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
-
-    ImGui::Begin("##VoxelForgeWorkspaceHost", nullptr, windowFlags);
-    ImGui::PopStyleVar(3);
-
-    ImGui::DockSpace(
-        dockspaceId,
-        ImVec2(0.0F, 0.0F),
-        ImGuiDockNodeFlags_PassthruCentralNode);
-
-    ImGui::End();
-}
-
-void EditorWorkspace::BuildDefaultLayout(const ImGuiID dockspaceId)
-{
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const ImVec2 workspaceSize(
-        viewport->WorkSize.x,
-        std::max(1.0F, viewport->WorkSize.y - StatusBarHeight));
-
-    ImGui::DockBuilderRemoveNode(dockspaceId);
-
-    const ImGuiDockNodeFlags dockNodeFlags =
-        static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) |
-        ImGuiDockNodeFlags_PassthruCentralNode;
-
-    ImGui::DockBuilderAddNode(dockspaceId, dockNodeFlags);
-    ImGui::DockBuilderSetNodeSize(dockspaceId, workspaceSize);
-
-    constexpr float PreferredLeftPanelFraction = 0.070F;
-    constexpr float PreferredRightPanelFraction = 0.073F;
-    constexpr float MinimumSidePanelWidth = 140.0F;
-    constexpr float MaximumSidePanelWidth = 220.0F;
-    constexpr float MinimumViewportWidthFraction = 0.75F;
-    constexpr float PreferredConsoleHeightFraction = 0.10F;
-    constexpr float MinimumConsoleHeight = 96.0F;
-    constexpr float MaximumConsoleHeight = 140.0F;
-
-    float leftPanelWidth = std::clamp(
-        workspaceSize.x * PreferredLeftPanelFraction,
-        MinimumSidePanelWidth,
-        MaximumSidePanelWidth);
-    float rightPanelWidth = std::clamp(
-        workspaceSize.x * PreferredRightPanelFraction,
-        MinimumSidePanelWidth,
-        MaximumSidePanelWidth);
-    const float maximumSidePanelTotal = workspaceSize.x *
-        (1.0F - MinimumViewportWidthFraction);
-    const float requestedSidePanelTotal = leftPanelWidth + rightPanelWidth;
-    if (requestedSidePanelTotal > maximumSidePanelTotal &&
-        requestedSidePanelTotal > 0.0F)
-    {
-        const float scale = maximumSidePanelTotal / requestedSidePanelTotal;
-        leftPanelWidth *= scale;
-        rightPanelWidth *= scale;
-    }
-    const float consoleHeight = std::clamp(
-        workspaceSize.y * PreferredConsoleHeightFraction,
-        MinimumConsoleHeight,
-        MaximumConsoleHeight);
-
-    ImGuiID topId = dockspaceId;
-    const ImGuiID bottomId = ImGui::DockBuilderSplitNode(
-        topId,
-        ImGuiDir_Down,
-        consoleHeight / workspaceSize.y,
-        nullptr,
-        &topId);
-
-    ImGuiID rightId = ImGui::DockBuilderSplitNode(
-        topId,
-        ImGuiDir_Right,
-        rightPanelWidth / workspaceSize.x,
-        nullptr,
-        &topId);
-
-    const ImGuiID leftId = ImGui::DockBuilderSplitNode(
-        topId,
-        ImGuiDir_Left,
-        leftPanelWidth / (workspaceSize.x - rightPanelWidth),
-        nullptr,
-        &topId);
-
-    ImGuiID toolsId = leftId;
-    const ImGuiID styleId = ImGui::DockBuilderSplitNode(
-        toolsId, ImGuiDir_Down, 0.34F, nullptr, &toolsId);
-    const ImGuiID toolOptionsId = ImGui::DockBuilderSplitNode(
-        toolsId, ImGuiDir_Down, 0.50F, nullptr, &toolsId);
-
-    ImGui::DockBuilderDockWindow(ToolsPanelWindowName, toolsId);
-    ImGui::DockBuilderDockWindow(ToolOptionsPanelWindowName, toolOptionsId);
-    ImGui::DockBuilderDockWindow(StylePanelWindowName, styleId);
-    ImGui::DockBuilderDockWindow(ViewportPanelWindowName, topId);
-    ImGui::DockBuilderDockWindow(AssetsPanelWindowName, rightId);
-    ImGui::DockBuilderDockWindow(ForgeLibraryPanelWindowName, rightId);
-    ImGui::DockBuilderDockWindow(ScenePanelWindowName, rightId);
-    ImGui::DockBuilderDockWindow(InspectorPanelWindowName, rightId);
-    ImGui::DockBuilderDockWindow(TransformPanelWindowName, rightId);
-    ImGui::DockBuilderDockWindow("Console", bottomId);
-    if (ImGuiDockNode* const rightNode = ImGui::DockBuilderGetNode(rightId))
-        rightNode->SelectedTabId = ImHashStr(AssetsPanelWindowName);
-    ImGui::DockBuilderFinish(dockspaceId);
-
-    showTools_ = true;
-    showToolOptions_ = true;
-    showExplorer_ = true;
-    showScene_ = true;
-    showInspector_ = true;
-    showTransformPanel_ = true;
-    showPalette_ = true;
-    showAssetBrowser_ = true;
-    showForgeLibrary_ = true;
-    console_.SetVisible(true);
-}
 
 void EditorWorkspace::DrawExplorerPanel()
 {
@@ -10406,6 +10276,29 @@ std::string EditorWorkspace::GetBackendDisplayName() const
     }
 
     return backendName.empty() ? "Unavailable" : backendName;
+}
+
+void EditorWorkspace::ApplyDefaultLayoutPanelVisibility()
+{
+    showTools_ = true;
+    showToolOptions_ = true;
+    showExplorer_ = true;
+    showScene_ = true;
+    showInspector_ = true;
+    showTransformPanel_ = true;
+    showPalette_ = true;
+    showAssetBrowser_ = true;
+    showForgeLibrary_ = true;
+    console_.SetVisible(true);
+}
+
+void EditorWorkspace::ApplyThumbnailVisualLayoutPanelVisibility()
+{
+    showExplorer_ = false;
+    showScene_ = false;
+    showInspector_ = true;
+    showAssetBrowser_ = true;
+    console_.SetVisible(false);
 }
 
 } // namespace VoxelForge::Editor

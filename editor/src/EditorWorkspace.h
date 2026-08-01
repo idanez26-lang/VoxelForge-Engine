@@ -267,9 +267,8 @@ private:
     void ApplyVoxelHistorySelection(const VoxelEditHistoryResult& result);
     void UndoCommand();
     void RedoCommand();
-    void DrawDockSpace(ImGuiID dockspaceId);
-    void BuildDefaultLayout(ImGuiID dockspaceId);
-    void BuildThumbnailVisualLayout(ImGuiID dockspaceId);
+    void ApplyDefaultLayoutPanelVisibility();
+    void ApplyThumbnailVisualLayoutPanelVisibility();
 
     void DrawExplorerPanel();
     void DrawToolsPanel();

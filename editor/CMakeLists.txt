@@ -504,6 +504,7 @@ add_library(VoxelForgeEditorLayout STATIC)
 target_sources(
     VoxelForgeEditorLayout
     PRIVATE
+        src/Layout/EditorDockLayout.cpp
         src/Layout/EditorLayoutPersistence.cpp
         src/Layout/InspectorLayoutModel.cpp
         src/Layout/PalettePanelLayout.cpp
