@@ -4600,10 +4600,10 @@ void EditorWorkspace::DrawModelImportDialogs()
             "Choose how VoxelForge should resolve this file-name collision."))
     {
         ImGui::TextUnformatted("Le fichier existe déjà.");
-        if (pendingImportCollision_)
+        if (const auto& collision = importBatch_.PendingCollision())
         {
             ImGui::TextWrapped("%s",
-                pendingImportCollision_->DestinationPath.string().c_str());
+                collision->DestinationPath.string().c_str());
         }
         const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts();
         EditorDialogStyle::BeginActions();
@@ -5643,8 +5643,7 @@ void EditorWorkspace::PrepareForApplicationClose()
     dragDropImport_.Reset();
     pendingDropImportTarget_ = DragDropImportTarget::None;
     selectedImportPaths_.clear();
-    pendingImportPaths_.clear();
-    pendingImportCollision_.reset();
+    importBatch_.Reset();
     showImportConfirmationPopup_ = false;
     showImportCollisionPopup_ = false;
     showOpenImportedModelPopup_ = false;
@@ -5692,9 +5691,7 @@ void EditorWorkspace::SynchronizeProjectAssets()
         pendingDropImportTarget_ = DragDropImportTarget::None;
         importStartedFromDrop_ = false;
         selectedImportPaths_.clear();
-        pendingImportPaths_.clear();
-        successfulImportPaths_.clear();
-        pendingImportCollision_.reset();
+        importBatch_.Reset();
         showImportConfirmationPopup_ = false;
         showImportCollisionPopup_ = false;
         modelImportService_.SetRefreshCallback(
@@ -5853,45 +5850,30 @@ void EditorWorkspace::BeginModelImport(
     std::vector<std::filesystem::path> sourcePaths)
 {
     modelImportService_.SetRefreshCallback({});
-    pendingImportPaths_ = std::move(sourcePaths);
-    pendingImportIndex_ = 0U;
-    requestedImportCount_ = pendingImportPaths_.size();
-    completedImportCount_ = 0U;
-    skippedImportCount_ = 0U;
-    failedImportCount_ = 0U;
-    successfulImportPaths_.clear();
-    pendingImportCollision_.reset();
+    importBatch_.Begin(std::move(sourcePaths));
     ContinueModelImport(ModelImportCollisionAction::Ask);
 }
 
 void EditorWorkspace::ContinueModelImport(
     ModelImportCollisionAction collisionAction)
 {
-    while (pendingImportIndex_ < pendingImportPaths_.size())
+    while (importBatch_.HasPending())
     {
-        const std::filesystem::path source =
-            pendingImportPaths_[pendingImportIndex_];
+        const std::filesystem::path source = importBatch_.CurrentSource();
         const ModelImportResult result =
             modelImportService_.ImportModel(source, collisionAction);
         collisionAction = ModelImportCollisionAction::Ask;
 
-        if (result.Status == ModelImportStatus::Collision)
+        switch (importBatch_.Classify(result))
         {
-            pendingImportCollision_ = result;
+        case ModelImportBatchStep::Collision:
             showImportCollisionPopup_ = true;
             return;
-        }
-        if (result.Status == ModelImportStatus::Cancelled)
-        {
+        case ModelImportBatchStep::Cancelled:
             AddConsoleMessage("Model import cancelled.");
             FinishModelImport(true);
             return;
-        }
-
-        if (result.Succeeded())
-        {
-            ++completedImportCount_;
-            successfulImportPaths_.push_back(result.DestinationPath);
+        case ModelImportBatchStep::Imported:
             LogModelImport(result);
             if (importStartedFromDrop_)
             {
@@ -5902,23 +5884,17 @@ void EditorWorkspace::ContinueModelImport(
                         result.DestinationPath.filename().string();
                 AddConsoleMessage(message + ".");
             }
-        }
-        else if (result.Status == ModelImportStatus::Skipped)
-        {
-            ++skippedImportCount_;
+            break;
+        case ModelImportBatchStep::Skipped:
             AddConsoleMessage(
                 "Import skipped: " + source.filename().string());
-        }
-        else
-        {
-            ++failedImportCount_;
+            break;
+        case ModelImportBatchStep::Failed:
             AddConsoleMessage(
                 "Import failed: " + source.filename().string() +
                 " - " + result.Message);
+            break;
         }
-
-        ++pendingImportIndex_;
-        pendingImportCollision_.reset();
     }
     FinishModelImport();
 }
@@ -5930,10 +5906,12 @@ void EditorWorkspace::FinishModelImport(const bool cancelled)
         {
             static_cast<void>(assetBrowser_.Refresh());
         });
-    if (!successfulImportPaths_.empty())
+    const std::vector<std::filesystem::path>& successes =
+        importBatch_.SuccessfulPaths();
+    if (!successes.empty())
     {
         const std::filesystem::path relativeToAssets =
-            successfulImportPaths_.back().lexically_relative(
+            successes.back().lexically_relative(
                 modelImportService_.ProjectRoot() / "Assets");
         static_cast<void>(assetBrowser_.RevealEntry(relativeToAssets));
         static_cast<void>(assetInspector_.UpdateSelection(
@@ -5943,36 +5921,29 @@ void EditorWorkspace::FinishModelImport(const bool cancelled)
     if (importStartedFromDrop_)
     {
         AddConsoleMessage("[Import] Completed:\n" +
-            std::to_string(completedImportCount_) + " imported\n" +
-            std::to_string(skippedImportCount_) + " skipped\n" +
-            std::to_string(failedImportCount_) + " failed");
+            std::to_string(importBatch_.CompletedCount()) + " imported\n" +
+            std::to_string(importBatch_.SkippedCount()) + " skipped\n" +
+            std::to_string(importBatch_.FailedCount()) + " failed");
         if (!cancelled &&
             pendingDropImportTarget_ == DragDropImportTarget::Viewport &&
-            requestedImportCount_ == 1U &&
-            successfulImportPaths_.size() == 1U)
-            static_cast<void>(OpenVoxInViewportNow(
-                successfulImportPaths_.front()));
+            importBatch_.HasSingleSuccess())
+            static_cast<void>(OpenVoxInViewportNow(successes.front()));
         if (cancelled)
             dragDropImport_.Cancel();
         else
             dragDropImport_.MarkCompleted();
     }
-    else if (requestedImportCount_ > 1U)
+    else if (importBatch_.RequestedCount() > 1U)
     {
         AddConsoleMessage(
-            std::to_string(successfulImportPaths_.size()) +
-            " models imported.");
+            std::to_string(successes.size()) + " models imported.");
     }
-    else if (requestedImportCount_ == 1U &&
-             successfulImportPaths_.size() == 1U)
+    else if (importBatch_.HasSingleSuccess())
     {
-        importedModelToOpen_ = successfulImportPaths_.front();
+        importedModelToOpen_ = successes.front();
         showOpenImportedModelPopup_ = true;
     }
-    pendingImportPaths_.clear();
-    pendingImportCollision_.reset();
-    pendingImportIndex_ = 0U;
-    requestedImportCount_ = 0U;
+    importBatch_.Reset();
     pendingDropImportTarget_ = DragDropImportTarget::None;
     importStartedFromDrop_ = false;
 }

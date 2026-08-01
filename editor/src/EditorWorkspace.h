@@ -16,6 +16,7 @@
 #include "Input/EditorInputService.h"
 #include "DragDropImport/DragDropImportController.h"
 #include "Layout/InspectorLayoutModel.h"
+#include "ModelImport/ModelImportBatch.h"
 #include "ModelImport/ModelImportService.h"
 #include "Palette/PaletteService.h"
 #include "Platform/FileDialogService.h"
@@ -660,15 +661,8 @@ private:
     std::optional<std::filesystem::path> failedRecentProjectPath_;
     std::filesystem::path pendingProjectDeletionPath_;
     std::vector<std::filesystem::path> selectedImportPaths_;
-    std::vector<std::filesystem::path> pendingImportPaths_;
-    std::vector<std::filesystem::path> successfulImportPaths_;
-    std::optional<ModelImportResult> pendingImportCollision_;
+    ModelImportBatch importBatch_;
     std::optional<std::filesystem::path> importedModelToOpen_;
-    std::size_t pendingImportIndex_ = 0U;
-    std::size_t requestedImportCount_ = 0U;
-    std::size_t completedImportCount_ = 0U;
-    std::size_t skippedImportCount_ = 0U;
-    std::size_t failedImportCount_ = 0U;
     DragDropImportTarget pendingDropImportTarget_ =
         DragDropImportTarget::None;
     DragDropRect assetBrowserDropRect_{};

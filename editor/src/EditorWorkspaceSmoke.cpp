@@ -2066,7 +2066,7 @@ bool EditorWorkspace::RunDragDropImportSmokeStep(
         BeginFileDrop(150.0F, 50.0F);
         AddDroppedFile(sourcePaths[2], 150.0F, 50.0F);
         CompleteFileDrop(150.0F, 50.0F);
-        if (!confirmDrop() || !pendingImportCollision_) return false;
+        if (!confirmDrop() || !importBatch_.PendingCollision()) return false;
         showImportCollisionPopup_ = false;
         ContinueModelImport(ModelImportCollisionAction::Rename);
         const auto renamed = modelImportService_.ModelsDirectory() /

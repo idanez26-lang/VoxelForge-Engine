@@ -581,6 +581,7 @@ target_sources(
     VoxelForgeEditorModelImport
     PRIVATE
         src/DragDropImport/DragDropImportController.cpp
+        src/ModelImport/ModelImportBatch.cpp
         src/ModelImport/ModelImportService.cpp
 )
 target_link_libraries(

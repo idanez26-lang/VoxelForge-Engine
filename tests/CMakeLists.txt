@@ -117,6 +117,19 @@ add_test(
     NAME VoxelForge.Editor.DragDropImport
     COMMAND $<TARGET_FILE:VoxelForgeEditorModelImportTests> --drag-drop-only
 )
+add_executable(
+    VoxelForgeEditorModelImportBatchTests
+    Editor/ModelImportBatchTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorModelImportBatchTests
+    PRIVATE VoxelForgeEditorModelImport
+)
+vf_configure_test(VoxelForgeEditorModelImportBatchTests)
+add_test(
+    NAME VoxelForge.Editor.ModelImportBatch
+    COMMAND $<TARGET_FILE:VoxelForgeEditorModelImportBatchTests>
+)
 
 add_executable(
     VoxelForgeEditorAssetMetadataTests
