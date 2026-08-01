@@ -5,6 +5,9 @@ Règle : aucune décision n'est effective sans validation explicite de Tony.
 
 | Date | Décision | Source |
 |---|---|---|
+| 2026-08-01 | Lot 4c clos en statu quo : `SynchronizeProjectAssets` reste dans EditorWorkspace (orchestration légitime ; pas de contrôleur à 15 références) | Tony, session Cowork 01/08 |
+| 2026-08-01 | Règle de build local : Visual Studio fermé pendant tout configure/build CLI (un seul propriétaire du `binaryDir` — sinon `rules.ninja` silencieusement absent) ; CMake 4.4.1 standalone en service | Diagnostic session 01/08 (build/DIAGNOSTIC.md) |
+| 2026-08-01 | Workflow de collaboration : Claude (Cowork) = code/fichiers ; Codex = exécution console sur prompts validés par Tony ; aucun commit/push sans validation explicite | Tony, session Cowork 01/08 |
 | 2026-07-31 | Push de sauvegarde systématique : `feature/imgui` et branches actives poussées ; plus de semaine de travail non poussée | Session Cowork 31/07 |
 | 2026-07-31 | Infrastructure adoptée : CI GitHub Actions (build + ctest), `.clang-format` (nouveau code uniquement), `.editorconfig`, racine rangée dans `docs/history/` | Session Cowork 31/07 |
 | 2026-07-31 | Consolidation documentaire : `000_Vision` / `010_Roadmap` / `020_Status` créés ; ancienne ROADMAP archivée (pivot éditeur d'abord acté par écrit) | Audit Phase A §7.1 |
@@ -16,7 +19,8 @@ Règle : aucune décision n'est effective sans validation explicite de Tony.
 ## Décisions en attente (Tony)
 
 1. Archiver ou supprimer `feature/common-foundation` (ancêtre strict confirmé, aucun contenu unique) ;
-2. Critères de fusion de `experiment/viewport-interaction-v2` dans `feature/imgui` (quels tests verts, quel périmètre) ;
-3. Adoption de `tests/CMakeLists.proposed.txt` comme `tests/CMakeLists.txt` (après commit du chantier V2) ;
-4. Tag de baseline `v0.1.2` (après premier run CI complet vert) ;
-5. Validation du Grand Livre et de la Roadmap v1 (les présents documents).
+2. Adoption de `tests/CMakeLists.proposed.txt` comme `tests/CMakeLists.txt` (à régénérer d'abord — obsolète depuis les lots 0-4) ;
+3. Validation du Grand Livre et de la Roadmap v1 (les présents documents).
+
+Résolues depuis le 31/07 : fusion V2 (avance rapide dans `feature/imgui`, branche supprimée) ;
+tag `v0.1.2` posé (`369277b`).
