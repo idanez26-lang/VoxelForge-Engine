@@ -14,13 +14,13 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 | Branche | État |
 |---|---|
 | `main` | Starter kit v0.0.1, aucun code moteur |
-| `feature/imgui` | **Branche de travail unique** — sommet `0afa2cf` (lot 5), CI verte |
+| `feature/imgui` | **Branche de travail unique** — sommet `43f99a1` (lot 6) |
 | `experiment/viewport-interaction-v2` | Fusionnée en avance rapide dans `feature/imgui`, supprimée (locale + distante) |
 | `feature/common-foundation` | Ancêtre strict de `feature/imgui` — archivage/suppression : décision Tony en attente |
 
 ## Chantier VF-0260 — dégraissage EditorWorkspace.cpp
 
-`EditorWorkspace.cpp` : 17 398 lignes (31/07) → **9 977 lignes (01/08, −42,7 %)**.
+`EditorWorkspace.cpp` : 17 398 lignes (31/07) → **9 180 lignes (01/08, −47,2 %)**.
 
 | Lot | Contenu | État |
 |---|---|---|
@@ -32,16 +32,19 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 | 4b | `ProtectedProjectDeletionRoots` → `ProjectDeletionService::DefaultProtectedRoots()` (statique) + test de garde | ✅ Commité `d383023`, CI #11 verte |
 | 4c | `SynchronizeProjectAssets` (~80 l., orchestration de ~15 services) | ✅ Clos par décision : **statu quo assumé** (Tony, 01/08) — orchestration légitime, un contrôleur à 15 références serait pire |
 | 5 | Import : machine à états `ModelImport/ModelImportBatch` (file, compteurs, collisions, décisions de fin) + test dédié ; fermeture examinée → déjà factorisée (`dirtyActionConfirmation_`/`closeRequest_`), rien d'extractible | ✅ Commité `0afa2cf`, CI verte (8/8 ctest ciblés en local) |
-| 6 | Adaptateurs outils / transforms | ⏭️ Prochain lot |
+| 6 | Adaptateurs transforms (23 méthodes : appliers panneau, ponts contraintes, Begin/Apply/Cancel Move/Duplicate/Rotate/Mirror/Scale/Align, annulation gizmo) déplacés en TU dédiée `EditorWorkspaceTransforms.cpp` — pur déplacement, comportement inchangé | ✅ Commité `43f99a1` (128/128 ctest bloquants en local) |
 | 7 | `DrawScenePanel` (1 536 l.) + `UpdateVoxelHighlights` (628 l.) + stroke Smart Tool — invariants sensibles, gardé pour la fin | ⚪ À venir |
 
 ## Tests et build
 
-- Build Debug complet vert (01/08, poste local, x64) ;
-- ctest ciblé lot 5 : 8/8 verts, dont les nouveaux `VoxelForge.Editor.ProjectSessionMapping`
-  (lot 4) et `VoxelForge.Editor.ModelImportBatch` (lot 5) ;
-- CI : verte jusqu'à `0afa2cf` inclus ; l'étape `EditorApp` (GPU requis) échoue sur
-  runner comme attendu (non bloquante) ;
+- Build Debug complet vert (01/08, poste local, x64) ; suite bloquante 128/128 (lot 6) ;
+- Nouveaux tests : `VoxelForge.Editor.ProjectSessionMapping` (lot 4),
+  `VoxelForge.Editor.ModelImportBatch` (lot 5) ;
+- CI : verte jusqu'à `0afa2cf` inclus (lot 6 `43f99a1` : run en cours au moment de cette note) ;
+  l'étape `EditorApp` (GPU requis) échoue sur runner comme attendu (non bloquante) ;
+- ⚠️ Suites locales : lancer ctest avec `TMP`/`TEMP` redirigés vers
+  `E:\VoxelForge-Engine\build\tmp` — le `%TEMP%` de C: provoque des `Access is denied`
+  (ACL/Defender), vu sur VoxelForge.Editor.StampCatalog ;
 - `tests/CMakeLists.proposed.txt` : obsolète depuis les lots (à régénérer avant adoption).
 
 ## Environnement de build local (leçons du 01/08)
@@ -58,16 +61,22 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 
 ## À faire (hors lots)
 
-1. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias), **benchmark
-   grand `.vox` en Release** (objectiver les lags outils ressentis — build Debug suspecté) ;
-2. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
+1. **PERF-01 — lags outils (confirmés en Release, même à 1 voxel, survol ET tracé)** :
+   benchmark STAMP-16 exécuté (01/08, Release) → pipeline stamp hors de cause aux petites
+   tailles (~1 ms), upload GPU à coût fixe ~1 ms, mesh rebuild 73-166 ms à 131k-262k voxels
+   (candidat rebuild incrémental, lot 7). Hypothèse pour le lag petit-modèle : travail
+   par événement souris (préview/highlights re-téléversés). Prochaine étape :
+   instrumentation de la boucle d'édition (chronos par frame, journal des frames lentes) ;
+2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
+3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;
-3. Nettoyage différé : copies de noms de panneaux, régénérer `tests/CMakeLists.proposed.txt`,
+4. Nettoyage différé : copies de noms de panneaux, régénérer `tests/CMakeLists.proposed.txt`,
    lot 3-bis (`BeginSaveSelectionAsStamp` + dialogue stamps), presenter des dialogues projet
    (facultatif, post-4a/4b) ;
-4. Phase D ensuite : Smart Tools — gate SMART-02.5 avant SMART-03 (AR-0104).
+5. Phase D ensuite : Smart Tools — gate SMART-02.5 avant SMART-03 (AR-0104).
 
 ## Dette principale
 
-`EditorWorkspace.cpp` ≈ 9 980 lignes (God Object en résorption, −42,7 % depuis le 31/07) —
-poursuivre les lots 6→7 de VF-0260.
+`EditorWorkspace.cpp` ≈ 9 180 lignes (God Object en résorption, −47,2 % depuis le 31/07) —
+reste le lot 7 de VF-0260 (DrawScenePanel, UpdateVoxelHighlights, stroke Smart Tool),
+à coupler avec le verdict PERF-01.
