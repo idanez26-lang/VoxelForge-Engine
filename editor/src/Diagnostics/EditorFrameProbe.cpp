@@ -14,6 +14,9 @@ const char* EditorFrameProbeSlotName(const EditorFrameProbeSlot slot) noexcept
     case EditorFrameProbeSlot::PreviewResolve: return "preview";
     case EditorFrameProbeSlot::MeshSynchronize: return "mesh-sync";
     case EditorFrameProbeSlot::GpuUpload: return "gpu-upload";
+    case EditorFrameProbeSlot::ScenePanel: return "scene-panel";
+    case EditorFrameProbeSlot::InteractionTick: return "v2-tick";
+    case EditorFrameProbeSlot::Stroke: return "stroke";
     }
     return "unknown";
 }

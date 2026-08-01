@@ -15,10 +15,13 @@ enum class EditorFrameProbeSlot : std::uint8_t
     Highlights,      // EditorWorkspace::UpdateVoxelHighlights, whole body
     PreviewResolve,  // SmartToolController::ResolvePreview calls
     MeshSynchronize, // VoxelDocumentMeshCache::Synchronize
-    GpuUpload        // ViewportRenderer::Upload
+    GpuUpload,       // ViewportRenderer::Upload
+    ScenePanel,      // EditorWorkspace::DrawScenePanel, whole body
+    InteractionTick, // ViewportInteractionV2 SubmitInput + Tick + presentation
+    Stroke           // EditorWorkspace::ContinueSmartToolStroke
 };
 
-inline constexpr std::size_t EditorFrameProbeSlotCount = 4U;
+inline constexpr std::size_t EditorFrameProbeSlotCount = 7U;
 
 [[nodiscard]] const char* EditorFrameProbeSlotName(
     EditorFrameProbeSlot slot) noexcept;

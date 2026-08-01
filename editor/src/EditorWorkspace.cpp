@@ -1862,6 +1862,8 @@ void EditorWorkspace::DrawToolOptionsPanel()
 
 void EditorWorkspace::DrawScenePanel()
 {
+    const EditorFrameProbeScope scenePanelProbe(
+        frameProbe_, EditorFrameProbeSlot::ScenePanel);
     const bool focusRequested = std::exchange(
         viewportFocusRequested_, false);
     if (focusRequested) ImGui::SetNextWindowFocus();
@@ -2504,10 +2506,15 @@ void EditorWorkspace::DrawScenePanel()
             interactionInput.DocumentRevision =
                 document != nullptr ? document->GetRevision() : 0U;
             interactionInput.PointerRay = viewportRay;
-            viewportInteractionV2_.SubmitInput(std::move(interactionInput));
-            viewportInteractionV2_.Tick(
-                document,
-                selectionService_);
+            {
+                const EditorFrameProbeScope interactionProbe(
+                    frameProbe_, EditorFrameProbeSlot::InteractionTick);
+                viewportInteractionV2_.SubmitInput(
+                    std::move(interactionInput));
+                viewportInteractionV2_.Tick(
+                    document,
+                    selectionService_);
+            }
             CommitViewportInteractionV2Move();
 
             const InteractionV2::ViewportPresentation& presentation =
@@ -6891,6 +6898,8 @@ bool EditorWorkspace::BeginSmartToolStroke()
 bool EditorWorkspace::ContinueSmartToolStroke()
 {
     if (!smartToolStroke_.IsActive()) return false;
+    const EditorFrameProbeScope strokeProbe(
+        frameProbe_, EditorFrameProbeSlot::Stroke);
     Asset::Voxel::VoxelDocument* const document = voxelDocumentSession_.ActiveDocument();
     const SmartToolStrokeContext& context = smartToolStroke_.Context();
     if (document == nullptr || reinterpret_cast<std::uintptr_t>(document) !=
