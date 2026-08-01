@@ -504,7 +504,6 @@ add_library(VoxelForgeEditorLayout STATIC)
 target_sources(
     VoxelForgeEditorLayout
     PRIVATE
-        src/Layout/EditorDockLayout.cpp
         src/Layout/EditorLayoutPersistence.cpp
         src/Layout/InspectorLayoutModel.cpp
         src/Layout/PalettePanelLayout.cpp
@@ -724,6 +723,7 @@ target_sources(
         src/EditorLayer.cpp
         src/Console/EditorConsoleService.cpp
         src/EditorWorkspace.cpp
+        src/Layout/EditorDockLayout.cpp
         src/EditorWorkspaceSmoke.cpp
         src/Input/EditorInputService.cpp
         src/VoxelStamps/Library/ForgeLibraryPanel.cpp
