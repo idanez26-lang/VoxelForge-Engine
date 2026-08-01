@@ -1,3 +1,21 @@
+add_library(VoxelForgeEditorDiagnostics STATIC)
+target_sources(
+    VoxelForgeEditorDiagnostics
+    PRIVATE src/Diagnostics/EditorFrameProbe.cpp
+)
+target_include_directories(
+    VoxelForgeEditorDiagnostics
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_features(VoxelForgeEditorDiagnostics PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeEditorDiagnostics PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeEditorDiagnostics PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_library(VoxelForgeEditorAssetMetadataCore STATIC)
 target_sources(
     VoxelForgeEditorAssetMetadataCore
@@ -759,6 +777,7 @@ target_link_libraries(
     VoxelForgeEditor
     PRIVATE
         VoxelForgeEditorAssetBrowser
+        VoxelForgeEditorDiagnostics
         VoxelForgeEditorDialogs
         VoxelForgeEditorAssetInspector
         VoxelForgeEditorCommands

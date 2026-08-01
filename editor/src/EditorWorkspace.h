@@ -16,6 +16,7 @@
 #include "Input/EditorInputService.h"
 #include "DragDropImport/DragDropImportController.h"
 #include "Layout/InspectorLayoutModel.h"
+#include "Diagnostics/EditorFrameProbe.h"
 #include "ModelImport/ModelImportBatch.h"
 #include "ModelImport/ModelImportService.h"
 #include "Palette/PaletteService.h"
@@ -680,6 +681,7 @@ private:
     bool showAssetBrowser_ = true;
     bool showForgeLibrary_ = true;
     bool showProfiler_ = false;
+    EditorFrameProbe frameProbe_;
     bool showImGuiDemo_ = false;
     bool useViewportInteractionV2_ = false;
     bool usePencilViewportInteractionV2_ = false;

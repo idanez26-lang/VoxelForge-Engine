@@ -118,6 +118,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorModelImportTests> --drag-drop-only
 )
 add_executable(
+    VoxelForgeEditorFrameProbeTests
+    Editor/EditorFrameProbeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorFrameProbeTests
+    PRIVATE VoxelForgeEditorDiagnostics
+)
+vf_configure_test(VoxelForgeEditorFrameProbeTests)
+add_test(
+    NAME VoxelForge.Editor.FrameProbe
+    COMMAND $<TARGET_FILE:VoxelForgeEditorFrameProbeTests>
+)
+add_executable(
     VoxelForgeEditorModelImportBatchTests
     Editor/ModelImportBatchTests.cpp
 )

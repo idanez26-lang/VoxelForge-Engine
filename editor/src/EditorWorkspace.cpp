@@ -523,6 +523,15 @@ void EditorWorkspace::CompleteFileDrop(const float x, const float y)
 
 void EditorWorkspace::Draw()
 {
+    // PERF-01: close the previous frame (event handling included) and open
+    // the next one; slow frames are summarized once in the console.
+    const double probeNowMilliseconds =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (const auto slowFrameSummary =
+            frameProbe_.FrameBoundary(probeNowMilliseconds))
+        AddConsoleMessage(*slowFrameSummary);
+
     if (closeRequest_.IsClosing())
     {
         if (closeRequest_.ConsumeCloseRequest()) exitRequest_.RequestExit();
@@ -4219,6 +4228,31 @@ void EditorWorkspace::DrawProfilerPanel()
     ImGui::Text("Graphics backend: %s", backendName.c_str());
     ImGui::Text("ImGui version: %s", IMGUI_VERSION);
 
+    ImGui::Separator();
+    const auto drawReport = [](const char* title,
+        const EditorFrameProbe::FrameReport& report)
+    {
+        ImGui::Text("%s: %.2f ms (frame %llu)", title,
+            report.FrameMilliseconds,
+            static_cast<unsigned long long>(report.Index));
+        for (std::size_t index = 0U;
+             index < EditorFrameProbeSlotCount; ++index)
+        {
+            const EditorFrameProbe::SlotStats& stats = report.Slots[index];
+            if (stats.Calls == 0U) continue;
+            ImGui::Text("  %s: %.2f ms x%u",
+                EditorFrameProbeSlotName(
+                    static_cast<EditorFrameProbeSlot>(index)),
+                stats.Milliseconds, stats.Calls);
+        }
+    };
+    drawReport("Last frame", frameProbe_.LastFrame());
+    drawReport("Worst frame", frameProbe_.WorstFrame());
+    ImGui::Text("Slow frames (> %.0f ms): %llu",
+        frameProbe_.SlowFrameThreshold(),
+        static_cast<unsigned long long>(frameProbe_.SlowFrameCount()));
+    if (ImGui::Button("Reset worst frame")) frameProbe_.ResetWorstFrame();
+
     ImGui::End();
 }
 
@@ -7692,7 +7726,12 @@ bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
     const std::uint64_t identity = voxelDocumentSession_.Generation();
     const std::uint64_t revision = document->GetRevision();
     const Mesh::VoxelDocumentMeshSyncResult synchronized =
-        voxelDocumentMeshCache_.Synchronize(*document, identity);
+        [this, document, identity]
+        {
+            const EditorFrameProbeScope meshProbe(
+                frameProbe_, EditorFrameProbeSlot::MeshSynchronize);
+            return voxelDocumentMeshCache_.Synchronize(*document, identity);
+        }();
     if (!synchronized.Succeeded || voxelDocumentMeshCache_.Mesh() == nullptr)
     {
         if (failedDocumentIdentity_ != identity ||
@@ -7716,7 +7755,14 @@ bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
     const Vec3 modelCenter = CalculateVoxelDocumentCenter(*document);
     const Voxel::VoxelPalette palette = BuildDocumentRenderPalette(*document);
     const Mesh::MeshData& mesh = *voxelDocumentMeshCache_.Mesh();
-    if (!viewportRenderer_.Upload(mesh, palette, modelCenter))
+    const bool uploaded =
+        [this, &mesh, &palette, modelCenter]
+        {
+            const EditorFrameProbeScope uploadProbe(
+                frameProbe_, EditorFrameProbeSlot::GpuUpload);
+            return viewportRenderer_.Upload(mesh, palette, modelCenter);
+        }();
+    if (!uploaded)
     {
         if (failedDocumentIdentity_ != identity ||
             failedDocumentRevision_ != revision)
@@ -7838,6 +7884,8 @@ std::size_t EditorWorkspace::VoxelHighlightRenderCount() const noexcept
 
 void EditorWorkspace::UpdateVoxelHighlights() noexcept
 {
+    const EditorFrameProbeScope highlightsProbe(
+        frameProbe_, EditorFrameProbeSlot::Highlights);
     universalCursor2DTarget_.reset();
     const auto coordinates = [](const std::optional<VoxelRaycastHit>& hit)
         -> std::optional<VoxelCoordinates>
@@ -7940,6 +7988,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         SmartToolPlanPtr plan;
         if (ShouldResolvePreviewForPresentation(activeStroke != nullptr))
         {
+            const EditorFrameProbeScope previewProbe(
+                frameProbe_, EditorFrameProbeSlot::PreviewResolve);
             const std::optional<SmartToolRequest> request =
                 BuildSmartPencilRequest();
             const SmartToolResult planning = request
