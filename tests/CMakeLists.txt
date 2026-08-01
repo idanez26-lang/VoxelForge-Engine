@@ -1362,6 +1362,23 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorProjectSessionTests>
 )
 add_executable(
+    VoxelForgeEditorProjectSessionMappingTests
+    Editor/ProjectSessionMappingTests.cpp
+)
+target_include_directories(
+    VoxelForgeEditorProjectSessionMappingTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgeEditorProjectSessionMappingTests
+    PRIVATE VoxelForgeEditorProjectSession
+)
+vf_configure_test(VoxelForgeEditorProjectSessionMappingTests)
+add_test(
+    NAME VoxelForge.Editor.ProjectSessionMapping
+    COMMAND $<TARGET_FILE:VoxelForgeEditorProjectSessionMappingTests>
+)
+add_executable(
     VoxelForgeEditorLayoutStabilityTests
     Editor/LayoutStabilityTests.cpp
 )

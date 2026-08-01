@@ -6,6 +6,7 @@
 #include "EditorWindowTitle.h"
 #include "Layout/EditorDockLayout.h"
 #include "Layout/PalettePanelLayout.h"
+#include "ProjectSession/ProjectSessionMapping.h"
 #include "Dialogs/EditorDialogStyle.h"
 #include "Toolbar/EditorToolbar.h"
 #include "Tools/ToolPanel.h"
@@ -123,48 +124,6 @@ std::string LowercaseExtension(const std::filesystem::path& path)
             return static_cast<char>(std::tolower(character));
         });
     return extension;
-}
-
-ProjectSessionCameraView ToSessionView(const EditorCameraView view) noexcept
-{
-    switch (view)
-    {
-    case EditorCameraView::Front: return ProjectSessionCameraView::Front;
-    case EditorCameraView::Back: return ProjectSessionCameraView::Back;
-    case EditorCameraView::Left: return ProjectSessionCameraView::Left;
-    case EditorCameraView::Right: return ProjectSessionCameraView::Right;
-    case EditorCameraView::Top: return ProjectSessionCameraView::Top;
-    case EditorCameraView::Bottom: return ProjectSessionCameraView::Bottom;
-    case EditorCameraView::Perspective:
-        return ProjectSessionCameraView::Perspective;
-    }
-    return ProjectSessionCameraView::Perspective;
-}
-
-EditorCameraView FromSessionView(const ProjectSessionCameraView view) noexcept
-{
-    switch (view)
-    {
-    case ProjectSessionCameraView::Front: return EditorCameraView::Front;
-    case ProjectSessionCameraView::Back: return EditorCameraView::Back;
-    case ProjectSessionCameraView::Left: return EditorCameraView::Left;
-    case ProjectSessionCameraView::Right: return EditorCameraView::Right;
-    case ProjectSessionCameraView::Top: return EditorCameraView::Top;
-    case ProjectSessionCameraView::Bottom: return EditorCameraView::Bottom;
-    case ProjectSessionCameraView::Perspective:
-        return EditorCameraView::Perspective;
-    }
-    return EditorCameraView::Perspective;
-}
-
-ProjectSessionVector3 ToSessionVector(const Vec3& value) noexcept
-{
-    return {value.X, value.Y, value.Z};
-}
-
-Vec3 FromSessionVector(const ProjectSessionVector3& value) noexcept
-{
-    return {value.X, value.Y, value.Z};
 }
 
 bool IsVisibleRecentProject(const std::filesystem::path& path)
@@ -5374,38 +5333,6 @@ void EditorWorkspace::RequestDeleteProject(
     showProjectDeletionPopup_ = true;
 }
 
-std::vector<std::filesystem::path>
-EditorWorkspace::ProtectedProjectDeletionRoots() const
-{
-    std::vector<std::filesystem::path> roots;
-    std::error_code error;
-    std::filesystem::path candidate = std::filesystem::current_path(error);
-    if (error) return roots;
-
-    while (!candidate.empty())
-    {
-        const bool repositoryRoot =
-            std::filesystem::is_directory(candidate / "editor", error) &&
-            !error &&
-            std::filesystem::is_directory(candidate / "engine", error) &&
-            !error &&
-            std::filesystem::is_regular_file(candidate / "CMakeLists.txt", error) &&
-            !error;
-        if (repositoryRoot)
-        {
-            roots.push_back(candidate);
-            roots.push_back(candidate / "assets");
-            roots.push_back(candidate / "Assets");
-            break;
-        }
-        const std::filesystem::path parent = candidate.parent_path();
-        if (parent == candidate) break;
-        candidate = parent;
-        error.clear();
-    }
-    return roots;
-}
-
 void EditorWorkspace::DeletePendingProject()
 {
     if (pendingProjectDeletionPath_.empty()) return;
@@ -5414,7 +5341,7 @@ void EditorWorkspace::DeletePendingProject()
     request.ProjectFilePath = pendingProjectDeletionPath_;
     if (const auto& activeProject = projectManager_.ActiveProject())
         request.ActiveProjectRoot = activeProject->RootPath();
-    request.ProtectedRoots = ProtectedProjectDeletionRoots();
+    request.ProtectedRoots = ProjectDeletionService::DefaultProtectedRoots();
     request.Confirmed = true;
 
     const ProjectDeletionResult result =
@@ -5837,13 +5764,15 @@ bool EditorWorkspace::SaveActiveProjectSession()
     const auto& project = projectManager_.ActiveProject();
     if (!project || projectSessionService_.ProjectRoot().empty()) return true;
 
-    ProjectSessionData session;
+    std::filesystem::path lastModel;
     if (voxelDocumentSession_.HasActiveDocument())
     {
-        std::error_code error;
-        session.LastModel = std::filesystem::relative(
-            voxelDocumentSession_.SourcePath(), project->RootPath(), error);
-        if (error || !ProjectSessionService::IsValidModelPath(session.LastModel))
+        std::error_code relativeError;
+        lastModel = std::filesystem::relative(
+            voxelDocumentSession_.SourcePath(), project->RootPath(),
+            relativeError);
+        if (relativeError ||
+            !ProjectSessionService::IsValidModelPath(lastModel))
         {
             AddConsoleMessage("Project session save warning: active model path "
                 "is not a valid project model.");
@@ -5851,47 +5780,13 @@ bool EditorWorkspace::SaveActiveProjectSession()
         }
     }
 
-    const EditorCameraState camera = viewportCamera_.CaptureState();
-    session.Camera = {
-        ToSessionVector(camera.Position),
-        ToSessionVector(camera.RotationDegrees),
-        camera.Distance,
-        ToSessionVector(camera.Target),
-        ToSessionView(camera.View)};
-    session.ActiveTool =
-        (voxelToolState_.IsPencilActive() &&
-         toolContext_.Smart.Action() == SmartAction::Erase)
-        ? ProjectSessionTool::Eraser
-        : (voxelToolState_.IsPencilActive() &&
-           toolContext_.Smart.Action() == SmartAction::Paint)
-        ? ProjectSessionTool::Fill
-        : voxelToolState_.IsEraserActive()
-        ? ProjectSessionTool::Eraser
-        : voxelToolState_.IsFillActive()
-        ? ProjectSessionTool::Fill
-        : voxelToolState_.IsBoxActive()
-        ? ProjectSessionTool::Box
-        : voxelToolState_.IsLineActive()
-        ? ProjectSessionTool::Line
-        : voxelToolState_.IsSphereActive()
-        ? ProjectSessionTool::Sphere
-        : ProjectSessionTool::Pencil;
-    session.ActivePaletteIndex =
+    const ProjectSessionData session = BuildSessionData(
+        viewportCamera_.CaptureState(),
+        voxelToolState_,
+        toolContext_.Smart,
         paletteService_.ActiveIndex().value_or(
-            PaletteService::FirstSelectableIndex);
-    const SmartBrushShape sessionShape = ResolveSmartBrushShape(
-        toolContext_.Smart.Geometry(), toolContext_.Smart.Brush().Shape);
-    session.SmartGeometry = sessionShape == SmartBrushShape::Cube
-        ? ProjectSessionSmartGeometry::Cube
-        : sessionShape == SmartBrushShape::Sphere
-        ? ProjectSessionSmartGeometry::Sphere
-        : ProjectSessionSmartGeometry::Pencil;
-    session.SmartAction = toolContext_.Smart.Action() == SmartAction::Erase
-        ? ProjectSessionSmartAction::Erase
-        : toolContext_.Smart.Action() == SmartAction::Paint
-        ? ProjectSessionSmartAction::Paint
-        : ProjectSessionSmartAction::Add;
-    session.SmartBrushSize = toolContext_.Smart.Brush().Size;
+            PaletteService::FirstSelectableIndex),
+        std::move(lastModel));
 
     std::string error;
     if (!projectSessionService_.Save(session, error))
@@ -5915,32 +5810,7 @@ void EditorWorkspace::RestoreActiveProjectSession()
         return;
     }
 
-    // Cube and Sphere were stored as SmartGeometry before Shape became the
-    // sole active geometry selector. Preserve the legacy brush volume while
-    // normalizing the live tool to Pencil for the current UI.
-    toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
-    if (loaded.Session.SmartGeometry == ProjectSessionSmartGeometry::Cube)
-        toolContext_.Smart.Brush().Shape = SmartBrushShape::Cube;
-    else if (loaded.Session.SmartGeometry == ProjectSessionSmartGeometry::Sphere)
-        toolContext_.Smart.Brush().Shape = SmartBrushShape::Sphere;
-    toolContext_.Smart.SetAction(
-        loaded.Session.SmartAction == ProjectSessionSmartAction::Erase
-            ? SmartAction::Erase
-            : loaded.Session.SmartAction == ProjectSessionSmartAction::Paint
-            ? SmartAction::Paint
-            : SmartAction::Add);
-    toolContext_.Smart.Brush().Size = loaded.Session.SmartBrushSize;
-    voxelToolState_.SetActiveTool(
-        loaded.Session.ActiveTool == ProjectSessionTool::Eraser ||
-        loaded.Session.ActiveTool == ProjectSessionTool::Fill
-            ? ActiveVoxelTool::Pencil
-            : loaded.Session.ActiveTool == ProjectSessionTool::Box
-            ? ActiveVoxelTool::Box
-            : loaded.Session.ActiveTool == ProjectSessionTool::Line
-            ? ActiveVoxelTool::Line
-            : loaded.Session.ActiveTool == ProjectSessionTool::Sphere
-            ? ActiveVoxelTool::Sphere
-            : ActiveVoxelTool::Pencil);
+    ApplySessionToTools(loaded.Session, toolContext_.Smart, voxelToolState_);
     if (loaded.Session.LastModel.empty()) return;
 
     const std::filesystem::path modelPath =
@@ -5972,12 +5842,8 @@ void EditorWorkspace::RestoreActiveProjectSession()
     if (!assetBrowser_.RevealEntry(browserPath))
         AddConsoleMessage("Last model could not be selected in Asset Browser.");
 
-    if (!loaded.CameraValid || !viewportCamera_.RestoreState({
-            FromSessionVector(loaded.Session.Camera.Position),
-            FromSessionVector(loaded.Session.Camera.RotationDegrees),
-            loaded.Session.Camera.Distance,
-            FromSessionVector(loaded.Session.Camera.Target),
-            FromSessionView(loaded.Session.Camera.View)}))
+    if (!loaded.CameraValid || !viewportCamera_.RestoreState(
+            FromSessionCamera(loaded.Session.Camera)))
     {
         AddConsoleMessage("Project session camera invalid; framed model used.");
     }

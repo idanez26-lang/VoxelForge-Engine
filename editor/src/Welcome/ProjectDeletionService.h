@@ -67,6 +67,13 @@ public:
     [[nodiscard]] ProjectDeletionResult DeleteProject(
         const ProjectDeletionRequest& request) const;
 
+    // Roots that must never reach the Recycle Bin: the repository the editor
+    // runs from (found by walking up from the current path to a directory
+    // holding editor/, engine/ and CMakeLists.txt) and its asset folders.
+    // Returns an empty list when no repository root is detected.
+    [[nodiscard]] static std::vector<std::filesystem::path>
+        DefaultProtectedRoots();
+
 private:
     IProjectRecycleBin* recycleBin_ = nullptr;
 };

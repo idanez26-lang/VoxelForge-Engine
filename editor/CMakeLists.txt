@@ -526,11 +526,20 @@ endif()
 add_library(VoxelForgeEditorProjectSession STATIC)
 target_sources(
     VoxelForgeEditorProjectSession
-    PRIVATE src/ProjectSession/ProjectSessionService.cpp
+    PRIVATE
+        src/ProjectSession/ProjectSessionMapping.cpp
+        src/ProjectSession/ProjectSessionService.cpp
 )
 target_include_directories(
     VoxelForgeEditorProjectSession
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+# The pure session<->tools mapping reads SmartTool and VoxelToolState, whose
+# method definitions live in VoxelForgeEditorCommands. Camera state is a plain
+# header-only struct, so no viewport or ImGui dependency is introduced.
+target_link_libraries(
+    VoxelForgeEditorProjectSession
+    PUBLIC VoxelForgeEditorCommands
 )
 target_compile_features(VoxelForgeEditorProjectSession PUBLIC cxx_std_20)
 if(MSVC)

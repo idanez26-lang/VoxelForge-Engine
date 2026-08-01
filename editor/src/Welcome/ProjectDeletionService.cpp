@@ -116,6 +116,38 @@ ProjectDeletionService::ProjectDeletionService(
 {
 }
 
+std::vector<std::filesystem::path>
+ProjectDeletionService::DefaultProtectedRoots()
+{
+    std::vector<std::filesystem::path> roots;
+    std::error_code error;
+    std::filesystem::path candidate = std::filesystem::current_path(error);
+    if (error) return roots;
+
+    while (!candidate.empty())
+    {
+        const bool repositoryRoot =
+            std::filesystem::is_directory(candidate / "editor", error) &&
+            !error &&
+            std::filesystem::is_directory(candidate / "engine", error) &&
+            !error &&
+            std::filesystem::is_regular_file(candidate / "CMakeLists.txt", error) &&
+            !error;
+        if (repositoryRoot)
+        {
+            roots.push_back(candidate);
+            roots.push_back(candidate / "assets");
+            roots.push_back(candidate / "Assets");
+            break;
+        }
+        const std::filesystem::path parent = candidate.parent_path();
+        if (parent == candidate) break;
+        candidate = parent;
+        error.clear();
+    }
+    return roots;
+}
+
 ProjectDeletionResult ProjectDeletionService::DeleteProject(
     const ProjectDeletionRequest& request) const
 {

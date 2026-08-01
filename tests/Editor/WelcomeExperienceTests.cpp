@@ -280,6 +280,25 @@ void TestRecycleFailurePreservesRecentEntry()
                 fs::weakly_canonical(projectFile),
         "A failed Recycle Bin operation changed the recent-project entry.");
 }
+
+void TestDefaultProtectedRootsDetectRepository()
+{
+    const std::vector<fs::path> roots =
+        ProjectDeletionService::DefaultProtectedRoots();
+    if (roots.empty()) return; // No repository above the working directory.
+
+    Require(roots.size() == 3U,
+        "Protected roots should list the repository and both asset casings.");
+    const fs::path& repository = roots.front();
+    std::error_code error;
+    Require(fs::is_directory(repository / "editor", error) && !error &&
+            fs::is_directory(repository / "engine", error) && !error &&
+            fs::is_regular_file(repository / "CMakeLists.txt", error) && !error,
+        "The first protected root should be the repository root.");
+    Require(roots[1] == repository / "assets" &&
+            roots[2] == repository / "Assets",
+        "Asset folders should be protected alongside the repository root.");
+}
 }
 
 int main()
@@ -292,6 +311,7 @@ int main()
         TestIdentityAndSymbolicLinks();
         TestRecentListSemantics();
         TestRecycleFailurePreservesRecentEntry();
+        TestDefaultProtectedRootsDetectRepository();
         std::cout << "Welcome experience and safe deletion tests passed.\n";
         return 0;
     }

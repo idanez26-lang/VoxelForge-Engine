@@ -338,8 +338,6 @@ private:
     void RequestDeleteProject(
         const std::filesystem::path& projectFilePath);
     void DeletePendingProject();
-    [[nodiscard]] std::vector<std::filesystem::path>
-        ProtectedProjectDeletionRoots() const;
     void SaveProject();
     void CreateVoxelModelNow();
     [[nodiscard]] bool SaveVoxelModel();
