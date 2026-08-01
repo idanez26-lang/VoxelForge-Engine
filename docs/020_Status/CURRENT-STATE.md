@@ -3,7 +3,7 @@
 | Champ | Valeur |
 |---|---|
 | Date de vérification | 2026-08-01 |
-| Méthode | Vérifications locales (git, build 761/761, ctest) + CI GitHub Actions run #11 |
+| Méthode | Vérifications locales (git, build, ctest) + CI GitHub Actions |
 | Version | 0.1.2 (tag `369277b`) — C++20, CMake ≥ 3.24, MSVC + Ninja, SDL3 + Dear ImGui (docking) |
 
 À mettre à jour à chaque jalon. Discipline : distinguer
@@ -14,13 +14,13 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 | Branche | État |
 |---|---|
 | `main` | Starter kit v0.0.1, aucun code moteur |
-| `feature/imgui` | **Branche de travail unique** — sommet `d383023`, CI #11 verte (01/08) |
+| `feature/imgui` | **Branche de travail unique** — sommet `0afa2cf` (lot 5), CI verte |
 | `experiment/viewport-interaction-v2` | Fusionnée en avance rapide dans `feature/imgui`, supprimée (locale + distante) |
 | `feature/common-foundation` | Ancêtre strict de `feature/imgui` — archivage/suppression : décision Tony en attente |
 
 ## Chantier VF-0260 — dégraissage EditorWorkspace.cpp
 
-`EditorWorkspace.cpp` : 17 398 lignes (31/07) → **10 006 lignes (01/08, −42,5 %)**.
+`EditorWorkspace.cpp` : 17 398 lignes (31/07) → **9 977 lignes (01/08, −42,7 %)**.
 
 | Lot | Contenu | État |
 |---|---|---|
@@ -31,16 +31,17 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 | 4a | Mapping pur session↔outils → `ProjectSession/ProjectSessionMapping.{h,cpp}` + test riche ; règle legacy Cube/Sphère→Pencil préservée | ✅ Commité `d383023`, CI #11 verte |
 | 4b | `ProtectedProjectDeletionRoots` → `ProjectDeletionService::DefaultProtectedRoots()` (statique) + test de garde | ✅ Commité `d383023`, CI #11 verte |
 | 4c | `SynchronizeProjectAssets` (~80 l., orchestration de ~15 services) | ✅ Clos par décision : **statu quo assumé** (Tony, 01/08) — orchestration légitime, un contrôleur à 15 références serait pire |
-| 5 | Import / fermeture de projet | ⏭️ Prochain lot |
-| 6 | Adaptateurs outils / transforms | ⚪ À venir |
+| 5 | Import : machine à états `ModelImport/ModelImportBatch` (file, compteurs, collisions, décisions de fin) + test dédié ; fermeture examinée → déjà factorisée (`dirtyActionConfirmation_`/`closeRequest_`), rien d'extractible | ✅ Commité `0afa2cf`, CI verte (8/8 ctest ciblés en local) |
+| 6 | Adaptateurs outils / transforms | ⏭️ Prochain lot |
 | 7 | `DrawScenePanel` (1 536 l.) + `UpdateVoxelHighlights` (628 l.) + stroke Smart Tool — invariants sensibles, gardé pour la fin | ⚪ À venir |
 
 ## Tests et build
 
-- Build Debug complet 761/761 cibles (01/08, poste local, x64) ;
-- ctest ciblé lot 4 : 5/5 verts, dont le nouveau `VoxelForge.Editor.ProjectSessionMapping` ;
-- CI #11 (`d383023`) : verte — tests bloquants OK ; l'étape `EditorApp` (GPU requis)
-  échoue sur runner comme attendu (non bloquante) ;
+- Build Debug complet vert (01/08, poste local, x64) ;
+- ctest ciblé lot 5 : 8/8 verts, dont les nouveaux `VoxelForge.Editor.ProjectSessionMapping`
+  (lot 4) et `VoxelForge.Editor.ModelImportBatch` (lot 5) ;
+- CI : verte jusqu'à `0afa2cf` inclus ; l'étape `EditorApp` (GPU requis) échoue sur
+  runner comme attendu (non bloquante) ;
 - `tests/CMakeLists.proposed.txt` : obsolète depuis les lots (à régénérer avant adoption).
 
 ## Environnement de build local (leçons du 01/08)
@@ -68,5 +69,5 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 
 ## Dette principale
 
-`EditorWorkspace.cpp` ≈ 10 000 lignes (God Object en résorption, −42,5 % depuis le 31/07) —
-poursuivre les lots 5→7 de VF-0260.
+`EditorWorkspace.cpp` ≈ 9 980 lignes (God Object en résorption, −42,7 % depuis le 31/07) —
+poursuivre les lots 6→7 de VF-0260.
