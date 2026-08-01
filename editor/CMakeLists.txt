@@ -722,6 +722,7 @@ target_sources(
         src/EditorCamera.cpp
         src/EditorLayer.cpp
         src/EditorWorkspace.cpp
+        src/EditorWorkspaceSmoke.cpp
         src/Input/EditorInputService.cpp
         src/VoxelStamps/Library/ForgeLibraryPanel.cpp
         src/Tools/ToolManager.cpp
