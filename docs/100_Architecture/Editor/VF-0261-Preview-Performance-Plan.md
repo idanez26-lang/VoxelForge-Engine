@@ -63,9 +63,13 @@ par-événement vs autre poste).
    rebuild complet du mesh par pas de trait** → PERF-02c prioritaire ; (2) coalescence
    ×3→×1 des highlights confirmée utile ; (3) ~35 ms/appel highlights restent non
    attribués → sous-sondes internes à poser (stroke-compose, exact-resolve, branches).
-2. **PERF-02b — coalescence par frame** : multiplicateur confirmé (highlights ×4/frame
-   en souris réelle) → résoudre préview/highlights au plus une fois par frame.
-   Prochaine étape.
+2. **PERF-02b — coalescence par frame** — ✅ implémenté et validé (lot 7b, 02/08,
+   `c387788`) : premier appel de la frame synchrone (les smokes restent exacts via
+   `ForceVoxelHighlightsResolve` dans leurs pas), appels suivants différés et purgés
+   au pré-rendu de la frame suivante. Session réelle : `highlights ×1` sur toutes les
+   frames (contre ×2-4), `hl-handoff` ×1 à 4-6 ms. Restes d'interaction : `hl-plan`
+   (matérialisation planner, 8-23 ms/nouvelle cellule → point 2bis) et `mesh-sync`
+   (VF-0262). 180/180 smokes GUI inclus.
 2bis. **PERF-02-planner — matérialisation paresseuse** : sur les plans agrégés, éviter
    de matérialiser les 262k cellules au survol (nécessaires seulement au commit).
    Profond : touche le planner et les invariants SMART (gate SMART-02.5) — à chiffrer
