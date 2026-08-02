@@ -107,11 +107,14 @@ par-événement vs autre poste).
    détaillée perd le rendu « état final » (statistiques et curseur restent exacts).
    **Option A validée en session réelle (02/08, `4ed2a8d`)** : le compose O(document) a
    disparu des mesures (`hl-plan` ≤ planner partout) ; frames de dessin ~35 ms
-   constants. Restes hiérarchisés : (1) rebuild complet au commit 110-120 ms ×1 sur
-   très gros modèle → VF-0262 ; (2) ~33 ms/frame non attribués dans `scene-panel`
-   pendant le trait (chemin de commit crayon, à sonder) ; (3) matérialisation du
-   planner 36-48 ms/nouvelle cellule à pinceau 64 ; (4) coalescence ×3→×1 (PERF-02b)
-   devenue secondaire (les appels résiduels coûtent ~0,1 ms).
+   constants. Restes hiérarchisés : (1) rebuild complet au commit (15→74 ms mesurés
+   croissant avec le modèle, session PERF-02f) → VF-0262 ; (2) ~17-29 ms/frame non
+   attribués dans `scene-panel` pointeur dans le viewport — éliminés par sondes :
+   highlights, stroke, v2-tick, pencil-tick/commit (0 appel), vp-render ; raycast
+   examiné (DDA borné + occupancy en vue non possédante = sain) → prochaine étape :
+   sections `sp-*` du bloc entrée/picking/gizmo/overlays de DrawScenePanel ;
+   (3) matérialisation du planner 36-48 ms/nouvelle cellule à pinceau 64 ;
+   (4) coalescence ×3→×1 (PERF-02b) devenue secondaire (~0,1 ms/appel résiduel).
    - Option A — seuil sur la taille du document (ex. > 50-100k voxels) : au-delà,
      préview par fantômes au lieu du mesh « état final exact ». Simple, borne le coût ;
      concession sur l'exactitude visuelle pour les très gros modèles uniquement.
