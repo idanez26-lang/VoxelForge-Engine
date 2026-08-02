@@ -65,3 +65,26 @@ endif()
 
 # This target is deliberately absent from add_test(). Its workloads are
 # profiling fixtures, not pass/fail regression tests.
+
+# VF-0262 lot 262-0: CPU-only baseline for the incremental mesh rebuild.
+add_executable(
+    VoxelForgeIncrementalEditBenchmark
+    IncrementalEditBenchmark.cpp
+)
+target_link_libraries(
+    VoxelForgeIncrementalEditBenchmark
+    PRIVATE
+        VoxelForgeAsset
+        VoxelForgeMesh
+)
+target_compile_features(
+    VoxelForgeIncrementalEditBenchmark
+    PRIVATE cxx_std_20
+)
+if(MSVC)
+    target_compile_options(
+        VoxelForgeIncrementalEditBenchmark PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgeIncrementalEditBenchmark PRIVATE -Wall -Wextra -Wpedantic)
+endif()

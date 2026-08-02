@@ -14,7 +14,7 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 | Branche | État |
 |---|---|
 | `main` | Starter kit v0.0.1, aucun code moteur |
-| `feature/imgui` | **Branche de travail unique** — sommet `43f99a1` (lot 6) |
+| `feature/imgui` | **Branche de travail unique** — chantiers PERF-02 (VF-0261) livrés : préview agrégée, rebuild différé pendant le trait, préview exacte plafonnée à 50k voxels (option A) ; VF-0262 lancé (262-1 : builder par région commité) ; `feature/common-foundation` supprimée |
 | `experiment/viewport-interaction-v2` | Fusionnée en avance rapide dans `feature/imgui`, supprimée (locale + distante) |
 | `feature/common-foundation` | Ancêtre strict de `feature/imgui` — archivage/suppression : décision Tony en attente |
 
@@ -61,12 +61,11 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 
 ## À faire (hors lots)
 
-1. **PERF-01 clos → PERF-02 planifié (VF-0261)** : cause du lag outils identifiée par
-   sonde in-app — `UpdateVoxelHighlights` croît avec le volume de préview (255 ms/appel
-   à pinceau 64, dont 55 ms de planner). Plan validé par Tony : préview agrégée au-delà
-   d'un seuil, coalescence par frame (à confirmer avec ses données `[Perf]` souris
-   réelle), rebuild incrémental couplé lot 7. Voir
-   `docs/100_Architecture/Editor/VF-0261-Preview-Performance-Plan.md` ;
+1. **PERF-02 livré (VF-0261)** : frames de dessin 258 → ~35 ms mesurés. Restes
+   documentés : sections `sp-*` de DrawScenePanel (~17-29 ms fantômes), matérialisation
+   paresseuse du planner, coalescence (secondaire). **VF-0262 en cours** : 262-1 fait
+   (builder par région + équivalence), 262-0 (benchmark) en cours ; ensuite lot 7 puis
+   262-2/4 (ordre validé 02/08) ;
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;

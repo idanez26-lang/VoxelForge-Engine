@@ -3,6 +3,21 @@
 These executables are profiling fixtures. They are deliberately not registered
 with CTest and do not define product pass/fail criteria.
 
+## VF-0262 incremental edit baseline (lot 262-0)
+
+CPU-only; no GPU or window required. Compares the full document mesh build
+(today's per-commit cost) with a 32^3 region build per document size:
+
+```powershell
+cmake --preset windows-release -DVF_BUILD_BENCHMARKS=ON
+cmake --build --preset build-windows-release --target VoxelForgeIncrementalEditBenchmark
+.\build\windows-release\benchmarks\VoxelForgeIncrementalEditBenchmark.exe
+```
+
+CSV columns: `voxels,full_build_ms,region32_build_ms,ratio`. The residual
+region cost exposes the collection traversal that stays O(document) until
+lots 262-2/262-3 introduce regional iteration.
+
 ## STAMP-16 placement pipeline
 
 Configure and build a Debug baseline from an MSVC developer prompt:
