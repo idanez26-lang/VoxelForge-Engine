@@ -7844,6 +7844,19 @@ CommandResult EditorWorkspace::RebuildActiveVoxelMesh()
 {
     if (voxelDocumentSession_.HasActiveDocument())
     {
+        // PERF-02c: while a stroke or pointer gesture streams edits, the
+        // rebuild nested in every transaction is redundant with the
+        // once-per-frame synchronization in Draw(), which rebuilds on any
+        // revision change. Deferring it caps mesh rebuilds at one per frame
+        // during drawing (measured 90 ms x2 per frame on large models).
+        // Trade-off, accepted in VF-0261: mid-stroke steps give up the
+        // rollback-on-rebuild-failure guard; a rebuild failure surfaces at
+        // the frame synchronization instead. Single-click edits, undo and
+        // redo keep the synchronous rebuild and its transactional guard.
+        if (smartToolStroke_.IsActive() ||
+            viewportInteractionV2_.OwnsPointer() ||
+            pencilViewportInteractionV2_.OwnsPointer())
+            return CommandResult::Success();
         return SynchronizeVoxelDocumentRendering()
             ? CommandResult::Success()
             : CommandResult::Failure(

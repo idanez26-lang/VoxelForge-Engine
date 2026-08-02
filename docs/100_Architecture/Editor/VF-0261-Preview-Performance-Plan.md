@@ -70,8 +70,18 @@ par-événement vs autre poste).
    de matérialiser les 262k cellules au survol (nécessaires seulement au commit).
    Profond : touche le planner et les invariants SMART (gate SMART-02.5) — à chiffrer
    après 02b.
-3. **PERF-02c — rebuild mesh incrémental** (gros modèles, au commit) : 73-166 ms mesurés ;
-   chantier séparé, à coupler au lot 7.
+3. **PERF-02c — rebuild mesh pendant le dessin** :
+   - **v1 — différé pendant le flux (✅ implémenté 02/08)** : `VoxelEditTransaction`
+     imbriquait un rebuild complet dans chaque transaction (garde de rollback), en
+     doublon avec la sync par frame de `Draw()` qui reconstruit sur changement de
+     révision. Pendant un stroke actif ou un geste V2 (`smartToolStroke_.IsActive()`
+     ou `viewportInteractionV2_.OwnsPointer()`), `RebuildActiveVoxelMesh` se contente
+     de réussir : plafond à 1 rebuild/frame en dessinant (mesuré ×2 auparavant).
+     Compromis accepté : les pas intermédiaires perdent le rollback-si-échec-rebuild ;
+     clic simple, undo et redo gardent le comportement transactionnel.
+   - **v2 — rebuild incrémental par régions (chunks)** : seul vrai plafond pour très
+     gros modèles (90 ms/rebuild restants) ; chantier d'architecture séparé à
+     documenter (VF-0262) et valider avant toute implémentation.
 
 ## Invariants à préserver (lus dans le code, 01/08)
 
