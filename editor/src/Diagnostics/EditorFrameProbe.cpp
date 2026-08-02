@@ -25,6 +25,8 @@ const char* EditorFrameProbeSlotName(const EditorFrameProbeSlot slot) noexcept
     case EditorFrameProbeSlot::HlSmartPlan: return "hl-plan";
     case EditorFrameProbeSlot::PencilTick: return "pencil-tick";
     case EditorFrameProbeSlot::PencilCommit: return "pencil-commit";
+    case EditorFrameProbeSlot::SpSetup: return "sp-setup";
+    case EditorFrameProbeSlot::SpPointer: return "sp-pointer";
     }
     return "unknown";
 }

@@ -1875,6 +1875,16 @@ void EditorWorkspace::DrawScenePanel()
 {
     const EditorFrameProbeScope scenePanelProbe(
         frameProbe_, EditorFrameProbeSlot::ScenePanel);
+    // Lot 7a: section timestamps mirroring the UpdateVoxelHighlights ones.
+    auto spSectionStart = std::chrono::steady_clock::now();
+    const auto spMarkSection =
+        [this, &spSectionStart](const EditorFrameProbeSlot slot)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        frameProbe_.Add(slot, std::chrono::duration<double, std::milli>(
+            now - spSectionStart).count());
+        spSectionStart = now;
+    };
     const bool focusRequested = std::exchange(
         viewportFocusRequested_, false);
     if (focusRequested) ImGui::SetNextWindowFocus();
@@ -2134,6 +2144,7 @@ void EditorWorkspace::DrawScenePanel()
     UpdateTransformGizmo(available.y);
     const auto width = static_cast<std::uint32_t>(available.x);
     const auto height = static_cast<std::uint32_t>(available.y);
+    spMarkSection(EditorFrameProbeSlot::SpSetup);
     const bool viewportRendered =
         [this, width, height]
         {
@@ -3341,6 +3352,7 @@ void EditorWorkspace::DrawScenePanel()
         }
         const std::uint64_t feedbackNow = static_cast<std::uint64_t>(
             ImGui::GetTime() * 1000.0);
+        spMarkSection(EditorFrameProbeSlot::SpPointer);
         // PERF-02a: aggregate previews carry no per-cell ghosts; the exact
         // statistics gate the label in both presentation modes.
         if (smartBrushGhostPreview_ != nullptr &&
