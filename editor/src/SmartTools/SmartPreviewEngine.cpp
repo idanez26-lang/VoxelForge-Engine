@@ -48,12 +48,20 @@ SmartPreviewData SmartPreviewEngine::Build(const SmartToolPlan& plan)
     data.Diagnostics = plan.PreviewDiagnostics();
     data.RenderPlan = plan.BrushResult().RenderPlan;
     data.Error = plan.BrushResult().Error;
-    data.GhostVoxels.reserve(plan.Cells().size());
-    data.AffectedPositions = plan.AffectedPositions();
-    for (const SmartToolPlanCell& cell : plan.Cells())
+    // PERF-02a: aggregate render plans (brushes above
+    // MaximumDetailedBrushPreviewVoxelCount) are presented as bounds only.
+    // Building one ghost per cell would cost O(volume) per pointer update for
+    // data the presentation never reads. Statistics, bounds and diagnostics
+    // above stay exact either way.
+    if (data.RenderPlan.Mode == SmartBrushRenderMode::DetailedCells)
     {
-        data.GhostVoxels.push_back({cell.WorldPosition, StateFor(cell.PreviewState),
-            BaseColor(cell), 1.0F});
+        data.GhostVoxels.reserve(plan.Cells().size());
+        data.AffectedPositions = plan.AffectedPositions();
+        for (const SmartToolPlanCell& cell : plan.Cells())
+        {
+            data.GhostVoxels.push_back({cell.WorldPosition,
+                StateFor(cell.PreviewState), BaseColor(cell), 1.0F});
+        }
     }
     return data;
 }

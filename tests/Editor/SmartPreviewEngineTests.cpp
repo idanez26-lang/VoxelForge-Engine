@@ -186,6 +186,25 @@ void TestCubeSphereAndInvalid()
 }
 }
 
+void TestAggregatePlansSkipGhostConstruction()
+{
+    auto request = Request(SmartAction::Add, States{}, {16, 16, 16}, 8);
+    request.BrushRequest.Dimensions = {32U, 32U, 32U};
+    const SmartPreviewData preview = SmartPreviewEngine::Build(*Plan(request));
+    Require(preview.RenderPlan.Mode == SmartBrushRenderMode::AggregateBox,
+        "A 512-cell cube brush should ship an aggregate render plan.");
+    Require(preview.GhostVoxels.empty() && preview.AffectedPositions.empty(),
+        "Aggregate plans should not pay for per-cell ghost construction.");
+    Require(preview.Statistics.Total > 256U && preview.CanCommit(),
+        "Aggregate previews keep exact statistics and commitability.");
+
+    const SmartPreviewData detailed = SmartPreviewEngine::Build(
+        *Plan(Request(SmartAction::Add, States{}, {2, 2, 2}, 2)));
+    Require(detailed.RenderPlan.Mode == SmartBrushRenderMode::DetailedCells &&
+            !detailed.GhostVoxels.empty(),
+        "Small brushes must keep the exact per-cell ghost preview.");
+}
+
 int main()
 {
     try
@@ -195,6 +214,7 @@ int main()
         TestCubeAndCache();
         TestPaletteSnapshotInvalidatesSessionPlan();
         TestCubeSphereAndInvalid();
+        TestAggregatePlansSkipGhostConstruction();
         std::cout << "Smart Preview Engine tests passed.\n";
         return 0;
     }

@@ -3314,8 +3314,10 @@ void EditorWorkspace::DrawScenePanel()
         }
         const std::uint64_t feedbackNow = static_cast<std::uint64_t>(
             ImGui::GetTime() * 1000.0);
+        // PERF-02a: aggregate previews carry no per-cell ghosts; the exact
+        // statistics gate the label in both presentation modes.
         if (smartBrushGhostPreview_ != nullptr &&
-            !smartBrushGhostPreview_->GhostVoxels.empty())
+            smartBrushGhostPreview_->Statistics.Total > 0U)
         {
             const SmartBrushState& state = toolContext_.Smart.Brush();
             const char* const shape = state.Shape == SmartBrushShape::Sphere
@@ -8023,12 +8025,24 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             // This engine consumes only the materialized immutable plan. It
             // never asks a document, palette, or planner for another value.
             smartBrushGhostPreview_ = &smartPreviewCache_.Resolve(plan);
+            const bool aggregateSmartPreview =
+                smartBrushGhostPreview_->RenderPlan.Mode !=
+                SmartBrushRenderMode::DetailedCells;
             const Asset::Voxel::VoxelDocument* const document =
                 voxelDocumentSession_.ActiveDocument();
             if (document != nullptr)
             {
                 exactSmartToolPlan = plan;
-                if (faceAddPlanGhostPresentation)
+                if (aggregateSmartPreview)
+                {
+                    // PERF-02a: above MaximumDetailedBrushPreviewVoxelCount
+                    // the plan presents aggregate bounds. Composing the exact
+                    // final-state mesh would cost O(volume) per pointer
+                    // update; the aggregate outline plus exact statistics
+                    // stand in for it.
+                    smartToolExactPreviewCache_.Clear();
+                }
+                else if (faceAddPlanGhostPresentation)
                 {
                     // Face depth replaces the stroke with one complete,
                     // immutable plan. Present those exact cells directly:
@@ -8448,6 +8462,20 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         brushOccupiedPreview = {};
         brushAggregatePreview.reset();
         brushAggregateSpherePreview.reset();
+        if (smartBrushGhostPreview_ != nullptr)
+        {
+            // PERF-02a: large brushes ship an aggregate render plan; present
+            // its bounds through the legacy aggregate channels instead of
+            // per-cell ghosts and the exact final-state mesh.
+            const SmartBrushRenderPlan& renderPlan =
+                smartBrushGhostPreview_->RenderPlan;
+            if (renderPlan.Mode == SmartBrushRenderMode::AggregateSphere)
+                brushAggregateSpherePreview = VoxelSpherePreview{
+                    renderPlan.SphereCenter, renderPlan.SphereRadius};
+            else if (renderPlan.Mode == SmartBrushRenderMode::AggregateBox)
+                brushAggregatePreview = VoxelBoxBounds{
+                    renderPlan.Bounds.Minimum, renderPlan.Bounds.Maximum};
+        }
     }
     if (exactSmartToolPreview != nullptr && exactSmartToolPreview->Succeeded())
     {

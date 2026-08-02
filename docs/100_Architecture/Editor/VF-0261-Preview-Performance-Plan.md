@@ -31,10 +31,18 @@ par-événement vs autre poste).
 
 ## Plan de correction (validé par Tony, 01/08)
 
-1. **PERF-02a — préview agrégée au-delà d'un seuil** : au-dessus de N voxels affectés
-   (~4 096, constante à calibrer), présenter la boîte/sphère englobante (le renderer
-   supporte déjà `brushAggregatePreview`/`RenderPlan`) au lieu des fantômes individuels
-   et du mesh exact. Coût borné ~constant → stabilité en taille d'outil.
+1. **PERF-02a — préview agrégée au-delà d'un seuil** — ✅ implémenté (02/08) :
+   le moteur décidait déjà `AggregateBox/Sphere` au-dessus de
+   `MaximumDetailedBrushPreviewVoxelCount` (256), mais la chaîne de présentation
+   construisait quand même fantômes + mesh exact. Désormais, en mode agrégé :
+   `SmartPreviewEngine::Build` ne construit plus `GhostVoxels`/`AffectedPositions` ;
+   `UpdateVoxelHighlights` saute la composition du mesh exact et présente la
+   boîte/sphère englobante via les canaux agrégés existants ; l'étiquette de
+   statistiques reste exacte (gardée par `Statistics.Total`).
+   Limites assumées : la gomme reste en cellules détaillées (règle produit du moteur :
+   un contour agrégé prétendrait que des cellules vides sont effaçables) ; les chemins
+   Face/Line/Geometry/Surface/Fill du planner forcent encore `DetailedCells`
+   (candidats PERF-02a-bis si mesures défavorables).
 2. **PERF-02b — coalescence par frame** (si les données Tony confirment le multiplicateur
    par-événement) : résoudre préview/highlights au plus une fois par frame.
 3. **PERF-02c — rebuild mesh incrémental** (gros modèles, au commit) : 73-166 ms mesurés ;
