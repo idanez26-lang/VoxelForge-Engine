@@ -528,6 +528,7 @@ void EditorWorkspace::CompleteFileDrop(const float x, const float y)
 
 void EditorWorkspace::Draw()
 {
+    ++drawFrameIndex_;
     // PERF-01: close the previous frame (event handling included) and open
     // the next one; slow frames are summarized once in the console.
     const double probeNowMilliseconds =
@@ -2145,6 +2146,10 @@ void EditorWorkspace::DrawScenePanel()
     const auto width = static_cast<std::uint32_t>(available.x);
     const auto height = static_cast<std::uint32_t>(available.y);
     spMarkSection(EditorFrameProbeSlot::SpSetup);
+    // Lot 7b : purge de la coalescence — l'état des highlights différé à la
+    // frame précédente est résolu ici, juste avant que le renderer le
+    // consomme pour cette frame.
+    if (highlightsUpdatePending_) UpdateVoxelHighlights();
     const bool viewportRendered =
         [this, width, height]
         {
@@ -7945,8 +7950,26 @@ std::size_t EditorWorkspace::VoxelHighlightRenderCount() const noexcept
     return viewportRenderer_.HighlightRenderCount();
 }
 
+void EditorWorkspace::ForceVoxelHighlightsResolve() noexcept
+{
+    highlightsResolvedFrame_ = std::numeric_limits<std::uint64_t>::max();
+    UpdateVoxelHighlights();
+}
+
 void EditorWorkspace::UpdateVoxelHighlights() noexcept
 {
+    // Lot 7b (PERF-02b) : une seule résolution complète par frame. Le premier
+    // appel reste synchrone (les smokes agissent puis lisent dans la même
+    // frame) ; les suivants sont différés et purgés au pré-rendu de la frame
+    // suivante — le moment où le renderer consomme réellement cet état, comme
+    // pour les appels post-rendu d'aujourd'hui.
+    if (highlightsResolvedFrame_ == drawFrameIndex_)
+    {
+        highlightsUpdatePending_ = true;
+        return;
+    }
+    highlightsResolvedFrame_ = drawFrameIndex_;
+    highlightsUpdatePending_ = false;
     const EditorFrameProbeScope highlightsProbe(
         frameProbe_, EditorFrameProbeSlot::Highlights);
     // PERF-02d: section timestamps inside the function; each call attributes

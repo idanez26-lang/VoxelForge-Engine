@@ -434,7 +434,7 @@ bool EditorWorkspace::RunStampLivePreviewVisualStep(const std::size_t)
             preview->State == VoxelPreviewState::Valid;
         if (stampLivePreviewVisualValid_)
         {
-            UpdateVoxelHighlights();
+            ForceVoxelHighlightsResolve();
         }
 
         stampLivePreviewVisualStartedAt_ = std::chrono::steady_clock::now();
@@ -472,7 +472,7 @@ bool EditorWorkspace::RunStampLivePreviewVisualStep(const std::size_t)
             !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo();
         if (stampLivePreviewVisualOverlap_)
         {
-            UpdateVoxelHighlights();
+            ForceVoxelHighlightsResolve();
         }
 
         AddConsoleMessage(stampLivePreviewVisualOverlap_
@@ -729,7 +729,7 @@ bool EditorWorkspace::RunForgeLibraryVisualStep(const std::size_t frame)
                 const Stamps::ForgeLibraryOperationResult activated =
                     forgeLibraryViewModel_.ActivateSelected(
                         *document, voxelDocumentSession_.Generation());
-                if (activated.SessionActivated) UpdateVoxelHighlights();
+                if (activated.SessionActivated) ForceVoxelHighlightsResolve();
             }
         }
     }
@@ -804,7 +804,7 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             return false;
         selectionSystemSmokeStarted_ =
             voxelToolState_.IsSelectionActive();
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 10U)
     {
@@ -1073,7 +1073,7 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             !click.WasDrag && !click.Bounds &&
             !selectionInteraction_.IsActive() &&
             selectionService_.EditableBounds() == persistent;
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 16U)
     {
@@ -1143,7 +1143,7 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
         selectionSystemSmokePassed_ = selectionSystemSmokeToolChanged_ &&
             selectionService_.Empty() &&
             !selectionService_.EditableBounds().Valid;
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 22U)
     {
@@ -1198,7 +1198,7 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             transformPreviewModel_.CollisionCount() != 1U ||
             transformPreviewModel_.OutOfBoundsCount() != 0U)
             return false;
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 23U)
     {
@@ -1219,7 +1219,7 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             transformPreviewModel_.CollisionCount() != 0U ||
             transformPreviewModel_.OutOfBoundsCount() != 1U)
             return false;
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 24U)
     {
@@ -1240,7 +1240,7 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             transformPreviewModel_.CollisionCount() != 1U ||
             transformPreviewModel_.OutOfBoundsCount() != 1U)
             return false;
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 25U)
     {
@@ -1248,7 +1248,7 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             viewportRenderer_.TransformPreviewCollisionPrimitiveCount() != 2U ||
             !transformPreviewModel_.CancelPreview())
             return false;
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 26U)
     {
@@ -1313,7 +1313,7 @@ bool EditorWorkspace::RunEraseVoxelSmokeStep(const std::size_t frame)
         if (!hit) return false;
         static_cast<void>(voxelSelection_.SetHovered(hit));
         static_cast<void>(voxelSelection_.SelectHovered());
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 1U)
     {
@@ -1380,7 +1380,7 @@ bool EditorWorkspace::RunPaintVoxelSmokeStep(const std::size_t frame)
         static_cast<void>(paintPaletteSelection_.SetIndex(paintSmokeNewColor_));
         static_cast<void>(voxelSelection_.SetHovered(hit));
         static_cast<void>(voxelSelection_.SelectHovered());
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 1U)
     {
@@ -1476,7 +1476,7 @@ bool EditorWorkspace::RunVoxelSaveSmokeStep(const std::size_t frame)
         static_cast<void>(paintPaletteSelection_.SetIndex(voxelSaveSmokeColor_));
         static_cast<void>(voxelSelection_.SetHovered(hit));
         static_cast<void>(voxelSelection_.SelectHovered());
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 1U)
     {
@@ -1702,7 +1702,7 @@ bool EditorWorkspace::RunAddVoxelSmokeStep(const std::size_t frame)
             return false;
         }
         addVoxelSmokeTarget_ = *target.Coordinates;
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
         addVoxelSmokeSelected_ = true;
     }
     else if (frame == 1U)
@@ -2349,7 +2349,7 @@ bool EditorWorkspace::RunVoxelRayPickingSmokeStep(
         if (!voxelRayPickingHitVerified_) return false;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 1U)
     {
@@ -2372,7 +2372,7 @@ bool EditorWorkspace::RunVoxelRayPickingSmokeStep(
         if (miss) return false;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::NoHit));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
     }
     else if (frame == 2U)
     {
@@ -2467,7 +2467,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
                 Asset::Voxel::VoxelPosition{0, 1, 1}) return false;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
         voxelPencilSmokeTarget_ = hit->AdjacentPosition;
         voxelPencilSmokePreviewValid_ =
             voxelPlacementPreview_.IsValid() &&
@@ -2487,7 +2487,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
         if (!hit) return false;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
         const bool firstClick = voxelToolSmokeInput_.Update(
             inputFrame(true)) == VoxelPencilInputDecision::Apply;
         const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
@@ -2546,7 +2546,7 @@ bool EditorWorkspace::RunVoxelPencilSmokeStep(
         outside.AdjacentWithinBounds = false;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, outside));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
         const std::uint64_t revision = document->GetRevision();
         const std::uint64_t count = document->GetVoxelCount();
         const std::size_t builds = voxelDocumentMeshCache_.BuildCount();
@@ -2657,7 +2657,7 @@ bool EditorWorkspace::RunVoxelEraserSmokeStep(
         voxelEraserSmokeAddedTarget_ = hit->AdjacentPosition;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
         const std::optional<SmartToolRequest> request = BuildSmartPencilRequest();
         const bool added = request && smartToolController_.ResolvePreview(
             smartToolSession_, *request).HasPlan() && ApplyVoxelPencil();
@@ -2681,7 +2681,7 @@ bool EditorWorkspace::RunVoxelEraserSmokeStep(
             return false;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
         voxelEraserSmokePreviewValid_ =
             voxelPlacementPreview_.IsValid() &&
             voxelPlacementPreview_.Tool == VoxelPreviewTool::Eraser &&
@@ -2699,7 +2699,7 @@ bool EditorWorkspace::RunVoxelEraserSmokeStep(
         if (!hit) return false;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
         const bool firstClick = voxelToolSmokeInput_.Update(
             inputFrame(true)) == VoxelToolInputDecision::Apply;
         const bool removed = firstClick && ApplyVoxelEraser();
@@ -2758,7 +2758,7 @@ bool EditorWorkspace::RunVoxelEraserSmokeStep(
             return false;
         static_cast<void>(voxelSelection_.SetHovered(
             VoxelPickingInteractionState::Hit, hit));
-        UpdateVoxelHighlights();
+        ForceVoxelHighlightsResolve();
         const bool click = voxelToolSmokeInput_.Update(
             inputFrame(true)) == VoxelToolInputDecision::Apply;
         const bool removed = click && ApplyVoxelEraser();

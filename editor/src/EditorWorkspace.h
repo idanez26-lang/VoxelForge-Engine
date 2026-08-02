@@ -101,6 +101,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -682,6 +683,16 @@ private:
     bool showForgeLibrary_ = true;
     bool showProfiler_ = false;
     EditorFrameProbe frameProbe_;
+    // Lot 7b (PERF-02b) : coalescence des highlights — au plus une résolution
+    // complète par frame ; les appels suivants sont purgés au pré-rendu de la
+    // frame suivante, où le renderer consomme l'état.
+    std::uint64_t drawFrameIndex_ = 0U;
+    std::uint64_t highlightsResolvedFrame_ =
+        std::numeric_limits<std::uint64_t>::max();
+    bool highlightsUpdatePending_ = false;
+    // Les pas de smoke provoquent un état puis le lisent dans la même frame :
+    // ce point d'entrée contourne la coalescence pour rester synchrone.
+    void ForceVoxelHighlightsResolve() noexcept;
     bool showImGuiDemo_ = false;
     bool useViewportInteractionV2_ = false;
     bool usePencilViewportInteractionV2_ = false;
