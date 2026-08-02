@@ -55,6 +55,14 @@ par-événement vs autre poste).
    prédiction). Le coût résiduel = **matérialisation du planner O(volume) à chaque
    nouvelle cellule survolée**, plus le multiplicateur par-événement souris réelle
    (highlights ×4 dans une même frame observé sur le segment de Tony).
+
+   **Session souris réelle de Tony (02/08, taille 21, en dessinant, sondes PERF-01c)** —
+   pire frame 258 ms : `highlights` 118,7 ms ×3, `mesh-sync` 90,7 ms ×2 (deux rebuilds
+   complets du mesh dans la même frame), `hl-handoff` 7,1 ms ×3, `preview` 8,4 ms ×2,
+   `vp-render` ~1 ms. Conclusions : (1) **pendant le dessin, le poste dominant est le
+   rebuild complet du mesh par pas de trait** → PERF-02c prioritaire ; (2) coalescence
+   ×3→×1 des highlights confirmée utile ; (3) ~35 ms/appel highlights restent non
+   attribués → sous-sondes internes à poser (stroke-compose, exact-resolve, branches).
 2. **PERF-02b — coalescence par frame** : multiplicateur confirmé (highlights ×4/frame
    en souris réelle) → résoudre préview/highlights au plus une fois par frame.
    Prochaine étape.
