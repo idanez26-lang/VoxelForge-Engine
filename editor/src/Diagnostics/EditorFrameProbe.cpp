@@ -22,6 +22,7 @@ const char* EditorFrameProbeSlotName(const EditorFrameProbeSlot slot) noexcept
     case EditorFrameProbeSlot::HlPrep: return "hl-prep";
     case EditorFrameProbeSlot::HlTools: return "hl-tools";
     case EditorFrameProbeSlot::HlCursor: return "hl-cursor";
+    case EditorFrameProbeSlot::HlSmartPlan: return "hl-plan";
     }
     return "unknown";
 }

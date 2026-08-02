@@ -8148,6 +8148,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 exactSmartToolPreview = &smartToolStrokePreviewMesh_;
             }
         }
+        hlMarkSection(EditorFrameProbeSlot::HlSmartPlan);
         voxelPlacementPreview_ = {};
         if (smartBrushGhostPreview_ != nullptr)
         {
