@@ -6,6 +6,7 @@ Règle : aucune décision n'est effective sans validation explicite de Tony.
 | Date | Décision | Source |
 |---|---|---|
 | 2026-08-02 | Préview « état final exact » plafonnée par la taille du document (option A : au-delà de 50k voxels, pas de mesh exact — constante `MaximumExactPreviewDocumentVoxelCount`) ; l'exactitude sans plafond sera restaurée par le compositeur incrémental (option B, VF-0262) | Tony, session Cowork 02/08 (VF-0261) |
+| 2026-08-02 | VF-0262 validé : rebuild mesh incrémental par chunks 32³, sans anticipation multi-modèles ; ordre 262-0/262-1 → lot 7 VF-0260 → 262-2/4 | Tony, session Cowork 02/08 |
 | 2026-08-02 | `feature/common-foundation` supprimée (ancêtre strict confirmé de `feature/imgui`, aucun contenu unique) | Tony, session Cowork 02/08 |
 | 2026-08-02 | Grand Livre de la Forge et Roadmap v1 validés | Tony, session Cowork 02/08 |
 | 2026-08-01 | Lot 4c clos en statu quo : `SynchronizeProjectAssets` reste dans EditorWorkspace (orchestration légitime ; pas de contrôleur à 15 références) | Tony, session Cowork 01/08 |

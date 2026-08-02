@@ -55,11 +55,10 @@ d'une région, pas du monde.
 - Verdicts : suite complète 180+, benchmark 262-0 avant/après, session sonde réelle
   (objectif : commit < 20 ms sur modèle 500k).
 
-## Questions ouvertes pour Tony
+## Arbitrages (validés par Tony, 02/08)
 
-1. Taille de chunk 32³ (défaut proposé) ou 16³ ?
-2. Le futur multi-modèles/sub-models (VOX Version 150+, Sub-models: 1 aujourd'hui)
-   doit-il être anticipé dans la partition, ou chunk par sub-model suffit ?
-3. Priorité relative : VF-0262 avant ou après le lot 7 de VF-0260 ? (Recommandation :
-   262-0/262-1 d'abord — purs et sans risque — puis lot 7, puis 262-2/4, car le lot 7
-   touche les mêmes zones d'appel.)
+1. Taille de chunk : **32³** (constante calibrable).
+2. Multi-modèles : **pas d'anticipation** — partition par sub-model, chunks à
+   l'intérieur ; on généralisera si le besoin réel arrive.
+3. Ordre : **262-0 puis 262-1 d'abord** (benchmark de référence + builder par région,
+   purs et sans risque), puis lot 7 de VF-0260, puis 262-2/262-3/262-4.
