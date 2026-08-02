@@ -79,9 +79,15 @@ par-événement vs autre poste).
      de réussir : plafond à 1 rebuild/frame en dessinant (mesuré ×2 auparavant).
      Compromis accepté : les pas intermédiaires perdent le rollback-si-échec-rebuild ;
      clic simple, undo et redo gardent le comportement transactionnel.
+   - **v1 validé (02/08, session souris réelle de Tony, gros modèle)** : pire frame
+     227 ms avec `mesh-sync` ×1 (88,6 ms, contre 65-90 ms ×2 avant) et `highlights` ×1
+     (127 ms, contre ×3-4 avant). CTest 180/180 smokes GUI inclus.
+   - **Restes mesurés** : (a) ~120 ms non attribués DANS `highlights` (hors `preview`
+     0,4 ms et `hl-handoff` 5,6 ms), croissant avec la taille du modèle — sous-sondes
+     internes à poser pour identifier le bloc ; (b) le rebuild lui-même (88 ms).
    - **v2 — rebuild incrémental par régions (chunks)** : seul vrai plafond pour très
-     gros modèles (90 ms/rebuild restants) ; chantier d'architecture séparé à
-     documenter (VF-0262) et valider avant toute implémentation.
+     gros modèles ; chantier d'architecture séparé à documenter (VF-0262) et valider
+     avant toute implémentation.
 
 ## Invariants à préserver (lus dans le code, 01/08)
 
