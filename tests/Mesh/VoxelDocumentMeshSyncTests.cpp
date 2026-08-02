@@ -3,6 +3,8 @@
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -161,6 +163,85 @@ void TestDocumentReplacementAndRelease()
 }
 }
 
+// VF-0262 lot 262-1: canonical multiset of faces, independent of emission
+// order. Each face key = its 4 corner positions (sorted), normal and colour.
+std::vector<std::string> FaceKeys(const VoxelForge::Mesh::MeshData& mesh)
+{
+    std::vector<std::string> keys;
+    keys.reserve(mesh.FaceCount());
+    const auto& vertices = mesh.Vertices();
+    for (std::size_t face = 0U; face < mesh.FaceCount(); ++face)
+    {
+        std::array<std::string, 4U> corners;
+        for (std::size_t corner = 0U; corner < 4U; ++corner)
+        {
+            const auto& vertex = vertices[face * 4U + corner];
+            corners[corner] =
+                std::to_string(vertex.Position[0]) + ',' +
+                std::to_string(vertex.Position[1]) + ',' +
+                std::to_string(vertex.Position[2]);
+        }
+        std::sort(corners.begin(), corners.end());
+        const auto& normal = vertices[face * 4U].Normal;
+        keys.push_back(corners[0] + '|' + corners[1] + '|' + corners[2] +
+            '|' + corners[3] + '|' +
+            std::to_string(normal[0]) + ',' + std::to_string(normal[1]) +
+            ',' + std::to_string(normal[2]) + '|' +
+            std::to_string(vertices[face * 4U].ColorIndex));
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+
+void TestRegionBuildsMatchFullMesh()
+{
+    // A solid 2x2x2 block crossing region boundaries plus scattered voxels,
+    // inside an 8x8x8 model split into eight 4x4x4 regions.
+    std::vector<VoxVoxel> voxels;
+    for (std::uint8_t z = 3U; z <= 4U; ++z)
+        for (std::uint8_t y = 3U; y <= 4U; ++y)
+            for (std::uint8_t x = 3U; x <= 4U; ++x)
+                voxels.push_back({x, y, z, 7U});
+    voxels.push_back({0U, 0U, 0U, 3U});
+    voxels.push_back({7U, 7U, 7U, 4U});
+    voxels.push_back({0U, 7U, 3U, 5U});
+    const VoxelDocument document =
+        Document({Model({8U, 8U, 8U}, voxels)});
+
+    const auto full = VoxelMeshBuilder::Build(document);
+    Require(full.Succeeded && full.Mesh, "Full mesh build failed.");
+    // The 2x2x2 block only exposes its outer shell: 24 faces, not 48.
+    Require(full.Mesh->FaceCount() == 24U + 3U * 6U,
+        "Unexpected full mesh face count for the fixture.");
+
+    std::vector<std::string> assembled;
+    for (std::int32_t z = 0; z < 8; z += 4)
+        for (std::int32_t y = 0; y < 8; y += 4)
+            for (std::int32_t x = 0; x < 8; x += 4)
+            {
+                const auto region = VoxelMeshBuilder::Build(
+                    document, {x, y, z}, {x + 3, y + 3, z + 3});
+                Require(region.Succeeded && region.Mesh,
+                    "Region mesh build failed.");
+                const auto keys = FaceKeys(*region.Mesh);
+                assembled.insert(
+                    assembled.end(), keys.begin(), keys.end());
+            }
+    std::sort(assembled.begin(), assembled.end());
+    Require(assembled == FaceKeys(*full.Mesh),
+        "Assembled region meshes must equal the full document mesh.");
+
+    const auto empty = VoxelMeshBuilder::Build(document, {1, 1, 1}, {2, 2, 2});
+    Require(empty.Succeeded && empty.Mesh && empty.Mesh->Empty(),
+        "An unoccupied region must build an empty mesh.");
+
+    const auto inverted =
+        VoxelMeshBuilder::Build(document, {4, 4, 4}, {3, 3, 3});
+    Require(!inverted.Succeeded &&
+            inverted.Error == MeshBuildError::InvalidSource,
+        "Inverted region bounds must be rejected.");
+}
+
 int main()
 {
     try
@@ -169,6 +250,7 @@ int main()
         TestMultiModelAndInvalidIndex();
         TestRevisionSynchronization();
         TestDocumentReplacementAndRelease();
+        TestRegionBuildsMatchFullMesh();
         return 0;
     }
     catch (const std::exception& exception)

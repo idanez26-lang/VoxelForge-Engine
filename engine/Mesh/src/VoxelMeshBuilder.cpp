@@ -241,9 +241,15 @@ MeshBuildResult VoxelMeshBuilder::Build(const Voxel::VoxelGrid& grid)
         std::move(mesh)};
 }
 
-MeshBuildResult VoxelMeshBuilder::Build(
+// Shared document mesh construction (VF-0262 lot 262-1). A null region
+// builds the whole sub-model; otherwise only voxels inside the inclusive
+// region emit faces. Visibility always consults the whole sub-model, so
+// meshes built over a partition of space assemble seamlessly.
+MeshBuildResult VoxelMeshBuilder::BuildDocumentMesh(
     const Asset::Voxel::VoxelDocument& document,
-    const std::size_t modelIndex)
+    const std::size_t modelIndex,
+    const Asset::Voxel::VoxelPosition* const regionMinimum,
+    const Asset::Voxel::VoxelPosition* const regionMaximum)
 {
     if (document.GetModelCount() == 0U && modelIndex == 0U)
     {
@@ -272,10 +278,20 @@ MeshBuildResult VoxelMeshBuilder::Build(
     {
         voxels.reserve(model->VoxelCount());
         model->ForEachVoxel(
-            [&voxels](
+            [&voxels, regionMinimum, regionMaximum](
                 const Asset::Voxel::VoxelPosition& position,
                 const Asset::Voxel::Voxel& voxel)
             {
+                if (regionMinimum != nullptr &&
+                    (position.X < regionMinimum->X ||
+                     position.Y < regionMinimum->Y ||
+                     position.Z < regionMinimum->Z ||
+                     position.X > regionMaximum->X ||
+                     position.Y > regionMaximum->Y ||
+                     position.Z > regionMaximum->Z))
+                {
+                    return;
+                }
                 voxels.push_back({position, voxel});
             });
         std::sort(
@@ -318,7 +334,7 @@ MeshBuildResult VoxelMeshBuilder::Build(
         for (const FaceDefinition& face : Faces)
         {
             if (faceVisible(voxel.Position, face) &&
-                ++faceCount > MaximumFaceCount)
+                ++faceCount > VoxelMeshBuilder::MaximumFaceCount)
             {
                 return Failure(
                     MeshBuildError::TooLarge,
@@ -330,8 +346,8 @@ MeshBuildResult VoxelMeshBuilder::Build(
     constexpr std::size_t maximumIndex =
         std::numeric_limits<std::uint32_t>::max();
     if (faceCount > maximumIndex / 4U || faceCount > maximumIndex / 6U ||
-        faceCount * 4U > MaximumVertexCount ||
-        faceCount * 6U > MaximumIndexCount)
+        faceCount * 4U > VoxelMeshBuilder::MaximumVertexCount ||
+        faceCount * 6U > VoxelMeshBuilder::MaximumIndexCount)
     {
         return Failure(
             MeshBuildError::TooLarge,
@@ -392,6 +408,31 @@ MeshBuildResult VoxelMeshBuilder::Build(
         MeshBuildError::None,
         "Voxel document mesh generation succeeded.",
         std::move(mesh)};
+}
+
+MeshBuildResult VoxelMeshBuilder::Build(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::size_t modelIndex)
+{
+    return BuildDocumentMesh(document, modelIndex, nullptr, nullptr);
+}
+
+MeshBuildResult VoxelMeshBuilder::Build(
+    const Asset::Voxel::VoxelDocument& document,
+    const Asset::Voxel::VoxelPosition& regionMinimum,
+    const Asset::Voxel::VoxelPosition& regionMaximum,
+    const std::size_t modelIndex)
+{
+    if (regionMinimum.X > regionMaximum.X ||
+        regionMinimum.Y > regionMaximum.Y ||
+        regionMinimum.Z > regionMaximum.Z)
+    {
+        return Failure(
+            MeshBuildError::InvalidSource,
+            "Voxel mesh region bounds are inverted.");
+    }
+    return BuildDocumentMesh(
+        document, modelIndex, &regionMinimum, &regionMaximum);
 }
 
 } // namespace VoxelForge::Mesh
