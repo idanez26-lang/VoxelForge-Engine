@@ -530,7 +530,13 @@ void EditorWorkspace::Draw()
             std::chrono::steady_clock::now().time_since_epoch()).count();
     if (const auto slowFrameSummary =
             frameProbe_.FrameBoundary(probeNowMilliseconds))
+    {
         AddConsoleMessage(*slowFrameSummary);
+        // PERF-02d: mirror slow-frame summaries into a plain-text log next to
+        // the executable so measurement sessions need no UI interaction.
+        std::ofstream perfLog("voxelforge-perf.log", std::ios::app);
+        if (perfLog) perfLog << *slowFrameSummary << '\n';
+    }
 
     if (closeRequest_.IsClosing())
     {
