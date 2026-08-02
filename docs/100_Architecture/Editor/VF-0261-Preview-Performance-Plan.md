@@ -92,6 +92,25 @@ par-événement vs autre poste).
      trait ~70 ms dans scene-panel hors sondes (frame 29516) — à sonder si gênant ;
      (d) `scene-panel` ~8 ms/frame constant sur gros modèle même au repos (suspect :
      raycast de survol O(N)) — piste séparée.
+
+   **Cause racine finale (PERF-02d, sonde `hl-plan`, 02/08)** : en mode détaillé
+   (pinceau ≤ 256 cellules, OU gros pinceau rogné sous 256 par les bords de la boîte),
+   `SmartToolExactPreviewComposer` via `smartToolExactPreviewCache_.Resolve` copie et
+   remaille **tout le document** à chaque nouvelle cellule survolée — O(modèle) par
+   événement (mesuré 75-144 ms, croissant avec le modèle ; ×1-×3 par frame). C'est la
+   racine du « plus il y a de voxels, plus ça lague », y compris petit pinceau.
+   **Arbitrage Tony (02/08) : option A maintenant, option B ensuite. Option A
+   implémentée (02/08)** : constante `MaximumExactPreviewDocumentVoxelCount = 50 000`
+   (EditorWorkspace.cpp, calibrable) ; au-delà, les trois chemins de composition
+   (hover détaillé, stroke détaillé, stroke suspendu) présentent fantômes/agrégat au
+   lieu du mesh exact. Concession documentée : sur très gros documents, la préview
+   détaillée perd le rendu « état final » (statistiques et curseur restent exacts).
+   - Option A — seuil sur la taille du document (ex. > 50-100k voxels) : au-delà,
+     préview par fantômes au lieu du mesh « état final exact ». Simple, borne le coût ;
+     concession sur l'exactitude visuelle pour les très gros modèles uniquement.
+   - Option B — compositeur incrémental par régions (ne recomposer que la zone
+     affectée) : préserve l'exactitude partout ; chantier couplé à VF-0262 (chunks).
+   - (Complément dans les deux cas : PERF-02b, coalescence ×3→×1 par frame.)
    - **v2 — rebuild incrémental par régions (chunks)** : seul vrai plafond pour très
      gros modèles ; chantier d'architecture séparé à documenter (VF-0262) et valider
      avant toute implémentation.

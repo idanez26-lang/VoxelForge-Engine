@@ -5,6 +5,8 @@ Règle : aucune décision n'est effective sans validation explicite de Tony.
 
 | Date | Décision | Source |
 |---|---|---|
+| 2026-08-02 | Préview « état final exact » plafonnée par la taille du document (option A : au-delà de 50k voxels, pas de mesh exact — constante `MaximumExactPreviewDocumentVoxelCount`) ; l'exactitude sans plafond sera restaurée par le compositeur incrémental (option B, VF-0262) | Tony, session Cowork 02/08 (VF-0261) |
+| 2026-08-02 | Grand Livre de la Forge et Roadmap v1 validés | Tony, session Cowork 02/08 |
 | 2026-08-01 | Lot 4c clos en statu quo : `SynchronizeProjectAssets` reste dans EditorWorkspace (orchestration légitime ; pas de contrôleur à 15 références) | Tony, session Cowork 01/08 |
 | 2026-08-01 | Règle de build local : Visual Studio fermé pendant tout configure/build CLI (un seul propriétaire du `binaryDir` — sinon `rules.ninja` silencieusement absent) ; CMake 4.4.1 standalone en service | Diagnostic session 01/08 (build/DIAGNOSTIC.md) |
 | 2026-08-01 | Workflow de collaboration : Claude (Cowork) = code/fichiers ; Codex = exécution console sur prompts validés par Tony ; aucun commit/push sans validation explicite | Tony, session Cowork 01/08 |
@@ -18,9 +20,8 @@ Règle : aucune décision n'est effective sans validation explicite de Tony.
 
 ## Décisions en attente (Tony)
 
-1. Archiver ou supprimer `feature/common-foundation` (ancêtre strict confirmé, aucun contenu unique) ;
-2. Adoption de `tests/CMakeLists.proposed.txt` comme `tests/CMakeLists.txt` (à régénérer d'abord — obsolète depuis les lots 0-4) ;
-3. Validation du Grand Livre et de la Roadmap v1 (les présents documents).
+1. Archiver ou supprimer `feature/common-foundation` (ancêtre strict confirmé, aucun contenu unique — accord de principe donné le 02/08, reste à choisir : archive-tag ou suppression) ;
+2. Adoption de `tests/CMakeLists.proposed.txt` comme `tests/CMakeLists.txt` (à régénérer d'abord — obsolète depuis les lots 0-6).
 
 Résolues depuis le 31/07 : fusion V2 (avance rapide dans `feature/imgui`, branche supprimée) ;
 tag `v0.1.2` posé (`369277b`).

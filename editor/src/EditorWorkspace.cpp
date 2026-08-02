@@ -45,6 +45,11 @@ namespace VoxelForge::Editor
 
 namespace
 {
+// PERF-02e (option A, arbitrage Tony 02/08) : au-delà de ce nombre de voxels
+// dans le document, la préview « état final exact » n'est plus composée — son
+// coût est O(document) par cellule survolée. L'option B (compositeur
+// incrémental, VF-0262) restaurera l'exactitude sans plafond.
+constexpr std::uint64_t MaximumExactPreviewDocumentVoxelCount = 50'000U;
 constexpr float StatusBarHeight = 26.0F;
 constexpr std::size_t MaximumConsoleMessageCount = 200;
 constexpr const char* WorkspaceDockspaceName = "VoxelForgeStudioDockSpace";
@@ -8068,10 +8073,13 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 SmartBrushRenderMode::DetailedCells;
             const Asset::Voxel::VoxelDocument* const document =
                 voxelDocumentSession_.ActiveDocument();
+            const bool exactPreviewAffordable = document != nullptr &&
+                document->GetVoxelCount() <=
+                    MaximumExactPreviewDocumentVoxelCount;
             if (document != nullptr)
             {
                 exactSmartToolPlan = plan;
-                if (aggregateSmartPreview)
+                if (aggregateSmartPreview || !exactPreviewAffordable)
                 {
                     // PERF-02a: above MaximumDetailedBrushPreviewVoxelCount
                     // the plan presents aggregate bounds. Composing the exact
@@ -8131,6 +8139,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             // suspended-target moments of large drags); their presentation
             // stays the aggregate outline, matching the primary stroke path.
             if (!invalidReplacementEndpoint && activeStroke != nullptr && document != nullptr &&
+                document->GetVoxelCount() <=
+                    MaximumExactPreviewDocumentVoxelCount &&
                 smartToolStrokePreviewPlan_ != nullptr &&
                 smartToolStrokePreviewPlan_->BrushResult().RenderPlan.Mode ==
                     SmartBrushRenderMode::DetailedCells)
