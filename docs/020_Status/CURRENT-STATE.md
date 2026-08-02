@@ -61,12 +61,12 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 
 ## À faire (hors lots)
 
-1. **PERF-01 — lags outils (confirmés en Release, même à 1 voxel, survol ET tracé)** :
-   benchmark STAMP-16 exécuté (01/08, Release) → pipeline stamp hors de cause aux petites
-   tailles (~1 ms), upload GPU à coût fixe ~1 ms, mesh rebuild 73-166 ms à 131k-262k voxels
-   (candidat rebuild incrémental, lot 7). Hypothèse pour le lag petit-modèle : travail
-   par événement souris (préview/highlights re-téléversés). Prochaine étape :
-   instrumentation de la boucle d'édition (chronos par frame, journal des frames lentes) ;
+1. **PERF-01 clos → PERF-02 planifié (VF-0261)** : cause du lag outils identifiée par
+   sonde in-app — `UpdateVoxelHighlights` croît avec le volume de préview (255 ms/appel
+   à pinceau 64, dont 55 ms de planner). Plan validé par Tony : préview agrégée au-delà
+   d'un seuil, coalescence par frame (à confirmer avec ses données `[Perf]` souris
+   réelle), rebuild incrémental couplé lot 7. Voir
+   `docs/100_Architecture/Editor/VF-0261-Preview-Performance-Plan.md` ;
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;
