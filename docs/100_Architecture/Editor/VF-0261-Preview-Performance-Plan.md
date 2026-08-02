@@ -43,8 +43,25 @@ par-événement vs autre poste).
    un contour agrégé prétendrait que des cellules vides sont effaçables) ; les chemins
    Face/Line/Geometry/Surface/Fill du planner forcent encore `DetailedCells`
    (candidats PERF-02a-bis si mesures défavorables).
-2. **PERF-02b — coalescence par frame** (si les données Tony confirment le multiplicateur
-   par-événement) : résoudre préview/highlights au plus une fois par frame.
+
+   **Mesures après (02/08, Release `e14bd23`, session sonde in-app, modèle 16k)** :
+   | Pinceau | Pire frame avant | Pire frame après | Poste dominant après |
+   |---|---|---|---|
+   | 3 | < 20 ms | 16,9 ms | — |
+   | 16 | non mesuré | 25,5 ms | highlights 23,0 ms |
+   | 64 | **258 ms** | **61,2 ms (×4,2)** | **planner (`ResolvePreview`) 57,7 ms** |
+
+   La présentation est réglée (fantômes + mesh exact ≈ 197 ms éliminés, conformes à la
+   prédiction). Le coût résiduel = **matérialisation du planner O(volume) à chaque
+   nouvelle cellule survolée**, plus le multiplicateur par-événement souris réelle
+   (highlights ×4 dans une même frame observé sur le segment de Tony).
+2. **PERF-02b — coalescence par frame** : multiplicateur confirmé (highlights ×4/frame
+   en souris réelle) → résoudre préview/highlights au plus une fois par frame.
+   Prochaine étape.
+2bis. **PERF-02-planner — matérialisation paresseuse** : sur les plans agrégés, éviter
+   de matérialiser les 262k cellules au survol (nécessaires seulement au commit).
+   Profond : touche le planner et les invariants SMART (gate SMART-02.5) — à chiffrer
+   après 02b.
 3. **PERF-02c — rebuild mesh incrémental** (gros modèles, au commit) : 73-166 ms mesurés ;
    chantier séparé, à coupler au lot 7.
 
