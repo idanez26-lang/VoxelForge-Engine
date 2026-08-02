@@ -2123,11 +2123,18 @@ void EditorWorkspace::DrawScenePanel()
     UpdateTransformGizmo(available.y);
     const auto width = static_cast<std::uint32_t>(available.x);
     const auto height = static_cast<std::uint32_t>(available.y);
-    if (viewportRenderer_.Render(
-            width, height, viewportCamera_,
-            viewportState_.IsGridVisible(),
-            viewportState_.AreAxesVisible(),
-            viewportState_.BackgroundColor()))
+    const bool viewportRendered =
+        [this, width, height]
+        {
+            const EditorFrameProbeScope renderProbe(
+                frameProbe_, EditorFrameProbeSlot::ViewportRender);
+            return viewportRenderer_.Render(
+                width, height, viewportCamera_,
+                viewportState_.IsGridVisible(),
+                viewportState_.AreAxesVisible(),
+                viewportState_.BackgroundColor());
+        }();
+    if (viewportRendered)
     {
         voxelViewportRendered_ = true;
         ImGui::Image(
@@ -8487,6 +8494,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         selectionBounds.reset();
         editableSelectionBounds.reset();
     }
+    const EditorFrameProbeScope handoffProbe(
+        frameProbe_, EditorFrameProbeSlot::HighlightsHandoff);
     viewportRenderer_.ConfigureHighlights(
         hoveredCoordinates,
         selectedCoordinates,

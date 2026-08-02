@@ -17,6 +17,8 @@ const char* EditorFrameProbeSlotName(const EditorFrameProbeSlot slot) noexcept
     case EditorFrameProbeSlot::ScenePanel: return "scene-panel";
     case EditorFrameProbeSlot::InteractionTick: return "v2-tick";
     case EditorFrameProbeSlot::Stroke: return "stroke";
+    case EditorFrameProbeSlot::HighlightsHandoff: return "hl-handoff";
+    case EditorFrameProbeSlot::ViewportRender: return "vp-render";
     }
     return "unknown";
 }
