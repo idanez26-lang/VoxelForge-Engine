@@ -8126,8 +8126,14 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             const bool invalidReplacementEndpoint =
                 (smartLineLockedStart_ && !smartLineEndpointValid_) ||
                 (smartGeometryPlane_ && !smartGeometryEndpointValid_);
+            // PERF-02d: aggregate strokes never compose the exact accumulated
+            // mesh (O(stroke volume) per revision, measured 86-135 ms during
+            // suspended-target moments of large drags); their presentation
+            // stays the aggregate outline, matching the primary stroke path.
             if (!invalidReplacementEndpoint && activeStroke != nullptr && document != nullptr &&
-                smartToolStrokePreviewPlan_ != nullptr)
+                smartToolStrokePreviewPlan_ != nullptr &&
+                smartToolStrokePreviewPlan_->BrushResult().RenderPlan.Mode ==
+                    SmartBrushRenderMode::DetailedCells)
             {
                 exactSmartToolPlan = smartToolStrokePreviewPlan_;
                 if (smartToolStrokePreviewStrokeRevision_ !=

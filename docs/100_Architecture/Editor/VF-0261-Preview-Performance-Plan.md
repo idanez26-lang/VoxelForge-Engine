@@ -82,9 +82,16 @@ par-événement vs autre poste).
    - **v1 validé (02/08, session souris réelle de Tony, gros modèle)** : pire frame
      227 ms avec `mesh-sync` ×1 (88,6 ms, contre 65-90 ms ×2 avant) et `highlights` ×1
      (127 ms, contre ×3-4 avant). CTest 180/180 smokes GUI inclus.
-   - **Restes mesurés** : (a) ~120 ms non attribués DANS `highlights` (hors `preview`
-     0,4 ms et `hl-handoff` 5,6 ms), croissant avec la taille du modèle — sous-sondes
-     internes à poser pour identifier le bloc ; (b) le rebuild lui-même (88 ms).
+   - **Restes mesurés** : (a) ~120 ms non attribués DANS `highlights` — **résolu
+     (PERF-02d, 02/08)** : sondes de sections `hl-prep/hl-tools/hl-cursor` + journal
+     fichier `voxelforge-perf.log` → coupable identifié dans `hl-tools` (86-135 ms) =
+     `SmartToolExactPreviewComposer::Compose` de la branche « stroke suspendu »
+     (cible temporairement invalide pendant un long trait), non couverte par le bypass
+     agrégé de PERF-02a. Corrigé : la branche exige désormais un RenderPlan
+     `DetailedCells`. (b) le rebuild lui-même (~90 ms, VF-0262) ; (c) commit de fin de
+     trait ~70 ms dans scene-panel hors sondes (frame 29516) — à sonder si gênant ;
+     (d) `scene-panel` ~8 ms/frame constant sur gros modèle même au repos (suspect :
+     raycast de survol O(N)) — piste séparée.
    - **v2 — rebuild incrémental par régions (chunks)** : seul vrai plafond pour très
      gros modèles ; chantier d'architecture séparé à documenter (VF-0262) et valider
      avant toute implémentation.
