@@ -43,6 +43,23 @@ d'une région, pas du monde.
 - `viewportState_.UpdateDocumentStatistics` et la palette : inchangés (recalcul global
   conservé, coût négligeable).
 
+## Référence 262-0 (mesurée le 02/08, Release, poste Tony, commit `688cea6`)
+
+| Voxels | Build complet | Région 32³ | Ratio |
+|---|---|---|---|
+| 15 625 | 4,70 ms | 4,65 ms | ×1,0 |
+| 64 000 | 22,1 ms | 10,5 ms | ×2,1 |
+| 132 651 | 58,6 ms | 15,2 ms | ×3,9 |
+| 262 144 | 147,8 ms | 25,6 ms | ×5,8 |
+| 493 039 | 343,3 ms | 39,1 ms | ×8,8 |
+| 1 000 000 | 886,8 ms | 63,9 ms | ×13,9 |
+
+Lecture : le build complet confirme l'O(N) catastrophique par pose ; la région 32³
+gagne ×5-14 mais croît encore — parcours de collecte (`ForEachVoxel` filtré) O(N)
+résiduel. **Exigence ajoutée pour 262-2/262-3 : itération régionale côté document**
+(`ForEachVoxelInRegion` ou stockage par chunks) pour une région à coût ~constant
+(~5 ms, indépendant du document).
+
 ## Découpage en lots (discipline VF-0260)
 
 - **262-0** : benchmark de référence — étendre STAMP-16 d'un scénario « édition
