@@ -105,6 +105,13 @@ par-événement vs autre poste).
    (hover détaillé, stroke détaillé, stroke suspendu) présentent fantômes/agrégat au
    lieu du mesh exact. Concession documentée : sur très gros documents, la préview
    détaillée perd le rendu « état final » (statistiques et curseur restent exacts).
+   **Option A validée en session réelle (02/08, `4ed2a8d`)** : le compose O(document) a
+   disparu des mesures (`hl-plan` ≤ planner partout) ; frames de dessin ~35 ms
+   constants. Restes hiérarchisés : (1) rebuild complet au commit 110-120 ms ×1 sur
+   très gros modèle → VF-0262 ; (2) ~33 ms/frame non attribués dans `scene-panel`
+   pendant le trait (chemin de commit crayon, à sonder) ; (3) matérialisation du
+   planner 36-48 ms/nouvelle cellule à pinceau 64 ; (4) coalescence ×3→×1 (PERF-02b)
+   devenue secondaire (les appels résiduels coûtent ~0,1 ms).
    - Option A — seuil sur la taille du document (ex. > 50-100k voxels) : au-delà,
      préview par fantômes au lieu du mesh « état final exact ». Simple, borne le coût ;
      concession sur l'exactitude visuelle pour les très gros modèles uniquement.
