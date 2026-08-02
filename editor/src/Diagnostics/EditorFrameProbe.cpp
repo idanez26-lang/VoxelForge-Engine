@@ -23,6 +23,8 @@ const char* EditorFrameProbeSlotName(const EditorFrameProbeSlot slot) noexcept
     case EditorFrameProbeSlot::HlTools: return "hl-tools";
     case EditorFrameProbeSlot::HlCursor: return "hl-cursor";
     case EditorFrameProbeSlot::HlSmartPlan: return "hl-plan";
+    case EditorFrameProbeSlot::PencilTick: return "pencil-tick";
+    case EditorFrameProbeSlot::PencilCommit: return "pencil-commit";
     }
     return "unknown";
 }

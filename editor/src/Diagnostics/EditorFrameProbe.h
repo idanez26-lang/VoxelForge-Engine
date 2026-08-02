@@ -24,10 +24,12 @@ enum class EditorFrameProbeSlot : std::uint8_t
     HlPrep,          // UpdateVoxelHighlights: hover/selection preparation
     HlTools,         // UpdateVoxelHighlights: smart/eraser/fill tool chain
     HlCursor,        // UpdateVoxelHighlights: universal cursor + tail
-    HlSmartPlan      // Smart branch: plan/exact resolution up to presentation
+    HlSmartPlan,     // Smart branch: plan/exact resolution up to presentation
+    PencilTick,      // Pencil V2: SubmitInput + Tick
+    PencilCommit     // Pencil V2: CommitPencilViewportInteractionV2
 };
 
-inline constexpr std::size_t EditorFrameProbeSlotCount = 13U;
+inline constexpr std::size_t EditorFrameProbeSlotCount = 15U;
 
 [[nodiscard]] const char* EditorFrameProbeSlotName(
     EditorFrameProbeSlot slot) noexcept;

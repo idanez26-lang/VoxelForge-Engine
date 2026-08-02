@@ -2578,9 +2578,18 @@ void EditorWorkspace::DrawScenePanel()
                 pencilInput.Request = *request;
                 pencilInput.Target = request->Placement.Target;
             }
-            pencilViewportInteractionV2_.SubmitInput(std::move(pencilInput));
-            pencilViewportInteractionV2_.Tick(document);
-            CommitPencilViewportInteractionV2();
+            {
+                const EditorFrameProbeScope pencilTickProbe(
+                    frameProbe_, EditorFrameProbeSlot::PencilTick);
+                pencilViewportInteractionV2_.SubmitInput(
+                    std::move(pencilInput));
+                pencilViewportInteractionV2_.Tick(document);
+            }
+            {
+                const EditorFrameProbeScope pencilCommitProbe(
+                    frameProbe_, EditorFrameProbeSlot::PencilCommit);
+                CommitPencilViewportInteractionV2();
+            }
             const InteractionV2::PencilCompactPresentation& presentation =
                 pencilViewportInteractionV2_.Presentation();
             if (pencilV2RenderedPresentationRevision_ != presentation.Revision)
