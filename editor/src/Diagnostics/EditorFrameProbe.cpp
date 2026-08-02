@@ -19,6 +19,9 @@ const char* EditorFrameProbeSlotName(const EditorFrameProbeSlot slot) noexcept
     case EditorFrameProbeSlot::Stroke: return "stroke";
     case EditorFrameProbeSlot::HighlightsHandoff: return "hl-handoff";
     case EditorFrameProbeSlot::ViewportRender: return "vp-render";
+    case EditorFrameProbeSlot::HlPrep: return "hl-prep";
+    case EditorFrameProbeSlot::HlTools: return "hl-tools";
+    case EditorFrameProbeSlot::HlCursor: return "hl-cursor";
     }
     return "unknown";
 }

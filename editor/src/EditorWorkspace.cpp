@@ -7917,6 +7917,17 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
 {
     const EditorFrameProbeScope highlightsProbe(
         frameProbe_, EditorFrameProbeSlot::Highlights);
+    // PERF-02d: section timestamps inside the function; each call attributes
+    // the elapsed time since the previous mark to the given slot.
+    auto hlSectionStart = std::chrono::steady_clock::now();
+    const auto hlMarkSection =
+        [this, &hlSectionStart](const EditorFrameProbeSlot slot)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        frameProbe_.Add(slot, std::chrono::duration<double, std::milli>(
+            now - hlSectionStart).count());
+        hlSectionStart = now;
+    };
     universalCursor2DTarget_.reset();
     const auto coordinates = [](const std::optional<VoxelRaycastHit>& hit)
         -> std::optional<VoxelCoordinates>
@@ -8012,6 +8023,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         toolContext_.Smart.SetPreview(SmartToolPreviewState::Unavailable);
         toolContext_.Smart.ClearStatistics();
     }
+    hlMarkSection(EditorFrameProbeSlot::HlPrep);
     if (smartAddActive || smartEraseActive || smartPaintActive)
     {
         const SmartToolStroke* const activeStroke = smartToolStroke_.IsActive()
@@ -8396,6 +8408,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             ? UniversalCursorPreviewSubject::PencilSingleVoxel
             : UniversalCursorPreviewSubject::PencilBrush
         : UniversalCursorPreviewSubject::Geometric;
+    hlMarkSection(EditorFrameProbeSlot::HlTools);
     const bool universalCursorToolActive = smartGeometryActive ||
         pencilV2ToolActive || voxelToolState_.IsFillActive();
     if (universalCursorToolActive)
@@ -8507,6 +8520,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         selectionBounds.reset();
         editableSelectionBounds.reset();
     }
+    hlMarkSection(EditorFrameProbeSlot::HlCursor);
     const EditorFrameProbeScope handoffProbe(
         frameProbe_, EditorFrameProbeSlot::HighlightsHandoff);
     viewportRenderer_.ConfigureHighlights(

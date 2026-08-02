@@ -20,10 +20,13 @@ enum class EditorFrameProbeSlot : std::uint8_t
     InteractionTick, // ViewportInteractionV2 SubmitInput + Tick + presentation
     Stroke,          // EditorWorkspace::ContinueSmartToolStroke
     HighlightsHandoff, // Renderer Configure* tail of UpdateVoxelHighlights
-    ViewportRender   // ViewportRenderer::Render inside DrawScenePanel
+    ViewportRender,  // ViewportRenderer::Render inside DrawScenePanel
+    HlPrep,          // UpdateVoxelHighlights: hover/selection preparation
+    HlTools,         // UpdateVoxelHighlights: smart/eraser/fill tool chain
+    HlCursor         // UpdateVoxelHighlights: universal cursor + tail
 };
 
-inline constexpr std::size_t EditorFrameProbeSlotCount = 9U;
+inline constexpr std::size_t EditorFrameProbeSlotCount = 12U;
 
 [[nodiscard]] const char* EditorFrameProbeSlotName(
     EditorFrameProbeSlot slot) noexcept;
