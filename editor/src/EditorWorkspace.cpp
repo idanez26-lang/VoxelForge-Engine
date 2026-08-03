@@ -1,4 +1,6 @@
 #include "EditorWorkspace.h"
+#include "EditorWorkspaceUiHelpers.h"
+#include "Layout/EditorPanelNames.h"
 #include "VoxelModelTransform.h"
 #include "VoxelSelection/ViewportRayBuilder.h"
 #include "VoxelSelection/VoxelRaycast.h"
@@ -45,18 +47,20 @@ namespace VoxelForge::Editor
 
 namespace
 {
-constexpr float StatusBarHeight = 26.0F;
+// VF-0260 (nettoyage) : les noms de panneaux viennent de la source de
+// vérité partagée Layout/EditorPanelNames.h — plus de littéraux locaux.
+constexpr float StatusBarHeight = PanelNames::StatusBarHeight;
 constexpr std::size_t MaximumConsoleMessageCount = 200;
-constexpr const char* WorkspaceDockspaceName = "VoxelForgeStudioDockSpace";
-constexpr const char* ToolsPanelWindowName = "Tools";
-constexpr const char* ToolOptionsPanelWindowName = "Tool Options";
-constexpr const char* StylePanelWindowName = "Style";
-constexpr const char* ViewportPanelWindowName = "Viewport";
-constexpr const char* AssetsPanelWindowName = "Assets";
-constexpr const char* ForgeLibraryPanelWindowName = "Forge Library";
-constexpr const char* ScenePanelWindowName = "Scene";
-constexpr const char* InspectorPanelWindowName = "Inspector";
-constexpr const char* TransformPanelWindowName = "Transform";
+constexpr const char* WorkspaceDockspaceName = PanelNames::WorkspaceDockspace;
+constexpr const char* ToolsPanelWindowName = PanelNames::Tools;
+constexpr const char* ToolOptionsPanelWindowName = PanelNames::ToolOptions;
+constexpr const char* StylePanelWindowName = PanelNames::Style;
+constexpr const char* ViewportPanelWindowName = PanelNames::Viewport;
+constexpr const char* AssetsPanelWindowName = PanelNames::Assets;
+constexpr const char* ForgeLibraryPanelWindowName = PanelNames::ForgeLibrary;
+constexpr const char* ScenePanelWindowName = PanelNames::Scene;
+constexpr const char* InspectorPanelWindowName = PanelNames::Inspector;
+constexpr const char* TransformPanelWindowName = PanelNames::Transform;
 constexpr const char* AboutPopupName = "About VoxelForge Studio";
 constexpr const char* DirtyConfirmationPopupName = "Unsaved Voxel Model";
 constexpr const char* ImportConfirmationPopupName = "Import Models";
@@ -133,73 +137,8 @@ bool IsVisibleRecentProject(const std::filesystem::path& path)
         std::filesystem::is_regular_file(path, error) && !error;
 }
 
-void DrawErrorMessage(const std::string_view error)
-{
-    if (error.empty())
-    {
-        return;
-    }
-
-    ImGui::PushStyleColor(
-        ImGuiCol_Text,
-        ImVec4(0.95F, 0.35F, 0.30F, 1.0F));
-    ImGui::TextWrapped("%.*s", static_cast<int>(error.size()), error.data());
-    ImGui::PopStyleColor();
-}
-
-void DrawTooltip(const char* text)
-{
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-    {
-        ImGui::SetTooltip("%s", text);
-    }
-}
-
-void DrawSelectionHandles(
-    const SelectionHandles& handles,
-    const std::optional<SelectionFace> hoveredFace,
-    const SelectionFace activeFace)
-{
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
-    constexpr float NormalHalfSize = 4.5F;
-    constexpr float ActiveHalfSize = 6.0F;
-    for (const SelectionHandle& handle : handles)
-    {
-        if (!handle.Visible) continue;
-        const bool active = handle.Face == activeFace;
-        const bool hovered = hoveredFace && *hoveredFace == handle.Face;
-        const float halfSize = active ? ActiveHalfSize : NormalHalfSize;
-        const ImVec2 minimum{
-            handle.ScreenPosition.X - halfSize,
-            handle.ScreenPosition.Y - halfSize};
-        const ImVec2 maximum{
-            handle.ScreenPosition.X + halfSize,
-            handle.ScreenPosition.Y + halfSize};
-        const ImU32 fill = active
-            ? IM_COL32(255, 194, 92, 255)
-            : hovered ? IM_COL32(104, 255, 220, 255)
-                      : IM_COL32(18, 45, 50, 245);
-        const ImU32 outline = active || hovered
-            ? IM_COL32(248, 255, 253, 255)
-            : IM_COL32(78, 232, 202, 255);
-        drawList->AddRectFilled(minimum, maximum, fill, 1.5F);
-        drawList->AddRect(minimum, maximum, IM_COL32(4, 8, 12, 255), 1.5F,
-            0, 3.0F);
-        drawList->AddRect(minimum, maximum, outline, 1.5F, 0, 1.0F);
-    }
-}
-
-void SetSelectionHandleCursor(const SelectionHandle& handle)
-{
-    const float horizontal = std::abs(handle.ScreenAxisPerVoxel.X);
-    const float vertical = std::abs(handle.ScreenAxisPerVoxel.Y);
-    if (horizontal > vertical * 1.5F)
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-    else if (vertical > horizontal * 1.5F)
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-    else
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
-}
+// DrawErrorMessage/DrawTooltip/DrawSelectionHandles/SetSelectionHandleCursor
+// vivent desormais dans EditorWorkspaceUiHelpers.h (source partagee).
 
 ImVec4 ToImGuiColor(const Asset::Voxel::VoxelColor& color) noexcept
 {

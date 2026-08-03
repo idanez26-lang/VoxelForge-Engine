@@ -84,10 +84,11 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;
-4. Nettoyage différé : copies de noms de panneaux **+ 5 symboles dupliqués au lot 7d
-   (`ViewportPanelWindowName`, `DrawErrorMessage`, `DrawTooltip`,
-   `DrawSelectionHandles`, `SetSelectionHandleCursor`) — à mutualiser dans un
-   en-tête**, régénérer `tests/CMakeLists.proposed.txt`,
+4. Nettoyage différé : ~~copies de noms de panneaux + 5 symboles dupliqués au
+   lot 7d~~ ✅ fait le 03/08 : assistants ImGui mutualisés dans
+   `EditorWorkspaceUiHelpers.h` (3 copies supprimées, dont du code mort dans
+   Smoke) et noms de panneaux sourcés depuis `Layout/EditorPanelNames.h` dans
+   les 3 TU. Reste : régénérer `tests/CMakeLists.proposed.txt`,
    lot 3-bis (`BeginSaveSelectionAsStamp` + dialogue stamps), presenter des dialogues projet
    (facultatif, post-4a/4b) ;
 5. Phase D ensuite : Smart Tools — gate SMART-02.5 avant SMART-03 (AR-0104).
