@@ -67,6 +67,16 @@ résiduel. **Exigence ajoutée pour 262-2/262-3 : itération régionale côté d
 - **262-1** : `VoxelMeshBuilder` par région (API `Build(grid, bounds)`) + tests
   d'équivalence (mesh complet == somme des chunks, frontières incluses).
 - **262-2** : journal d'invalidation dans le document/les transactions + tests.
+  **✅ Implémenté (03/08)** : journal borné au niveau `VoxelDocument` (couvre
+  mutations directes, transactions ET undo/redo sans instrumentation des appelants —
+  les 7 sites `RecordChange()` journalisent). API : `ChangesSince(sinceRevision)`
+  → positions touchées agrégées (`nullopt` = réponse impossible → secours complet ;
+  vecteur vide = changements palette uniquement → **aucun remaillage nécessaire**,
+  gain bonus). Bornes : 64 révisions × 4 096 positions (constantes calibrables) ;
+  une mutation au-delà du plafond marque son delta « overflow » et force le secours.
+  Positions agrégées tous sub-models confondus (arbitrage n° 2). Tests :
+  `TestRevisionJournalChangesSince` (agrégation, palette-only, éviction de l'anneau,
+  overflow, no-ops/rejets sans effet).
 - **262-3** : `VoxelDocumentMeshCache` incrémental (chunks + secours complet) + tests.
 - **262-4** : upload partiel côté renderer + validation visuelle sur poste.
 - Verdicts : suite complète 180+, benchmark 262-0 avant/après, session sonde réelle

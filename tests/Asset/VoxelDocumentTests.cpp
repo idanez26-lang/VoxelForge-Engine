@@ -3,9 +3,11 @@
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 #include "VoxelForge/Asset/Vox/VoxModelAnalyzer.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <tuple>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -22,6 +24,7 @@ using VoxelForge::Asset::Voxel::VoxelBounds;
 using VoxelForge::Asset::Voxel::VoxelColor;
 using VoxelForge::Asset::Voxel::VoxelDimensions;
 using VoxelForge::Asset::Voxel::VoxelDocument;
+using VoxelForge::Asset::Voxel::VoxelDocumentChange;
 using VoxelForge::Asset::Voxel::VoxelDocumentError;
 using VoxelForge::Asset::Voxel::VoxelPosition;
 using VoxelForge::Asset::Voxel::VoxDocumentLoader;
@@ -363,6 +366,121 @@ void TestMutationsDirtyRevisionAndBounds(TemporaryProject& temporary)
         "MarkSaved must clear dirty without resetting revision.");
 }
 
+[[nodiscard]] bool SamePositions(
+    std::vector<VoxelPosition> actual,
+    std::vector<VoxelPosition> expected)
+{
+    const auto lessThan = [](const VoxelPosition& a, const VoxelPosition& b)
+    {
+        return std::tie(a.X, a.Y, a.Z) < std::tie(b.X, b.Y, b.Z);
+    };
+    std::sort(actual.begin(), actual.end(), lessThan);
+    std::sort(expected.begin(), expected.end(), lessThan);
+    return actual == expected;
+}
+
+void TestRevisionJournalChangesSince(TemporaryProject& temporary)
+{
+    const fs::path path = temporary.Models / "journal.vox";
+    Write(path, Vox(Model(8U, 8U, 8U, {})));
+    VoxelDocument document = Load(path);
+
+    Require(document.ChangesSince(0U) && document.ChangesSince(0U)->empty(),
+        "Fresh document must report an empty change set at revision zero.");
+    Require(!document.ChangesSince(5U),
+        "A future revision must be refused with nullopt.");
+
+    Require(document.SetVoxel({1, 1, 1}, 3U).Changed &&
+        document.SetVoxel({2, 2, 2}, 4U).Changed,
+        "Journal test setup mutations failed.");
+    auto changes = document.ChangesSince(0U);
+    Require(changes && SamePositions(*changes, {{1, 1, 1}, {2, 2, 2}}),
+        "ChangesSince(0) must aggregate both mutations.");
+    changes = document.ChangesSince(1U);
+    Require(changes && SamePositions(*changes, {{2, 2, 2}}),
+        "ChangesSince must exclude already-seen revisions.");
+    Require(document.ChangesSince(2U) && document.ChangesSince(2U)->empty(),
+        "ChangesSince at the current revision must be empty.");
+
+    Require(!document.SetVoxel({1, 1, 1}, 3U).Changed &&
+        document.SetVoxel({0, 0, 0}, 0U).Error ==
+            VoxelDocumentError::InvalidPaletteIndex &&
+        document.GetRevision() == 2U,
+        "No-ops and rejected mutations must not touch the journal.");
+
+    Require(document.SetPaletteColor(9U, VoxelColor{1U, 2U, 3U, 4U}).Changed,
+        "Palette mutation failed.");
+    changes = document.ChangesSince(2U);
+    Require(changes && changes->empty(),
+        "Palette-only mutations must journal an empty voxel set.");
+    changes = document.ChangesSince(0U);
+    Require(changes && SamePositions(*changes, {{1, 1, 1}, {2, 2, 2}}),
+        "Palette mutations must not add voxel positions to the journal.");
+
+    Require(document.RemoveVoxel({1, 1, 1}).Changed,
+        "Journal removal mutation failed.");
+    changes = document.ChangesSince(3U);
+    Require(changes && SamePositions(*changes, {{1, 1, 1}}),
+        "Removals must be journaled like additions.");
+
+    const std::vector<VoxelDocumentChange> batch{
+        {0U, {5, 5, 5}, false, 0U, true, 2U},
+        {0U, {6, 6, 6}, false, 0U, true, 2U},
+        {0U, {7, 7, 7}, false, 0U, true, 2U}};
+    Require(document.ApplyVoxelChanges(batch).Changed,
+        "Composite change batch failed.");
+    changes = document.ChangesSince(4U);
+    Require(changes &&
+        SamePositions(*changes, {{5, 5, 5}, {6, 6, 6}, {7, 7, 7}}),
+        "Composite changes must journal every touched position.");
+
+    // Eviction: churn more revisions than the bounded ring keeps.
+    const std::uint64_t beforeChurn = document.GetRevision();
+    for (std::size_t index = 0U;
+         index <= VoxelDocument::MaximumJournaledRevisions; ++index)
+    {
+        Require(document.ReplaceVoxelColor(
+            {5, 5, 5}, (index % 2U == 0U) ? 3U : 2U).Changed,
+            "Journal churn mutation failed.");
+    }
+    Require(!document.ChangesSince(beforeChurn),
+        "Evicted revisions must force a nullopt (full rebuild).");
+    changes = document.ChangesSince(document.GetRevision() - 1U);
+    Require(changes && SamePositions(*changes, {{5, 5, 5}}),
+        "Recent revisions must survive the ring eviction.");
+
+    // Overflow: one mutation touching more positions than the per-revision cap.
+    const fs::path overflowPath = temporary.Models / "journal-overflow.vox";
+    Write(overflowPath, Vox(Model(17U, 17U, 17U, {})));
+    VoxelDocument big = Load(overflowPath);
+    std::vector<VoxelDocumentChange> huge;
+    huge.reserve(VoxelDocument::MaximumJournaledPositionsPerRevision + 1U);
+    for (std::size_t linear = 0U;
+         linear <= VoxelDocument::MaximumJournaledPositionsPerRevision;
+         ++linear)
+    {
+        huge.push_back({0U,
+            {static_cast<std::int32_t>(linear % 17U),
+             static_cast<std::int32_t>((linear / 17U) % 17U),
+             static_cast<std::int32_t>(linear / (17U * 17U))},
+            false, 0U, true, 1U});
+    }
+    Require(big.ApplyVoxelChanges(huge).Changed,
+        "Oversized composite batch failed.");
+    Require(!big.ChangesSince(0U),
+        "An overflowed delta must force a nullopt (full rebuild).");
+    Require(big.ChangesSince(big.GetRevision()) &&
+        big.ChangesSince(big.GetRevision())->empty(),
+        "The current revision must stay answerable after an overflow.");
+    Require(big.RemoveVoxel({0, 0, 0}).Changed,
+        "Post-overflow removal failed.");
+    changes = big.ChangesSince(big.GetRevision() - 1U);
+    Require(changes && SamePositions(*changes, {{0, 0, 0}}),
+        "Deltas recorded after an overflow must remain answerable.");
+    Require(!big.ChangesSince(big.GetRevision() - 2U),
+        "Ranges crossing an overflowed delta must force a nullopt.");
+}
+
 void TestIndependentSubModelsAndDuplicateRefusal(TemporaryProject& temporary)
 {
     Bytes children;
@@ -471,6 +589,7 @@ int main()
         TestLoadingReadingAndAnalyzerCoherence(temporary);
         TestDefaultPaletteAndEmptyBounds(temporary);
         TestMutationsDirtyRevisionAndBounds(temporary);
+        TestRevisionJournalChangesSince(temporary);
         TestIndependentSubModelsAndDuplicateRefusal(temporary);
         TestSparseReasonableLargeDocument(temporary);
         TestSessionLifecycleAndInternalProtection(temporary);

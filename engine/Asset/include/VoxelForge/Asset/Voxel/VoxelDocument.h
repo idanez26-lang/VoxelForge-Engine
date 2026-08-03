@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -203,6 +204,25 @@ public:
     [[nodiscard]] bool IsDirty() const noexcept;
     [[nodiscard]] std::uint64_t GetRevision() const noexcept;
 
+    // VF-0262 (262-2): bounded revision journal. Each successful mutation
+    // records the voxel positions it touched (palette-only mutations record
+    // an empty set, so mesh caches can skip remeshing entirely). Positions
+    // are aggregated across sub-models (no multi-model split, per the
+    // 02/08 arbitration).
+    static constexpr std::size_t MaximumJournaledRevisions = 64U;
+    static constexpr std::size_t MaximumJournaledPositionsPerRevision = 4096U;
+
+    // Returns every voxel position touched strictly after `sinceRevision`,
+    // up to and including the current revision. Duplicates are possible.
+    // An empty vector means no voxel changed (palette-only edits, or the
+    // document is already at `sinceRevision`). Returns std::nullopt when the
+    // journal cannot answer exactly (revision in the future, evicted from
+    // the bounded ring, or a single mutation exceeded
+    // MaximumJournaledPositionsPerRevision) -> callers must fall back to a
+    // full rebuild.
+    [[nodiscard]] std::optional<std::vector<VoxelPosition>> ChangesSince(
+        std::uint64_t sinceRevision) const;
+
     [[nodiscard]] VoxelDocumentOperationResult SetVoxel(
         const VoxelPosition& position,
         std::size_t paletteIndex,
@@ -240,6 +260,20 @@ private:
         std::size_t modelIndex) const;
     void RecordChange() noexcept;
 
+    struct RevisionDelta final
+    {
+        std::uint64_t Revision = 0U;
+        std::vector<VoxelPosition> Positions;
+        bool Overflowed = false;
+    };
+
+    // Must be called right after RecordChange() so the delta carries the
+    // freshly bumped revision. `overflowed` marks a mutation whose position
+    // set exceeded MaximumJournaledPositionsPerRevision (positions dropped).
+    void JournalMutation(
+        std::vector<VoxelPosition> positions,
+        bool overflowed);
+
     std::filesystem::path sourcePath_;
     std::optional<std::string> assetId_;
     std::uint32_t voxVersion_ = 0U;
@@ -247,6 +281,7 @@ private:
     std::vector<VoxelSubModel> models_;
     std::uint64_t voxelCount_ = 0U;
     std::uint64_t revision_ = 0U;
+    std::deque<RevisionDelta> revisionJournal_;
     bool hasCustomPalette_ = false;
     bool dirty_ = false;
 };

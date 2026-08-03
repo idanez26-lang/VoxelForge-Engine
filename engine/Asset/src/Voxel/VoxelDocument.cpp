@@ -260,6 +260,7 @@ VoxelDocumentOperationResult VoxelDocument::SetVoxel(
             return Success(false, "Voxel already has the requested color.");
         found->second.PaletteIndex = static_cast<std::uint8_t>(paletteIndex);
         RecordChange();
+        JournalMutation({position}, false);
         return Success(true, "Voxel color replaced.");
     }
     model.voxels_.emplace(
@@ -267,6 +268,7 @@ VoxelDocumentOperationResult VoxelDocument::SetVoxel(
     model.ExtendBounds(position);
     ++voxelCount_;
     RecordChange();
+    JournalMutation({position}, false);
     return Success(true, "Voxel added.");
 }
 
@@ -295,6 +297,7 @@ VoxelDocumentOperationResult VoxelDocument::RemoveVoxel(
     --voxelCount_;
     if (touchesBounds) model.RecalculateBounds();
     RecordChange();
+    JournalMutation({position}, false);
     return Success(true, "Voxel removed.");
 }
 
@@ -315,6 +318,7 @@ VoxelDocumentOperationResult VoxelDocument::ReplaceVoxelColor(
         return Success(false, "Voxel already has the requested color.");
     found->second.PaletteIndex = static_cast<std::uint8_t>(paletteIndex);
     RecordChange();
+    JournalMutation({position}, false);
     return Success(true, "Voxel color replaced.");
 }
 
@@ -330,6 +334,7 @@ VoxelDocumentOperationResult VoxelDocument::SetPaletteColor(
     palette_[paletteIndex] = color;
     hasCustomPalette_ = true;
     RecordChange();
+    JournalMutation({}, false);
     return Success(true, "Palette color changed.");
 }
 
@@ -361,6 +366,7 @@ VoxelDocumentOperationResult VoxelDocument::ReplacePalette(
     palette_ = snapshot.Colors;
     hasCustomPalette_ = snapshot.HasCustomPalette;
     RecordChange();
+    JournalMutation({}, false);
     return Success(true, "Palette replaced.");
 }
 
@@ -506,6 +512,16 @@ VoxelDocumentOperationResult VoxelDocument::ApplyCompositeChanges(
         if (recalculateBounds[index]) models_[index].RecalculateBounds();
     }
     RecordChange();
+    std::vector<VoxelPosition> journaledPositions;
+    const bool journalOverflowed =
+        voxelChanges.size() > MaximumJournaledPositionsPerRevision;
+    if (!journalOverflowed)
+    {
+        journaledPositions.reserve(voxelChanges.size());
+        for (const VoxelDocumentChange& change : voxelChanges)
+            journaledPositions.push_back(change.Position);
+    }
+    JournalMutation(std::move(journaledPositions), journalOverflowed);
     return Success(true, "Composite voxel document changes applied atomically.");
 }
 
@@ -541,6 +557,38 @@ void VoxelDocument::RecordChange() noexcept
 {
     dirty_ = true;
     ++revision_;
+}
+
+void VoxelDocument::JournalMutation(
+    std::vector<VoxelPosition> positions,
+    const bool overflowed)
+{
+    revisionJournal_.push_back(
+        RevisionDelta{revision_, std::move(positions), overflowed});
+    while (revisionJournal_.size() > MaximumJournaledRevisions)
+        revisionJournal_.pop_front();
+}
+
+std::optional<std::vector<VoxelPosition>> VoxelDocument::ChangesSince(
+    const std::uint64_t sinceRevision) const
+{
+    if (sinceRevision > revision_) return std::nullopt;
+    if (sinceRevision == revision_) return std::vector<VoxelPosition>{};
+    // Every RecordChange() site journals exactly one delta, so journal
+    // revisions are consecutive. The ring must therefore still contain the
+    // delta for `sinceRevision + 1`; otherwise history was evicted.
+    if (revisionJournal_.empty() ||
+        revisionJournal_.front().Revision > sinceRevision + 1U)
+        return std::nullopt;
+    std::vector<VoxelPosition> aggregated;
+    for (const RevisionDelta& delta : revisionJournal_)
+    {
+        if (delta.Revision <= sinceRevision) continue;
+        if (delta.Overflowed) return std::nullopt;
+        aggregated.insert(aggregated.end(),
+            delta.Positions.begin(), delta.Positions.end());
+    }
+    return aggregated;
 }
 
 } // namespace VoxelForge::Asset::Voxel

@@ -63,9 +63,11 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 
 1. **PERF-02 livré (VF-0261)** : frames de dessin 258 → ~35 ms mesurés. Restes
    documentés : sections `sp-*` de DrawScenePanel (~17-29 ms fantômes), matérialisation
-   paresseuse du planner, coalescence (secondaire). **VF-0262 en cours** : 262-1 fait
-   (builder par région + équivalence), 262-0 (benchmark) en cours ; ensuite lot 7 puis
-   262-2/4 (ordre validé 02/08) ;
+   paresseuse du planner, coalescence (secondaire). **VF-0262 en cours** : 262-0 ✅
+   (benchmark, baseline `688cea6`), 262-1 ✅ (builder par région + équivalence),
+   262-2 ✅ codé le 03/08 (journal d'invalidation `ChangesSince` dans VoxelDocument
+   + tests — en attente build/commit) ; ensuite 262-3 (cache incrémental chunks 32³
+   + itération régionale côté document) puis 262-4 ;
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;
