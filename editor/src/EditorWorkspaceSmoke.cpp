@@ -3040,6 +3040,29 @@ bool EditorWorkspace::RunFirstCreationExperienceSmokeStep(
                 std::cerr << " SourcePath=\""
                     << document->SourcePath().string() << '"';
             }
+            // Niveau 2 (03/08) : Browser=0/Selection=0 sur le runner —
+            // rejoue le reveal en imprimant chaque maillon.
+            const auto& project = projectManager_.ActiveProject();
+            std::cerr << " HasProject=" << static_cast<bool>(project)
+                << " HasAssetsRoot="
+                << assetBrowser_.Directory().HasAssetsRoot();
+            if (assetBrowser_.Directory().HasAssetsRoot())
+            {
+                std::cerr << " AssetsRoot=\""
+                    << assetBrowser_.Directory().AssetsRoot().string() << '"';
+            }
+            if (project)
+            {
+                const std::filesystem::path relative =
+                    created.ModelPath.lexically_relative(
+                        project->RootPath() / "Assets");
+                std::cerr << " RootPath=\""
+                    << project->RootPath().string() << '"'
+                    << " Relative=\"" << relative.string() << '"'
+                    << " RetryReveal=" << assetBrowser_.RevealEntry(relative)
+                    << " DirError=\""
+                    << assetBrowser_.Directory().LastError() << '"';
+            }
             std::cerr << '\n';
             return false;
         }
