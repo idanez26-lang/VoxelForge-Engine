@@ -173,8 +173,17 @@ résiduel. **Exigence ajoutée pour 262-2/262-3 : itération régionale côté d
     32³ plein) : le résiduel est le double parcours de visibilité du builder
     (~196k lookups hash par chunk plein) — piste d'optimisation future
     (stockage par chunks côté document), hors périmètre VF-0262.
-    **VF-0262 : code-complet.** Verdict restant : session sonde réelle
-    (mesh-sync et GpuUpload attendus ~constants pendant le dessin).
+    **VF-0262 : code-complet.**
+
+  **Verdict final (03/08, session sonde réelle pilotée par Claude, Release
+  `8011677`, modèle 64³/16k)** : 14 poses + 3 traits + 14 undos → **2 frames
+  lentes seulement** sur toute la session (27,2 et 22,3 ms), avec mesh-sync
+  ×1 à 1,5-5,3 ms et gpu-upload ×1 à 5-9,5 ms — contre 258 ms/frame et
+  mesh-sync 88-90 ms avant chantier sur le même scénario. **VF-0262 clos.**
+  Le contrôle « commit < 20 ms sur modèle 500k » en conditions réelles sera
+  rejoué quand l'éditeur permettra de choisir les dimensions de la box de
+  création (besoin produit noté) ; le benchmark CPU couvre déjà 1M
+  (édit ~22 ms).
   - Validation : suite bloquante + smokes EditorApp sur poste (GPU requis),
     session sonde réelle (`GpuUpload` attendu ~constant), vérification
     visuelle (édits en bord de chunk, gomme, palette, undo/redo).
