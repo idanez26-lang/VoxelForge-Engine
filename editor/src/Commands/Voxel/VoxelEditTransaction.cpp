@@ -16,20 +16,72 @@ namespace VoxelForge::Editor
 namespace
 {
 
+struct EditableSessionState final
+{
+    Voxel::VoxelModel* Model = nullptr;
+    Voxel::VoxelGrid* Grid = nullptr;
+    Asset::Voxel::VoxelDocument* Document = nullptr;
+    const Asset::Voxel::VoxelSubModel* DocumentModel = nullptr;
+};
+
 CommandResult ValidateSession(
     VoxelEditSession& session,
     const std::uint64_t modelGeneration,
     const std::size_t modelIndex,
-    Voxel::VoxelModel*& model) noexcept
+    EditableSessionState& state) noexcept
 {
     if (session.VoxelModelGeneration() != modelGeneration)
         return CommandResult::Failure("The voxel model session has changed.");
-    model = session.ActiveVoxelModel();
-    if (model == nullptr)
-        return CommandResult::Failure("No active voxel model is available.");
-    if (model->GetGrid(modelIndex) == nullptr)
+
+    state.Document = session.ActiveVoxelDocument();
+    state.Model = session.ActiveVoxelModel();
+    if (state.Document == nullptr && state.Model == nullptr)
         return CommandResult::Failure(
-            "The active voxel model has no matching grid.");
+            "No active voxel document or compatibility model is available.");
+
+    if (state.Document != nullptr)
+    {
+        state.DocumentModel = state.Document->GetModel(modelIndex);
+        if (state.DocumentModel == nullptr)
+            return CommandResult::Failure(
+                "The active VoxelDocument has no matching sub-model.");
+    }
+    if (state.Model != nullptr)
+    {
+        state.Grid = state.Model->GetGrid(modelIndex);
+        if (state.Grid == nullptr)
+            return CommandResult::Failure(
+                "The compatibility model has no matching grid.");
+    }
+    return CommandResult::Success();
+}
+
+CommandResult ReadDocumentVoxel(
+    const EditableSessionState& state,
+    const std::size_t modelIndex,
+    const std::uint32_t x,
+    const std::uint32_t y,
+    const std::uint32_t z,
+    Voxel::Voxel& voxel) noexcept
+{
+    if (state.Document == nullptr || state.DocumentModel == nullptr)
+        return CommandResult::Failure("No active VoxelDocument is available.");
+
+    const Asset::Voxel::VoxelDimensions dimensions =
+        state.DocumentModel->Dimensions();
+    if (x >= dimensions.X || y >= dimensions.Y || z >= dimensions.Z)
+        return CommandResult::Failure(
+            "Voxel coordinates are outside the active document.");
+
+    const std::optional<Asset::Voxel::Voxel> current =
+        state.Document->GetVoxel({
+            static_cast<std::int32_t>(x),
+            static_cast<std::int32_t>(y),
+            static_cast<std::int32_t>(z)}, modelIndex);
+    voxel = current
+        ? Voxel::Voxel{
+            current->PaletteIndex, Voxel::Voxel::OccupiedFlag}
+        : Voxel::Voxel{};
     return CommandResult::Success();
 }
 
@@ -43,14 +95,29 @@ CommandResult ReadEditableVoxel(
     const std::uint32_t z,
     Voxel::Voxel& voxel) noexcept
 {
-    Voxel::VoxelModel* model = nullptr;
+    EditableSessionState state;
     CommandResult validation = ValidateSession(
-        session, modelGeneration, 0U, model);
+        session, modelGeneration, 0U, state);
     if (!validation) return validation;
 
-    const Voxel::Voxel* current = model->GetGrid(0U)->Get(x, y, z);
+    if (state.Document != nullptr)
+    {
+        validation = ReadDocumentVoxel(state, 0U, x, y, z, voxel);
+        if (!validation) return validation;
+        if (state.Grid != nullptr)
+        {
+            const Voxel::Voxel* compatibility = state.Grid->Get(x, y, z);
+            if (compatibility == nullptr || *compatibility != voxel)
+                return CommandResult::Failure(
+                    "VoxelDocument and compatibility grid have diverged.");
+        }
+        return CommandResult::Success();
+    }
+
+    const Voxel::Voxel* current = state.Grid->Get(x, y, z);
     if (current == nullptr)
-        return CommandResult::Failure("Voxel coordinates are outside the active grid.");
+        return CommandResult::Failure(
+            "Voxel coordinates are outside the active grid.");
     voxel = *current;
     return CommandResult::Success();
 }
@@ -65,28 +132,43 @@ CommandResult ApplyVoxelEdit(
     const Voxel::Voxel replacement,
     const std::size_t modelIndex)
 {
-    Voxel::VoxelModel* model = nullptr;
+    EditableSessionState state;
     CommandResult validation = ValidateSession(
-        session, modelGeneration, modelIndex, model);
+        session, modelGeneration, modelIndex, state);
     if (!validation) return validation;
 
-    Voxel::VoxelGrid* grid = model->GetGrid(modelIndex);
-    const Voxel::Voxel* current = grid->Get(x, y, z);
-    if (current == nullptr)
-        return CommandResult::Failure("Voxel coordinates are outside the active grid.");
-    if (*current != expected)
+    Voxel::Voxel current;
+    if (state.Document != nullptr)
+    {
+        validation = ReadDocumentVoxel(
+            state, modelIndex, x, y, z, current);
+        if (!validation) return validation;
+    }
+    else
+    {
+        const Voxel::Voxel* compatibility = state.Grid->Get(x, y, z);
+        if (compatibility == nullptr)
+            return CommandResult::Failure(
+                "Voxel coordinates are outside the active grid.");
+        current = *compatibility;
+    }
+    if (current != expected)
         return CommandResult::Failure("The active voxel no longer matches command history.");
 
-    Asset::Voxel::VoxelDocument* document = session.ActiveVoxelDocument();
-    if (document != nullptr && document->GetModel(modelIndex) == nullptr)
-        return CommandResult::Failure(
-            "The active VoxelDocument has no matching sub-model.");
+    if (state.Grid != nullptr)
+    {
+        const Voxel::Voxel* compatibility = state.Grid->Get(x, y, z);
+        if (compatibility == nullptr || *compatibility != expected)
+            return CommandResult::Failure(
+                "VoxelDocument and compatibility grid have diverged.");
+    }
+
     const Asset::Voxel::VoxelPosition documentPosition{
         static_cast<std::int32_t>(x),
         static_cast<std::int32_t>(y),
         static_cast<std::int32_t>(z)};
     const auto applyDocumentVoxel = [
-        document, &documentPosition, modelIndex](
+        document = state.Document, &documentPosition, modelIndex](
         const Voxel::Voxel value)
     {
         return value.IsOccupied()
@@ -99,8 +181,8 @@ CommandResult ApplyVoxelEdit(
     std::optional<Voxel::VoxelGrid> gridSnapshot;
     try
     {
-        if (document != nullptr) documentSnapshot = *document;
-        gridSnapshot = *grid;
+        if (state.Document != nullptr) documentSnapshot = *state.Document;
+        if (state.Grid != nullptr) gridSnapshot = *state.Grid;
     }
     catch (const std::exception& exception)
     {
@@ -115,29 +197,24 @@ CommandResult ApplyVoxelEdit(
     }
     const auto rollback = [&]() noexcept
     {
-        if (gridSnapshot) *grid = std::move(*gridSnapshot);
-        if (document != nullptr && documentSnapshot)
-            *document = std::move(*documentSnapshot);
+        if (state.Grid != nullptr && gridSnapshot)
+            *state.Grid = std::move(*gridSnapshot);
+        if (state.Document != nullptr && documentSnapshot)
+            *state.Document = std::move(*documentSnapshot);
     };
 
-    if (document != nullptr)
+    if (state.Document != nullptr)
     {
-        const std::optional<Asset::Voxel::Voxel> documentVoxel =
-            document->GetVoxel(documentPosition, modelIndex);
-        const bool documentMatches = expected.IsOccupied()
-            ? documentVoxel &&
-                documentVoxel->PaletteIndex == expected.ColorIndex
-            : !documentVoxel;
-        if (!documentMatches)
-            return CommandResult::Failure(
-                "VoxelDocument and the editable compatibility grid diverged.");
         const Asset::Voxel::VoxelDocumentOperationResult changed =
             applyDocumentVoxel(replacement);
         if (!changed.Succeeded)
+        {
+            rollback();
             return CommandResult::Failure(
                 "VoxelDocument edit failed: " + changed.Message);
+        }
     }
-    if (!grid->Set(x, y, z, replacement))
+    if (state.Grid != nullptr && !state.Grid->Set(x, y, z, replacement))
     {
         rollback();
         return CommandResult::Failure("Unable to update the active voxel grid.");
@@ -211,9 +288,9 @@ CommandResult ApplyVoxelEditOperation(
         return CommandResult::Failure("The voxel model session has changed.");
     Voxel::VoxelModel* model = session.ActiveVoxelModel();
     Asset::Voxel::VoxelDocument* document = session.ActiveVoxelDocument();
-    if (model == nullptr || document == nullptr)
+    if (document == nullptr)
         return CommandResult::Failure(
-            "An editable voxel document and compatibility model are required.");
+            "An editable VoxelDocument is required.");
 
     struct GridSnapshot final
     {
@@ -228,7 +305,8 @@ CommandResult ApplyVoxelEditOperation(
     try
     {
         directedChanges.reserve(operation.Changes.size());
-        gridSnapshots.reserve(model->GridCount());
+        if (model != nullptr)
+            gridSnapshots.reserve(model->GridCount());
         for (const VoxelChange& source : operation.Changes)
         {
             VoxelChange directed = source;
@@ -245,24 +323,46 @@ CommandResult ApplyVoxelEditOperation(
                 return CommandResult::Failure(
                     "Voxel change coordinates cannot be negative.");
             }
-            Voxel::VoxelGrid* grid = model->GetGrid(directed.SubModelIndex);
-            if (grid == nullptr)
+            const Asset::Voxel::VoxelSubModel* documentModel =
+                document->GetModel(directed.SubModelIndex);
+            if (documentModel == nullptr)
                 return CommandResult::Failure(
-                    "Voxel change references an unavailable compatibility grid.");
+                    "Voxel change references an unavailable document sub-model.");
             const auto x = static_cast<std::uint32_t>(directed.Position.X);
             const auto y = static_cast<std::uint32_t>(directed.Position.Y);
             const auto z = static_cast<std::uint32_t>(directed.Position.Z);
-            const Voxel::Voxel* current = grid->Get(x, y, z);
-            if (current == nullptr)
+            const Asset::Voxel::VoxelDimensions dimensions =
+                documentModel->Dimensions();
+            if (x >= dimensions.X || y >= dimensions.Y || z >= dimensions.Z)
                 return CommandResult::Failure(
-                    "Voxel change coordinates lie outside the compatibility grid.");
-            const bool gridMatches = directed.ExistedBefore
-                ? current->IsOccupied() &&
-                    current->ColorIndex == directed.PaletteIndexBefore
-                : !current->IsOccupied();
-            if (!gridMatches)
+                    "Voxel change coordinates lie outside the document sub-model.");
+            const std::optional<Asset::Voxel::Voxel> documentVoxel =
+                document->GetVoxel(
+                    directed.Position, directed.SubModelIndex);
+            const bool documentMatches = directed.ExistedBefore
+                ? documentVoxel &&
+                    documentVoxel->PaletteIndex == directed.PaletteIndexBefore
+                : !documentVoxel;
+            if (!documentMatches)
                 return CommandResult::Failure(
-                    "VoxelDocument and compatibility grid differ from the expected state.");
+                    "VoxelDocument differs from the expected state.");
+            if (model != nullptr)
+            {
+                Voxel::VoxelGrid* grid =
+                    model->GetGrid(directed.SubModelIndex);
+                if (grid == nullptr)
+                    return CommandResult::Failure(
+                        "Voxel change references an unavailable compatibility grid.");
+                const Voxel::Voxel* current = grid->Get(x, y, z);
+                const bool gridMatches = current != nullptr &&
+                    (directed.ExistedBefore
+                        ? current->IsOccupied() &&
+                            current->ColorIndex == directed.PaletteIndexBefore
+                        : !current->IsOccupied());
+                if (!gridMatches)
+                    return CommandResult::Failure(
+                        "The compatibility grid differs from the VoxelDocument state.");
+            }
             directedChanges.push_back(directed);
         }
         if (operation.PaletteChange)
@@ -272,8 +372,14 @@ CommandResult ApplyVoxelEditOperation(
                 std::swap(
                     directedPaletteChange->Before,
                     directedPaletteChange->After);
+            if (document->GetPaletteSnapshot() !=
+                directedPaletteChange->Before)
+            {
+                return CommandResult::Failure(
+                    "The VoxelDocument palette no longer matches the expected state.");
+            }
             for (std::size_t index = 0U;
-                 index < Voxel::VoxelPalette::Size(); ++index)
+                 model != nullptr && index < Voxel::VoxelPalette::Size(); ++index)
             {
                 const Asset::Voxel::VoxelColor& expected =
                     directedPaletteChange->Before.Colors[index];
@@ -291,8 +397,9 @@ CommandResult ApplyVoxelEditOperation(
             }
         }
         documentSnapshot = *document;
-        paletteSnapshot = model->Palette();
-        for (std::size_t index = 0U; index < model->GridCount(); ++index)
+        if (model != nullptr) paletteSnapshot = model->Palette();
+        for (std::size_t index = 0U;
+             model != nullptr && index < model->GridCount(); ++index)
         {
             bool referenced = false;
             for (const VoxelChange& change : directedChanges)
@@ -322,11 +429,17 @@ CommandResult ApplyVoxelEditOperation(
     const auto rollback = [&]() noexcept
     {
         if (documentSnapshot) *document = std::move(*documentSnapshot);
-        if (paletteSnapshot) model->Palette() = std::move(*paletteSnapshot);
+        if (model != nullptr && paletteSnapshot)
+            model->Palette() = std::move(*paletteSnapshot);
         for (GridSnapshot& snapshot : gridSnapshots)
         {
-            if (Voxel::VoxelGrid* grid = model->GetGrid(snapshot.ModelIndex))
-                *grid = std::move(snapshot.Grid);
+            if (model != nullptr)
+            {
+                Voxel::VoxelGrid* grid =
+                    model->GetGrid(snapshot.ModelIndex);
+                if (grid != nullptr)
+                    *grid = std::move(snapshot.Grid);
+            }
         }
     };
 
@@ -349,7 +462,7 @@ CommandResult ApplyVoxelEditOperation(
         }
         const auto synchronizeModelPalette = [&]() noexcept
         {
-            if (!directedPaletteChange) return true;
+            if (model == nullptr || !directedPaletteChange) return true;
             for (std::size_t index = 0U;
                  index < Voxel::VoxelPalette::Size(); ++index)
             {
@@ -370,6 +483,7 @@ CommandResult ApplyVoxelEditOperation(
         }
         for (const VoxelChange& change : directedChanges)
         {
+            if (model == nullptr) break;
             Voxel::VoxelGrid* grid = model->GetGrid(change.SubModelIndex);
             const Voxel::Voxel replacement = change.ExistsAfter
                 ? Voxel::Voxel{

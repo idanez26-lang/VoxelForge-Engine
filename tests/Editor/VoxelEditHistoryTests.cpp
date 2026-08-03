@@ -1,5 +1,6 @@
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelHistory/VoxelHistoryInput.h"
+#include "Commands/Voxel/VoxelEditTransaction.h"
 #include "VoxelTools/VoxelEraserTool.h"
 #include "VoxelTools/VoxelPencilTool.h"
 #include "SmartToolTestSupport.h"
@@ -663,6 +664,61 @@ void TestRefusalsAndRollback()
         "Before-state mismatch changed the document.");
 }
 
+void TestDocumentOnlyCanonicalTransactions()
+{
+    auto document = DefaultDocument();
+    TestSession session(document);
+    session.hasModel_ = false;
+    Require(session.PrimeMesh(),
+        "Unable to prime the document-only history mesh.");
+
+    Voxel::Voxel empty;
+    Require(Editor::ReadEditableVoxel(
+            session, session.generation_, 2U, 2U, 2U, empty) &&
+        !empty.IsOccupied(),
+        "A document-only session could not read an empty canonical cell.");
+    Require(Editor::ApplyVoxelEdit(
+            session, session.generation_, 2U, 2U, 2U, empty,
+            {12U, Voxel::Voxel::OccupiedFlag}) &&
+        document.GetVoxel({2, 2, 2}) ==
+            std::optional<Asset::Voxel::Voxel>{
+                Asset::Voxel::Voxel{12U}},
+        "A direct document-only edit did not update the canonical document.");
+
+    Editor::VoxelEditHistory history;
+    history.MarkSavedState(document);
+    const Editor::VoxelEditOperation operation =
+        AddOperation("Document-only add", {3, 2, 2}, 13U);
+    const auto executed = history.Execute(session, operation);
+    const bool presentAfterExecute = document.HasVoxel({3, 2, 2});
+    const auto undone = history.Undo(session);
+    const bool absentAfterUndo = !document.HasVoxel({3, 2, 2});
+    const auto redone = history.Redo(session);
+    Require(executed && presentAfterExecute && absentAfterUndo &&
+        document.GetVoxel({3, 2, 2}) ==
+            std::optional<Asset::Voxel::Voxel>{
+                Asset::Voxel::Voxel{13U}} &&
+        undone && redone && document.HasVoxel({3, 2, 2}),
+        "Document-only Execute/Undo/Redo did not preserve canonical state.");
+
+    const Asset::Voxel::VoxelColor replacement{17U, 34U, 51U, 255U};
+    const Editor::VoxelEditOperation palette =
+        PaletteOperation(document, "Document-only palette", 13U, replacement);
+    Require(history.Execute(session, palette) &&
+        document.GetPalette()[13U] == replacement &&
+        history.Undo(session) && document.GetPalette()[13U] != replacement &&
+        history.Redo(session) && document.GetPalette()[13U] == replacement,
+        "Document-only palette history still required a compatibility model.");
+
+    const std::uint64_t revision = document.GetRevision();
+    session.failRebuild_ = true;
+    Require(!history.Execute(
+            session, AddOperation("Document-only rollback", {4, 2, 2}, 14U)) &&
+        !document.HasVoxel({4, 2, 2}) &&
+        document.GetRevision() == revision,
+        "A failed document-only rebuild did not roll back canonical state.");
+}
+
 void TestShortcutInput()
 {
     Editor::VoxelHistoryInputController input;
@@ -719,6 +775,7 @@ int main()
         TestCompositeDuplicatesLargeBatchAndLifecycle();
         TestLimitsAndMemory();
         TestRefusalsAndRollback();
+        TestDocumentOnlyCanonicalTransactions();
         TestShortcutInput();
         std::cout << "Voxel edit history tests passed.\n";
         return 0;

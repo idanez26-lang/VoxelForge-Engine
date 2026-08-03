@@ -41,9 +41,10 @@ enum class VoxelChangeDirection
     std::span<const VoxelChange> changes,
     VoxelChangeDirection direction);
 
-// Applies the complete history operation as one atomic document/model edit.
-// Voxel cells, the document palette and the compatibility-model palette are
-// committed together, or restored together on any failure.
+// Applies the complete history operation atomically to the canonical
+// VoxelDocument. When a legacy VoxelModel is still attached to the session,
+// its grids and palette are validated and synchronized as an optional
+// compatibility mirror. Every touched state is restored on failure.
 [[nodiscard]] CommandResult ApplyVoxelEditOperation(
     VoxelEditSession& session,
     std::uint64_t modelGeneration,
