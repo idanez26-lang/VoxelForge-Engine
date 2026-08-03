@@ -73,9 +73,11 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
    262-4a/4b ✅ (`a8c4036`, renderer par chunks : upload partiel des seuls
    chunks touchés, patch gardé par identité/centre/palette ; 129/129 +
    smokes 51/51 ; vérification visuelle Claude OK — frontières continues,
-   3 poses + undo/redo corrects), 262-4c ✅ codé le 03/08 (assemblage
-   `Mesh()` paresseux + statistiques par totaux de chunks — en attente
-   build/commit). Ensuite : session sonde réelle = verdict final VF-0262 ;
+   3 poses + undo/redo corrects), 262-4c ✅ (`660f527`, assemblage `Mesh()`
+   paresseux + statistiques par totaux de chunks ; 129/129 + smokes 51/51).
+   **VF-0262 code-complet** : édit ~4-22 ms toutes tailles vs 836 ms de
+   build complet @1M (×38). Verdict final : session sonde réelle
+   (mesh-sync/GpuUpload ~constants attendus) ;
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;

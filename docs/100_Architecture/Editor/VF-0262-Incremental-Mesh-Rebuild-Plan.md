@@ -166,6 +166,15 @@ résiduel. **Exigence ajoutée pour 262-2/262-3 : itération régionale côté d
     `VoxelViewportState`. Consommateurs restants de `Mesh()` : chemin de
     chargement (une fois par ouverture) et un smoke — hors chemin par édit.
     Le commit d'édition ne paie plus **aucun** coût O(surface) côté CPU.
+
+    **Vérifié (03/08, Release `660f527`, ctest 129/129 + smokes 51/51)** :
+    `sync_edit` ~4-22 ms toutes tailles (build complet équivalent 836 ms @1M,
+    ×38). Le coût par édit ≈ coût du rebuild du chunk touché (~10-14 ms à
+    32³ plein) : le résiduel est le double parcours de visibilité du builder
+    (~196k lookups hash par chunk plein) — piste d'optimisation future
+    (stockage par chunks côté document), hors périmètre VF-0262.
+    **VF-0262 : code-complet.** Verdict restant : session sonde réelle
+    (mesh-sync et GpuUpload attendus ~constants pendant le dessin).
   - Validation : suite bloquante + smokes EditorApp sur poste (GPU requis),
     session sonde réelle (`GpuUpload` attendu ~constant), vérification
     visuelle (édits en bord de chunk, gomme, palette, undo/redo).
