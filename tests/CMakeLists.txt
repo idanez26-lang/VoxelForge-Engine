@@ -39,6 +39,14 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeCoreLayerTests>
 )
 
+add_executable(VoxelForgeCoreUserDataPathsTests Core/UserDataPathsTests.cpp)
+target_link_libraries(VoxelForgeCoreUserDataPathsTests PRIVATE VoxelForgeCore)
+vf_configure_test(VoxelForgeCoreUserDataPathsTests)
+add_test(
+    NAME VoxelForge.Core.UserDataPaths
+    COMMAND $<TARGET_FILE:VoxelForgeCoreUserDataPathsTests>
+)
+
 add_executable(
     VoxelForgeEditorExitRequestTests
     Editor/EditorExitRequestTests.cpp

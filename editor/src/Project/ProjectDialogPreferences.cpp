@@ -1,8 +1,8 @@
 #include "Project/ProjectDialogPreferences.h"
 
-#include <cstdlib>
+#include "VoxelForge/Core/UserDataPaths.h"
+
 #include <fstream>
-#include <optional>
 
 namespace VoxelForge::Editor
 {
@@ -20,24 +20,6 @@ std::string ToUtf8(const std::filesystem::path& value)
     return std::string(utf8.begin(), utf8.end());
 }
 
-std::optional<std::string> Environment(const char* name)
-{
-#if defined(_WIN32)
-    char* value = nullptr;
-    std::size_t length = 0;
-    if (_dupenv_s(&value, &length, name) != 0 || value == nullptr)
-    {
-        return std::nullopt;
-    }
-    std::string result(value);
-    std::free(value);
-    return result.empty() ? std::nullopt : std::optional<std::string>(result);
-#else
-    const char* value = std::getenv(name);
-    return value == nullptr || *value == '\0'
-        ? std::nullopt : std::optional<std::string>(value);
-#endif
-}
 }
 
 ProjectDialogPreferences::ProjectDialogPreferences(
@@ -129,21 +111,16 @@ const std::string& ProjectDialogPreferences::LastError() const noexcept
 
 std::filesystem::path ProjectDialogPreferences::DefaultStorageFilePath()
 {
-    if (const auto overridePath = Environment("VOXELFORGE_PREFERENCES_FILE"))
-        return std::filesystem::path(*overridePath);
-#if defined(_WIN32)
-    if (const auto appData = Environment("APPDATA"))
-        return std::filesystem::path(*appData) / "VoxelForgeStudio" /
-            "preferences.ini";
-#else
-    if (const auto configHome = Environment("XDG_CONFIG_HOME"))
-        return std::filesystem::path(*configHome) / "VoxelForgeStudio" /
-            "preferences.ini";
-    if (const auto home = Environment("HOME"))
-        return std::filesystem::path(*home) / ".config" / "VoxelForgeStudio" /
-            "preferences.ini";
-#endif
-    return {};
+    if (const auto overridePath =
+            Core::UserDataPaths::PathFromEnvironment(
+                "VOXELFORGE_PREFERENCES_FILE"))
+        return *overridePath;
+
+    const std::filesystem::path directory =
+        Core::UserDataPaths::FromSystemEnvironment().ConfigurationDirectory();
+    return directory.empty()
+        ? std::filesystem::path{}
+        : directory / "preferences.ini";
 }
 
 bool ProjectDialogPreferences::Save()

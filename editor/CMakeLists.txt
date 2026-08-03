@@ -484,7 +484,10 @@ target_include_directories(
     VoxelForgeEditorQualityOfLife
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(VoxelForgeEditorQualityOfLife PUBLIC SDL3::SDL3)
+target_link_libraries(
+    VoxelForgeEditorQualityOfLife
+    PUBLIC SDL3::SDL3
+    PRIVATE VoxelForgeCore)
 target_compile_features(VoxelForgeEditorQualityOfLife PUBLIC cxx_std_20)
 if(MSVC)
     target_compile_options(
@@ -532,7 +535,8 @@ target_include_directories(
 )
 target_link_libraries(
     VoxelForgeEditorLayout
-    PUBLIC VoxelForgeEditorCommands)
+    PUBLIC VoxelForgeEditorCommands
+    PRIVATE VoxelForgeCore)
 target_compile_features(VoxelForgeEditorLayout PUBLIC cxx_std_20)
 if(MSVC)
     target_compile_options(VoxelForgeEditorLayout PRIVATE /W4 /permissive-)

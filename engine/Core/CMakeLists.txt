@@ -10,6 +10,7 @@ target_sources(
         src/Layer/LayerStack.cpp
         src/Logger.cpp
         src/Time.cpp
+        src/UserDataPaths.cpp
         src/UUID.cpp
         src/Version.cpp
         src/Window/SDLWindow.cpp

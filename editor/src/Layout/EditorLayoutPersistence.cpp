@@ -1,6 +1,7 @@
 #include "Layout/EditorLayoutPersistence.h"
 
-#include <cstdlib>
+#include "VoxelForge/Core/UserDataPaths.h"
+
 #include <system_error>
 #include <utility>
 
@@ -29,7 +30,7 @@ bool EditorLayoutPersistence::Initialize()
     path_ = pathOverride_.empty() ? ResolveCanonicalPath() : pathOverride_;
     if (path_.empty())
     {
-        lastError_ = "LOCALAPPDATA is unavailable.";
+        lastError_ = "The local user data directory is unavailable.";
         return false;
     }
     if (!path_.is_absolute())
@@ -79,32 +80,20 @@ const std::string& EditorLayoutPersistence::LastError() const noexcept
 std::filesystem::path EditorLayoutPersistence::CanonicalPathFromLocalAppData(
     const std::filesystem::path& localAppDataRoot)
 {
-    if (localAppDataRoot.empty()) return {};
-    return (localAppDataRoot / "VoxelForge Studio" / "imgui.ini")
-        .lexically_normal();
+    const Core::UserDataPaths paths({}, localAppDataRoot);
+    const std::filesystem::path directory = paths.LocalDataDirectory();
+    return directory.empty()
+        ? std::filesystem::path{}
+        : directory / "imgui.ini";
 }
 
 std::filesystem::path EditorLayoutPersistence::ResolveCanonicalPath()
 {
-#if defined(_WIN32)
-    char* localAppData = nullptr;
-    std::size_t length = 0U;
-    if (_dupenv_s(&localAppData, &length, "LOCALAPPDATA") != 0 ||
-        localAppData == nullptr || length <= 1U)
-    {
-        std::free(localAppData);
-        return {};
-    }
-    const std::filesystem::path result = CanonicalPathFromLocalAppData(
-        std::filesystem::path(localAppData));
-    std::free(localAppData);
-    return result;
-#else
-    const char* localAppData = std::getenv("LOCALAPPDATA");
-    if (localAppData == nullptr || *localAppData == '\0') return {};
-    return CanonicalPathFromLocalAppData(
-        std::filesystem::path(localAppData));
-#endif
+    const std::filesystem::path directory =
+        Core::UserDataPaths::FromSystemEnvironment().LocalDataDirectory();
+    return directory.empty()
+        ? std::filesystem::path{}
+        : directory / "imgui.ini";
 }
 
 } // namespace VoxelForge::Editor

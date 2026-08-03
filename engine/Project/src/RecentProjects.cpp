@@ -1,10 +1,10 @@
 #include "VoxelForge/Project/RecentProjects.h"
 
+#include "VoxelForge/Core/UserDataPaths.h"
+
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <fstream>
-#include <memory>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -14,39 +14,6 @@ namespace VoxelForge::Project
 
 namespace
 {
-
-std::optional<std::string> ReadEnvironmentVariable(const char* name)
-{
-#if defined(_WIN32)
-    char* value = nullptr;
-    std::size_t length = 0;
-
-    if (_dupenv_s(&value, &length, name) != 0 || value == nullptr)
-    {
-        return std::nullopt;
-    }
-
-    const std::unique_ptr<char, decltype(&std::free)> ownedValue(
-        value,
-        &std::free);
-
-    if (length <= 1)
-    {
-        return std::nullopt;
-    }
-
-    return std::string(ownedValue.get());
-#else
-    const char* const value = std::getenv(name);
-
-    if (value == nullptr || *value == '\0')
-    {
-        return std::nullopt;
-    }
-
-    return std::string(value);
-#endif
-}
 
 std::string PathKey(const std::filesystem::path& path)
 {
@@ -292,33 +259,17 @@ const std::string& RecentProjects::LastError() const noexcept
 std::filesystem::path RecentProjects::DefaultStorageFilePath()
 {
     if (const auto overridePath =
-            ReadEnvironmentVariable("VOXELFORGE_RECENT_PROJECTS_FILE"))
+            Core::UserDataPaths::PathFromEnvironment(
+                "VOXELFORGE_RECENT_PROJECTS_FILE"))
     {
-        return std::filesystem::path(*overridePath);
+        return *overridePath;
     }
 
-#if defined(_WIN32)
-    if (const auto applicationData = ReadEnvironmentVariable("APPDATA"))
-    {
-        return std::filesystem::path(*applicationData) /
-            "VoxelForgeStudio" / "recent_projects.txt";
-    }
-#else
-    if (const auto configurationHome =
-            ReadEnvironmentVariable("XDG_CONFIG_HOME"))
-    {
-        return std::filesystem::path(*configurationHome) /
-            "VoxelForgeStudio" / "recent_projects.txt";
-    }
-
-    if (const auto home = ReadEnvironmentVariable("HOME"))
-    {
-        return std::filesystem::path(*home) / ".config" /
-            "VoxelForgeStudio" / "recent_projects.txt";
-    }
-#endif
-
-    return {};
+    const std::filesystem::path directory =
+        Core::UserDataPaths::FromSystemEnvironment().ConfigurationDirectory();
+    return directory.empty()
+        ? std::filesystem::path{}
+        : directory / "recent_projects.txt";
 }
 
 bool RecentProjects::Save()
