@@ -753,6 +753,7 @@ target_sources(
         src/EditorWorkspace.cpp
         src/EditorWorkspaceTransforms.cpp
         src/EditorWorkspaceHighlights.cpp
+        src/EditorWorkspaceViewportPanel.cpp
         src/Layout/EditorDockLayout.cpp
         src/VoxelStamps/Workflow/StampPreviewController.cpp
         src/EditorWorkspaceSmoke.cpp
