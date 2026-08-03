@@ -20,7 +20,7 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 
 ## Chantier VF-0260 — dégraissage EditorWorkspace.cpp
 
-`EditorWorkspace.cpp` : 17 398 lignes (31/07) → **9 180 lignes (01/08, −47,2 %)**.
+`EditorWorkspace.cpp` : 17 398 lignes (31/07) → **7 086 lignes (02/08, −59,3 %)**.
 
 | Lot | Contenu | État |
 |---|---|---|
@@ -33,7 +33,7 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 | 4c | `SynchronizeProjectAssets` (~80 l., orchestration de ~15 services) | ✅ Clos par décision : **statu quo assumé** (Tony, 01/08) — orchestration légitime, un contrôleur à 15 références serait pire |
 | 5 | Import : machine à états `ModelImport/ModelImportBatch` (file, compteurs, collisions, décisions de fin) + test dédié ; fermeture examinée → déjà factorisée (`dirtyActionConfirmation_`/`closeRequest_`), rien d'extractible | ✅ Commité `0afa2cf`, CI verte (8/8 ctest ciblés en local) |
 | 6 | Adaptateurs transforms (23 méthodes : appliers panneau, ponts contraintes, Begin/Apply/Cancel Move/Duplicate/Rotate/Mirror/Scale/Align, annulation gizmo) déplacés en TU dédiée `EditorWorkspaceTransforms.cpp` — pur déplacement, comportement inchangé | ✅ Commité `43f99a1` (128/128 ctest bloquants en local) |
-| 7 | `DrawScenePanel` (1 536 l.) + `UpdateVoxelHighlights` (628 l.) + stroke Smart Tool — invariants sensibles, gardé pour la fin | ⚪ À venir |
+| 7 | 7a sondes `sp-*` ✅ ; 7b coalescence highlights (1 résolution/frame) ✅ ; 7c `UpdateVoxelHighlights`+`ForceVoxelHighlightsResolve` → `EditorWorkspaceHighlights.cpp` ✅ ; 7d `DrawScenePanel` (1 576 l.) → `EditorWorkspaceViewportPanel.cpp` ✅ (`71cfabc`). Reste optionnel : stroke Smart Tool en TU, extractions de services | 🟢 Quasi clos |
 
 ## Tests et build
 
@@ -69,7 +69,10 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;
-4. Nettoyage différé : copies de noms de panneaux, régénérer `tests/CMakeLists.proposed.txt`,
+4. Nettoyage différé : copies de noms de panneaux **+ 5 symboles dupliqués au lot 7d
+   (`ViewportPanelWindowName`, `DrawErrorMessage`, `DrawTooltip`,
+   `DrawSelectionHandles`, `SetSelectionHandleCursor`) — à mutualiser dans un
+   en-tête**, régénérer `tests/CMakeLists.proposed.txt`,
    lot 3-bis (`BeginSaveSelectionAsStamp` + dialogue stamps), presenter des dialogues projet
    (facultatif, post-4a/4b) ;
 5. Phase D ensuite : Smart Tools — gate SMART-02.5 avant SMART-03 (AR-0104).
