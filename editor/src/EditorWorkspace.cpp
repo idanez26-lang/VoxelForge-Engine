@@ -2172,14 +2172,14 @@ void EditorWorkspace::DrawInspectorPanel()
         return;
     }
 
-    if (!activeVoxelModel_)
+    if (document == nullptr && !activeVoxelModel_)
     {
         ImGui::TextDisabled("No asset selected.");
         ImGui::End();
         return;
     }
 
-    const auto colorToImGui = [](const Voxel::VoxelColor& color)
+    const auto colorToImGui = [](const Asset::Voxel::VoxelColor& color)
     {
         constexpr float ByteScale = 1.0F / 255.0F;
         return ImVec4(
@@ -2188,17 +2188,44 @@ void EditorWorkspace::DrawInspectorPanel()
             static_cast<float>(color.Blue) * ByteScale,
             1.0F);
     };
+    const auto paletteColorAt = [document, this](const std::size_t index)
+        -> std::optional<Asset::Voxel::VoxelColor>
+    {
+        if (document != nullptr) return document->GetPaletteColor(index);
+        if (!activeVoxelModel_) return std::nullopt;
+        const Voxel::VoxelColor* color =
+            activeVoxelModel_->Palette().Get(index);
+        if (color == nullptr) return std::nullopt;
+        return Asset::Voxel::VoxelColor{
+            color->Red, color->Green, color->Blue, color->Alpha};
+    };
 
-    const Voxel::VoxelGrid* grid = activeVoxelModel_->GetGrid(0U);
     const std::optional<VoxelRaycastHit>& selected = voxelSelection_.Selected();
-    const Voxel::Voxel* selectedVoxel = selected && grid
-        ? grid->Get(
-            selected->Coordinates.X,
-            selected->Coordinates.Y,
-            selected->Coordinates.Z)
-        : nullptr;
-    const bool hasOccupiedSelection =
-        selectedVoxel != nullptr && selectedVoxel->IsOccupied();
+    std::optional<std::uint8_t> selectedPaletteIndex;
+    if (selected && document != nullptr &&
+        selected->DocumentRevision == document->GetRevision())
+    {
+        const auto voxel = document->GetVoxel({
+            static_cast<std::int32_t>(selected->Coordinates.X),
+            static_cast<std::int32_t>(selected->Coordinates.Y),
+            static_cast<std::int32_t>(selected->Coordinates.Z)},
+            selected->SubModelIndex);
+        if (voxel) selectedPaletteIndex = voxel->PaletteIndex;
+    }
+    else if (selected && document == nullptr && activeVoxelModel_)
+    {
+        const Voxel::VoxelGrid* grid =
+            activeVoxelModel_->GetGrid(selected->SubModelIndex);
+        const Voxel::Voxel* voxel = grid
+            ? grid->Get(
+                selected->Coordinates.X,
+                selected->Coordinates.Y,
+                selected->Coordinates.Z)
+            : nullptr;
+        if (voxel != nullptr && voxel->IsOccupied())
+            selectedPaletteIndex = voxel->ColorIndex;
+    }
+    const bool hasOccupiedSelection = selectedPaletteIndex.has_value();
 
     ImGui::TextUnformatted("Selected voxel");
     if (hasOccupiedSelection)
@@ -2208,9 +2235,8 @@ void EditorWorkspace::DrawInspectorPanel()
             selected->Coordinates.X,
             selected->Coordinates.Y,
             selected->Coordinates.Z);
-        ImGui::Text("Current Color: %u", selectedVoxel->ColorIndex);
-        const Voxel::VoxelColor* currentColor =
-            activeVoxelModel_->Palette().Get(selectedVoxel->ColorIndex);
+        ImGui::Text("Current Color: %u", *selectedPaletteIndex);
+        const auto currentColor = paletteColorAt(*selectedPaletteIndex);
         if (currentColor)
         {
             ImGui::SameLine();
@@ -2228,8 +2254,7 @@ void EditorWorkspace::DrawInspectorPanel()
 
     ImGui::Spacing();
     ImGui::Text("Paint Color: %u", paintPaletteSelection_.Index());
-    const Voxel::VoxelColor* paintPreview =
-        paintPaletteSelection_.SelectedColor(&activeVoxelModel_->Palette());
+    const auto paintPreview = paletteColorAt(paintPaletteSelection_.Index());
     if (paintPreview)
     {
         ImGui::SameLine();
@@ -2244,8 +2269,8 @@ void EditorWorkspace::DrawInspectorPanel()
          index < Voxel::VoxelPalette::Size();
          ++index)
     {
-        const Voxel::VoxelColor* color = activeVoxelModel_->Palette().Get(index);
-        if (color == nullptr) continue;
+        const auto color = paletteColorAt(index);
+        if (!color) continue;
 
         ImGui::PushID(static_cast<int>(index));
         const bool chosen = index == paintPaletteSelection_.Index();
@@ -2279,7 +2304,7 @@ void EditorWorkspace::DrawInspectorPanel()
     }
 
     const bool wouldChange = hasOccupiedSelection &&
-        selectedVoxel->ColorIndex != paintPaletteSelection_.Index();
+        *selectedPaletteIndex != paintPaletteSelection_.Index();
     ImGui::BeginDisabled(!wouldChange);
     if (ImGui::Button("Paint Selected"))
         static_cast<void>(PaintSelectedVoxel());
