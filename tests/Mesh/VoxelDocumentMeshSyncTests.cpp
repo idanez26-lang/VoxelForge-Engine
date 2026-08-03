@@ -242,6 +242,110 @@ void TestRegionBuildsMatchFullMesh()
         "Inverted region bounds must be rejected.");
 }
 
+// VF-0262 lot 262-3: the incremental chunked cache must stay equivalent to a
+// fresh full build after every kind of edit, and only fall back to the full
+// rebuild when the revision journal cannot answer.
+void TestIncrementalSynchronizeMatchesFullBuild()
+{
+    using VoxelForge::Asset::Voxel::VoxelDocumentChange;
+
+    // 40x40x40 model: a solid 4x4x4 block crossing the 32-chunk boundary on
+    // every axis, plus far corners, so all eight chunks are populated.
+    std::vector<VoxVoxel> voxels;
+    for (std::uint8_t z = 30U; z <= 33U; ++z)
+        for (std::uint8_t y = 30U; y <= 33U; ++y)
+            for (std::uint8_t x = 30U; x <= 33U; ++x)
+                voxels.push_back({x, y, z, 9U});
+    voxels.push_back({0U, 0U, 0U, 3U});
+    voxels.push_back({39U, 39U, 39U, 4U});
+    VoxelDocument document = Document({Model({40U, 40U, 40U}, voxels)});
+
+    VoxelDocumentMeshCache cache;
+    Require(cache.Synchronize(document, 42U).Rebuilt() &&
+        cache.FullRebuildCount() == 1U &&
+        cache.IncrementalRebuildCount() == 0U &&
+        cache.ChunkCount() == 8U,
+        "Initial synchronization must fully build all eight chunks.");
+
+    const auto verify = [&](const std::string_view message)
+    {
+        const auto reference = VoxelMeshBuilder::Build(document);
+        Require(reference.Succeeded && reference.Mesh,
+            "Reference full build failed.");
+        Require(cache.Mesh() &&
+            FaceKeys(*cache.Mesh()) == FaceKeys(*reference.Mesh), message);
+    };
+    verify("Initial assembled mesh must match the full build.");
+
+    Require(document.SetVoxel({10, 10, 10}, 5U).Changed,
+        "Interior fixture mutation failed.");
+    Require(cache.Synchronize(document, 42U).Rebuilt() &&
+        cache.IncrementalRebuildCount() == 1U &&
+        cache.LastRebuildChunkCount() == 1U,
+        "An interior edit must rebuild exactly one chunk.");
+    verify("Mesh after an interior edit must match the full build.");
+
+    Require(document.SetVoxel({31, 10, 10}, 6U).Changed,
+        "Border fixture mutation failed.");
+    Require(cache.Synchronize(document, 42U).Rebuilt() &&
+        cache.IncrementalRebuildCount() == 2U &&
+        cache.LastRebuildChunkCount() == 2U,
+        "A border edit must rebuild the chunk and its axis neighbour.");
+    verify("Mesh after a border edit must match the full build.");
+
+    Require(document.RemoveVoxel({32, 30, 31}).Changed,
+        "Boundary removal fixture mutation failed.");
+    Require(cache.Synchronize(document, 42U).Rebuilt(),
+        "Boundary removal synchronization failed.");
+    verify("Mesh after a boundary removal must match the full build.");
+
+    const std::vector<VoxelDocumentChange> batch{
+        {0U, {2, 2, 2}, false, 0U, true, 8U},
+        {0U, {33, 2, 2}, false, 0U, true, 8U},
+        {0U, {30, 30, 30}, true, 9U, true, 10U}};
+    Require(document.ApplyVoxelChanges(batch).Changed,
+        "Composite fixture batch failed.");
+    Require(cache.Synchronize(document, 42U).Rebuilt(),
+        "Composite batch synchronization failed.");
+    verify("Mesh after a composite batch must match the full build.");
+
+    // Palette-only revision: geometry untouched, no rebuild at all.
+    const std::size_t buildsBefore = cache.BuildCount();
+    Require(document.SetPaletteColor(9U, {1U, 2U, 3U, 4U}).Changed,
+        "Palette fixture mutation failed.");
+    const auto paletteSync = cache.Synchronize(document, 42U);
+    Require(paletteSync.Succeeded &&
+        paletteSync.Status == VoxelDocumentMeshSyncStatus::Unchanged &&
+        cache.BuildCount() == buildsBefore &&
+        cache.DocumentRevision() == document.GetRevision(),
+        "Palette-only revisions must adopt the revision without a rebuild.");
+
+    // Journal eviction: churn more revisions than the ring keeps.
+    Require(document.SetVoxel({5, 5, 5}, 7U).Changed,
+        "Churn seed mutation failed.");
+    for (std::size_t index = 0U;
+         index <= VoxelDocument::MaximumJournaledRevisions; ++index)
+    {
+        Require(document.ReplaceVoxelColor(
+            {5, 5, 5}, (index % 2U == 0U) ? 8U : 7U).Changed,
+            "Churn mutation failed.");
+    }
+    const std::size_t fullRebuilds = cache.FullRebuildCount();
+    Require(cache.Synchronize(document, 42U).Rebuilt() &&
+        cache.FullRebuildCount() == fullRebuilds + 1U,
+        "An evicted journal must fall back to the full chunked rebuild.");
+    verify("Mesh after the fallback rebuild must match the full build.");
+
+    // Identity change bypasses the incremental path entirely.
+    Require(cache.Synchronize(document, 43U).Rebuilt() &&
+        cache.FullRebuildCount() == fullRebuilds + 2U,
+        "An identity change must fully rebuild.");
+
+    cache.Clear();
+    Require(!cache.HasMesh() && cache.ChunkCount() == 0U,
+        "Clear must release the chunk meshes.");
+}
+
 int main()
 {
     try
@@ -251,6 +355,7 @@ int main()
         TestRevisionSynchronization();
         TestDocumentReplacementAndRelease();
         TestRegionBuildsMatchFullMesh();
+        TestIncrementalSynchronizeMatchesFullBuild();
         return 0;
     }
     catch (const std::exception& exception)

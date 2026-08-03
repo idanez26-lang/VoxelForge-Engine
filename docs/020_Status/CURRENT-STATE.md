@@ -65,9 +65,10 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
    documentés : sections `sp-*` de DrawScenePanel (~17-29 ms fantômes), matérialisation
    paresseuse du planner, coalescence (secondaire). **VF-0262 en cours** : 262-0 ✅
    (benchmark, baseline `688cea6`), 262-1 ✅ (builder par région + équivalence),
-   262-2 ✅ codé le 03/08 (journal d'invalidation `ChangesSince` dans VoxelDocument
-   + tests — en attente build/commit) ; ensuite 262-3 (cache incrémental chunks 32³
-   + itération régionale côté document) puis 262-4 ;
+   262-2 ✅ (`6956f75`, journal d'invalidation `ChangesSince` dans VoxelDocument),
+   262-3 ✅ codé le 03/08 (cache incrémental chunks 32³ + itération régionale du
+   builder + équivalence — en attente build/commit, benchmark avant/après à
+   re-mesurer) ; reste 262-4 (upload partiel renderer) ;
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;

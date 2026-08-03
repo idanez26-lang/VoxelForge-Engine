@@ -78,6 +78,31 @@ résiduel. **Exigence ajoutée pour 262-2/262-3 : itération régionale côté d
   `TestRevisionJournalChangesSince` (agrégation, palette-only, éviction de l'anneau,
   overflow, no-ops/rejets sans effet).
 - **262-3** : `VoxelDocumentMeshCache` incrémental (chunks + secours complet) + tests.
+  **✅ Implémenté (03/08)** :
+  - *Itération régionale* (exigence 262-0) : `BuildDocumentMesh` sonde directement
+    les positions de la région (clampée aux bounds) quand son volume ≤ population du
+    sub-model — O(région) au lieu du parcours O(document), ordre canonique sans tri.
+  - *Cache par chunks 32³* : `map` clé→mesh de chunk + mesh assemblé unique (API
+    `Mesh()` inchangée, l'upload partiel attendra 262-4 ; `MeshData::Append/Reserve`
+    ajoutés pour l'assemblage). `Synchronize` consomme `ChangesSince` : chunks
+    touchés + voisins d'axe des positions en bord de chunk (les règles de faces ne
+    regardent que les 6-voisins → pas de diagonales), rebuild régional de ces seuls
+    chunks, réassemblage. Palette seule → révision adoptée, zéro remaillage.
+  - *Secours complet* (rebuild de tous les chunks des bounds) si : journal muet
+    (`nullopt`), identité/modèle changé, ou > `MaximumIncrementalChunkRebuilds`
+    (64) chunks touchés. Échec de build → cache inchangé (garantie forte),
+    révision périmée → nouvelle tentative au Synchronize suivant.
+  - *Équivalence* : plafond global de faces appliqué comme au build complet ;
+    garde de test `TestIncrementalSynchronizeMatchesFullBuild` (multiset de faces
+    == build complet frais après édits intérieurs, en bord de chunk, retraits,
+    lots composites, palette, éviction du journal, changement d'identité).
+  - *Benchmark* : colonne `sync_edit_ms` ajoutée à `IncrementalEditBenchmark`
+    (coût réel par édit : rebuild du chunk touché + assemblage) — à re-mesurer
+    sur poste pour le verdict avant/après.
+  - Concession documentée : positions journalisées tous sub-models confondus →
+    sur-invalidation possible en multi-modèles (correct, jamais de faces
+    manquantes) ; l'assemblage reste O(total) en memcpy (borne suivante, levée
+    par l'upload partiel 262-4).
 - **262-4** : upload partiel côté renderer + validation visuelle sur poste.
 - Verdicts : suite complète 180+, benchmark 262-0 avant/après, session sonde réelle
   (objectif : commit < 20 ms sur modèle 500k).

@@ -276,34 +276,100 @@ MeshBuildResult VoxelMeshBuilder::BuildDocumentMesh(
     std::vector<DocumentVoxel> voxels;
     try
     {
-        voxels.reserve(model->VoxelCount());
-        model->ForEachVoxel(
-            [&voxels, regionMinimum, regionMaximum](
-                const Asset::Voxel::VoxelPosition& position,
-                const Asset::Voxel::Voxel& voxel)
+        // VF-0262 (lot 262-3): when a region is requested and it is small
+        // compared to the sub-model population, probing the region positions
+        // directly costs O(region volume) instead of the O(document) full
+        // traversal. The ascending z/y/x loops emit the canonical order, so
+        // the sort is skipped. Larger regions keep the traversal path.
+        bool collected = false;
+        if (regionMinimum != nullptr)
+        {
+            const Asset::Voxel::VoxelBounds& bounds = model->Bounds();
+            if (!bounds.HasValue)
             {
-                if (regionMinimum != nullptr &&
-                    (position.X < regionMinimum->X ||
-                     position.Y < regionMinimum->Y ||
-                     position.Z < regionMinimum->Z ||
-                     position.X > regionMaximum->X ||
-                     position.Y > regionMaximum->Y ||
-                     position.Z > regionMaximum->Z))
+                collected = true;
+            }
+            else
+            {
+                const std::int32_t minimumX =
+                    std::max(regionMinimum->X, bounds.Minimum.X);
+                const std::int32_t minimumY =
+                    std::max(regionMinimum->Y, bounds.Minimum.Y);
+                const std::int32_t minimumZ =
+                    std::max(regionMinimum->Z, bounds.Minimum.Z);
+                const std::int32_t maximumX =
+                    std::min(regionMaximum->X, bounds.Maximum.X);
+                const std::int32_t maximumY =
+                    std::min(regionMaximum->Y, bounds.Maximum.Y);
+                const std::int32_t maximumZ =
+                    std::min(regionMaximum->Z, bounds.Maximum.Z);
+                if (minimumX > maximumX || minimumY > maximumY ||
+                    minimumZ > maximumZ)
                 {
-                    return;
+                    collected = true;
                 }
-                voxels.push_back({position, voxel});
-            });
-        std::sort(
-            voxels.begin(), voxels.end(),
-            [](const DocumentVoxel& left, const DocumentVoxel& right)
-            {
-                if (left.Position.Z != right.Position.Z)
-                    return left.Position.Z < right.Position.Z;
-                if (left.Position.Y != right.Position.Y)
-                    return left.Position.Y < right.Position.Y;
-                return left.Position.X < right.Position.X;
-            });
+                else
+                {
+                    const std::uint64_t extentX = static_cast<std::uint64_t>(
+                        static_cast<std::int64_t>(maximumX) - minimumX + 1);
+                    const std::uint64_t extentY = static_cast<std::uint64_t>(
+                        static_cast<std::int64_t>(maximumY) - minimumY + 1);
+                    const std::uint64_t extentZ = static_cast<std::uint64_t>(
+                        static_cast<std::int64_t>(maximumZ) - minimumZ + 1);
+                    const std::uint64_t population = model->VoxelCount();
+                    // Overflow-safe test for extentX*extentY*extentZ <= population.
+                    const bool probeRegion =
+                        extentX <= population / extentY &&
+                        (extentX * extentY) <= population / extentZ;
+                    if (probeRegion)
+                    {
+                        voxels.reserve(extentX * extentY * extentZ);
+                        for (std::int32_t z = minimumZ; z <= maximumZ; ++z)
+                            for (std::int32_t y = minimumY; y <= maximumY; ++y)
+                                for (std::int32_t x = minimumX;
+                                     x <= maximumX; ++x)
+                                {
+                                    const std::optional<Asset::Voxel::Voxel>
+                                        voxel = model->GetVoxel({x, y, z});
+                                    if (voxel)
+                                        voxels.push_back({{x, y, z}, *voxel});
+                                }
+                        collected = true;
+                    }
+                }
+            }
+        }
+        if (!collected)
+        {
+            voxels.reserve(model->VoxelCount());
+            model->ForEachVoxel(
+                [&voxels, regionMinimum, regionMaximum](
+                    const Asset::Voxel::VoxelPosition& position,
+                    const Asset::Voxel::Voxel& voxel)
+                {
+                    if (regionMinimum != nullptr &&
+                        (position.X < regionMinimum->X ||
+                         position.Y < regionMinimum->Y ||
+                         position.Z < regionMinimum->Z ||
+                         position.X > regionMaximum->X ||
+                         position.Y > regionMaximum->Y ||
+                         position.Z > regionMaximum->Z))
+                    {
+                        return;
+                    }
+                    voxels.push_back({position, voxel});
+                });
+            std::sort(
+                voxels.begin(), voxels.end(),
+                [](const DocumentVoxel& left, const DocumentVoxel& right)
+                {
+                    if (left.Position.Z != right.Position.Z)
+                        return left.Position.Z < right.Position.Z;
+                    if (left.Position.Y != right.Position.Y)
+                        return left.Position.Y < right.Position.Y;
+                    return left.Position.X < right.Position.X;
+                });
+        }
     }
     catch (const std::bad_alloc&)
     {

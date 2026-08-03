@@ -1,11 +1,13 @@
 // VF-0262 lot 262-0 — profiling fixture, deliberately not a CTest.
 // Compares, per document size, the cost of the full document mesh build
-// (today's per-commit behaviour) with a 32^3 region build (the unit the
-// incremental cache of lots 262-2/262-3 will pay per edit). The residual
-// region cost also exposes what stays O(document): the collection traversal.
+// (the pre-262-3 per-commit behaviour) with a 32^3 region build (the unit
+// the incremental cache pays per edit) and, since lot 262-3, the real
+// per-edit cost of VoxelDocumentMeshCache::Synchronize (touched chunk
+// rebuild + assembly of the single renderer mesh).
 
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
+#include "VoxelForge/Mesh/VoxelDocumentMeshCache.h"
 #include "VoxelForge/Mesh/VoxelMeshBuilder.h"
 
 #include <algorithm>
@@ -23,6 +25,7 @@ using VoxelForge::Asset::Vox::DefaultVoxPalette;
 using VoxelForge::Asset::Vox::VoxModel;
 using VoxelForge::Asset::Vox::VoxModelMetadata;
 using VoxelForge::Asset::Vox::VoxVoxel;
+using VoxelForge::Mesh::VoxelDocumentMeshCache;
 using VoxelForge::Mesh::VoxelMeshBuilder;
 
 constexpr int RegionSize = 32;
@@ -77,10 +80,11 @@ double MedianMilliseconds(const Callable& callable)
 int main()
 {
     std::printf(
-        "voxels,full_build_ms,region32_build_ms,ratio\n");
+        "voxels,full_build_ms,region32_build_ms,sync_edit_ms,"
+        "full_over_sync\n");
     for (const std::uint32_t edge : {25U, 40U, 51U, 64U, 79U, 100U})
     {
-        const VoxelDocument document = SolidCubeDocument(edge);
+        VoxelDocument document = SolidCubeDocument(edge);
         const std::uint64_t voxelCount = document.GetVoxelCount();
 
         const double fullMilliseconds = MedianMilliseconds(
@@ -103,11 +107,29 @@ int main()
                 if (!built.Succeeded) std::exit(3);
             });
 
-        std::printf("%llu,%.3f,%.3f,%.2f\n",
+        // VF-0262 lot 262-3: real per-edit cost — a color toggle at the cube
+        // center, then Synchronize (incremental chunk rebuild + assembly).
+        VoxelDocumentMeshCache cache;
+        if (!cache.Synchronize(document, 1U).Succeeded) std::exit(4);
+        const std::int32_t center = static_cast<std::int32_t>(edge / 2U);
+        bool toggle = false;
+        const double syncMilliseconds = MedianMilliseconds(
+            [&document, &cache, &toggle, center]
+            {
+                toggle = !toggle;
+                if (!document.SetVoxel(
+                        {center, center, center},
+                        toggle ? 9U : 10U).Succeeded)
+                    std::exit(5);
+                if (!cache.Synchronize(document, 1U).Succeeded)
+                    std::exit(6);
+            });
+
+        std::printf("%llu,%.3f,%.3f,%.3f,%.2f\n",
             static_cast<unsigned long long>(voxelCount),
-            fullMilliseconds, regionMilliseconds,
-            regionMilliseconds > 0.0
-                ? fullMilliseconds / regionMilliseconds : 0.0);
+            fullMilliseconds, regionMilliseconds, syncMilliseconds,
+            syncMilliseconds > 0.0
+                ? fullMilliseconds / syncMilliseconds : 0.0);
         std::fflush(stdout);
     }
     return 0;

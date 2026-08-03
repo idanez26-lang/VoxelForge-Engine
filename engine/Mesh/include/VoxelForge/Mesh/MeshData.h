@@ -55,6 +55,28 @@ public:
         indices_.clear();
     }
 
+    // VF-0262 (lot 262-3): pre-allocates the buffers before assembly.
+    void Reserve(const std::size_t vertexCount, const std::size_t indexCount)
+    {
+        vertices_.reserve(vertexCount);
+        indices_.reserve(indexCount);
+    }
+
+    // VF-0262 (lot 262-3): appends another mesh, offsetting its indices by
+    // the current vertex count. Used to assemble per-chunk meshes into the
+    // single mesh consumed by the renderer (until the partial upload of
+    // lot 262-4).
+    void Append(const MeshData& other)
+    {
+        const std::uint32_t vertexOffset =
+            static_cast<std::uint32_t>(vertices_.size());
+        vertices_.insert(
+            vertices_.end(), other.vertices_.begin(), other.vertices_.end());
+        indices_.reserve(indices_.size() + other.indices_.size());
+        for (const std::uint32_t index : other.indices_)
+            indices_.push_back(index + vertexOffset);
+    }
+
 private:
     friend class VoxelMeshBuilder;
 
