@@ -99,8 +99,6 @@ void EditorWorkspace::DrawScenePanel()
     }
 
     const bool hasModel = viewportState_.HasModel();
-    Voxel::VoxelGrid* viewportGrid = activeVoxelModel_
-        ? activeVoxelModel_->GetGrid(0U) : nullptr;
     const VoxelViewportStatistics& statistics = viewportState_.Statistics();
     const std::string modelLabel = hasModel
         ? viewportState_.Name() + (voxelSaveState_.IsDirty() ? " *" : "")
@@ -276,8 +274,7 @@ void EditorWorkspace::DrawScenePanel()
 
     bool eraseRequested = false;
     bool addRequested = false;
-    const AddVoxelTarget addTarget = FindAddVoxelTarget(
-        viewportGrid, voxelSelection_.Selected());
+    const AddVoxelTarget addTarget = ResolveAddVoxelTarget();
     ImGui::BeginDisabled(!addTarget);
     if (ImGui::Button("Add Adjacent"))
         addRequested = true;

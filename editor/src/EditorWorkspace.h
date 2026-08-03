@@ -373,6 +373,7 @@ private:
     [[nodiscard]] bool SynchronizeVoxelDocumentRendering();
     [[nodiscard]] bool EraseSelectedVoxel();
     [[nodiscard]] bool PaintSelectedVoxel();
+    [[nodiscard]] AddVoxelTarget ResolveAddVoxelTarget() const noexcept;
     [[nodiscard]] bool AddAdjacentVoxel();
     // Re-picks exclusively against committed source geometry. Pending Smart
     // Tool cells remain planner input through SmartToolStroke::ReadVoxel, but

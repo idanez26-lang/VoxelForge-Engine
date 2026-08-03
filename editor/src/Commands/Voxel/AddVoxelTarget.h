@@ -9,6 +9,11 @@ namespace VoxelForge::Voxel
 class VoxelGrid;
 }
 
+namespace VoxelForge::Asset::Voxel
+{
+class VoxelDocument;
+}
+
 namespace VoxelForge::Editor
 {
 
@@ -19,6 +24,7 @@ enum class AddVoxelTargetStatus
     MissingGrid,
     SelectedOutsideGrid,
     SelectedVoxelEmpty,
+    StaleSelection,
     InvalidFace,
     OutsideGrid,
     DestinationOccupied
@@ -38,6 +44,10 @@ struct AddVoxelTarget final
 
 [[nodiscard]] AddVoxelTarget FindAddVoxelTarget(
     const Voxel::VoxelGrid* grid,
+    const std::optional<VoxelRaycastHit>& selection) noexcept;
+
+[[nodiscard]] AddVoxelTarget FindAddVoxelTarget(
+    const Asset::Voxel::VoxelDocument& document,
     const std::optional<VoxelRaycastHit>& selection) noexcept;
 
 [[nodiscard]] const char* AddVoxelTargetStatusMessage(

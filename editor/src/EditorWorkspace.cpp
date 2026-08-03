@@ -4734,10 +4734,7 @@ bool EditorWorkspace::PaintSelectedVoxel()
 
 bool EditorWorkspace::AddAdjacentVoxel()
 {
-    Voxel::VoxelGrid* grid = activeVoxelModel_
-        ? activeVoxelModel_->GetGrid(0U) : nullptr;
-    const AddVoxelTarget target =
-        FindAddVoxelTarget(grid, voxelSelection_.Selected());
+    const AddVoxelTarget target = ResolveAddVoxelTarget();
     if (!target)
     {
         AddConsoleMessage(
@@ -4750,11 +4747,13 @@ bool EditorWorkspace::AddAdjacentVoxel()
     CommandResult result;
     if (voxelDocumentSession_.HasActiveDocument())
     {
+        const std::size_t subModelIndex =
+            voxelSelection_.Selected()->SubModelIndex;
         const VoxelEditHistoryResult historyResult =
             voxelEditHistory_.Execute(*this, {
                 "Add Voxel",
                 {VoxelChange{
-                    0U,
+                    subModelIndex,
                     {
                         static_cast<std::int32_t>(destination.X),
                         static_cast<std::int32_t>(destination.Y),
@@ -4788,6 +4787,20 @@ bool EditorWorkspace::AddAdjacentVoxel()
         std::to_string(destination.Y) + ", " +
         std::to_string(destination.Z));
     return true;
+}
+
+AddVoxelTarget EditorWorkspace::ResolveAddVoxelTarget() const noexcept
+{
+    const std::optional<VoxelRaycastHit>& selection =
+        voxelSelection_.Selected();
+    if (const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument())
+    {
+        return FindAddVoxelTarget(*document, selection);
+    }
+    const Voxel::VoxelGrid* grid = activeVoxelModel_
+        ? activeVoxelModel_->GetGrid(0U) : nullptr;
+    return FindAddVoxelTarget(grid, selection);
 }
 
 bool EditorWorkspace::RefreshSmartToolHover() noexcept

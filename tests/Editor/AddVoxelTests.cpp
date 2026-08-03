@@ -2,6 +2,8 @@
 #include "Commands/Voxel/AddVoxelCommand.h"
 #include "Commands/Voxel/AddVoxelTarget.h"
 
+#include "VoxelForge/Asset/Vox/VoxFormat.h"
+#include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 #include "VoxelForge/Mesh/VoxelMeshBuilder.h"
 #include "VoxelForge/Voxel/VoxelModelSerializer.h"
 
@@ -13,6 +15,8 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace
 {
@@ -123,9 +127,31 @@ VoxelRaycastHit Hit(
     const std::uint32_t x,
     const std::uint32_t y,
     const std::uint32_t z,
-    const VoxelHitFace face)
+    const VoxelHitFace face,
+    const std::uint64_t documentRevision = 0U)
 {
-    return {{x, y, z}, face, 0.0F, {}, 1U};
+    VoxelRaycastHit hit;
+    hit.Coordinates = {x, y, z};
+    hit.Face = face;
+    hit.ColorIndex = 1U;
+    hit.DocumentRevision = documentRevision;
+    return hit;
+}
+
+VoxelForge::Asset::Voxel::VoxelDocument Document(
+    const VoxelForge::Asset::Vox::VoxDimensions dimensions,
+    std::vector<VoxelForge::Asset::Vox::VoxVoxel> voxels)
+{
+    VoxelForge::Asset::Vox::VoxModel source;
+    source.Version = 150U;
+    source.Palette = VoxelForge::Asset::Vox::DefaultVoxPalette();
+    source.Models.push_back({dimensions, std::move(voxels)});
+    source.DeclaredModelCount = 1U;
+    auto loaded = VoxelForge::Asset::Voxel::VoxDocumentLoader{}.Build(
+        source, "add-target-memory.vox");
+    if (!loaded.Succeeded())
+        throw std::runtime_error("Unable to build Add target test document.");
+    return std::move(*loaded.Document);
 }
 
 bool TestTargets()
@@ -246,6 +272,74 @@ bool TestCommandAndHistory()
     passed &= Check(!AddVoxelCommand(
         palette255, palette255.Generation, 1U, 0U, 1U, 256U).Execute(),
         "Palette index 256 must be refused.");
+    return passed;
+}
+
+bool TestDocumentTargets()
+{
+    bool passed = true;
+    auto document = Document(
+        {3U, 3U, 3U}, {{1U, 1U, 1U, 4U}});
+    const std::array cases{
+        std::pair{VoxelHitFace::NegativeX, VoxelCoordinates{0U, 1U, 1U}},
+        std::pair{VoxelHitFace::PositiveX, VoxelCoordinates{2U, 1U, 1U}},
+        std::pair{VoxelHitFace::NegativeY, VoxelCoordinates{1U, 0U, 1U}},
+        std::pair{VoxelHitFace::PositiveY, VoxelCoordinates{1U, 2U, 1U}},
+        std::pair{VoxelHitFace::NegativeZ, VoxelCoordinates{1U, 1U, 0U}},
+        std::pair{VoxelHitFace::PositiveZ, VoxelCoordinates{1U, 1U, 2U}}};
+    for (const auto& [face, expected] : cases)
+    {
+        const AddVoxelTarget target = FindAddVoxelTarget(
+            document, Hit(1U, 1U, 1U, face, document.GetRevision()));
+        passed &= Check(target && target.Coordinates == expected,
+            "Document Add target calculation failed for one face.");
+    }
+    passed &= Check(FindAddVoxelTarget(document,
+        Hit(1U, 1U, 1U, VoxelHitFace::None,
+            document.GetRevision())).Status ==
+            AddVoxelTargetStatus::InvalidFace,
+        "Document Add target accepted an invalid face.");
+    passed &= Check(FindAddVoxelTarget(document,
+        Hit(0U, 0U, 0U, VoxelHitFace::PositiveX,
+            document.GetRevision())).Status ==
+            AddVoxelTargetStatus::SelectedVoxelEmpty,
+        "Document Add target accepted an empty source.");
+
+    const auto negativeBoundary = document.SetVoxel({0, 1, 1}, 2U);
+    passed &= Check(negativeBoundary.Succeeded &&
+        FindAddVoxelTarget(document,
+            Hit(0U, 1U, 1U, VoxelHitFace::NegativeX,
+                document.GetRevision())).Status ==
+                AddVoxelTargetStatus::OutsideGrid,
+        "Document Add target crossed the negative boundary.");
+    const auto positiveBoundary = document.SetVoxel({2, 1, 1}, 3U);
+    passed &= Check(positiveBoundary.Succeeded &&
+        FindAddVoxelTarget(document,
+            Hit(2U, 1U, 1U, VoxelHitFace::PositiveX,
+                document.GetRevision())).Status ==
+                AddVoxelTargetStatus::OutsideGrid &&
+        FindAddVoxelTarget(document,
+            Hit(1U, 1U, 1U, VoxelHitFace::NegativeX,
+                document.GetRevision())).Status ==
+                AddVoxelTargetStatus::DestinationOccupied,
+        "Document Add target missed a boundary or occupied destination.");
+
+    VoxelRaycastHit missingModel = Hit(
+        1U, 1U, 1U, VoxelHitFace::PositiveY, document.GetRevision());
+    missingModel.SubModelIndex = 1U;
+    passed &= Check(FindAddVoxelTarget(document, missingModel).Status ==
+            AddVoxelTargetStatus::MissingGrid,
+        "Document Add target accepted an unavailable sub-model.");
+    const VoxelRaycastHit stale = Hit(
+        1U, 1U, 1U, VoxelHitFace::PositiveY, document.GetRevision());
+    const auto advanced = document.SetVoxel({0, 0, 0}, 5U);
+    passed &= Check(advanced.Succeeded &&
+        FindAddVoxelTarget(document, stale).Status ==
+            AddVoxelTargetStatus::StaleSelection,
+        "Document Add target accepted a stale selection revision.");
+    passed &= Check(FindAddVoxelTarget(
+        document, std::nullopt).Status == AddVoxelTargetStatus::NoSelection,
+        "Document Add target accepted a missing selection.");
     return passed;
 }
 
@@ -388,7 +482,8 @@ bool TestGeometryAndSave()
 
 int main()
 {
-    const bool passed = TestTargets() && TestCommandAndHistory() &&
-        TestInvalidAndRollback() && TestGeometryAndSave();
+    const bool passed = TestTargets() && TestDocumentTargets() &&
+        TestCommandAndHistory() && TestInvalidAndRollback() &&
+        TestGeometryAndSave();
     return passed ? 0 : 1;
 }

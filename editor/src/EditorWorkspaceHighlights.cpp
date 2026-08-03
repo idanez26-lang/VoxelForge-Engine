@@ -508,10 +508,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     else
     {
         voxelPlacementPreview_ = {};
-        const Voxel::VoxelGrid* grid = activeVoxelModel_
-            ? activeVoxelModel_->GetGrid(0U) : nullptr;
-        const AddVoxelTarget addTarget =
-            FindAddVoxelTarget(grid, voxelSelection_.Selected());
+        const AddVoxelTarget addTarget = ResolveAddVoxelTarget();
         if (addTarget)
         {
             placementPosition = Asset::Voxel::VoxelPosition{
