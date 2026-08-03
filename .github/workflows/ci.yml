@@ -44,14 +44,13 @@ jobs:
       - name: Build
         run: cmake --build --preset build-windows-debug
 
-      # Les tests étiquetés "EditorApp" lancent l'éditeur complet et exigent
-      # un rendu GPU réel — indisponible sur les runners GitHub (D3D12 logiciel
-      # sans frame). Ils tournent en étape séparée, non bloquante.
+      # Les tests étiquetés "EditorApp" lancent l'éditeur complet. Le runner
+      # GitHub les exécute avec le rendu logiciel D3D12 WARP ; le code 77
+      # conserve un skip propre pour les postes réellement sans device GPU.
       - name: Tests (bloquants — tout sauf l'application GUI)
         run: ctest --test-dir build/windows-debug --output-on-failure --timeout 120 --label-exclude EditorApp
 
-      - name: Tests de l'application (GPU requis — non bloquants sur runner)
-        continue-on-error: true
+      - name: Tests de l'application (bloquants — D3D12 WARP sur runner)
         env:
           # Rendu logiciel WARP lent : budget de frames des smokes x5
           # (diagnostic 03/08 — 23 smokes en "did not complete" a x1).
