@@ -388,6 +388,37 @@ void TestRollbackAndMultiModel()
         "Pencil edited the wrong sub-model.");
 }
 
+void TestDocumentOnlyCanonicalEdits()
+{
+    auto directDocument = Document({Model(
+        {4U, 4U, 4U}, {{1U, 1U, 1U, 4U}})});
+    TestEditSession directSession(directDocument);
+    directSession.hasModel_ = false;
+    const Editor::VoxelToolResult direct = Editor::VoxelPencilTool::Apply(
+        Context(directSession, directDocument,
+            Hit(1U, 1U, 1U, Editor::VoxelHitFace::PositiveX), 7U));
+    Require(direct.Code == Editor::VoxelToolResultCode::Applied &&
+        directDocument.GetVoxel({2, 1, 1})->PaletteIndex == 7U &&
+        directSession.completedEdits_ == 1U,
+        "Pencil did not edit the canonical document without a compatibility model.");
+
+    auto historyDocument = Document({Model(
+        {4U, 4U, 4U}, {{1U, 1U, 1U, 2U}})});
+    TestEditSession historySession(historyDocument);
+    historySession.hasModel_ = false;
+    Editor::VoxelEditHistory history;
+    TestPencilContext context = Context(historySession, historyDocument,
+        Hit(1U, 1U, 1U, Editor::VoxelHitFace::PositiveY), 9U);
+    context.History = &history;
+    Require(Editor::VoxelPencilTool::Apply(context).Code ==
+            Editor::VoxelToolResultCode::Applied &&
+        historyDocument.GetVoxel({1, 2, 1})->PaletteIndex == 9U &&
+        history.UndoCount() == 1U && history.Undo(historySession) &&
+        !historyDocument.HasVoxel({1, 2, 1}) && history.Redo(historySession) &&
+        historyDocument.GetVoxel({1, 2, 1})->PaletteIndex == 9U,
+        "Document-only Pencil history did not apply, undo and redo canonically.");
+}
+
 void TestPreview()
 {
     auto document = Document({Model(
@@ -909,6 +940,7 @@ int main()
         TestToolApplicationAndSynchronization();
         TestToolRefusals();
         TestRollbackAndMultiModel();
+        TestDocumentOnlyCanonicalEdits();
         TestPreview();
         TestBrushGenerationAndPreview();
         TestAtomicBrushHistory();

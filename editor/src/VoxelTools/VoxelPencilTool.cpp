@@ -3,9 +3,6 @@
 #include "Commands/Voxel/VoxelEditTransaction.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 
-#include "VoxelForge/Voxel/VoxelGrid.h"
-#include "VoxelForge/Voxel/VoxelModel.h"
-
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -74,14 +71,10 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
     if (document.GetModel(context.Execution.SubModelIndex) == nullptr)
         return Refused(VoxelToolResultCode::InvalidModel, target, revision);
 
-    Voxel::VoxelModel* model = context.Execution.EditSession->ActiveVoxelModel();
-    Voxel::VoxelGrid* grid = model == nullptr
-        ? nullptr : model->GetGrid(context.Execution.SubModelIndex);
-    if (context.Execution.EditSession->ActiveVoxelDocument() != &document ||
-        grid == nullptr)
+    if (context.Execution.EditSession->ActiveVoxelDocument() != &document)
     {
         return Refused(VoxelToolResultCode::InvalidModel, target, revision,
-            "The editable document and compatibility grid are unavailable.");
+            "The editable document is unavailable or does not match the plan.");
     }
 
     const SmartBrushResult& brush = context.Plan->BrushResult();
@@ -99,23 +92,12 @@ VoxelToolResult VoxelPencilTool::Apply(const VoxelPencilContext& context)
     {
         if (!cell.HasChange()) continue;
         const Asset::Voxel::VoxelPosition position = cell.WorldPosition;
-        const Voxel::Voxel* compatibilityVoxel = grid->Get(
-            static_cast<std::uint32_t>(position.X),
-            static_cast<std::uint32_t>(position.Y),
-            static_cast<std::uint32_t>(position.Z));
-        if (compatibilityVoxel == nullptr)
-            return Refused(VoxelToolResultCode::Failed, target, revision,
-                "VoxelDocument and the editable compatibility grid diverged.");
         const auto current = document.GetVoxel(
             position, context.Execution.SubModelIndex);
         const bool documentMatchesBefore =
             current.has_value() == cell.Before.Exists &&
             (!current || current->PaletteIndex == cell.Before.PaletteIndex);
-        const bool compatibilityMatchesBefore =
-            compatibilityVoxel->IsOccupied() == cell.Before.Exists &&
-            (!cell.Before.Exists ||
-                compatibilityVoxel->ColorIndex == cell.Before.PaletteIndex);
-        if (!documentMatchesBefore || !compatibilityMatchesBefore)
+        if (!documentMatchesBefore)
             return Refused(VoxelToolResultCode::Failed, target, revision,
                 "The Smart Tool plan no longer matches the document state.");
         changes.push_back({context.Execution.SubModelIndex, position,
@@ -146,12 +128,10 @@ VoxelToolResult VoxelPencilTool::ApplyChanges(
             "The Smart Tool execution session is unavailable.");
     if (changes.empty())
         return Refused(VoxelToolResultCode::NoChange, target, revision);
-    Voxel::VoxelModel* model = execution.EditSession->ActiveVoxelModel();
-    Voxel::VoxelGrid* grid = model == nullptr
-        ? nullptr : model->GetGrid(execution.SubModelIndex);
-    if (execution.EditSession->ActiveVoxelDocument() != &document || grid == nullptr)
+    const auto dimensions = document.GetDimensions(execution.SubModelIndex);
+    if (execution.EditSession->ActiveVoxelDocument() != &document || !dimensions)
         return Refused(VoxelToolResultCode::InvalidModel, target, revision,
-            "The editable document and compatibility grid are unavailable.");
+            "The editable document is unavailable or has no matching sub-model.");
 
     for (const VoxelChange& change : changes)
     {
@@ -162,18 +142,17 @@ VoxelToolResult VoxelPencilTool::ApplyChanges(
             change.Position.Z < 0)
             return Refused(VoxelToolResultCode::TargetOutOfBounds, target,
                 revision, "A stroke change has a negative voxel coordinate.");
+        if (static_cast<std::uint32_t>(change.Position.X) >= dimensions->X ||
+            static_cast<std::uint32_t>(change.Position.Y) >= dimensions->Y ||
+            static_cast<std::uint32_t>(change.Position.Z) >= dimensions->Z)
+        {
+            return Refused(VoxelToolResultCode::TargetOutOfBounds, target,
+                revision, "A stroke change lies outside the voxel document.");
+        }
         const auto current = document.GetVoxel(change.Position, change.SubModelIndex);
-        const Voxel::Voxel* compatibilityVoxel = grid->Get(
-            static_cast<std::uint32_t>(change.Position.X),
-            static_cast<std::uint32_t>(change.Position.Y),
-            static_cast<std::uint32_t>(change.Position.Z));
         const bool documentMatchesBefore = current.has_value() == change.ExistedBefore &&
             (!current || current->PaletteIndex == change.PaletteIndexBefore);
-        const bool compatibilityMatchesBefore = compatibilityVoxel != nullptr &&
-            compatibilityVoxel->IsOccupied() == change.ExistedBefore &&
-            (!change.ExistedBefore ||
-                compatibilityVoxel->ColorIndex == change.PaletteIndexBefore);
-        if (!documentMatchesBefore || !compatibilityMatchesBefore)
+        if (!documentMatchesBefore)
             return Refused(VoxelToolResultCode::Failed, target, revision,
                 "The accumulated Smart Tool stroke no longer matches the document.");
     }
@@ -204,16 +183,8 @@ VoxelToolResult VoxelPencilTool::ApplyChanges(
     for (const VoxelChange& change : changes)
     {
         const auto voxel = document.GetVoxel(change.Position, change.SubModelIndex);
-        const Voxel::Voxel* compatibilityVoxel = grid->Get(
-            static_cast<std::uint32_t>(change.Position.X),
-            static_cast<std::uint32_t>(change.Position.Y),
-            static_cast<std::uint32_t>(change.Position.Z));
         synchronized &= voxel.has_value() == change.ExistsAfter &&
-            (!voxel || voxel->PaletteIndex == change.PaletteIndexAfter) &&
-            compatibilityVoxel != nullptr &&
-            compatibilityVoxel->IsOccupied() == change.ExistsAfter &&
-            (!change.ExistsAfter ||
-                compatibilityVoxel->ColorIndex == change.PaletteIndexAfter);
+            (!voxel || voxel->PaletteIndex == change.PaletteIndexAfter);
     }
     if (!synchronized)
     {

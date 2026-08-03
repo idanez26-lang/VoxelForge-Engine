@@ -3,9 +3,6 @@
 #include "Commands/Voxel/VoxelEditTransaction.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 
-#include "VoxelForge/Voxel/VoxelGrid.h"
-#include "VoxelForge/Voxel/VoxelModel.h"
-
 #include <utility>
 
 namespace VoxelForge::Editor
@@ -75,27 +72,15 @@ VoxelEraserResult VoxelEraserTool::Apply(
             context.SubModelIndex, revision);
     }
 
-    Voxel::VoxelModel* model = context.EditSession->ActiveVoxelModel();
-    Voxel::VoxelGrid* grid = model == nullptr
-        ? nullptr : model->GetGrid(context.SubModelIndex);
-    if (context.EditSession->ActiveVoxelDocument() != &document ||
-        grid == nullptr)
+    if (context.EditSession->ActiveVoxelDocument() != &document)
     {
         return Refused(VoxelEraserResultCode::InvalidModel, position,
             context.SubModelIndex, revision,
-            "The editable document and compatibility grid are unavailable.");
+            "The editable document is unavailable or does not match the hit.");
     }
     const auto x = static_cast<std::uint32_t>(position.X);
     const auto y = static_cast<std::uint32_t>(position.Y);
     const auto z = static_cast<std::uint32_t>(position.Z);
-    const Voxel::Voxel* compatibilityVoxel = grid->Get(x, y, z);
-    if (compatibilityVoxel == nullptr || !compatibilityVoxel->IsOccupied() ||
-        compatibilityVoxel->ColorIndex != documentVoxel->PaletteIndex)
-    {
-        return Refused(VoxelEraserResultCode::Failed, position,
-            context.SubModelIndex, revision,
-            "VoxelDocument and the editable compatibility grid diverged.");
-    }
 
     const std::uint8_t removedPaletteIndex = documentVoxel->PaletteIndex;
     CommandResult applied;
@@ -121,7 +106,8 @@ VoxelEraserResult VoxelEraserTool::Apply(
         applied = ApplyVoxelEdit(
             *context.EditSession,
             context.EditSession->VoxelModelGeneration(),
-            x, y, z, *compatibilityVoxel, Voxel::Voxel{},
+            x, y, z,
+            {removedPaletteIndex, Voxel::Voxel::OccupiedFlag}, Voxel::Voxel{},
             context.SubModelIndex);
     }
     if (!applied)
@@ -130,10 +116,8 @@ VoxelEraserResult VoxelEraserTool::Apply(
             context.SubModelIndex, document.GetRevision(), applied.Message);
     }
 
-    const Voxel::Voxel* synchronizedVoxel = grid->Get(x, y, z);
     const std::uint64_t revisionAfter = document.GetRevision();
     if (document.HasVoxel(position, context.SubModelIndex) ||
-        synchronizedVoxel == nullptr || synchronizedVoxel->IsOccupied() ||
         revisionAfter != revision + 1U || !document.IsDirty())
     {
         return {

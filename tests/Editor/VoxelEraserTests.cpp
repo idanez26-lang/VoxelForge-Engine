@@ -2,6 +2,7 @@
 #include "VoxelTools/VoxelPencilInput.h"
 #include "VoxelTools/VoxelPencilPreview.h"
 #include "VoxelTools/VoxelToolState.h"
+#include "VoxelHistory/VoxelEditHistory.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
@@ -327,6 +328,39 @@ void TestMultiModelAndGridDivergence()
         "Document/grid divergence was not rejected atomically.");
 }
 
+void TestDocumentOnlyCanonicalEdits()
+{
+    auto directDocument = Document({Model(
+        {3U, 3U, 3U}, {{1U, 1U, 1U, 5U}, {2U, 1U, 1U, 6U}})});
+    TestEditSession directSession(directDocument);
+    directSession.hasModel_ = false;
+    const auto direct = Editor::VoxelEraserTool::Apply(
+        Context(directSession, directDocument, Hit(1U, 1U, 1U)));
+    Require(direct.Code == Editor::VoxelEraserResultCode::Applied &&
+        direct.RemovedPaletteIndex == 5U &&
+        !directDocument.HasVoxel({1, 1, 1}) &&
+        directDocument.HasVoxel({2, 1, 1}) &&
+        directSession.completedEdits_ == 1U,
+        "Eraser did not edit the canonical document without a compatibility model.");
+
+    auto historyDocument = Document({Model(
+        {3U, 3U, 3U}, {{1U, 1U, 1U, 12U}})});
+    TestEditSession historySession(historyDocument);
+    historySession.hasModel_ = false;
+    Editor::VoxelEditHistory history;
+    Editor::VoxelEraserContext context = Context(
+        historySession, historyDocument, Hit(1U, 1U, 1U));
+    context.History = &history;
+    Require(Editor::VoxelEraserTool::Apply(context).Code ==
+            Editor::VoxelEraserResultCode::Applied &&
+        !historyDocument.HasVoxel({1, 1, 1}) && history.UndoCount() == 1U &&
+        history.Undo(historySession) &&
+        historyDocument.GetVoxel({1, 1, 1})->PaletteIndex == 12U &&
+        history.Redo(historySession) &&
+        !historyDocument.HasVoxel({1, 1, 1}),
+        "Document-only Eraser history did not apply, undo and redo canonically.");
+}
+
 Editor::VoxelToolInputFrame AllowedInput()
 {
     Editor::VoxelToolInputFrame frame;
@@ -462,6 +496,7 @@ int main()
         TestInteriorAndLastVoxel();
         TestRefusalsAndRollback();
         TestMultiModelAndGridDivergence();
+        TestDocumentOnlyCanonicalEdits();
         TestSharedInputAndShortcuts();
         TestPreviewAndToolState();
         std::cout << "Voxel Eraser tests passed.\n";
