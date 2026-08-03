@@ -293,6 +293,15 @@ void TestIncrementalSynchronizeMatchesFullBuild()
         "A border edit must rebuild the chunk and its axis neighbour.");
     verify("Mesh after a border edit must match the full build.");
 
+    // VF-0262 (262-3bis): a pure recolor on the same border position cannot
+    // flip neighbour face visibility -> exactly one chunk.
+    Require(document.SetVoxel({31, 10, 10}, 7U).Changed,
+        "Border recolor fixture mutation failed.");
+    Require(cache.Synchronize(document, 42U).Rebuilt() &&
+        cache.LastRebuildChunkCount() == 1U,
+        "A border recolor must rebuild only the touched chunk.");
+    verify("Mesh after a border recolor must match the full build.");
+
     Require(document.RemoveVoxel({32, 30, 31}).Changed,
         "Boundary removal fixture mutation failed.");
     Require(cache.Synchronize(document, 42U).Rebuilt(),

@@ -103,6 +103,33 @@ résiduel. **Exigence ajoutée pour 262-2/262-3 : itération régionale côté d
     sur-invalidation possible en multi-modèles (correct, jamais de faces
     manquantes) ; l'assemblage reste O(total) en memcpy (borne suivante, levée
     par l'upload partiel 262-4).
+
+  **Mesures après (03/08, Release `b387230`, poste Tony, ctest 129/129)** :
+  | Voxels | Build complet | Région 32³ | Sync par édit | Gain |
+  |---|---|---|---|---|
+  | 15 625 | 4,6 ms | 3,8 ms | 4,0 ms | ×1,2 |
+  | 64 000 | 21,8 ms | 8,5 ms | 9,5 ms | ×2,3 |
+  | 132 651 | 57,9 ms | 9,1 ms | 11,4 ms | ×5,1 |
+  | 262 144 | 141,5 ms | 8,1 ms | **88,0 ms** | ×1,6 |
+  | 493 039 | 347,8 ms | 8,8 ms | 26,6 ms | ×13,1 |
+  | 1 000 000 | 823,0 ms | 8,9 ms | 21,0 ms | ×39,3 |
+
+  Lecture : la région 32³ est devenue **plate** (~8,8 ms, contre 10→64 ms en
+  262-0) — l'itération régionale remplit l'exigence. Le point 262 144 (cube 64³)
+  est le pire cas géométrique : le voxel du benchmark {32,32,32} est au coin de
+  4 chunks, or l'édit n'est qu'une recoloration → 3 remaillages de voisins
+  inutiles. La pente restante (11→21 ms) est l'assemblage O(surface) (→ 262-4).
+
+- **262-3bis** : drapeau d'occupation dans le journal. **✅ Implémenté (03/08)** :
+  `ChangesSince` renvoie des `TouchedPosition{Position, OccupancyChanged}` ;
+  pose/retrait → `true`, recoloration pure (`SetVoxel` sur position occupée,
+  `ReplaceVoxelColor`, changes composites avec `ExistedBefore == ExistsAfter`)
+  → `false`. Le cache n'invalide les chunks voisins d'une position en bord que
+  si l'occupation a changé — une recoloration ne peut pas changer la visibilité
+  des faces voisines. Aplati le pire cas ci-dessus à ~1 chunk et profite
+  directement à l'outil peinture. Gardes : flags vérifiés dans
+  `TestRevisionJournalChangesSince`, recolor-en-bord = 1 chunk dans
+  `TestIncrementalSynchronizeMatchesFullBuild`.
 - **262-4** : upload partiel côté renderer + validation visuelle sur poste.
 - Verdicts : suite complète 180+, benchmark 262-0 avant/après, session sonde réelle
   (objectif : commit < 20 ms sur modèle 500k).

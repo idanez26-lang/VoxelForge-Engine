@@ -366,13 +366,19 @@ void TestMutationsDirtyRevisionAndBounds(TemporaryProject& temporary)
         "MarkSaved must clear dirty without resetting revision.");
 }
 
+using TouchedPosition = VoxelDocument::TouchedPosition;
+
 [[nodiscard]] bool SamePositions(
-    std::vector<VoxelPosition> actual,
-    std::vector<VoxelPosition> expected)
+    std::vector<TouchedPosition> actual,
+    std::vector<TouchedPosition> expected)
 {
-    const auto lessThan = [](const VoxelPosition& a, const VoxelPosition& b)
+    const auto lessThan =
+        [](const TouchedPosition& a, const TouchedPosition& b)
     {
-        return std::tie(a.X, a.Y, a.Z) < std::tie(b.X, b.Y, b.Z);
+        return std::tie(
+            a.Position.X, a.Position.Y, a.Position.Z, a.OccupancyChanged) <
+            std::tie(
+                b.Position.X, b.Position.Y, b.Position.Z, b.OccupancyChanged);
     };
     std::sort(actual.begin(), actual.end(), lessThan);
     std::sort(expected.begin(), expected.end(), lessThan);
@@ -394,10 +400,11 @@ void TestRevisionJournalChangesSince(TemporaryProject& temporary)
         document.SetVoxel({2, 2, 2}, 4U).Changed,
         "Journal test setup mutations failed.");
     auto changes = document.ChangesSince(0U);
-    Require(changes && SamePositions(*changes, {{1, 1, 1}, {2, 2, 2}}),
-        "ChangesSince(0) must aggregate both mutations.");
+    Require(changes && SamePositions(
+        *changes, {{{1, 1, 1}, true}, {{2, 2, 2}, true}}),
+        "ChangesSince(0) must aggregate both mutations as occupancy changes.");
     changes = document.ChangesSince(1U);
-    Require(changes && SamePositions(*changes, {{2, 2, 2}}),
+    Require(changes && SamePositions(*changes, {{{2, 2, 2}, true}}),
         "ChangesSince must exclude already-seen revisions.");
     Require(document.ChangesSince(2U) && document.ChangesSince(2U)->empty(),
         "ChangesSince at the current revision must be empty.");
@@ -414,14 +421,15 @@ void TestRevisionJournalChangesSince(TemporaryProject& temporary)
     Require(changes && changes->empty(),
         "Palette-only mutations must journal an empty voxel set.");
     changes = document.ChangesSince(0U);
-    Require(changes && SamePositions(*changes, {{1, 1, 1}, {2, 2, 2}}),
+    Require(changes && SamePositions(
+        *changes, {{{1, 1, 1}, true}, {{2, 2, 2}, true}}),
         "Palette mutations must not add voxel positions to the journal.");
 
     Require(document.RemoveVoxel({1, 1, 1}).Changed,
         "Journal removal mutation failed.");
     changes = document.ChangesSince(3U);
-    Require(changes && SamePositions(*changes, {{1, 1, 1}}),
-        "Removals must be journaled like additions.");
+    Require(changes && SamePositions(*changes, {{{1, 1, 1}, true}}),
+        "Removals must be journaled as occupancy changes.");
 
     const std::vector<VoxelDocumentChange> batch{
         {0U, {5, 5, 5}, false, 0U, true, 2U},
@@ -430,8 +438,8 @@ void TestRevisionJournalChangesSince(TemporaryProject& temporary)
     Require(document.ApplyVoxelChanges(batch).Changed,
         "Composite change batch failed.");
     changes = document.ChangesSince(4U);
-    Require(changes &&
-        SamePositions(*changes, {{5, 5, 5}, {6, 6, 6}, {7, 7, 7}}),
+    Require(changes && SamePositions(*changes,
+        {{{5, 5, 5}, true}, {{6, 6, 6}, true}, {{7, 7, 7}, true}}),
         "Composite changes must journal every touched position.");
 
     // Eviction: churn more revisions than the bounded ring keeps.
@@ -446,8 +454,8 @@ void TestRevisionJournalChangesSince(TemporaryProject& temporary)
     Require(!document.ChangesSince(beforeChurn),
         "Evicted revisions must force a nullopt (full rebuild).");
     changes = document.ChangesSince(document.GetRevision() - 1U);
-    Require(changes && SamePositions(*changes, {{5, 5, 5}}),
-        "Recent revisions must survive the ring eviction.");
+    Require(changes && SamePositions(*changes, {{{5, 5, 5}, false}}),
+        "Recolors must be journaled without an occupancy change.");
 
     // Overflow: one mutation touching more positions than the per-revision cap.
     const fs::path overflowPath = temporary.Models / "journal-overflow.vox";
@@ -475,7 +483,7 @@ void TestRevisionJournalChangesSince(TemporaryProject& temporary)
     Require(big.RemoveVoxel({0, 0, 0}).Changed,
         "Post-overflow removal failed.");
     changes = big.ChangesSince(big.GetRevision() - 1U);
-    Require(changes && SamePositions(*changes, {{0, 0, 0}}),
+    Require(changes && SamePositions(*changes, {{{0, 0, 0}, true}}),
         "Deltas recorded after an overflow must remain answerable.");
     Require(!big.ChangesSince(big.GetRevision() - 2U),
         "Ranges crossing an overflowed delta must force a nullopt.");

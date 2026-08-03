@@ -212,6 +212,19 @@ public:
     static constexpr std::size_t MaximumJournaledRevisions = 64U;
     static constexpr std::size_t MaximumJournaledPositionsPerRevision = 4096U;
 
+    // VF-0262 (262-3bis): a touched position carries whether its occupancy
+    // changed. Pure recolors keep OccupancyChanged false: they cannot flip
+    // the face visibility of any neighbour, so mesh caches only need to
+    // remesh the chunk containing the position itself.
+    struct TouchedPosition final
+    {
+        VoxelPosition Position{};
+        bool OccupancyChanged = false;
+
+        [[nodiscard]] bool operator==(
+            const TouchedPosition&) const noexcept = default;
+    };
+
     // Returns every voxel position touched strictly after `sinceRevision`,
     // up to and including the current revision. Duplicates are possible.
     // An empty vector means no voxel changed (palette-only edits, or the
@@ -220,7 +233,7 @@ public:
     // the bounded ring, or a single mutation exceeded
     // MaximumJournaledPositionsPerRevision) -> callers must fall back to a
     // full rebuild.
-    [[nodiscard]] std::optional<std::vector<VoxelPosition>> ChangesSince(
+    [[nodiscard]] std::optional<std::vector<TouchedPosition>> ChangesSince(
         std::uint64_t sinceRevision) const;
 
     [[nodiscard]] VoxelDocumentOperationResult SetVoxel(
@@ -263,7 +276,7 @@ private:
     struct RevisionDelta final
     {
         std::uint64_t Revision = 0U;
-        std::vector<VoxelPosition> Positions;
+        std::vector<TouchedPosition> Positions;
         bool Overflowed = false;
     };
 
@@ -271,7 +284,7 @@ private:
     // freshly bumped revision. `overflowed` marks a mutation whose position
     // set exceeded MaximumJournaledPositionsPerRevision (positions dropped).
     void JournalMutation(
-        std::vector<VoxelPosition> positions,
+        std::vector<TouchedPosition> positions,
         bool overflowed);
 
     std::filesystem::path sourcePath_;

@@ -44,7 +44,8 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::Synchronize(
     if (mesh_ && documentIdentity_ == documentIdentity &&
         modelIndex_ == modelIndex && documentRevision_)
     {
-        const std::optional<std::vector<Asset::Voxel::VoxelPosition>>
+        const std::optional<std::vector<
+            Asset::Voxel::VoxelDocument::TouchedPosition>>
             changes = document.ChangesSince(*documentRevision_);
         if (changes)
         {
@@ -64,14 +65,19 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::Synchronize(
             {
                 std::vector<ChunkKey> keys;
                 keys.reserve(changes->size() * 2U);
-                for (const Asset::Voxel::VoxelPosition& position : *changes)
+                for (const Asset::Voxel::VoxelDocument::TouchedPosition&
+                         touched : *changes)
                 {
+                    const Asset::Voxel::VoxelPosition& position =
+                        touched.Position;
                     const ChunkKey key = KeyForPosition(position);
                     keys.push_back(key);
-                    // A change on a chunk border flips face visibility
-                    // inside the axis neighbour; face rules only look at
-                    // 6-neighbours, so axis neighbours suffice (no
+                    // VF-0262 (262-3bis): only occupancy changes can flip
+                    // face visibility inside the axis neighbour; a pure
+                    // recolor never invalidates neighbours. Face rules only
+                    // look at 6-neighbours, so axis neighbours suffice (no
                     // diagonals).
+                    if (!touched.OccupancyChanged) continue;
                     const std::int32_t localX =
                         position.X - key.X * ChunkEdgeLength;
                     const std::int32_t localY =

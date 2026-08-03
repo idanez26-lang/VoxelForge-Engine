@@ -66,9 +66,11 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
    paresseuse du planner, coalescence (secondaire). **VF-0262 en cours** : 262-0 ✅
    (benchmark, baseline `688cea6`), 262-1 ✅ (builder par région + équivalence),
    262-2 ✅ (`6956f75`, journal d'invalidation `ChangesSince` dans VoxelDocument),
-   262-3 ✅ codé le 03/08 (cache incrémental chunks 32³ + itération régionale du
-   builder + équivalence — en attente build/commit, benchmark avant/après à
-   re-mesurer) ; reste 262-4 (upload partiel renderer) ;
+   262-3 ✅ (`b387230`, cache incrémental chunks 32³ + itération régionale :
+   région 32³ plate à ~8,8 ms, édit 823→21 ms @1M, ctest 129/129),
+   262-3bis ✅ codé le 03/08 (drapeau d'occupation : recoloration sans
+   invalidation des voisins — en attente build/commit) ; reste 262-4
+   (upload partiel renderer) ;
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;
