@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,20 @@
 
 namespace
 {
+// Diagnostic CI (03/08) : sur le runner GitHub (D3D12 WARP logiciel), 23
+// smokes echouent en "did not complete" — hypothese budget de frames trop
+// court pour un rendu logiciel lent. VOXELFORGE_SMOKE_FRAME_SCALE (entier,
+// defaut 1) multiplie la limite de frames des smokes ; sans effet en local.
+std::size_t ScaleSmokeFrameLimit(const std::size_t frames) noexcept
+{
+    if (frames == 0U) return frames;
+    const char* const scaleText = std::getenv("VOXELFORGE_SMOKE_FRAME_SCALE");
+    if (scaleText == nullptr) return frames;
+    const int scale = std::atoi(scaleText);
+    if (scale <= 1 || scale > 100) return frames;
+    return frames * static_cast<std::size_t>(scale);
+}
+
 constexpr std::size_t SmokeTestFrameCount = 5;
 constexpr std::size_t ViewportSmokeTestFrameCount = 30;
 constexpr std::size_t VoxelSelectionSmokeTestFrameCount = 30;
@@ -661,7 +676,7 @@ int main(const int argumentCount, char* arguments[])
                     return application.GetWindow().SetTitle(std::move(title));
                 },
                 [&application]() noexcept { application.Close(); },
-                commandLine.EraseVoxelSmokeTest
+                ScaleSmokeFrameLimit(commandLine.EraseVoxelSmokeTest
                     ? EraseVoxelSmokeTestFrameCount
                     : commandLine.PaintVoxelSmokeTest
                     ? PaintVoxelSmokeTestFrameCount
@@ -745,7 +760,7 @@ int main(const int argumentCount, char* arguments[])
                     ? VoxelSelectionSmokeTestFrameCount
                     : commandLine.ViewportSmokeTest
                     ? ViewportSmokeTestFrameCount
-                    : (commandLine.SmokeTest ? SmokeTestFrameCount : 0U),
+                    : (commandLine.SmokeTest ? SmokeTestFrameCount : 0U)),
                 viewportTest ? viewportFixture.VoxPath()
                              : std::filesystem::path{},
                 commandLine.ViewportSmokeTest ||
