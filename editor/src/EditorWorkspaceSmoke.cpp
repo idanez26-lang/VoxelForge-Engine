@@ -41,6 +41,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <iostream>
 #include <optional>
 #include <memory>
 #include <limits>
@@ -3001,7 +3002,47 @@ bool EditorWorkspace::RunFirstCreationExperienceSmokeStep(
             created.Metadata.Analysis->VoxelCount == 0U &&
             created.Metadata.Thumbnail &&
             created.Metadata.Thumbnail->Status == ThumbnailStatus::Valid;
-        if (!firstCreationSmokeCreated_) return false;
+        if (!firstCreationSmokeCreated_)
+        {
+            // Diagnostic CI (03/08) : sur le runner WARP, tous les smokes du
+            // flux de creation directe echouent des cette porte — impression
+            // de chaque condition pour identifier le coupable exact.
+            std::cerr << "[SmokeDiag] CreateModel frame0:"
+                << " Status=" << VoxelModelCreationStatusName(created.Status)
+                << " Succeeded=" << created.Succeeded()
+                << " Thumb=" << created.ThumbnailGenerated
+                << " Browser=" << created.AssetBrowserRefreshed
+                << " Opened=" << created.Opened
+                << " Doc=" << (document != nullptr);
+            if (document != nullptr)
+            {
+                std::cerr
+                    << " PathEq="
+                    << (document->SourcePath() == created.ModelPath)
+                    << " Dims=" << (document->GetDimensions() ==
+                        Asset::Voxel::VoxelDimensions{64U, 64U, 64U})
+                    << " Count0=" << (document->GetVoxelCount() == 0U)
+                    << " Clean=" << !document->IsDirty();
+            }
+            std::cerr
+                << " SavedState=" << voxelEditHistory_.IsAtSavedState()
+                << " Selection=" << (assetBrowser_.SelectedRelativePath() ==
+                    expectedSelection)
+                << " Analysis=" << (created.Metadata.Analysis &&
+                    created.Metadata.Analysis->Valid)
+                << " ThumbValid=" << (created.Metadata.Thumbnail &&
+                    created.Metadata.Thumbnail->Status ==
+                        ThumbnailStatus::Valid)
+                << " Message=\"" << created.Message << '"'
+                << " ModelPath=\"" << created.ModelPath.string() << '"';
+            if (document != nullptr)
+            {
+                std::cerr << " SourcePath=\""
+                    << document->SourcePath().string() << '"';
+            }
+            std::cerr << '\n';
+            return false;
+        }
         firstCreationExperience_.Start(false);
         firstCreationExperience_.Acknowledge();
     }
