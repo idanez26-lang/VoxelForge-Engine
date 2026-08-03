@@ -73,7 +73,10 @@ public:
         : document_(&document), model_(CompatibilityModel(document)) {}
 
     std::uint64_t VoxelModelGeneration() const noexcept override { return 1U; }
-    Voxel::VoxelModel* ActiveVoxelModel() noexcept override { return &model_; }
+    Voxel::VoxelModel* ActiveVoxelModel() noexcept override
+    {
+        return hasModel_ ? &model_ : nullptr;
+    }
     Asset::Voxel::VoxelDocument* ActiveVoxelDocument() noexcept override
     {
         return document_;
@@ -89,6 +92,7 @@ public:
     Voxel::VoxelModel model_;
     std::size_t rebuildCount_ = 0U;
     std::size_t completedCount_ = 0U;
+    bool hasModel_ = true;
 };
 
 Editor::VoxelLineResult Line(
@@ -193,6 +197,22 @@ void TestAtomicUndoRedoPaletteAndSave()
         "Line result is incompatible with VOX Save.");
 }
 
+void TestDocumentOnlyCanonicalHistory()
+{
+    auto document = Document({8U, 8U, 8U});
+    TestEditSession session(document);
+    session.hasModel_ = false;
+    Editor::VoxelEditHistory history;
+    const auto result = Line(
+        session, history, document, {1, 1, 1}, {4, 1, 1}, 13U);
+    Require(result.Code == Editor::VoxelLineResultCode::Applied &&
+        result.ChangedVoxelCount == 4U && document.GetVoxelCount() == 4U &&
+        history.Undo(session) && document.GetVoxelCount() == 0U &&
+        history.Redo(session) && document.GetVoxelCount() == 4U &&
+        document.GetVoxel({4, 1, 1})->PaletteIndex == 13U,
+        "Document-only Line history did not apply, undo and redo canonically.");
+}
+
 void TestWorkplaneFaceCancellationAndToolState()
 {
     auto document = Document({16U, 16U, 16U});
@@ -231,6 +251,7 @@ int main()
         TestDiagonalContinuityAndSymmetry();
         TestClipping();
         TestAtomicUndoRedoPaletteAndSave();
+        TestDocumentOnlyCanonicalHistory();
         TestWorkplaneFaceCancellationAndToolState();
         std::cout << "Voxel Line tests passed.\n";
         return 0;

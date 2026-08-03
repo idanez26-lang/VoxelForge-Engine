@@ -2,9 +2,6 @@
 
 #include "VoxelHistory/VoxelEditHistory.h"
 
-#include "VoxelForge/Voxel/VoxelGrid.h"
-#include "VoxelForge/Voxel/VoxelModel.h"
-
 #include <array>
 #include <exception>
 #include <new>
@@ -93,12 +90,7 @@ VoxelFillResult VoxelFillService::Apply(const VoxelFillContext& context)
         return Refused(VoxelFillResultCode::SameColor, start,
             revision);
 
-    Voxel::VoxelModel* compatibilityModel =
-        context.EditSession->ActiveVoxelModel();
-    Voxel::VoxelGrid* compatibilityGrid = compatibilityModel == nullptr
-        ? nullptr : compatibilityModel->GetGrid(context.SubModelIndex);
-    if (context.EditSession->ActiveVoxelDocument() != &document ||
-        compatibilityGrid == nullptr)
+    if (context.EditSession->ActiveVoxelDocument() != &document)
     {
         return Refused(VoxelFillResultCode::InvalidModel, start,
             revision);

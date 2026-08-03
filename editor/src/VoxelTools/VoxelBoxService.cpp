@@ -2,9 +2,6 @@
 
 #include "VoxelHistory/VoxelEditHistory.h"
 
-#include "VoxelForge/Voxel/VoxelGrid.h"
-#include "VoxelForge/Voxel/VoxelModel.h"
-
 #include <algorithm>
 #include <exception>
 #include <new>
@@ -83,13 +80,6 @@ VoxelBoxResult VoxelBoxService::Apply(const VoxelBoxContext& context)
         return Refused(VoxelBoxResultCode::InvalidPaletteIndex, {}, revision);
     if (context.EditSession == nullptr || context.History == nullptr ||
         context.EditSession->ActiveVoxelDocument() != &document)
-    {
-        return Refused(VoxelBoxResultCode::InvalidModel, {}, revision);
-    }
-    Voxel::VoxelModel* compatibilityModel =
-        context.EditSession->ActiveVoxelModel();
-    if (compatibilityModel == nullptr ||
-        compatibilityModel->GetGrid(context.SubModelIndex) == nullptr)
     {
         return Refused(VoxelBoxResultCode::InvalidModel, {}, revision);
     }

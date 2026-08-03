@@ -74,7 +74,10 @@ public:
         : document_(&document), model_(CompatibilityModel(document)) {}
 
     std::uint64_t VoxelModelGeneration() const noexcept override { return 1U; }
-    Voxel::VoxelModel* ActiveVoxelModel() noexcept override { return &model_; }
+    Voxel::VoxelModel* ActiveVoxelModel() noexcept override
+    {
+        return hasModel_ ? &model_ : nullptr;
+    }
     Asset::Voxel::VoxelDocument* ActiveVoxelDocument() noexcept override
     {
         return document_;
@@ -90,6 +93,7 @@ public:
     Voxel::VoxelModel model_;
     std::size_t rebuildCount_ = 0U;
     std::size_t completedCount_ = 0U;
+    bool hasModel_ = true;
 };
 
 Editor::VoxelSphereResult Sphere(
@@ -195,6 +199,22 @@ void TestAtomicUndoRedoPaletteSaveAndOccupiedPreservation()
         "Sphere result is incompatible with VOX Save.");
 }
 
+void TestDocumentOnlyCanonicalHistory()
+{
+    auto document = Document({8U, 8U, 8U});
+    TestEditSession session(document);
+    session.hasModel_ = false;
+    Editor::VoxelEditHistory history;
+    const auto result = Sphere(
+        session, history, document, {3, 3, 3}, {4, 3, 3}, 14U);
+    Require(result.Code == Editor::VoxelSphereResultCode::Applied &&
+        result.ChangedVoxelCount == 7U && document.GetVoxelCount() == 7U &&
+        history.Undo(session) && document.GetVoxelCount() == 0U &&
+        history.Redo(session) && document.GetVoxelCount() == 7U &&
+        document.GetVoxel({4, 3, 3})->PaletteIndex == 14U,
+        "Document-only Sphere history did not apply, undo and redo canonically.");
+}
+
 void TestWorkplaneFaceCancellationAndToolState()
 {
     auto document = Document({16U, 16U, 16U});
@@ -233,6 +253,7 @@ int main()
         TestRadiusZeroAndSmallSphere();
         TestLargeSphereClippingContinuityAndLimits();
         TestAtomicUndoRedoPaletteSaveAndOccupiedPreservation();
+        TestDocumentOnlyCanonicalHistory();
         TestWorkplaneFaceCancellationAndToolState();
         std::cout << "Voxel Sphere tests passed.\n";
         return 0;

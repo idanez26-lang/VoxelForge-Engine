@@ -2,9 +2,6 @@
 
 #include "VoxelHistory/VoxelEditHistory.h"
 
-#include "VoxelForge/Voxel/VoxelGrid.h"
-#include "VoxelForge/Voxel/VoxelModel.h"
-
 #include <algorithm>
 #include <cstdlib>
 #include <exception>
@@ -137,14 +134,6 @@ VoxelLineResult VoxelLineService::Apply(const VoxelLineContext& context)
     {
         return Refused(VoxelLineResultCode::InvalidModel, revision);
     }
-    Voxel::VoxelModel* compatibilityModel =
-        context.EditSession->ActiveVoxelModel();
-    if (compatibilityModel == nullptr ||
-        compatibilityModel->GetGrid(context.SubModelIndex) == nullptr)
-    {
-        return Refused(VoxelLineResultCode::InvalidModel, revision);
-    }
-
     std::vector<VoxelChange> changes;
     try
     {

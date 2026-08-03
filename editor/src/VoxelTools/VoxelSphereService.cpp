@@ -2,9 +2,6 @@
 
 #include "VoxelHistory/VoxelEditHistory.h"
 
-#include "VoxelForge/Voxel/VoxelGrid.h"
-#include "VoxelForge/Voxel/VoxelModel.h"
-
 #include <algorithm>
 #include <cmath>
 #include <exception>
@@ -119,11 +116,6 @@ VoxelSphereResult VoxelSphereService::Apply(const VoxelSphereContext& context)
             VoxelSphereResultCode::InvalidPaletteIndex, sphere, revision);
     if (context.EditSession == nullptr || context.History == nullptr ||
         context.EditSession->ActiveVoxelDocument() != &document)
-        return Refused(VoxelSphereResultCode::InvalidModel, sphere, revision);
-    Voxel::VoxelModel* compatibilityModel =
-        context.EditSession->ActiveVoxelModel();
-    if (compatibilityModel == nullptr ||
-        compatibilityModel->GetGrid(context.SubModelIndex) == nullptr)
         return Refused(VoxelSphereResultCode::InvalidModel, sphere, revision);
 
     std::vector<VoxelChange> changes;

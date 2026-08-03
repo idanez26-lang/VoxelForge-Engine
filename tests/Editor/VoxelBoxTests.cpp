@@ -70,7 +70,10 @@ public:
         : document_(&document), model_(CompatibilityModel(document)) {}
 
     std::uint64_t VoxelModelGeneration() const noexcept override { return 1U; }
-    Voxel::VoxelModel* ActiveVoxelModel() noexcept override { return &model_; }
+    Voxel::VoxelModel* ActiveVoxelModel() noexcept override
+    {
+        return hasModel_ ? &model_ : nullptr;
+    }
     Asset::Voxel::VoxelDocument* ActiveVoxelDocument() noexcept override
     {
         return document_;
@@ -86,6 +89,7 @@ public:
     Voxel::VoxelModel model_;
     std::size_t rebuildCount_ = 0U;
     std::size_t completedCount_ = 0U;
+    bool hasModel_ = true;
 };
 
 Editor::VoxelBoxResult Box(
@@ -181,6 +185,22 @@ void TestWorkplaneFaceAndSaveCompatibility()
         "Workplane/face corners or VOX Save compatibility failed.");
 }
 
+void TestDocumentOnlyCanonicalHistory()
+{
+    auto document = Document({4U, 4U, 4U});
+    TestEditSession session(document);
+    session.hasModel_ = false;
+    Editor::VoxelEditHistory history;
+    const auto result = Box(
+        session, history, document, {0, 0, 0}, {1, 1, 1}, 6U);
+    Require(result.Code == Editor::VoxelBoxResultCode::Applied &&
+        result.ChangedVoxelCount == 8U && document.GetVoxelCount() == 8U &&
+        history.Undo(session) && document.GetVoxelCount() == 0U &&
+        history.Redo(session) && document.GetVoxelCount() == 8U &&
+        document.GetVoxel({1, 1, 1})->PaletteIndex == 6U,
+        "Document-only Box history did not apply, undo and redo canonically.");
+}
+
 void TestNoOpCancellationAndToolState()
 {
     auto document = Document({4U, 4U, 4U}, {{1U, 1U, 1U, 5U}});
@@ -218,6 +238,7 @@ int main()
         TestClippingAndMaximumExtent();
         TestLargeBox();
         TestWorkplaneFaceAndSaveCompatibility();
+        TestDocumentOnlyCanonicalHistory();
         TestNoOpCancellationAndToolState();
         std::cout << "Voxel Box tests passed.\n";
         return 0;
