@@ -54,6 +54,10 @@ bool Application::Initialize()
     {
         Logger::Instance().Error(
             Renderer::Renderer::GetLastError());
+        // Video/GPU initialization failures are environmental (headless
+        // runner, no driver) — remembered so Run() can report a skip
+        // instead of a test failure.
+        gpuUnavailable_ = true;
         return false;
     }
 
@@ -95,7 +99,7 @@ int Application::Run()
         {
             Logger::Instance().Error("VoxelForge failed to initialize.");
             Shutdown();
-            return 1;
+            return gpuUnavailable_ ? GpuUnavailableExitCode : 1;
         }
 
         Logger::Instance().Info("VoxelForge Engine Ready.");

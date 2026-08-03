@@ -82,8 +82,12 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
    Re-test 500k en réel quand les dimensions de la box de création seront
    configurables — **besoin produit noté** (backlog) ;
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
-3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
-   supprimer l'annotation d'erreur cosmétique ;
+3. Mini-lot `SKIP_RETURN_CODE` ✅ codé le 03/08 : l'application retourne 77
+   (`Application::GpuUnavailableExitCode`) quand l'init vidéo/GPU échoue ;
+   `SKIP_RETURN_CODE 77` sur la suite EditorApp. **À observer au prochain run
+   CI** : si le runner crée un device logiciel (WARP) et échoue plus loin,
+   élargir la détection ; sinon, retirer le `continue-on-error` du workflow
+   dans un second temps ;
 4. Nettoyage différé : ~~copies de noms de panneaux + 5 symboles dupliqués au
    lot 7d~~ ✅ fait le 03/08 : assistants ImGui mutualisés dans
    `EditorWorkspaceUiHelpers.h` (3 copies supprimées, dont du code mort dans

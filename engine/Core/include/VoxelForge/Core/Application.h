@@ -21,6 +21,11 @@ class Window;
 class Application final
 {
 public:
+    // Exit code returned by Run() when the platform cannot provide a GPU
+    // device (headless CI runner). CTest maps it to a proper "skipped"
+    // status via SKIP_RETURN_CODE on the EditorApp suite.
+    static constexpr int GpuUnavailableExitCode = 77;
+
     using WindowCloseRequestCallback = std::function<bool()>;
     explicit Application(ApplicationSpecification specification = {});
     ~Application();
@@ -60,6 +65,7 @@ private:
     WindowCloseRequestCallback windowCloseRequestCallback_;
     bool initialized_;
     bool running_;
+    bool gpuUnavailable_ = false;
 };
 
 } // namespace VoxelForge::Core

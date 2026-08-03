@@ -1866,6 +1866,10 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.SaveOnExitSmoke
         PROPERTIES
         LABELS "EditorApp"
+            # L'application retourne 77 (Application::GpuUnavailableExitCode)
+            # quand le poste n'a pas de GPU : CTest marque alors le test
+            # "Skipped" au lieu d'un echec (runner CI sans device).
+            SKIP_RETURN_CODE 77
             TIMEOUT 30
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             ENVIRONMENT
