@@ -51,6 +51,19 @@ public:
         const Asset::Voxel::VoxelDocument& document,
         const Mesh::MeshData& mesh,
         std::size_t modelIndex = 0U) noexcept;
+    // VF-0262 (lot 262-4c): count-based overloads so the per-edit path can
+    // feed statistics from the chunk cache without assembling a single mesh.
+    [[nodiscard]] bool ReplaceDocument(
+        std::string name,
+        const Asset::Voxel::VoxelDocument& document,
+        std::size_t meshVertexCount,
+        std::size_t meshTriangleCount,
+        std::size_t modelIndex = 0U);
+    [[nodiscard]] bool UpdateDocumentStatistics(
+        const Asset::Voxel::VoxelDocument& document,
+        std::size_t meshVertexCount,
+        std::size_t meshTriangleCount,
+        std::size_t modelIndex = 0U) noexcept;
     void Clear() noexcept;
 
     [[nodiscard]] bool HasModel() const noexcept;

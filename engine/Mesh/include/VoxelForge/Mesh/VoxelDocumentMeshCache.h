@@ -72,7 +72,15 @@ public:
     void Clear() noexcept;
 
     [[nodiscard]] bool HasMesh() const noexcept;
+    // VF-0262 (lot 262-4c): the assembled mesh is built lazily on first
+    // access after a rebuild (statistics-only consumers should prefer the
+    // Total*Count accessors, which sum the chunks without assembling).
+    // Returns nullptr when the cache holds no state or assembly failed to
+    // allocate; retried on the next call.
     [[nodiscard]] const MeshData* Mesh() const noexcept;
+    [[nodiscard]] std::size_t TotalVertexCount() const noexcept;
+    [[nodiscard]] std::size_t TotalTriangleCount() const noexcept;
+    [[nodiscard]] std::size_t TotalFaceCount() const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> DocumentRevision() const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> DocumentIdentity() const noexcept;
     [[nodiscard]] std::size_t ModelIndex() const noexcept;
@@ -109,12 +117,16 @@ private:
         std::uint64_t revision,
         const std::vector<ChunkKey>& keys,
         std::size_t modelIndex);
-    [[nodiscard]] bool AssembleMesh();
+    [[nodiscard]] bool AssembleMesh() const;
 
     std::map<ChunkKey, MeshData> chunkMeshes_;
     std::vector<ChunkKey> lastSyncTouchedChunks_;
     bool lastSyncWasFullRebuild_ = false;
-    std::optional<MeshData> mesh_;
+    // Lazy assembly state (262-4c): mutable because Mesh() is conceptually
+    // const — it only materializes the aggregation of the chunk meshes.
+    mutable std::optional<MeshData> mesh_;
+    mutable bool meshDirty_ = false;
+    bool hasState_ = false;
     std::optional<std::uint64_t> documentRevision_;
     std::optional<std::uint64_t> documentIdentity_;
     std::size_t modelIndex_ = 0U;

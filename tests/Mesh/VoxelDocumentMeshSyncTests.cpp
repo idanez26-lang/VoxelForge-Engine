@@ -278,6 +278,12 @@ void TestIncrementalSynchronizeMatchesFullBuild()
             "Reference full build failed.");
         Require(cache.Mesh() &&
             FaceKeys(*cache.Mesh()) == FaceKeys(*reference.Mesh), message);
+        // VF-0262 (262-4c): the chunk totals must match the assembled
+        // counts without forcing an assembly.
+        Require(cache.TotalVertexCount() == reference.Mesh->VertexCount() &&
+            cache.TotalTriangleCount() == reference.Mesh->TriangleCount() &&
+            cache.TotalFaceCount() == reference.Mesh->FaceCount(),
+            "Chunk totals must match the full build counts.");
     };
     verify("Initial assembled mesh must match the full build.");
 

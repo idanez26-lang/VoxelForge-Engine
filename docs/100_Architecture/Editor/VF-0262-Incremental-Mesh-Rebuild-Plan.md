@@ -157,9 +157,15 @@ résiduel. **Exigence ajoutée pour 262-2/262-3 : itération régionale côté d
     pas de modification de shaders) ; double upload ponctuel à l'ouverture de
     projet (chemin de chargement en mesh entier, premier Draw bascule en
     chunks).
-  - **Reste 4c** : assemblage `Mesh()` paresseux (aujourd'hui encore construit
-    à chaque rebuild pour les statistiques du viewport et `ReplaceDocument`) —
-    dernière composante O(surface) du commit.
+  - **4c — assemblage paresseux ✅ implémenté (03/08)** : `Synchronize` ne
+    construit plus le mesh assemblé ; `Mesh()` l'assemble à la demande
+    (mutable + drapeau sale, échec d'allocation → nullptr et nouvel essai au
+    prochain appel ; stabilité de pointeur préservée). Les statistiques du
+    viewport passent par `TotalVertexCount/TotalTriangleCount` (somme des
+    chunks, ≤ ~64 itérations) via de nouvelles surcharges par compteurs de
+    `VoxelViewportState`. Consommateurs restants de `Mesh()` : chemin de
+    chargement (une fois par ouverture) et un smoke — hors chemin par édit.
+    Le commit d'édition ne paie plus **aucun** coût O(surface) côté CPU.
   - Validation : suite bloquante + smokes EditorApp sur poste (GPU requis),
     session sonde réelle (`GpuUpload` attendu ~constant), vérification
     visuelle (édits en bord de chunk, gomme, palette, undo/redo).

@@ -28,7 +28,7 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::Synchronize(
     const std::size_t modelIndex)
 {
     const std::uint64_t revision = document.GetRevision();
-    if (mesh_ && documentIdentity_ == documentIdentity &&
+    if (hasState_ && documentIdentity_ == documentIdentity &&
         documentRevision_ == revision && modelIndex_ == modelIndex)
     {
         lastSyncTouchedChunks_.clear();
@@ -43,7 +43,7 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::Synchronize(
     // VF-0262 (lot 262-3): incremental path — same document, same sub-model,
     // and the revision journal can name every touched position since the
     // cached revision.
-    if (mesh_ && documentIdentity_ == documentIdentity &&
+    if (hasState_ && documentIdentity_ == documentIdentity &&
         modelIndex_ == modelIndex && documentRevision_)
     {
         const std::optional<std::vector<
@@ -198,16 +198,7 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::RebuildChunks(
             MeshBuildError::AllocationFailure,
             "Unable to allocate the chunk mesh storage."};
     }
-    if (!AssembleMesh())
-    {
-        // Chunks are already consistent with the document; the stale
-        // revision forces the next Synchronize to retry the assembly.
-        return {
-            false,
-            VoxelDocumentMeshSyncStatus::Unchanged,
-            MeshBuildError::AllocationFailure,
-            "Unable to allocate CPU memory for the assembled voxel mesh."};
-    }
+    meshDirty_ = true;
     documentRevision_ = revision;
     ++buildCount_;
     ++incrementalRebuildCount_;
@@ -310,14 +301,8 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::RebuildAllChunks(
     }
 
     chunkMeshes_ = std::move(chunks);
-    if (!AssembleMesh())
-    {
-        return {
-            false,
-            VoxelDocumentMeshSyncStatus::Unchanged,
-            MeshBuildError::AllocationFailure,
-            "Unable to allocate CPU memory for the assembled voxel mesh."};
-    }
+    meshDirty_ = true;
+    hasState_ = true;
     documentIdentity_ = documentIdentity;
     documentRevision_ = revision;
     modelIndex_ = modelIndex;
@@ -344,7 +329,7 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::RebuildAllChunks(
         "Voxel document mesh rebuilt."};
 }
 
-bool VoxelDocumentMeshCache::AssembleMesh()
+bool VoxelDocumentMeshCache::AssembleMesh() const
 {
     try
     {
@@ -378,6 +363,8 @@ void VoxelDocumentMeshCache::Clear() noexcept
     lastSyncTouchedChunks_.clear();
     lastSyncWasFullRebuild_ = false;
     mesh_.reset();
+    meshDirty_ = false;
+    hasState_ = false;
     documentRevision_.reset();
     documentIdentity_.reset();
     modelIndex_ = 0U;
@@ -386,12 +373,42 @@ void VoxelDocumentMeshCache::Clear() noexcept
 
 bool VoxelDocumentMeshCache::HasMesh() const noexcept
 {
-    return mesh_.has_value();
+    return hasState_;
 }
 
 const MeshData* VoxelDocumentMeshCache::Mesh() const noexcept
 {
-    return mesh_ ? &*mesh_ : nullptr;
+    if (!hasState_) return nullptr;
+    if (!mesh_ || meshDirty_)
+    {
+        if (!AssembleMesh()) return nullptr;
+        meshDirty_ = false;
+    }
+    return &*mesh_;
+}
+
+std::size_t VoxelDocumentMeshCache::TotalVertexCount() const noexcept
+{
+    std::size_t count = 0U;
+    for (const auto& entry : chunkMeshes_)
+        count += entry.second.VertexCount();
+    return count;
+}
+
+std::size_t VoxelDocumentMeshCache::TotalTriangleCount() const noexcept
+{
+    std::size_t count = 0U;
+    for (const auto& entry : chunkMeshes_)
+        count += entry.second.TriangleCount();
+    return count;
+}
+
+std::size_t VoxelDocumentMeshCache::TotalFaceCount() const noexcept
+{
+    std::size_t count = 0U;
+    for (const auto& entry : chunkMeshes_)
+        count += entry.second.FaceCount();
+    return count;
 }
 
 std::optional<std::uint64_t>

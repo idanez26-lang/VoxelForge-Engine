@@ -6206,7 +6206,7 @@ bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
                 frameProbe_, EditorFrameProbeSlot::MeshSynchronize);
             return voxelDocumentMeshCache_.Synchronize(*document, identity);
         }();
-    if (!synchronized.Succeeded || voxelDocumentMeshCache_.Mesh() == nullptr)
+    if (!synchronized.Succeeded || !voxelDocumentMeshCache_.HasMesh())
     {
         if (failedDocumentIdentity_ != identity ||
             failedDocumentRevision_ != revision)
@@ -6228,7 +6228,6 @@ bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
 
     const Vec3 modelCenter = CalculateVoxelDocumentCenter(*document);
     const Voxel::VoxelPalette palette = BuildDocumentRenderPalette(*document);
-    const Mesh::MeshData& mesh = *voxelDocumentMeshCache_.Mesh();
     // VF-0262 (lot 262-4): patch only the chunks the cache rebuilt when the
     // inputs baked into the vertices (palette colours, model center) and the
     // document identity are unchanged; anything else refreshes the whole
@@ -6288,15 +6287,23 @@ bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
         }
         return false;
     }
+    // VF-0262 (lot 262-4c): statistics come from the chunk totals — the
+    // per-edit path never assembles the single mesh anymore.
+    const std::size_t meshVertexCount =
+        voxelDocumentMeshCache_.TotalVertexCount();
+    const std::size_t meshTriangleCount =
+        voxelDocumentMeshCache_.TotalTriangleCount();
     if (viewportState_.HasModel())
     {
-        if (!viewportState_.UpdateDocumentStatistics(*document, mesh))
+        if (!viewportState_.UpdateDocumentStatistics(
+                *document, meshVertexCount, meshTriangleCount))
             return false;
     }
     else if (!viewportState_.ReplaceDocument(
                  document->SourcePath().filename().string(),
                  *document,
-                 mesh))
+                 meshVertexCount,
+                 meshTriangleCount))
     {
         return false;
     }

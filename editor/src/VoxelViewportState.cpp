@@ -65,6 +65,31 @@ bool VoxelViewportState::UpdateDocumentStatistics(
     const Mesh::MeshData& mesh,
     const std::size_t modelIndex) noexcept
 {
+    return UpdateDocumentStatistics(
+        document, mesh.VertexCount(), mesh.TriangleCount(), modelIndex);
+}
+
+bool VoxelViewportState::ReplaceDocument(
+    std::string name,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::size_t meshVertexCount,
+    const std::size_t meshTriangleCount,
+    const std::size_t modelIndex)
+{
+    if (!UpdateDocumentStatistics(
+            document, meshVertexCount, meshTriangleCount, modelIndex))
+        return false;
+    name_ = std::move(name);
+    hasModel_ = true;
+    return true;
+}
+
+bool VoxelViewportState::UpdateDocumentStatistics(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::size_t meshVertexCount,
+    const std::size_t meshTriangleCount,
+    const std::size_t modelIndex) noexcept
+{
     const auto dimensions = document.GetDimensions(modelIndex);
     const auto voxelCount = document.GetVoxelCount(modelIndex);
     if (!dimensions || !voxelCount) return false;
@@ -73,8 +98,8 @@ bool VoxelViewportState::UpdateDocumentStatistics(
         dimensions->Y,
         dimensions->Z,
         *voxelCount,
-        mesh.VertexCount(),
-        mesh.TriangleCount()};
+        meshVertexCount,
+        meshTriangleCount};
     return true;
 }
 
