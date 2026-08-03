@@ -266,6 +266,10 @@ void TestIncrementalSynchronizeMatchesFullBuild()
         cache.IncrementalRebuildCount() == 0U &&
         cache.ChunkCount() == 8U,
         "Initial synchronization must fully build all eight chunks.");
+    Require(cache.LastSyncWasFullRebuild() &&
+        cache.LastSyncTouchedChunks().size() == 8U &&
+        cache.Chunks().size() == 8U,
+        "A full rebuild must report all chunks as touched.");
 
     const auto verify = [&](const std::string_view message)
     {
@@ -283,7 +287,14 @@ void TestIncrementalSynchronizeMatchesFullBuild()
         cache.IncrementalRebuildCount() == 1U &&
         cache.LastRebuildChunkCount() == 1U,
         "An interior edit must rebuild exactly one chunk.");
+    Require(!cache.LastSyncWasFullRebuild() &&
+        cache.LastSyncTouchedChunks() ==
+            std::vector<VoxelDocumentMeshCache::ChunkKey>{{0, 0, 0}},
+        "An interior edit must report exactly its own chunk as touched.");
     verify("Mesh after an interior edit must match the full build.");
+    Require(cache.Synchronize(document, 42U).Succeeded &&
+        cache.LastSyncTouchedChunks().empty(),
+        "An unchanged synchronization must report no touched chunks.");
 
     Require(document.SetVoxel({31, 10, 10}, 6U).Changed,
         "Border fixture mutation failed.");
@@ -328,6 +339,9 @@ void TestIncrementalSynchronizeMatchesFullBuild()
         cache.BuildCount() == buildsBefore &&
         cache.DocumentRevision() == document.GetRevision(),
         "Palette-only revisions must adopt the revision without a rebuild.");
+    Require(!cache.LastSyncWasFullRebuild() &&
+        cache.LastSyncTouchedChunks().empty(),
+        "Palette-only revisions must report no touched chunks.");
 
     // Journal eviction: churn more revisions than the ring keeps.
     Require(document.SetVoxel({5, 5, 5}, 7U).Changed,

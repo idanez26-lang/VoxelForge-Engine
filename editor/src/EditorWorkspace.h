@@ -1129,6 +1129,10 @@ private:
     bool voxelUndoRedoSmokeSourcePreserved_ = false;
     std::optional<std::uint64_t> uploadedDocumentIdentity_;
     std::optional<std::uint64_t> uploadedDocumentRevision_;
+    // VF-0262 (lot 262-4): presentation inputs baked into the uploaded
+    // vertices; any change forces a full chunk refresh instead of a patch.
+    Vec3 uploadedDocumentModelCenter_{};
+    Voxel::VoxelPalette uploadedDocumentPalette_;
     std::optional<std::uint64_t> failedDocumentIdentity_;
     std::optional<std::uint64_t> failedDocumentRevision_;
 };

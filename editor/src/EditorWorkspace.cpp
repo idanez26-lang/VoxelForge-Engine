@@ -6229,12 +6229,51 @@ bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
     const Vec3 modelCenter = CalculateVoxelDocumentCenter(*document);
     const Voxel::VoxelPalette palette = BuildDocumentRenderPalette(*document);
     const Mesh::MeshData& mesh = *voxelDocumentMeshCache_.Mesh();
+    // VF-0262 (lot 262-4): patch only the chunks the cache rebuilt when the
+    // inputs baked into the vertices (palette colours, model center) and the
+    // document identity are unchanged; anything else refreshes the whole
+    // chunk set. Palette-only revisions arrive as Unchanged with no touched
+    // chunks and land in the full-refresh branch, re-baking the colours.
+    const bool canPatch =
+        synchronized.Rebuilt() &&
+        !voxelDocumentMeshCache_.LastSyncWasFullRebuild() &&
+        uploadedDocumentIdentity_ == identity &&
+        uploadedDocumentModelCenter_.X == modelCenter.X &&
+        uploadedDocumentModelCenter_.Y == modelCenter.Y &&
+        uploadedDocumentModelCenter_.Z == modelCenter.Z &&
+        uploadedDocumentPalette_.Data() == palette.Data();
     const bool uploaded =
-        [this, &mesh, &palette, modelCenter]
+        [this, &palette, modelCenter, canPatch]
         {
             const EditorFrameProbeScope uploadProbe(
                 frameProbe_, EditorFrameProbeSlot::GpuUpload);
-            return viewportRenderer_.Upload(mesh, palette, modelCenter);
+            const auto& chunks = voxelDocumentMeshCache_.Chunks();
+            std::vector<ViewportRenderer::ModelChunkUpdate> updates;
+            if (canPatch)
+            {
+                const auto& touched =
+                    voxelDocumentMeshCache_.LastSyncTouchedChunks();
+                updates.reserve(touched.size());
+                for (const auto& key : touched)
+                {
+                    const auto found = chunks.find(key);
+                    updates.push_back({
+                        {key.X, key.Y, key.Z},
+                        found != chunks.end() ? &found->second : nullptr});
+                }
+            }
+            else
+            {
+                updates.reserve(chunks.size());
+                for (const auto& entry : chunks)
+                {
+                    updates.push_back({
+                        {entry.first.X, entry.first.Y, entry.first.Z},
+                        &entry.second});
+                }
+            }
+            return viewportRenderer_.UploadModelChunks(
+                updates, palette, modelCenter, !canPatch);
         }();
     if (!uploaded)
     {
@@ -6289,6 +6328,8 @@ bool EditorWorkspace::SynchronizeVoxelDocumentRendering()
         static_cast<float>(statistics.Depth));
     uploadedDocumentIdentity_ = identity;
     uploadedDocumentRevision_ = revision;
+    uploadedDocumentModelCenter_ = modelCenter;
+    uploadedDocumentPalette_ = palette;
     failedDocumentIdentity_.reset();
     failedDocumentRevision_.reset();
     voxelViewportRendered_ = false;

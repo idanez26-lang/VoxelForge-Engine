@@ -130,7 +130,39 @@ résiduel. **Exigence ajoutée pour 262-2/262-3 : itération régionale côté d
   directement à l'outil peinture. Gardes : flags vérifiés dans
   `TestRevisionJournalChangesSince`, recolor-en-bord = 1 chunk dans
   `TestIncrementalSynchronizeMatchesFullBuild`.
+
+  **Vérifié (03/08, Release `831a9c0`, ctest 129/129)** : le pire cas 262 144
+  retombe de 88,0 à **19,9 ms** ; coût par édit borné à ~4-25 ms sur toutes
+  les tailles (build complet équivalent : 4,6→965 ms, machine plus bruitée sur
+  ce run). L'objectif « commit < 20 ms sur modèle 500k » est atteint à
+  l'assemblage près (~O(surface), levé par 262-4).
 - **262-4** : upload partiel côté renderer + validation visuelle sur poste.
+  **✅ 4a + 4b implémentés (03/08)** :
+  - *4a — exposition du cache* : `Chunks()` (chunks non vides),
+    `LastSyncTouchedChunks()` (clés rebâties ou vidées par le dernier
+    `Synchronize` ; vide si Unchanged/palette seule), `LastSyncWasFullRebuild()`
+    (consommateurs → rafraîchissement complet). `ChunkKey` rendu public.
+  - *4b — renderer par chunks* : `ViewportRenderer` tient un couple de buffers
+    GPU par chunk (`UploadModelChunks` : un appel = une opération d'upload,
+    `ModelUploadCount` +1 — sémantique smokes préservée) ; seuls les chunks
+    touchés sont convertis (`GPUVertex`) et téléversés ; un mesh nul/vide
+    retire le chunk ; N draw calls même pipeline (≤ ~64). Chemins chunké et
+    mesh-entier mutuellement exclusifs (legacy `VoxelGrid` inchangé).
+    `SynchronizeVoxelDocumentRendering` patch les chunks touchés si identité,
+    centre du modèle et palette (bakés dans les sommets) sont inchangés ;
+    sinon rafraîchissement complet — les révisions palette-seule re-bakent
+    les couleurs sans remaillage. Modèle vidé → `ClearModel()` (comportement
+    historique `Upload(vide)`).
+  - Concessions 4b : centre baké (changement de bounds → re-upload complet,
+    pas de modification de shaders) ; double upload ponctuel à l'ouverture de
+    projet (chemin de chargement en mesh entier, premier Draw bascule en
+    chunks).
+  - **Reste 4c** : assemblage `Mesh()` paresseux (aujourd'hui encore construit
+    à chaque rebuild pour les statistiques du viewport et `ReplaceDocument`) —
+    dernière composante O(surface) du commit.
+  - Validation : suite bloquante + smokes EditorApp sur poste (GPU requis),
+    session sonde réelle (`GpuUpload` attendu ~constant), vérification
+    visuelle (édits en bord de chunk, gomme, palette, undo/redo).
 - Verdicts : suite complète 180+, benchmark 262-0 avant/après, session sonde réelle
   (objectif : commit < 20 ms sur modèle 500k).
 

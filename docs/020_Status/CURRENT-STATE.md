@@ -68,9 +68,12 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
    262-2 ✅ (`6956f75`, journal d'invalidation `ChangesSince` dans VoxelDocument),
    262-3 ✅ (`b387230`, cache incrémental chunks 32³ + itération régionale :
    région 32³ plate à ~8,8 ms, édit 823→21 ms @1M, ctest 129/129),
-   262-3bis ✅ codé le 03/08 (drapeau d'occupation : recoloration sans
-   invalidation des voisins — en attente build/commit) ; reste 262-4
-   (upload partiel renderer) ;
+   262-3bis ✅ (`831a9c0`, drapeau d'occupation : recoloration sans invalidation
+   des voisins — pire cas 88→19,9 ms, édit borné ~4-25 ms toutes tailles) ;
+   262-4a/4b ✅ codés le 03/08 (renderer par chunks : upload partiel des seuls
+   chunks touchés, patch gardé par identité/centre/palette — en attente
+   build/commit ; smokes EditorApp à passer sur poste) ; reste 262-4c
+   (assemblage `Mesh()` paresseux) ;
 2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
 3. Mini-lot différé : skip propre des tests `EditorApp` en CI (`SKIP_RETURN_CODE`) pour
    supprimer l'annotation d'erreur cosmétique ;

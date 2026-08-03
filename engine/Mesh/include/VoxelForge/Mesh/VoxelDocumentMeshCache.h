@@ -48,6 +48,23 @@ public:
     static constexpr std::int32_t ChunkEdgeLength = 32;
     static constexpr std::size_t MaximumIncrementalChunkRebuilds = 64U;
 
+    // VF-0262 (lot 262-4a): chunk identity, public so renderers can maintain
+    // per-chunk GPU buffers keyed on it.
+    struct ChunkKey final
+    {
+        std::int32_t X = 0;
+        std::int32_t Y = 0;
+        std::int32_t Z = 0;
+
+        [[nodiscard]] bool operator==(const ChunkKey&) const noexcept = default;
+
+        [[nodiscard]] bool operator<(const ChunkKey& other) const noexcept
+        {
+            return std::tie(X, Y, Z) <
+                std::tie(other.X, other.Y, other.Z);
+        }
+    };
+
     [[nodiscard]] VoxelDocumentMeshSyncResult Synchronize(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentIdentity,
@@ -67,22 +84,18 @@ public:
     [[nodiscard]] std::size_t LastRebuildChunkCount() const noexcept;
     [[nodiscard]] std::size_t ChunkCount() const noexcept;
 
+    // VF-0262 (lot 262-4a): per-chunk consumption for partial GPU uploads.
+    // Chunks() only contains non-empty chunk meshes. LastSyncTouchedChunks()
+    // lists the keys rebuilt (or emptied and erased) by the last successful
+    // Synchronize; it is empty after an Unchanged result (fast path or
+    // palette-only revision). LastSyncWasFullRebuild() tells consumers to
+    // refresh everything instead of patching the touched keys.
+    [[nodiscard]] const std::map<ChunkKey, MeshData>& Chunks() const noexcept;
+    [[nodiscard]] const std::vector<ChunkKey>&
+    LastSyncTouchedChunks() const noexcept;
+    [[nodiscard]] bool LastSyncWasFullRebuild() const noexcept;
+
 private:
-    struct ChunkKey final
-    {
-        std::int32_t X = 0;
-        std::int32_t Y = 0;
-        std::int32_t Z = 0;
-
-        [[nodiscard]] bool operator==(const ChunkKey&) const noexcept = default;
-
-        [[nodiscard]] bool operator<(const ChunkKey& other) const noexcept
-        {
-            return std::tie(X, Y, Z) <
-                std::tie(other.X, other.Y, other.Z);
-        }
-    };
-
     [[nodiscard]] static ChunkKey KeyForPosition(
         const Asset::Voxel::VoxelPosition& position) noexcept;
 
@@ -99,6 +112,8 @@ private:
     [[nodiscard]] bool AssembleMesh();
 
     std::map<ChunkKey, MeshData> chunkMeshes_;
+    std::vector<ChunkKey> lastSyncTouchedChunks_;
+    bool lastSyncWasFullRebuild_ = false;
     std::optional<MeshData> mesh_;
     std::optional<std::uint64_t> documentRevision_;
     std::optional<std::uint64_t> documentIdentity_;

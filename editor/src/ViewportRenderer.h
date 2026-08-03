@@ -18,11 +18,13 @@
 #include <cstdint>
 #include <array>
 #include <cstddef>
+#include <map>
 #include <string>
 #include <string_view>
 #include <optional>
 #include <memory>
 #include <span>
+#include <tuple>
 #include <vector>
 
 struct SDL_GPUBuffer;
@@ -77,10 +79,44 @@ public:
     ViewportRenderer();
     ~ViewportRenderer();
 
+    // VF-0262 (lot 262-4): chunked model presentation. The renderer keeps one
+    // GPU buffer pair per chunk and a batch call patches only the chunks the
+    // mesh cache rebuilt. A null or empty mesh removes the chunk. The chunked
+    // and whole-mesh model paths are mutually exclusive: each upload owns the
+    // model view and releases the other's buffers.
+    struct ModelChunkId final
+    {
+        std::int32_t X = 0;
+        std::int32_t Y = 0;
+        std::int32_t Z = 0;
+
+        [[nodiscard]] bool operator==(
+            const ModelChunkId&) const noexcept = default;
+
+        [[nodiscard]] bool operator<(
+            const ModelChunkId& other) const noexcept
+        {
+            return std::tie(X, Y, Z) <
+                std::tie(other.X, other.Y, other.Z);
+        }
+    };
+    struct ModelChunkUpdate final
+    {
+        ModelChunkId Id{};
+        const Mesh::MeshData* Mesh = nullptr;
+    };
+
     [[nodiscard]] bool Upload(
         const Mesh::MeshData& mesh,
         const Voxel::VoxelPalette& palette,
         Vec3 modelCenter);
+    // One call = one model upload operation (ModelUploadCount increments
+    // once, like Upload). `clearExisting` refreshes the whole chunk set.
+    [[nodiscard]] bool UploadModelChunks(
+        std::span<const ModelChunkUpdate> updates,
+        const Voxel::VoxelPalette& palette,
+        Vec3 modelCenter,
+        bool clearExisting);
     // Accepts prepared mesh data only.  The renderer never receives a document
     // or a SmartToolPlan and therefore cannot recalculate placement logic.
     [[nodiscard]] bool ConfigureExactPreviewMesh(
@@ -156,6 +192,7 @@ public:
     [[nodiscard]] std::size_t ModelRenderCount() const noexcept;
     [[nodiscard]] std::size_t ModelUploadCount() const noexcept;
     [[nodiscard]] bool HasModelMesh() const noexcept;
+    [[nodiscard]] std::size_t ModelChunkCount() const noexcept;
     /// True while a Smart Tool exact final-state mesh overrides the document
     /// mesh. This remains true for a valid empty final state.
     [[nodiscard]] bool HasExactPreviewMesh() const noexcept;
@@ -206,6 +243,8 @@ private:
         std::uint32_t& indexCount,
         std::string_view label);
     void ClearExactPreviewMesh() noexcept;
+    void ReleaseModelChunks() noexcept;
+    void ReleaseWholeModelBuffers() noexcept;
     void ReleaseInteractionV2MoveSource() noexcept;
     void ReleaseGuides() noexcept;
     void ReleaseHighlights() noexcept;
@@ -218,8 +257,16 @@ private:
     SDL_GPUGraphicsPipeline* smartBrushGhostPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* transformGizmoVisiblePipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* transformGizmoOccludedPipeline_ = nullptr;
+    struct ModelChunkBuffers final
+    {
+        SDL_GPUBuffer* VertexBuffer = nullptr;
+        SDL_GPUBuffer* IndexBuffer = nullptr;
+        std::uint32_t IndexCount = 0U;
+    };
+
     SDL_GPUBuffer* vertexBuffer_ = nullptr;
     SDL_GPUBuffer* indexBuffer_ = nullptr;
+    std::map<ModelChunkId, ModelChunkBuffers> modelChunks_;
     SDL_GPUBuffer* exactPreviewVertexBuffer_ = nullptr;
     SDL_GPUBuffer* exactPreviewIndexBuffer_ = nullptr;
     SDL_GPUBuffer* guideVertexBuffer_ = nullptr;

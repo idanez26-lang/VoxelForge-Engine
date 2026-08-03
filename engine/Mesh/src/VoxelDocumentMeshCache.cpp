@@ -31,6 +31,8 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::Synchronize(
     if (mesh_ && documentIdentity_ == documentIdentity &&
         documentRevision_ == revision && modelIndex_ == modelIndex)
     {
+        lastSyncTouchedChunks_.clear();
+        lastSyncWasFullRebuild_ = false;
         return {
             true,
             VoxelDocumentMeshSyncStatus::Unchanged,
@@ -55,6 +57,8 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::Synchronize(
                 // so the geometry is untouched. Adopt the revision, keep
                 // the mesh.
                 documentRevision_ = revision;
+                lastSyncTouchedChunks_.clear();
+                lastSyncWasFullRebuild_ = false;
                 return {
                     true,
                     VoxelDocumentMeshSyncStatus::Unchanged,
@@ -208,6 +212,17 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::RebuildChunks(
     ++buildCount_;
     ++incrementalRebuildCount_;
     lastRebuildChunkCount_ = keys.size();
+    try
+    {
+        lastSyncTouchedChunks_ = keys;
+        lastSyncWasFullRebuild_ = false;
+    }
+    catch (const std::bad_alloc&)
+    {
+        // Safe degradation: consumers refresh everything.
+        lastSyncTouchedChunks_.clear();
+        lastSyncWasFullRebuild_ = true;
+    }
     return {
         true,
         VoxelDocumentMeshSyncStatus::Rebuilt,
@@ -309,6 +324,19 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::RebuildAllChunks(
     ++buildCount_;
     ++fullRebuildCount_;
     lastRebuildChunkCount_ = chunkMeshes_.size();
+    lastSyncWasFullRebuild_ = true;
+    lastSyncTouchedChunks_.clear();
+    try
+    {
+        lastSyncTouchedChunks_.reserve(chunkMeshes_.size());
+        for (const auto& entry : chunkMeshes_)
+            lastSyncTouchedChunks_.push_back(entry.first);
+    }
+    catch (const std::bad_alloc&)
+    {
+        // The full-rebuild flag already tells consumers to refresh all.
+        lastSyncTouchedChunks_.clear();
+    }
     return {
         true,
         VoxelDocumentMeshSyncStatus::Rebuilt,
@@ -347,6 +375,8 @@ bool VoxelDocumentMeshCache::AssembleMesh()
 void VoxelDocumentMeshCache::Clear() noexcept
 {
     chunkMeshes_.clear();
+    lastSyncTouchedChunks_.clear();
+    lastSyncWasFullRebuild_ = false;
     mesh_.reset();
     documentRevision_.reset();
     documentIdentity_.reset();
@@ -404,6 +434,23 @@ std::size_t VoxelDocumentMeshCache::LastRebuildChunkCount() const noexcept
 std::size_t VoxelDocumentMeshCache::ChunkCount() const noexcept
 {
     return chunkMeshes_.size();
+}
+
+const std::map<VoxelDocumentMeshCache::ChunkKey, MeshData>&
+VoxelDocumentMeshCache::Chunks() const noexcept
+{
+    return chunkMeshes_;
+}
+
+const std::vector<VoxelDocumentMeshCache::ChunkKey>&
+VoxelDocumentMeshCache::LastSyncTouchedChunks() const noexcept
+{
+    return lastSyncTouchedChunks_;
+}
+
+bool VoxelDocumentMeshCache::LastSyncWasFullRebuild() const noexcept
+{
+    return lastSyncWasFullRebuild_;
 }
 
 } // namespace VoxelForge::Mesh

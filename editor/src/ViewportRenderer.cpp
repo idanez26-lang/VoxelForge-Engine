@@ -616,9 +616,93 @@ bool ViewportRenderer::Upload(
     if (!UploadMesh(mesh, palette, modelCenter, vertexBuffer_, indexBuffer_,
             indexCount_, "voxel model"))
         return false;
+    // The whole-mesh path owns the model view (VF-0262 lot 262-4).
+    ReleaseModelChunks();
     ++modelUploadCount_;
     lastError_.clear();
     return true;
+}
+
+bool ViewportRenderer::UploadModelChunks(
+    const std::span<const ModelChunkUpdate> updates,
+    const Voxel::VoxelPalette& palette,
+    const Vec3 modelCenter,
+    const bool clearExisting)
+{
+    if (!EnsurePipeline()) return false;
+    if (clearExisting) ReleaseModelChunks();
+    // The chunked path owns the model view (VF-0262 lot 262-4).
+    ReleaseWholeModelBuffers();
+    for (const ModelChunkUpdate& update : updates)
+    {
+        if (update.Mesh == nullptr || update.Mesh->Empty())
+        {
+            const auto found = modelChunks_.find(update.Id);
+            if (found != modelChunks_.end())
+            {
+                if (device_ != nullptr)
+                {
+                    if (found->second.VertexBuffer != nullptr)
+                        SDL_ReleaseGPUBuffer(
+                            device_, found->second.VertexBuffer);
+                    if (found->second.IndexBuffer != nullptr)
+                        SDL_ReleaseGPUBuffer(
+                            device_, found->second.IndexBuffer);
+                }
+                modelChunks_.erase(found);
+            }
+            continue;
+        }
+        ModelChunkBuffers& slot = modelChunks_[update.Id];
+        if (!UploadMesh(*update.Mesh, palette, modelCenter,
+                slot.VertexBuffer, slot.IndexBuffer, slot.IndexCount,
+                "voxel model chunk"))
+        {
+            // UploadMesh leaves the previous buffers intact on failure;
+            // drop the slot only if it never held a mesh.
+            if (slot.VertexBuffer == nullptr && slot.IndexBuffer == nullptr)
+                modelChunks_.erase(update.Id);
+            return false;
+        }
+    }
+    if (modelChunks_.empty())
+    {
+        // An emptied model clears the whole model view, matching the
+        // whole-mesh path's Upload(empty) behaviour.
+        ClearModel();
+    }
+    ++modelUploadCount_;
+    lastError_.clear();
+    return true;
+}
+
+void ViewportRenderer::ReleaseModelChunks() noexcept
+{
+    if (device_ != nullptr)
+    {
+        for (auto& entry : modelChunks_)
+        {
+            if (entry.second.VertexBuffer != nullptr)
+                SDL_ReleaseGPUBuffer(device_, entry.second.VertexBuffer);
+            if (entry.second.IndexBuffer != nullptr)
+                SDL_ReleaseGPUBuffer(device_, entry.second.IndexBuffer);
+        }
+    }
+    modelChunks_.clear();
+}
+
+void ViewportRenderer::ReleaseWholeModelBuffers() noexcept
+{
+    if (device_ != nullptr)
+    {
+        if (vertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, vertexBuffer_);
+        if (indexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, indexBuffer_);
+    }
+    vertexBuffer_ = nullptr;
+    indexBuffer_ = nullptr;
+    indexCount_ = 0U;
 }
 
 bool ViewportRenderer::ConfigureExactPreviewMesh(
@@ -2065,21 +2149,47 @@ bool ViewportRenderer::Render(
                 pass, axesIndexCount_, 1U, gridIndexCount_, 0, 0U);
         }
     }
-    SDL_GPUBuffer* const visibleVertexBuffer = exactPreviewActive_
-        ? exactPreviewVertexBuffer_ : vertexBuffer_;
-    SDL_GPUBuffer* const visibleIndexBuffer = exactPreviewActive_
-        ? exactPreviewIndexBuffer_ : indexBuffer_;
-    const std::uint32_t visibleIndexCount = exactPreviewActive_
-        ? exactPreviewIndexCount_ : indexCount_;
-    if (visibleIndexCount > 0U)
+    if (exactPreviewActive_ || indexCount_ > 0U)
     {
-        const SDL_GPUBufferBinding vertexBinding{visibleVertexBuffer, 0U};
-        const SDL_GPUBufferBinding indexBinding{visibleIndexBuffer, 0U};
-        SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
-        SDL_BindGPUIndexBuffer(
-            pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-        SDL_DrawGPUIndexedPrimitives(pass, visibleIndexCount, 1U, 0U, 0, 0U);
-        ++modelRenderCount_;
+        SDL_GPUBuffer* const visibleVertexBuffer = exactPreviewActive_
+            ? exactPreviewVertexBuffer_ : vertexBuffer_;
+        SDL_GPUBuffer* const visibleIndexBuffer = exactPreviewActive_
+            ? exactPreviewIndexBuffer_ : indexBuffer_;
+        const std::uint32_t visibleIndexCount = exactPreviewActive_
+            ? exactPreviewIndexCount_ : indexCount_;
+        if (visibleIndexCount > 0U)
+        {
+            const SDL_GPUBufferBinding vertexBinding{visibleVertexBuffer, 0U};
+            const SDL_GPUBufferBinding indexBinding{visibleIndexBuffer, 0U};
+            SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+            SDL_BindGPUIndexBuffer(
+                pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+            SDL_DrawGPUIndexedPrimitives(
+                pass, visibleIndexCount, 1U, 0U, 0, 0U);
+            ++modelRenderCount_;
+        }
+    }
+    else if (!modelChunks_.empty())
+    {
+        // VF-0262 (lot 262-4): chunked model — one draw per chunk, same
+        // pipeline and uniforms.
+        bool drewModelChunk = false;
+        for (const auto& entry : modelChunks_)
+        {
+            const ModelChunkBuffers& chunk = entry.second;
+            if (chunk.IndexCount == 0U || chunk.VertexBuffer == nullptr ||
+                chunk.IndexBuffer == nullptr)
+                continue;
+            const SDL_GPUBufferBinding vertexBinding{chunk.VertexBuffer, 0U};
+            const SDL_GPUBufferBinding indexBinding{chunk.IndexBuffer, 0U};
+            SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+            SDL_BindGPUIndexBuffer(
+                pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+            SDL_DrawGPUIndexedPrimitives(
+                pass, chunk.IndexCount, 1U, 0U, 0, 0U);
+            drewModelChunk = true;
+        }
+        if (drewModelChunk) ++modelRenderCount_;
     }
     if (interactionV2MoveActive_ &&
         interactionV2MoveIndexCount_ > 0U &&
@@ -2174,14 +2284,8 @@ bool ViewportRenderer::Render(
 
 void ViewportRenderer::ClearModel() noexcept
 {
-    if (device_ != nullptr)
-    {
-        if (vertexBuffer_ != nullptr) SDL_ReleaseGPUBuffer(device_, vertexBuffer_);
-        if (indexBuffer_ != nullptr) SDL_ReleaseGPUBuffer(device_, indexBuffer_);
-    }
-    vertexBuffer_ = nullptr;
-    indexBuffer_ = nullptr;
-    indexCount_ = 0U;
+    ReleaseWholeModelBuffers();
+    ReleaseModelChunks();
     ClearExactPreviewMesh();
     ConfigureVoxelPreview(nullptr);
     ConfigureTransformPreview(nullptr);
@@ -2409,8 +2513,13 @@ std::size_t ViewportRenderer::ModelUploadCount() const noexcept
 
 bool ViewportRenderer::HasModelMesh() const noexcept
 {
-    return vertexBuffer_ != nullptr && indexBuffer_ != nullptr &&
-        indexCount_ > 0U;
+    return (vertexBuffer_ != nullptr && indexBuffer_ != nullptr &&
+        indexCount_ > 0U) || !modelChunks_.empty();
+}
+
+std::size_t ViewportRenderer::ModelChunkCount() const noexcept
+{
+    return modelChunks_.size();
 }
 
 bool ViewportRenderer::HasExactPreviewMesh() const noexcept
