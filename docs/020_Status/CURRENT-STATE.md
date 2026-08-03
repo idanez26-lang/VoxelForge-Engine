@@ -89,12 +89,19 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
    passent réellement**, 23 échouent (motif apparent : tous les tests à
    fixture `CreateEmptyProject` — FirstCreation/DirectCreation/InstantNew,
    PaletteUi, Fill/Box/Line/Sphere, ModernToolbar, KeyboardShortcuts,
-   transforms/gizmos, SaveOnExit « did not complete »). **Expérience en
-   cours (03/08)** : `VOXELFORGE_SMOKE_FRAME_SCALE` (multiplicateur du
-   budget de frames des smokes, défaut 1, sans effet local) fixé à 5 sur
-   l'étape CI EditorApp — si les 23 passent, c'était le rendu logiciel
-   lent → étape bloquante possible à 51/51 ; sinon, repli : label
-   `RequiresRealGpu` sur les 23 et étape bloquante pour les 28 ;
+   transforms/gizmos, SaveOnExit « did not complete »). **Cause racine
+   trouvée (03/08, diagnostics instrumentés + logs bruts run #56)** : le
+   `%TEMP%` du runner est un nom court 8.3 (`C:\Users\RUNNER~1\...`) alors
+   que les services canonicalisent en forme longue (`runneradmin`) →
+   `lexically_relative` casse le reveal AssetBrowser (gate frame 0 de tous
+   les smokes à création de modèle). Corrigé dans la fixture
+   (`weakly_canonical` du dossier temp dans `ViewportTestFixture::Prepare`).
+   Notes : l'expérience ×5 du budget de frames a réfuté l'hypothèse « rendu
+   lent » (mêmes échecs) — `VOXELFORGE_SMOKE_FRAME_SCALE` conservé comme
+   marge sur WARP ; le mécanisme 77/SKIP_RETURN_CODE reste pour les vrais
+   postes sans GPU. **Si le prochain run passe 51/51 : rendre l'étape
+   EditorApp bloquante** (retirer `continue-on-error`). Durcissement prod à
+   considérer ensuite : normaliser la racine projet dans ProjectManager ;
 4. Nettoyage différé : ~~copies de noms de panneaux + 5 symboles dupliqués au
    lot 7d~~ ✅ fait le 03/08 : assistants ImGui mutualisés dans
    `EditorWorkspaceUiHelpers.h` (3 copies supprimées, dont du code mort dans

@@ -273,7 +273,18 @@ public:
     {
         const auto unique =
             std::chrono::steady_clock::now().time_since_epoch().count();
-        parent_ = std::filesystem::temp_directory_path() /
+        // Diagnostic CI (03/08) : le %TEMP% des runners GitHub est un nom
+        // court Windows (C:\Users\RUNNER~1\...) alors que les services de
+        // creation canonicalisent en forme longue (runneradmin) — les
+        // comparaisons lexicales de chemins (reveal AssetBrowser) echouaient.
+        // weakly_canonical resout la forme longue des l'origine.
+        std::error_code canonicalError;
+        const std::filesystem::path temporaryRoot =
+            std::filesystem::weakly_canonical(
+                std::filesystem::temp_directory_path(), canonicalError);
+        parent_ = (canonicalError || temporaryRoot.empty()
+            ? std::filesystem::temp_directory_path()
+            : temporaryRoot) /
             ("VoxelForgeViewport-" + std::to_string(unique));
         std::error_code error;
         if (!std::filesystem::create_directories(parent_, error) || error)
