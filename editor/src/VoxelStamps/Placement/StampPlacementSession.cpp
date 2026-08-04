@@ -276,7 +276,7 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
         plan_->PaletteMapping != next.PaletteMapping;
     plan_ = std::move(next);
     const bool previewChanged =
-        preview_.Activate(StampLivePreviewBuilder::Build(*plan_));
+        preview_.Activate(BuildStampPreview(*plan_));
     return {
         .Succeeded = plan_->WorldBounds.Valid && !plan_->Voxels.empty(),
         .PlanChanged = planChanged,

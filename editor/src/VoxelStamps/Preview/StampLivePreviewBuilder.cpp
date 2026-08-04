@@ -5,7 +5,7 @@
 namespace VoxelForge::Editor::Stamps
 {
 
-VoxelPreviewData StampLivePreviewBuilder::Build(
+VoxelPreviewData BuildStampPreview(
     const StampPlacementPlan& plan) noexcept
 {
     VoxelPreviewData result{};
@@ -55,6 +55,12 @@ VoxelPreviewData StampLivePreviewBuilder::Build(
         result = {};
     }
     return result;
+}
+
+VoxelPreviewData StampLivePreviewBuilder::Build(
+    const StampPlacementPlan& plan) noexcept
+{
+    return BuildStampPreview(plan);
 }
 
 } // namespace VoxelForge::Editor::Stamps

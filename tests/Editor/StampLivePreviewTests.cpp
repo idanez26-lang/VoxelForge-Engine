@@ -1,6 +1,7 @@
 #include "Preview/VoxelPreview.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelSelection/VoxelRaycast.h"
+#include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 #include "VoxelStamps/Placement/StampPlacementPlanner.h"
 #include "VoxelStamps/Preview/StampLivePreviewBuilder.h"
 
@@ -46,6 +47,34 @@ VoxelStamp MakeStamp(
     return *stamp;
 }
 
+VoxelStamp MakeLargeStamp()
+{
+    constexpr std::int32_t side = 23;
+    std::vector<StampVoxel> voxels;
+    voxels.reserve(static_cast<std::size_t>(side * side));
+    for (std::int32_t y = 0; y < side; ++y)
+    {
+        for (std::int32_t x = 0; x < side; ++x)
+        {
+            voxels.push_back({{x, y, 0}, 0U});
+        }
+    }
+    StampValidationResult validation{};
+    const auto stamp = VoxelStamp::TryCreate(
+        {Core::UUID{0x5354414d5031344cULL}, "stamp-14-large"},
+        {{}, {side - 1, side - 1, 0},
+         {static_cast<std::uint32_t>(side),
+          static_cast<std::uint32_t>(side), 1U}},
+        {.RequestedMode = StampPivotMode::Corner,
+         .ResolvedMode = StampPivotMode::Corner,
+         .LocalPosition = {}},
+        {}, {{0U, {40U, 180U, 90U, 255U}}}, std::move(voxels),
+        DefaultStampResourceLimits(), &validation);
+    Require(stamp.has_value() && validation.IsValid(),
+        "Large preview fixture Stamp must be valid.");
+    return *stamp;
+}
+
 Asset::Voxel::VoxelDocument MakeDocument()
 {
     Asset::Vox::VoxModel source{};
@@ -68,14 +97,17 @@ StampPlacementPlan BuildPlan(
         2 * StampFixedPoint::UnitsPerVoxel,
         8 * StampFixedPoint::UnitsPerVoxel},
     const std::uint64_t generation = 1U,
-    const std::size_t subModel = 0U)
+    const std::size_t subModel = 0U,
+    const StampCollisionPolicy collisionPolicy =
+        StampCollisionPolicy::Overwrite)
 {
     return StampPlacementPlanner::Build({
         .Stamp = &stamp,
         .Document = &document,
         .DocumentGeneration = generation,
         .TargetSubModel = subModel,
-        .Transform = {.TargetPivot = target}});
+        .Transform = {.TargetPivot = target},
+        .CollisionPolicy = collisionPolicy});
 }
 
 VoxelPreviewData BuildPreview(
@@ -86,7 +118,7 @@ VoxelPreviewData BuildPreview(
         2 * StampFixedPoint::UnitsPerVoxel,
         8 * StampFixedPoint::UnitsPerVoxel})
 {
-    return StampLivePreviewBuilder::Build(
+    return BuildStampPreview(
         BuildPlan(stamp, document, target));
 }
 
@@ -245,6 +277,123 @@ void Test12InvalidSubmodelFailsSafely()
         "12: Invalid submodels must not create partial previews.");
 }
 
+void Test13CommonContractPreservesExactPlan()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    const auto plan = BuildPlan(stamp, document);
+    const auto preview = BuildStampPreview(plan);
+    const auto instances = preview.Placement.Instances();
+    Require(preview.IsActive() && preview.Placement.IsActive() &&
+                instances.size() == plan.Voxels.size() &&
+                preview.Placement.Statistics().Total ==
+                    plan.Statistics.PlannedVoxelCount &&
+                preview.Placement.Statistics().Valid ==
+                    plan.Statistics.PlannedVoxelCount &&
+                preview.WorldBounds.Minimum == plan.WorldBounds.Minimum &&
+                preview.WorldBounds.Maximum == plan.WorldBounds.Maximum,
+        "13: The common preview must retain exact plan counts and bounds.");
+    for (std::size_t index = 0U; index < instances.size(); ++index)
+    {
+        Require(instances[index].Position ==
+                    plan.Voxels[index].WorldPosition &&
+                    instances[index].Semantic ==
+                        VoxelPreviewSemantic::Valid,
+            "13: The common preview must copy every planned world cell.");
+    }
+}
+
+void Test14CommonContractShowsOrangeAndBlockingRedStates()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    const StampFixedPoint overlapTarget{
+        10 * StampFixedPoint::UnitsPerVoxel + 128,
+        2 * StampFixedPoint::UnitsPerVoxel,
+        4 * StampFixedPoint::UnitsPerVoxel};
+
+    const auto overlapPlan = BuildPlan(stamp, document, overlapTarget);
+    const auto overlap = BuildStampPreview(overlapPlan);
+    Require(overlapPlan.CanCommit &&
+                overlap.State == VoxelPreviewState::Overlap &&
+                overlap.Placement.Statistics().Overlap == 1U &&
+                overlap.Placement.Statistics().Valid == 1U &&
+                overlap.Placement.Instances()[0].Semantic ==
+                    VoxelPreviewSemantic::Overlap,
+        "14: A non-blocking overlap must remain an orange common-preview state.");
+
+    const auto rejectedPlan = BuildPlan(stamp, document, overlapTarget,
+        1U, 0U, StampCollisionPolicy::Reject);
+    const auto rejected = BuildStampPreview(rejectedPlan);
+    Require(!rejectedPlan.CanCommit && rejectedPlan.HasErrors() &&
+                rejected.State == VoxelPreviewState::Invalid &&
+                rejected.Placement.Statistics().Invalid ==
+                    rejectedPlan.Statistics.PlannedVoxelCount &&
+                rejected.Placement.Statistics().Overlap == 0U,
+        "14: A blocking collision must turn the complete common preview red.");
+}
+
+void Test15UnchangedPlanReusesTheActiveSnapshot()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    const auto plan = BuildPlan(stamp, document);
+    VoxelPreviewSession session;
+    Require(session.Activate(BuildStampPreview(plan)),
+        "15: The first immutable plan must activate its preview.");
+    const std::uint64_t revision = session.Revision();
+    const VoxelPreviewInstance* const storage =
+        session.Current()->Placement.Instances().data();
+    Require(!session.Activate(BuildStampPreview(plan)) &&
+                session.Revision() == revision &&
+                session.Current()->Placement.Instances().data() == storage,
+        "15: Reusing an unchanged plan must retain revision and immutable storage.");
+}
+
+void Test16PreviewAndOperationUseTheSamePlanPositions()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    const auto plan = BuildPlan(stamp, document);
+    const auto preview = BuildStampPreview(plan);
+    const auto prepared = PreparePlaceVoxelStampOperation(plan);
+    Require(prepared.IsReady() &&
+                prepared.Operation.Changes.size() ==
+                    preview.Placement.Instances().size(),
+        "16: A valid preview and operation must consume the same complete plan.");
+    for (const VoxelPreviewInstance& instance :
+         preview.Placement.Instances())
+    {
+        bool found = false;
+        for (const VoxelChange& change : prepared.Operation.Changes)
+        {
+            if (change.Position == instance.Position)
+            {
+                found = true;
+                break;
+            }
+        }
+        Require(found,
+            "16: Every exact preview position must exist in the prepared operation.");
+    }
+}
+
+void Test17LargePreviewUsesTheCommonAggregatePolicy()
+{
+    const VoxelStamp stamp = MakeLargeStamp();
+    const auto document = MakeDocument();
+    const auto plan = BuildPlan(stamp, document, {});
+    const auto preview = BuildStampPreview(plan);
+    Require(plan.CanCommit && preview.IsActive() &&
+                preview.Voxels.size() == 529U &&
+                preview.Placement.Statistics().Total == 529U &&
+                preview.Placement.Instances().size() == 529U &&
+                preview.Placement.InstancesComplete() &&
+                preview.Placement.RenderMode() ==
+                    VoxelPreviewRenderMode::AggregateBounds,
+        "17: A large exact Stamp preview must select the common aggregate render policy.");
+}
+
 } // namespace
 
 int main()
@@ -263,6 +412,11 @@ int main()
         Test10OutOfBoundsPlanIsInvalidPreview();
         Test11PreviewIsExcludedFromRayPicking();
         Test12InvalidSubmodelFailsSafely();
+        Test13CommonContractPreservesExactPlan();
+        Test14CommonContractShowsOrangeAndBlockingRedStates();
+        Test15UnchangedPlanReusesTheActiveSnapshot();
+        Test16PreviewAndOperationUseTheSamePlanPositions();
+        Test17LargePreviewUsesTheCommonAggregatePolicy();
     }
     catch (const std::exception& error)
     {
