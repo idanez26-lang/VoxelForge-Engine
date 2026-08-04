@@ -32,7 +32,7 @@ bool StampUserLibraryRepository::SetUserDataPaths(
     std::error_code error;
     const std::filesystem::path canonical =
         std::filesystem::weakly_canonical(root, error);
-    if (error || canonical != root) return false;
+    if (error || canonical.empty()) return false;
 
     const auto status = std::filesystem::symlink_status(root, error);
     if (error == std::errc::no_such_file_or_directory)
@@ -45,7 +45,7 @@ bool StampUserLibraryRepository::SetUserDataPaths(
         return false;
     }
 
-    SetValidatedRepositoryRoot(root);
+    SetValidatedRepositoryRoot(canonical);
     return true;
 }
 

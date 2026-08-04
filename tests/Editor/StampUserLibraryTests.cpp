@@ -86,8 +86,8 @@ void TestInjectedProfileAndCrossProjectAvailability(TemporaryProfile& profile)
 {
     const Core::UserDataPaths paths({}, profile.LocalAppData());
     StampUserLibraryRepository first(paths);
-    const fs::path expectedRoot =
-        profile.LocalAppData() / "VoxelForge Studio";
+    const fs::path expectedRoot = fs::weakly_canonical(
+        profile.LocalAppData() / "VoxelForge Studio");
     Require(first.UserDataRoot() == expectedRoot,
         "My Library must use the injected VoxelForge Studio data root.");
     Require(!fs::exists(expectedRoot),
