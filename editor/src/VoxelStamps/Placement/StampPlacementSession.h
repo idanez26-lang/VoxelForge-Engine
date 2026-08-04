@@ -4,6 +4,7 @@
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelStamps/Library/StampAssetCache.h"
 #include "VoxelStamps/Placement/StampPlacementPlanner.h"
+#include "VoxelStamps/SmartPlacement/StampSmartPlacementService.h"
 #include "VoxelStamps/Variants/StampVariantResolver.h"
 #include "VoxelStamps/VoxelStamp.h"
 
@@ -174,6 +175,23 @@ public:
     [[nodiscard]] StampPlacementSessionResult ResetTransform(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult UpdateSmartPlacementContext(
+        StampSmartPlacementTargetContext context,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult SetSmartPlacementEnabled(
+        bool enabled,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult SetSmartPlacementMode(
+        StampSmartPlacementMode mode,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult
+        SetSmartPlacementTemporaryBypass(
+            bool temporarilyBypassed,
+            const Asset::Voxel::VoxelDocument& document,
+            std::uint64_t documentGeneration);
     [[nodiscard]] StampPlacementSessionResult RenewVariantSeed(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
@@ -206,6 +224,13 @@ public:
     [[nodiscard]] const StampPlacementVariantIdentity*
         CurrentVariantIdentity() const noexcept;
     [[nodiscard]] std::uint64_t PlacementSessionSeed() const noexcept;
+    [[nodiscard]] bool SmartPlacementEnabled() const noexcept;
+    [[nodiscard]] StampSmartPlacementMode SmartPlacementMode() const noexcept;
+    [[nodiscard]] bool SmartPlacementTemporarilyBypassed() const noexcept;
+    [[nodiscard]] bool SmartPlacementOrientationLocked() const noexcept;
+    [[nodiscard]] bool SmartPlacementAppliedToPreview() const noexcept;
+    [[nodiscard]] const StampSmartPlacementSuggestion*
+        CurrentSmartPlacementSuggestion() const noexcept;
 
 private:
     [[nodiscard]] StampPlacementSessionResult BuildCurrent(
@@ -227,6 +252,14 @@ private:
     std::optional<StampPlacementPlan> plan_;
     VoxelPreviewSession preview_;
     StampPlacementTransform transform_{};
+    StampSmartPlacementTargetContext smartPlacementTarget_{};
+    std::optional<StampSmartPlacementSuggestion> smartPlacementSuggestion_;
+    StampSmartPlacementMode smartPlacementMode_ =
+        StampSmartPlacementMode::PreviewAssist;
+    bool smartPlacementEnabled_ = true;
+    bool smartPlacementTemporarilyBypassed_ = false;
+    bool smartPlacementOrientationLocked_ = false;
+    bool smartPlacementAppliedToPreview_ = false;
     StampCollisionPolicy collisionPolicy_ = StampCollisionPolicy::Overwrite;
     std::size_t targetSubModel_ = 0U;
     std::uintptr_t documentInstanceToken_ = 0U;

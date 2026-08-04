@@ -2307,3 +2307,23 @@ set_tests_properties(
     VoxelForge.Editor.StampVariantPlacement
     PROPERTIES LABELS "Smoke"
 )
+
+# STAMP-21: Smart Placement remains deterministic, enabled by default,
+# bypassable and advisory when a suggested preview would become invalid.
+add_executable(
+    VoxelForgeEditorStampSmartPlacementTests
+    Editor/StampSmartPlacementTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampSmartPlacementTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampSmartPlacementTests)
+add_test(
+    NAME VoxelForge.Editor.StampSmartPlacement
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampSmartPlacementTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.StampSmartPlacement
+    PROPERTIES LABELS "Smoke"
+)

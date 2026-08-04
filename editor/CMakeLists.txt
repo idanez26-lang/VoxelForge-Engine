@@ -358,6 +358,8 @@ target_sources(
         src/VoxelStamps/Placement/StampPlacementPlan.cpp
         src/VoxelStamps/Placement/StampPlacementPlanner.cpp
         src/VoxelStamps/Placement/StampPlacementSession.cpp
+        # STAMP-21: deterministic, advisory Smart Placement suggestions.
+        src/VoxelStamps/SmartPlacement/StampSmartPlacementService.cpp
         # STAMP-13/14: prepares an existing composite operation from the plan.
         src/VoxelStamps/Placement/PlaceVoxelStampOperation.cpp
 )

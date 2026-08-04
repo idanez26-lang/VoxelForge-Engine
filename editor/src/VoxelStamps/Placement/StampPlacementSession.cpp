@@ -67,6 +67,11 @@ StampPlacementSessionResult StampPlacementSession::Begin(
     documentGeneration_ = documentGeneration;
     transform_ = {};
     transform_.TargetPivot = targetPivot;
+    smartPlacementTarget_ = {};
+    smartPlacementSuggestion_.reset();
+    smartPlacementTemporarilyBypassed_ = false;
+    smartPlacementOrientationLocked_ = false;
+    smartPlacementAppliedToPreview_ = false;
     collisionPolicy_ = collisionPolicy;
     placementSessionSeed_ = 0U;
     placementOrdinal_ = 0U;
@@ -97,6 +102,11 @@ StampPlacementSessionResult StampPlacementSession::BeginVariantGroup(
     documentGeneration_ = documentGeneration;
     transform_ = {};
     transform_.TargetPivot = targetPivot;
+    smartPlacementTarget_ = {};
+    smartPlacementSuggestion_.reset();
+    smartPlacementTemporarilyBypassed_ = false;
+    smartPlacementOrientationLocked_ = false;
+    smartPlacementAppliedToPreview_ = false;
     collisionPolicy_ = collisionPolicy;
     placementSessionSeed_ = placementSessionSeed;
     placementOrdinal_ = 0U;
@@ -190,6 +200,7 @@ StampPlacementSessionResult StampPlacementSession::SetQuarterRotation(
     }
     transform_.QuarterTurns =
         static_cast<std::uint8_t>(quarterTurns % 4U);
+    smartPlacementOrientationLocked_ = true;
     return BuildCurrent(document, documentGeneration);
 }
 
@@ -213,6 +224,7 @@ StampPlacementSessionResult StampPlacementSession::Rotate90(
     const std::uint8_t delta = clockwise ? 1U : 3U;
     transform_.QuarterTurns = static_cast<std::uint8_t>(
         (transform_.QuarterTurns + delta) % 4U);
+    smartPlacementOrientationLocked_ = true;
     return BuildCurrent(document, documentGeneration);
 }
 
@@ -331,6 +343,80 @@ StampPlacementSessionResult StampPlacementSession::ResetTransform(
     const StampFixedPoint target = transform_.TargetPivot;
     transform_ = {};
     transform_.TargetPivot = target;
+    smartPlacementOrientationLocked_ = false;
+    return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult
+StampPlacementSession::UpdateSmartPlacementContext(
+    StampSmartPlacementTargetContext context,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    smartPlacementTarget_ = context;
+    if (!IsActive())
+    {
+        return {
+            .Code = StampPlacementSessionResultCode::Succeeded,
+            .Succeeded = true};
+    }
+    return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::SetSmartPlacementEnabled(
+    const bool enabled,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    smartPlacementEnabled_ = enabled;
+    if (!IsActive())
+    {
+        return {
+            .Code = StampPlacementSessionResultCode::Succeeded,
+            .Succeeded = true};
+    }
+    return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::SetSmartPlacementMode(
+    const StampSmartPlacementMode mode,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    switch (mode)
+    {
+    case StampSmartPlacementMode::Off:
+    case StampSmartPlacementMode::Suggest:
+    case StampSmartPlacementMode::PreviewAssist:
+        break;
+    default:
+        return {
+            .Code = StampPlacementSessionResultCode::InvalidPlan,
+            .Succeeded = false};
+    }
+    smartPlacementMode_ = mode;
+    if (!IsActive())
+    {
+        return {
+            .Code = StampPlacementSessionResultCode::Succeeded,
+            .Succeeded = true};
+    }
+    return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult
+StampPlacementSession::SetSmartPlacementTemporaryBypass(
+    const bool temporarilyBypassed,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    smartPlacementTemporarilyBypassed_ = temporarilyBypassed;
+    if (!IsActive())
+    {
+        return {
+            .Code = StampPlacementSessionResultCode::Succeeded,
+            .Succeeded = true};
+    }
     return BuildCurrent(document, documentGeneration);
 }
 
@@ -453,6 +539,11 @@ bool StampPlacementSession::Cancel() noexcept
     plan_.reset();
     static_cast<void>(preview_.Clear());
     transform_ = {};
+    smartPlacementTarget_ = {};
+    smartPlacementSuggestion_.reset();
+    smartPlacementTemporarilyBypassed_ = false;
+    smartPlacementOrientationLocked_ = false;
+    smartPlacementAppliedToPreview_ = false;
     collisionPolicy_ = StampCollisionPolicy::Overwrite;
     targetSubModel_ = 0U;
     documentInstanceToken_ = 0U;
@@ -562,6 +653,37 @@ std::uint64_t StampPlacementSession::PlacementSessionSeed() const noexcept
     return placementSessionSeed_;
 }
 
+bool StampPlacementSession::SmartPlacementEnabled() const noexcept
+{
+    return smartPlacementEnabled_;
+}
+
+StampSmartPlacementMode StampPlacementSession::SmartPlacementMode() const noexcept
+{
+    return smartPlacementMode_;
+}
+
+bool StampPlacementSession::SmartPlacementTemporarilyBypassed() const noexcept
+{
+    return smartPlacementTemporarilyBypassed_;
+}
+
+bool StampPlacementSession::SmartPlacementOrientationLocked() const noexcept
+{
+    return smartPlacementOrientationLocked_;
+}
+
+bool StampPlacementSession::SmartPlacementAppliedToPreview() const noexcept
+{
+    return smartPlacementAppliedToPreview_;
+}
+
+const StampSmartPlacementSuggestion*
+StampPlacementSession::CurrentSmartPlacementSuggestion() const noexcept
+{
+    return smartPlacementSuggestion_ ? &*smartPlacementSuggestion_ : nullptr;
+}
+
 bool StampPlacementSession::MatchesDocumentContext(
     const Asset::Voxel::VoxelDocument& document,
     const std::uint64_t documentGeneration) const noexcept
@@ -669,14 +791,46 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
             .PlanChanged = changed,
             .PreviewChanged = previewChanged};
     }
-    StampPlacementPlan next = StampPlacementPlanner::Build({
+    const auto buildPlan = [&](const StampPlacementTransform& transform)
+    {
+        return StampPlacementPlanner::Build({
+            .Stamp = &*stamp_,
+            .Variant = variantIdentity_,
+            .Document = &document,
+            .DocumentGeneration = documentGeneration,
+            .TargetSubModel = targetSubModel_,
+            .Transform = transform,
+            .CollisionPolicy = collisionPolicy_});
+    };
+
+    StampPlacementPlan next = buildPlan(transform_);
+    smartPlacementSuggestion_ = SuggestPlacement({
         .Stamp = &*stamp_,
-        .Variant = variantIdentity_,
-        .Document = &document,
-        .DocumentGeneration = documentGeneration,
-        .TargetSubModel = targetSubModel_,
-        .Transform = transform_,
-        .CollisionPolicy = collisionPolicy_});
+        .UserTransform = transform_,
+        .Target = smartPlacementTarget_,
+        .Enabled = smartPlacementEnabled_ &&
+            smartPlacementMode_ != StampSmartPlacementMode::Off,
+        .TemporarilyBypassed = smartPlacementTemporarilyBypassed_,
+        .OrientationLockedByUser = smartPlacementOrientationLocked_});
+    smartPlacementAppliedToPreview_ = false;
+    if (smartPlacementMode_ == StampSmartPlacementMode::PreviewAssist &&
+        smartPlacementSuggestion_->Available())
+    {
+        if (smartPlacementSuggestion_->Transform == transform_)
+        {
+            smartPlacementAppliedToPreview_ = true;
+        }
+        else
+        {
+            StampPlacementPlan assisted =
+                buildPlan(smartPlacementSuggestion_->Transform);
+            if (!next.CanCommit || assisted.CanCommit)
+            {
+                next = std::move(assisted);
+                smartPlacementAppliedToPreview_ = true;
+            }
+        }
+    }
     const StampPlacementDiagnosticCode firstDiagnostic =
         next.Diagnostics.empty()
         ? StampPlacementDiagnosticCode::None
