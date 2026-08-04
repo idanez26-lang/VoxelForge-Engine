@@ -114,6 +114,7 @@ void TestCanonicalInstallReadUniqueAndRemove(TemporaryProject& project)
         MakeStamp(41U, 10U), {.PreferredFileStem = "stone-wall"});
     Require(first.Succeeded() && first.Reference.RelativePath ==
                 fs::path{"Assets/ForgeLibrary/Creations/stone-wall.vfstamp"} &&
+                first.Reference.Scope == StampLibraryScope::Project &&
                 fs::exists(project.Root() / first.Reference.RelativePath),
         "Install must publish under the canonical portable Creations path.");
     Require(StampTransactionTemporaryPath(project.Root() / first.Reference.RelativePath).filename() ==

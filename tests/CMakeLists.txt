@@ -1969,6 +1969,20 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorStampProjectLibraryTests>
 )
 
+add_executable(
+    VoxelForgeEditorStampUserLibraryTests
+    Editor/StampUserLibraryTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampUserLibraryTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorStampUserLibraryTests)
+add_test(
+    NAME VoxelForge.Editor.StampUserLibrary
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampUserLibraryTests>
+)
+
 add_executable(VoxelForgeEditorStampCatalogTests Editor/StampCatalogTests.cpp)
 target_link_libraries(VoxelForgeEditorStampCatalogTests PRIVATE VoxelForgeEditorVoxelStamps)
 vf_configure_test(VoxelForgeEditorStampCatalogTests)

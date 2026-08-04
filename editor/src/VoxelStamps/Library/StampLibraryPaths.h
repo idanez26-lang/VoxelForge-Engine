@@ -10,6 +10,9 @@ inline const std::filesystem::path ProjectForgeLibraryRelativePath{
     "Assets/ForgeLibrary"};
 inline const std::filesystem::path ProjectCreationsRelativePath{
     "Assets/ForgeLibrary/Creations"};
+inline const std::filesystem::path UserForgeLibraryRelativePath{"Library"};
+inline const std::filesystem::path UserCreationsRelativePath{
+    "Library/Creations"};
 
 [[nodiscard]] inline bool IsPortableRelativePath(
     const std::filesystem::path& path) noexcept

@@ -11,6 +11,12 @@
 namespace VoxelForge::Editor::Stamps
 {
 
+enum class StampLibraryScope
+{
+    Project,
+    User
+};
+
 enum class StampLibraryError
 {
     None,
@@ -35,23 +41,23 @@ enum class StampLibraryError
 {
     switch (error)
     {
-    case StampLibraryError::None: return "Project Stamp Library operation completed.";
-    case StampLibraryError::NotConfigured: return "Project Stamp Library has no configured project root.";
-    case StampLibraryError::InvalidProjectRoot: return "Project root or Assets directory is invalid.";
+    case StampLibraryError::None: return "Stamp Library operation completed.";
+    case StampLibraryError::NotConfigured: return "Stamp Library has no configured storage root.";
+    case StampLibraryError::InvalidProjectRoot: return "Stamp Library storage root is invalid.";
     case StampLibraryError::InvalidReference: return "Stamp reference must be a portable .vfstamp path.";
-    case StampLibraryError::PathEscapesProjectLibrary: return "Stamp path escapes Assets/ForgeLibrary/Creations.";
+    case StampLibraryError::PathEscapesProjectLibrary: return "Stamp path escapes the configured Creations directory.";
     case StampLibraryError::SymbolicLinkRejected: return "Symbolic links and reparse-path escapes are not allowed.";
     case StampLibraryError::StaleTransactionFile: return "A stale Stamp transaction file requires manual recovery.";
     case StampLibraryError::AssetNotFound: return "Stamp source asset was not found.";
     case StampLibraryError::AssetNotRegularFile: return "Stamp source asset must be a regular file.";
     case StampLibraryError::InvalidAsset: return "Stamp source asset failed Vfstamp validation.";
     case StampLibraryError::SerializationFailed: return "Stamp could not be serialized for installation.";
-    case StampLibraryError::IoFailure: return "Project Stamp Library filesystem operation failed.";
+    case StampLibraryError::IoFailure: return "Stamp Library filesystem operation failed.";
     case StampLibraryError::TransactionFailed: return "Stamp installation transaction failed without publishing new content.";
     case StampLibraryError::RollbackFailed: return "Stamp installation failed and original content could not be restored.";
     case StampLibraryError::AllocationFailure: return "Project Stamp Library operation ran out of memory.";
     }
-    return "Unknown Project Stamp Library error.";
+    return "Unknown Stamp Library error.";
 }
 
 struct StampAssetReference final
@@ -59,6 +65,7 @@ struct StampAssetReference final
     Core::UUID Id{0U};
     std::string ContentHash;
     std::filesystem::path RelativePath;
+    StampLibraryScope Scope = StampLibraryScope::Project;
 
     [[nodiscard]] bool operator==(const StampAssetReference&) const noexcept = default;
 };

@@ -172,10 +172,30 @@ CreateStandardStampLibraryTransactionFileSystem()
     return std::make_shared<StandardTransactionFileSystem>();
 }
 
+StampFilesystemLibraryRepository::StampFilesystemLibraryRepository(
+    const StampLibraryScope scope,
+    std::filesystem::path libraryRelativePath,
+    std::filesystem::path creationsRelativePath,
+    const bool createRepositoryRoot,
+    std::shared_ptr<IStampLibraryTransactionFileSystem> transactionFileSystem)
+    : scope_(scope),
+      libraryRelativePath_(std::move(libraryRelativePath)),
+      creationsRelativePath_(std::move(creationsRelativePath)),
+      createRepositoryRoot_(createRepositoryRoot),
+      transactionFileSystem_(transactionFileSystem
+          ? std::move(transactionFileSystem)
+          : CreateStandardStampLibraryTransactionFileSystem())
+{
+}
+
 StampProjectLibraryRepository::StampProjectLibraryRepository(
     std::shared_ptr<IStampLibraryTransactionFileSystem> transactionFileSystem)
-    : transactionFileSystem_(transactionFileSystem ? std::move(transactionFileSystem)
-        : CreateStandardStampLibraryTransactionFileSystem())
+    : StampFilesystemLibraryRepository(
+          StampLibraryScope::Project,
+          ProjectForgeLibraryRelativePath,
+          ProjectCreationsRelativePath,
+          false,
+          std::move(transactionFileSystem))
 {
 }
 
@@ -191,19 +211,50 @@ bool StampProjectLibraryRepository::SetProjectRoot(const std::filesystem::path& 
     if (error || std::filesystem::is_symlink(status) || !std::filesystem::is_directory(status)) return false;
     const std::filesystem::path canonicalAssets = std::filesystem::weakly_canonical(assets, error);
     if (error || !IsPathWithin(canonicalAssets, canonical)) return false;
-    projectRoot_ = canonical;
+    SetValidatedRepositoryRoot(canonical);
     return true;
 }
 
-void StampProjectLibraryRepository::ClearProjectRoot() noexcept { projectRoot_.clear(); }
-const std::filesystem::path& StampProjectLibraryRepository::ProjectRoot() const noexcept { return projectRoot_; }
-
-StampLibraryResult StampProjectLibraryRepository::EnsureCreationsDirectory() const
+void StampProjectLibraryRepository::ClearProjectRoot() noexcept
 {
-    if (projectRoot_.empty()) return Failure(StampLibraryError::NotConfigured);
+    ClearRepositoryRoot();
+}
+
+const std::filesystem::path& StampProjectLibraryRepository::ProjectRoot() const noexcept
+{
+    return RepositoryRoot();
+}
+
+void StampFilesystemLibraryRepository::SetValidatedRepositoryRoot(
+    std::filesystem::path root)
+{
+    repositoryRoot_ = std::move(root);
+}
+
+void StampFilesystemLibraryRepository::ClearRepositoryRoot() noexcept
+{
+    repositoryRoot_.clear();
+}
+
+const std::filesystem::path&
+StampFilesystemLibraryRepository::RepositoryRoot() const noexcept
+{
+    return repositoryRoot_;
+}
+
+StampLibraryResult StampFilesystemLibraryRepository::EnsureCreationsDirectory() const
+{
+    if (repositoryRoot_.empty()) return Failure(StampLibraryError::NotConfigured);
     std::error_code error;
-    const std::filesystem::path assets = projectRoot_ / "Assets";
-    for (const std::filesystem::path& directory : {assets, assets / "ForgeLibrary", assets / "ForgeLibrary" / "Creations"})
+    std::vector<std::filesystem::path> directories;
+    if (createRepositoryRoot_) directories.push_back(repositoryRoot_);
+    const std::filesystem::path libraryParent =
+        libraryRelativePath_.parent_path();
+    if (!libraryParent.empty())
+        directories.push_back(repositoryRoot_ / libraryParent);
+    directories.push_back(repositoryRoot_ / libraryRelativePath_);
+    directories.push_back(repositoryRoot_ / creationsRelativePath_);
+    for (const std::filesystem::path& directory : directories)
     {
         const auto status = std::filesystem::symlink_status(directory, error);
         if (error && error != std::errc::no_such_file_or_directory)
@@ -220,7 +271,8 @@ StampLibraryResult StampProjectLibraryRepository::EnsureCreationsDirectory() con
         }
         else if (!std::filesystem::is_directory(status))
         {
-            return Failure(StampLibraryError::IoFailure, "Project library component is not a directory.");
+            return Failure(StampLibraryError::IoFailure,
+                "Stamp library component is not a directory.");
         }
         const std::filesystem::path canonical = std::filesystem::weakly_canonical(directory, error);
         if (error || canonical != directory.lexically_normal())
@@ -229,24 +281,25 @@ StampLibraryResult StampProjectLibraryRepository::EnsureCreationsDirectory() con
     return {};
 }
 
-StampLibraryResult StampProjectLibraryRepository::ResolvePath(
+StampLibraryResult StampFilesystemLibraryRepository::ResolvePath(
     const std::filesystem::path& relativePath,
     std::filesystem::path& absolute) const
 {
-    if (projectRoot_.empty()) return Failure(StampLibraryError::NotConfigured);
+    if (repositoryRoot_.empty()) return Failure(StampLibraryError::NotConfigured);
     if (!IsPortableRelativePath(relativePath) || LowerExtension(relativePath) != ".vfstamp")
         return Failure(StampLibraryError::InvalidReference);
     const std::filesystem::path normalized = relativePath.lexically_normal();
-    const std::filesystem::path belowCreations = normalized.lexically_relative(ProjectCreationsRelativePath);
+    const std::filesystem::path belowCreations =
+        normalized.lexically_relative(creationsRelativePath_);
     if (belowCreations.empty() || belowCreations.is_absolute() || !IsPortableRelativePath(belowCreations))
         return Failure(StampLibraryError::PathEscapesProjectLibrary);
-    absolute = (projectRoot_ / normalized).lexically_normal();
-    if (!IsPathWithin(absolute, projectRoot_ / ProjectCreationsRelativePath))
+    absolute = (repositoryRoot_ / normalized).lexically_normal();
+    if (!IsPathWithin(absolute, repositoryRoot_ / creationsRelativePath_))
         return Failure(StampLibraryError::PathEscapesProjectLibrary);
     return {};
 }
 
-StampLibraryResult StampProjectLibraryRepository::ResolvePortableReference(
+StampLibraryResult StampFilesystemLibraryRepository::ResolvePortableReference(
     const std::filesystem::path& relativePath) const
 {
     std::filesystem::path absolute;
@@ -258,12 +311,13 @@ StampLibraryResult StampProjectLibraryRepository::ResolvePortableReference(
     if (std::filesystem::is_symlink(status)) return Failure(StampLibraryError::SymbolicLinkRejected);
     if (!std::filesystem::is_regular_file(status)) return Failure(StampLibraryError::AssetNotRegularFile);
     const std::filesystem::path canonical = std::filesystem::weakly_canonical(absolute, error);
-    if (error || !IsPathWithin(canonical, projectRoot_ / ProjectCreationsRelativePath))
+    if (error || !IsPathWithin(
+            canonical, repositoryRoot_ / creationsRelativePath_))
         return Failure(StampLibraryError::PathEscapesProjectLibrary);
     return ReadPath(absolute, relativePath.lexically_normal());
 }
 
-StampLibraryResult StampProjectLibraryRepository::ReadPath(
+StampLibraryResult StampFilesystemLibraryRepository::ReadPath(
     const std::filesystem::path& absolute,
     const std::filesystem::path& relative) const
 {
@@ -284,7 +338,8 @@ StampLibraryResult StampProjectLibraryRepository::ReadPath(
     StampLibraryResult result{};
     result.Reference = {.Id = decoded.Stamp->Identity().Id,
                         .ContentHash = decoded.Stamp->Identity().ContentHash,
-                        .RelativePath = relative};
+                        .RelativePath = relative,
+                        .Scope = scope_};
     result.Stamp = std::move(*decoded.Stamp);
     return result;
     }
@@ -294,8 +349,12 @@ StampLibraryResult StampProjectLibraryRepository::ReadPath(
     }
 }
 
-StampLibraryResult StampProjectLibraryRepository::Read(const StampAssetReference& reference) const
+StampLibraryResult StampFilesystemLibraryRepository::Read(
+    const StampAssetReference& reference) const
 {
+    if (reference.Scope != scope_)
+        return Failure(StampLibraryError::InvalidReference,
+            "Stamp reference belongs to a different library scope.");
     std::filesystem::path absolute;
     StampLibraryResult resolved = ResolvePath(reference.RelativePath, absolute);
     if (!resolved.Succeeded()) return resolved;
@@ -308,7 +367,7 @@ StampLibraryResult StampProjectLibraryRepository::Read(const StampAssetReference
     return read;
 }
 
-StampLibraryResult StampProjectLibraryRepository::Install(
+StampLibraryResult StampFilesystemLibraryRepository::Install(
     const VoxelStamp& stamp,
     const StampInstallOptions& options)
 {
@@ -319,7 +378,8 @@ StampLibraryResult StampProjectLibraryRepository::Install(
             return Failure(StampLibraryError::SerializationFailed, std::string(written.Message));
         StampLibraryResult directory = EnsureCreationsDirectory();
         if (!directory.Succeeded()) return directory;
-        const std::filesystem::path creations = projectRoot_ / ProjectCreationsRelativePath;
+        const std::filesystem::path creations =
+            repositoryRoot_ / creationsRelativePath_;
         const std::optional<std::string> stem = ValidFileStem(options.PreferredFileStem.empty()
             ? stamp.Identity().Id.ToString() : options.PreferredFileStem);
         if (!stem) return Failure(StampLibraryError::InvalidReference,
@@ -356,7 +416,8 @@ StampLibraryResult StampProjectLibraryRepository::Install(
             return Failure(std::filesystem::is_symlink(std::filesystem::symlink_status(destination, error))
                 ? StampLibraryError::SymbolicLinkRejected : StampLibraryError::AssetNotRegularFile);
         if (!WriteAndFlush(temporary, written.Bytes)) return Failure(StampLibraryError::IoFailure);
-        const std::filesystem::path relative = destination.lexically_relative(projectRoot_);
+        const std::filesystem::path relative =
+            destination.lexically_relative(repositoryRoot_);
         StampLibraryResult verify = ReadPath(temporary, relative);
         if (!verify.Succeeded()) { static_cast<void>(RemoveRegularFile(temporary)); return Failure(StampLibraryError::InvalidAsset); }
         std::string operationError;
@@ -389,17 +450,22 @@ StampLibraryResult StampProjectLibraryRepository::Install(
         }
         if (replacing && !RemoveRegularFile(backup))
             return Failure(StampLibraryError::TransactionFailed, "Stamp installed but transaction backup cleanup failed.");
-        final.Reference = {.Id = stamp.Identity().Id, .ContentHash = written.LogicalContentHash, .RelativePath = relative};
+        final.Reference = {
+            .Id = stamp.Identity().Id,
+            .ContentHash = written.LogicalContentHash,
+            .RelativePath = relative,
+            .Scope = scope_};
         return final;
     }
     catch (const std::bad_alloc&) { return Failure(StampLibraryError::AllocationFailure); }
 }
 
-StampLibraryResult StampProjectLibraryRepository::EnumerateSourceAssets() const
+StampLibraryResult StampFilesystemLibraryRepository::EnumerateSourceAssets() const
 {
     StampLibraryResult result{};
-    if (projectRoot_.empty()) return Failure(StampLibraryError::NotConfigured);
-    const std::filesystem::path creations = projectRoot_ / ProjectCreationsRelativePath;
+    if (repositoryRoot_.empty()) return Failure(StampLibraryError::NotConfigured);
+    const std::filesystem::path creations =
+        repositoryRoot_ / creationsRelativePath_;
     std::error_code error;
     bool creationsExists = false;
     bool creationsSymlink = false;
@@ -410,7 +476,8 @@ StampLibraryResult StampProjectLibraryRepository::EnumerateSourceAssets() const
     if (!creationsExists) return result;
     const auto creationsStatus = std::filesystem::symlink_status(creations, error);
     if (error || !std::filesystem::is_directory(creationsStatus))
-        return Failure(StampLibraryError::IoFailure, "Project Creations path is not a directory.");
+        return Failure(StampLibraryError::IoFailure,
+            "Stamp Creations path is not a directory.");
     const std::filesystem::path canonicalCreations = std::filesystem::weakly_canonical(creations, error);
     if (error || canonicalCreations != creations.lexically_normal())
         return Failure(StampLibraryError::PathEscapesProjectLibrary);
@@ -418,7 +485,8 @@ StampLibraryResult StampProjectLibraryRepository::EnumerateSourceAssets() const
     {
         const auto status = it->symlink_status(error);
         if (error) break;
-        const std::filesystem::path relative = it->path().lexically_relative(projectRoot_);
+        const std::filesystem::path relative =
+            it->path().lexically_relative(repositoryRoot_);
         if (std::filesystem::is_symlink(status))
         {
             result.Diagnostics.push_back({StampLibraryError::SymbolicLinkRejected, relative,
@@ -458,15 +526,19 @@ StampLibraryResult StampProjectLibraryRepository::EnumerateSourceAssets() const
     return result;
 }
 
-StampLibraryResult StampProjectLibraryRepository::RebuildSourceInventory() const
+StampLibraryResult StampFilesystemLibraryRepository::RebuildSourceInventory() const
 {
     // STAMP-07 owns the derived catalogue. This method deliberately scans and
     // validates source assets only; it never deletes or repairs them silently.
     return EnumerateSourceAssets();
 }
 
-StampLibraryResult StampProjectLibraryRepository::Remove(const StampAssetReference& reference)
+StampLibraryResult StampFilesystemLibraryRepository::Remove(
+    const StampAssetReference& reference)
 {
+    if (reference.Scope != scope_)
+        return Failure(StampLibraryError::InvalidReference,
+            "Stamp reference belongs to a different library scope.");
     if (reference.Id.Value() == 0U || reference.ContentHash.empty())
         return Failure(StampLibraryError::InvalidReference,
             "Removing a Project Stamp requires its UUID and content hash.");
