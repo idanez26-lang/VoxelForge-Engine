@@ -153,22 +153,43 @@ StampPlacementSessionResult StampPlacementSession::SetQuarterRotation(
     return BuildCurrent(document, documentGeneration);
 }
 
+StampPlacementSessionResult StampPlacementSession::Rotate90(
+    const StampPlacementRotationAxis axis,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration,
+    const bool clockwise)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+    if (axis != StampPlacementRotationAxis::VerticalY)
+    {
+        return {
+            .Code = StampPlacementSessionResultCode::InvalidPlan,
+            .Diagnostic = StampPlacementDiagnosticCode::UnsupportedRotation};
+    }
+    transform_.RotationAxis = axis;
+    const std::uint8_t delta = clockwise ? 1U : 3U;
+    transform_.QuarterTurns = static_cast<std::uint8_t>(
+        (transform_.QuarterTurns + delta) % 4U);
+    return BuildCurrent(document, documentGeneration);
+}
+
 StampPlacementSessionResult StampPlacementSession::RotateClockwise(
     const Asset::Voxel::VoxelDocument& document,
     const std::uint64_t documentGeneration)
 {
-    return SetQuarterRotation(
-        static_cast<std::uint8_t>((transform_.QuarterTurns + 1U) % 4U),
-        document, documentGeneration);
+    return Rotate90(StampPlacementRotationAxis::VerticalY,
+        document, documentGeneration, true);
 }
 
 StampPlacementSessionResult StampPlacementSession::RotateCounterClockwise(
     const Asset::Voxel::VoxelDocument& document,
     const std::uint64_t documentGeneration)
 {
-    return SetQuarterRotation(
-        static_cast<std::uint8_t>((transform_.QuarterTurns + 3U) % 4U),
-        document, documentGeneration);
+    return Rotate90(StampPlacementRotationAxis::VerticalY,
+        document, documentGeneration, false);
 }
 
 StampPlacementSessionResult StampPlacementSession::SetMirror(
@@ -182,6 +203,57 @@ StampPlacementSessionResult StampPlacementSession::SetMirror(
     }
     transform_.Mirror = mirror;
     return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::ToggleMirror(
+    const StampPlacementMirrorMode axis,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+
+    StampPlacementMirrorMode next = transform_.Mirror;
+    switch (axis)
+    {
+    case StampPlacementMirrorMode::X:
+        next = transform_.Mirror == StampPlacementMirrorMode::None
+            ? StampPlacementMirrorMode::X
+            : transform_.Mirror == StampPlacementMirrorMode::X
+            ? StampPlacementMirrorMode::None
+            : transform_.Mirror == StampPlacementMirrorMode::Z
+            ? StampPlacementMirrorMode::XZ
+            : StampPlacementMirrorMode::Z;
+        break;
+    case StampPlacementMirrorMode::Z:
+        next = transform_.Mirror == StampPlacementMirrorMode::None
+            ? StampPlacementMirrorMode::Z
+            : transform_.Mirror == StampPlacementMirrorMode::Z
+            ? StampPlacementMirrorMode::None
+            : transform_.Mirror == StampPlacementMirrorMode::X
+            ? StampPlacementMirrorMode::XZ
+            : StampPlacementMirrorMode::X;
+        break;
+    case StampPlacementMirrorMode::XZ:
+        next = transform_.Mirror == StampPlacementMirrorMode::None
+            ? StampPlacementMirrorMode::XZ
+            : transform_.Mirror == StampPlacementMirrorMode::XZ
+            ? StampPlacementMirrorMode::None
+            : transform_.Mirror == StampPlacementMirrorMode::X
+            ? StampPlacementMirrorMode::Z
+            : StampPlacementMirrorMode::X;
+        break;
+    case StampPlacementMirrorMode::None:
+        next = StampPlacementMirrorMode::None;
+        break;
+    default:
+        return {
+            .Code = StampPlacementSessionResultCode::InvalidPlan,
+            .Diagnostic = StampPlacementDiagnosticCode::UnsupportedMirror};
+    }
+    return SetMirror(next, document, documentGeneration);
 }
 
 StampPlacementSessionResult StampPlacementSession::CycleMirror(
@@ -206,6 +278,20 @@ StampPlacementSessionResult StampPlacementSession::CycleMirror(
         break;
     }
     return SetMirror(next, document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::ResetTransform(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+    const StampFixedPoint target = transform_.TargetPivot;
+    transform_ = {};
+    transform_.TargetPivot = target;
+    return BuildCurrent(document, documentGeneration);
 }
 
 StampPlacementSessionPlaceResult StampPlacementSession::PlaceOnce(
@@ -337,6 +423,11 @@ StampPlacementSession::CacheKey() const noexcept
 StampFixedPoint StampPlacementSession::Target() const noexcept
 {
     return transform_.TargetPivot;
+}
+
+StampPlacementRotationAxis StampPlacementSession::RotationAxis() const noexcept
+{
+    return transform_.RotationAxis;
 }
 
 std::uint8_t StampPlacementSession::QuarterRotation() const noexcept

@@ -18,6 +18,19 @@ std::string SessionFailureMessage(
         : std::string(Stamps::StampPlacementSessionResultMessage(
             result.Code));
 }
+
+const char* MirrorLabel(
+    const Stamps::StampPlacementMirrorMode mirror) noexcept
+{
+    switch (mirror)
+    {
+    case Stamps::StampPlacementMirrorMode::X: return "X";
+    case Stamps::StampPlacementMirrorMode::Z: return "Z";
+    case Stamps::StampPlacementMirrorMode::XZ: return "XZ";
+    case Stamps::StampPlacementMirrorMode::None:
+    default: return "None";
+    }
+}
 }
 
 StampPreviewController::StampPreviewController(
@@ -76,9 +89,9 @@ void StampPreviewController::Rotate(const bool clockwise)
         return;
     }
 
-    const Stamps::StampPlacementSessionResult result = clockwise
-        ? placement_.RotateClockwise(*document, documents_.Generation())
-        : placement_.RotateCounterClockwise(*document, documents_.Generation());
+    const Stamps::StampPlacementSessionResult result = placement_.Rotate90(
+        Stamps::StampPlacementRotationAxis::VerticalY,
+        *document, documents_.Generation(), clockwise);
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();
@@ -121,24 +134,83 @@ void StampPreviewController::Mirror(
         return;
     }
 
-    const char* label = "None";
-    switch (placement_.Mirror())
+    console_.AddMessage(
+        "Live Stamp Preview: mirror " +
+        std::string(MirrorLabel(placement_.Mirror())) + ".");
+}
+
+void StampPreviewController::ToggleMirror(
+    const Stamps::StampPlacementMirrorMode axis)
+{
+    Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
+    if (!placement_.IsActive() || document == nullptr)
     {
-    case Stamps::StampPlacementMirrorMode::X:
-        label = "X";
-        break;
-    case Stamps::StampPlacementMirrorMode::Z:
-        label = "Z";
-        break;
-    case Stamps::StampPlacementMirrorMode::XZ:
-        label = "XZ";
-        break;
-    case Stamps::StampPlacementMirrorMode::None:
-    default:
-        break;
+        return;
+    }
+
+    const Stamps::StampPlacementSessionResult result =
+        placement_.ToggleMirror(axis, *document, documents_.Generation());
+    if (result.PreviewChanged)
+    {
+        onHighlightsChanged_();
+    }
+    if (!result.Succeeded)
+    {
+        console_.AddMessage(
+            "Live Stamp Preview: " + SessionFailureMessage(result));
+        return;
     }
     console_.AddMessage(
-        "Live Stamp Preview: mirror " + std::string(label) + ".");
+        "Live Stamp Preview: mirror " +
+        std::string(MirrorLabel(placement_.Mirror())) + ".");
+}
+
+void StampPreviewController::CycleMirror()
+{
+    Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
+    if (!placement_.IsActive() || document == nullptr)
+    {
+        return;
+    }
+
+    const Stamps::StampPlacementSessionResult result =
+        placement_.CycleMirror(*document, documents_.Generation());
+    if (result.PreviewChanged)
+    {
+        onHighlightsChanged_();
+    }
+    if (!result.Succeeded)
+    {
+        console_.AddMessage(
+            "Live Stamp Preview: " + SessionFailureMessage(result));
+        return;
+    }
+    console_.AddMessage(
+        "Live Stamp Preview: mirror " +
+        std::string(MirrorLabel(placement_.Mirror())) + ".");
+}
+
+void StampPreviewController::ResetTransform()
+{
+    Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
+    if (!placement_.IsActive() || document == nullptr)
+    {
+        return;
+    }
+
+    const Stamps::StampPlacementSessionResult result =
+        placement_.ResetTransform(*document, documents_.Generation());
+    if (result.PreviewChanged)
+    {
+        onHighlightsChanged_();
+    }
+    if (!result.Succeeded)
+    {
+        console_.AddMessage(
+            "Live Stamp Preview: " + SessionFailureMessage(result));
+        return;
+    }
+    console_.AddMessage("Live Stamp Preview: transform reset.");
 }
 
 void StampPreviewController::Place()

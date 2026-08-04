@@ -33,12 +33,16 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 26U,
+    Require(service.Bindings().size() == 28U,
         "The expected command bindings are incomplete.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
         service.CommandName(EditorInputCommand::InteractionCancel) ==
             "Interaction.Cancel" &&
+        service.CommandName(EditorInputCommand::StampCycleMirror) ==
+            "Stamp.CycleMirror" &&
+        service.CommandName(EditorInputCommand::StampResetTransform) ==
+            "Stamp.ResetTransform" &&
         service.CommandName(static_cast<EditorInputCommand>(255)).empty(),
         "Command names or unknown-command handling are invalid.");
     Require(service.ShortcutLabel(EditorInputCommand::ToolFill) == "Shift+F" &&
@@ -61,6 +65,9 @@ void TestCommandsAndBindings()
         service.ShortcutLabel(EditorInputCommand::ScaleZ) == "Z" &&
         service.ShortcutLabel(EditorInputCommand::ScaleUniform) == "U" &&
         service.ShortcutLabel(EditorInputCommand::TransformApply) == "Enter" &&
+        service.ShortcutLabel(EditorInputCommand::StampCycleMirror) == "M" &&
+        service.ShortcutLabel(EditorInputCommand::StampResetTransform) ==
+            "Shift+M" &&
         service.ShortcutLabel(EditorInputCommand::FileSave) == "Ctrl+S",
         "Shortcut labels do not reflect the real bindings.");
 }
@@ -261,6 +268,42 @@ void TestAvailabilityAndUnknownCommands()
         "Transform Apply stayed unavailable for a valid preview.");
 }
 
+void TestActiveStampTransformContext()
+{
+    const EditorInputService service;
+    EditorCommandAvailability stamp;
+    stamp.HasDocument = true;
+    stamp.CanCancelInteraction = true;
+    stamp.CanAdjustRotation = true;
+    stamp.CanAdjustMirror = true;
+    stamp.CanAdjustStampTransform = true;
+
+    Require(
+        Resolve(service, EditorInputKey::Q, stamp) ==
+                EditorInputCommand::RotateLeft &&
+            Resolve(service, EditorInputKey::Q, stamp, false, true) ==
+                EditorInputCommand::RotateRight &&
+            Resolve(service, EditorInputKey::X, stamp) ==
+                EditorInputCommand::MirrorX &&
+            Resolve(service, EditorInputKey::Z, stamp) ==
+                EditorInputCommand::MirrorZ &&
+            Resolve(service, EditorInputKey::M, stamp) ==
+                EditorInputCommand::StampCycleMirror &&
+            Resolve(service, EditorInputKey::M, stamp, false, true) ==
+                EditorInputCommand::StampResetTransform &&
+            Resolve(service, EditorInputKey::Escape, stamp) ==
+                EditorInputCommand::InteractionCancel,
+        "Active Stamp placement shortcuts do not own their transform commands.");
+    Require(
+        Resolve(service, EditorInputKey::P, stamp) ==
+                EditorInputCommand::None &&
+            Resolve(service, EditorInputKey::R, stamp) ==
+                EditorInputCommand::None &&
+            !service.IsAvailable(EditorInputCommand::ToolMove, stamp) &&
+            !service.IsAvailable(EditorInputCommand::ToolPencil, stamp),
+        "A tool shortcut interrupted the active Stamp placement session.");
+}
+
 void TestSmartBrushSizeResolver()
 {
     SmartBrushSizeInputFrame frame;
@@ -349,6 +392,7 @@ int main()
         TestSaveUndoRedoAndCancel();
         TestProtectedInputContexts();
         TestAvailabilityAndUnknownCommands();
+        TestActiveStampTransformContext();
         TestSmartBrushSizeResolver();
         std::cout << "Editor input service tests passed.\n";
         return 0;

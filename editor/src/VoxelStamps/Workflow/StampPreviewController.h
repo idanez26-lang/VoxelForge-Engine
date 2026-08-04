@@ -33,6 +33,9 @@ public:
     void Move(std::int32_t x, std::int32_t y, std::int32_t z);
     void Rotate(bool clockwise);
     void Mirror(Stamps::StampPlacementMirrorMode mirror);
+    void ToggleMirror(Stamps::StampPlacementMirrorMode axis);
+    void CycleMirror();
+    void ResetTransform();
     void Place();
     bool Refresh();
     void Clear() noexcept;

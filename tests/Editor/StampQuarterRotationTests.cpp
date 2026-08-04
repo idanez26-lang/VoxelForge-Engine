@@ -195,21 +195,31 @@ void TestSessionRotationLifecycle()
         "Quarter rotation session must begin.");
     const auto originalKey = *session.CacheKey();
 
-    Require(session.RotateClockwise(document, 15U).Succeeded &&
+    Require(session.Rotate90(
+                StampPlacementRotationAxis::VerticalY,
+                document, 15U).Succeeded &&
+                session.RotationAxis() ==
+                    StampPlacementRotationAxis::VerticalY &&
                 session.QuarterRotation() == 1U &&
                 session.CurrentPlan()->Transform.QuarterTurns == 1U &&
                 session.CurrentPreview()->Transform.QuarterTurns == 1U &&
                 *session.CacheKey() != originalKey,
         "Clockwise rotation must rebuild one new shared plan.");
-    Require(session.RotateCounterClockwise(document, 15U).Succeeded &&
+    Require(session.Rotate90(
+                StampPlacementRotationAxis::VerticalY,
+                document, 15U, false).Succeeded &&
                 session.QuarterRotation() == 0U &&
                 *session.CacheKey() == originalKey,
         "Counter-clockwise rotation must return to the exact cached context.");
     Require(session.SetQuarterRotation(6U, document, 15U).Succeeded &&
                 session.QuarterRotation() == 2U,
         "Session rotation setter must normalize complete turns.");
-    Require(session.RotateClockwise(document, 15U).Succeeded &&
-                session.RotateClockwise(document, 15U).Succeeded &&
+    Require(session.Rotate90(
+                StampPlacementRotationAxis::VerticalY,
+                document, 15U).Succeeded &&
+                session.Rotate90(
+                    StampPlacementRotationAxis::VerticalY,
+                    document, 15U).Succeeded &&
                 session.QuarterRotation() == 0U,
         "Four clockwise quarter turns must return to zero.");
     Require(session.Cancel() && session.QuarterRotation() == 0U,

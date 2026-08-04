@@ -127,6 +127,11 @@ public:
         std::uint8_t quarterTurns,
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult Rotate90(
+        StampPlacementRotationAxis axis,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration,
+        bool clockwise = true);
     [[nodiscard]] StampPlacementSessionResult RotateClockwise(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
@@ -137,7 +142,14 @@ public:
         StampPlacementMirrorMode mirror,
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult ToggleMirror(
+        StampPlacementMirrorMode axis,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
     [[nodiscard]] StampPlacementSessionResult CycleMirror(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult ResetTransform(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
     [[nodiscard]] StampPlacementSessionPlaceResult PlaceOnce(
@@ -157,6 +169,7 @@ public:
     [[nodiscard]] const VoxelPreviewData* CurrentPreview() const noexcept;
     [[nodiscard]] const StampPlacementCacheKey* CacheKey() const noexcept;
     [[nodiscard]] StampFixedPoint Target() const noexcept;
+    [[nodiscard]] StampPlacementRotationAxis RotationAxis() const noexcept;
     [[nodiscard]] std::uint8_t QuarterRotation() const noexcept;
     [[nodiscard]] StampPlacementMirrorMode Mirror() const noexcept;
     [[nodiscard]] std::size_t TargetSubModel() const noexcept;

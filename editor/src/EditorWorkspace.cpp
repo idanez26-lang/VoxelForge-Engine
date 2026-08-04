@@ -874,17 +874,51 @@ void EditorWorkspace::DrawMainMenuBar()
         }
 
         if (ImGui::MenuItem(
-                "Rotate Stamp Preview Clockwise", nullptr, false,
+                "Rotate Stamp Preview Clockwise",
+                shortcut(EditorInputCommand::RotateRight), false,
                 liveStampPreviewActive))
         {
             RotateLatestStampPreview(true);
         }
 
         if (ImGui::MenuItem(
-                "Rotate Stamp Preview Counter-Clockwise", nullptr, false,
+                "Rotate Stamp Preview Counter-Clockwise",
+                shortcut(EditorInputCommand::RotateLeft), false,
                 liveStampPreviewActive))
         {
             RotateLatestStampPreview(false);
+        }
+
+        if (ImGui::MenuItem(
+                "Toggle Stamp Mirror X",
+                shortcut(EditorInputCommand::MirrorX), false,
+                liveStampPreviewActive))
+        {
+            ToggleLatestStampPreview(Stamps::StampPlacementMirrorMode::X);
+        }
+
+        if (ImGui::MenuItem(
+                "Toggle Stamp Mirror Z",
+                shortcut(EditorInputCommand::MirrorZ), false,
+                liveStampPreviewActive))
+        {
+            ToggleLatestStampPreview(Stamps::StampPlacementMirrorMode::Z);
+        }
+
+        if (ImGui::MenuItem(
+                "Cycle Stamp Mirror",
+                shortcut(EditorInputCommand::StampCycleMirror), false,
+                liveStampPreviewActive))
+        {
+            CycleLatestStampPreview();
+        }
+
+        if (ImGui::MenuItem(
+                "Reset Stamp Transform",
+                shortcut(EditorInputCommand::StampResetTransform), false,
+                liveStampPreviewActive))
+        {
+            ResetLatestStampTransform();
         }
 
         if (ImGui::MenuItem(
@@ -1298,6 +1332,9 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
     const Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
     const bool documentHistory = document != nullptr;
+    const bool stampTransform = documentHistory &&
+        stampPlacementSession_.IsActive() && !voxelEditInProgress_ &&
+        !voxelEditHistory_.IsBusy();
     return {
         documentHistory,
         documentHistory
@@ -1311,6 +1348,7 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
                              : commandHistory_.CanRedo()),
         voxelBoxInteraction_.IsActive() || voxelLineInteraction_.IsActive() ||
             voxelSphereInteraction_.IsActive() ||
+            stampPlacementSession_.IsActive() ||
             transformGizmoManager_.IsDragging() ||
             selectionInteraction_.IsActive() ||
             selectionService_.EditableBounds().Valid ||
@@ -1318,9 +1356,11 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
         CanMoveSelection(),
         CanDuplicateSelection(),
         CanRotateSelection(),
-        voxelToolState_.IsRotateActive() && CanRotateSelection(),
+        stampTransform ||
+            (voxelToolState_.IsRotateActive() && CanRotateSelection()),
         CanMirrorSelection(),
-        voxelToolState_.IsMirrorActive() && CanMirrorSelection(),
+        stampTransform ||
+            (voxelToolState_.IsMirrorActive() && CanMirrorSelection()),
         CanScaleSelection(),
         voxelToolState_.IsScaleActive() && CanScaleSelection(),
         CanAlignSelection(),
@@ -1331,13 +1371,15 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
          voxelToolState_.IsAlignActive()) &&
             transformPreviewModel_.IsActive() &&
             !transformPreviewModel_.HasCollisions() &&
-            !transformPreviewModel_.HasOutOfBounds()};
+            !transformPreviewModel_.HasOutOfBounds(),
+        stampTransform};
 }
 
 bool EditorWorkspace::CanMoveSelection() const noexcept
 {
     return voxelDocumentSession_.HasActiveDocument() &&
         !voxelEditInProgress_ && !voxelEditHistory_.IsBusy() &&
+        !stampPlacementSession_.IsActive() &&
         !selectionService_.Empty() &&
         selectionService_.EditableBounds().Valid &&
         selectionService_.DocumentGeneration() ==
@@ -1406,15 +1448,31 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
     case EditorInputCommand::ToolAlign:
         SelectVoxelTool(ActiveVoxelTool::Align); break;
     case EditorInputCommand::RotateLeft:
-        static_cast<void>(BeginVoxelRotatePreview(
-            VoxelRotationDirection::CounterClockwise)); break;
+        if (stampPlacementSession_.IsActive())
+            RotateLatestStampPreview(false);
+        else
+            static_cast<void>(BeginVoxelRotatePreview(
+                VoxelRotationDirection::CounterClockwise));
+        break;
     case EditorInputCommand::RotateRight:
-        static_cast<void>(BeginVoxelRotatePreview(
-            VoxelRotationDirection::Clockwise)); break;
+        if (stampPlacementSession_.IsActive())
+            RotateLatestStampPreview(true);
+        else
+            static_cast<void>(BeginVoxelRotatePreview(
+                VoxelRotationDirection::Clockwise));
+        break;
     case EditorInputCommand::MirrorX:
-        static_cast<void>(BeginVoxelMirrorPreview(VoxelMirrorAxis::X)); break;
+        if (stampPlacementSession_.IsActive())
+            ToggleLatestStampPreview(Stamps::StampPlacementMirrorMode::X);
+        else
+            static_cast<void>(BeginVoxelMirrorPreview(VoxelMirrorAxis::X));
+        break;
     case EditorInputCommand::MirrorZ:
-        static_cast<void>(BeginVoxelMirrorPreview(VoxelMirrorAxis::Z)); break;
+        if (stampPlacementSession_.IsActive())
+            ToggleLatestStampPreview(Stamps::StampPlacementMirrorMode::Z);
+        else
+            static_cast<void>(BeginVoxelMirrorPreview(VoxelMirrorAxis::Z));
+        break;
     case EditorInputCommand::ScaleX:
         static_cast<void>(BeginVoxelScalePreview(VoxelScaleMode::X)); break;
     case EditorInputCommand::ScaleY:
@@ -1451,6 +1509,12 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
             static_cast<void>(ApplyVoxelScale());
         else if (voxelToolState_.IsAlignActive())
             static_cast<void>(ApplyVoxelAlign());
+        break;
+    case EditorInputCommand::StampCycleMirror:
+        CycleLatestStampPreview();
+        break;
+    case EditorInputCommand::StampResetTransform:
+        ResetLatestStampTransform();
         break;
     case EditorInputCommand::FileSave:
         if (voxelDocumentSession_.HasActiveDocument())
@@ -2851,6 +2915,22 @@ void EditorWorkspace::MirrorLatestStampPreview(
     const Stamps::StampPlacementMirrorMode mirror)
 {
     stampPreview_.Mirror(mirror);
+}
+
+void EditorWorkspace::ToggleLatestStampPreview(
+    const Stamps::StampPlacementMirrorMode axis)
+{
+    stampPreview_.ToggleMirror(axis);
+}
+
+void EditorWorkspace::CycleLatestStampPreview()
+{
+    stampPreview_.CycleMirror();
+}
+
+void EditorWorkspace::ResetLatestStampTransform()
+{
+    stampPreview_.ResetTransform();
 }
 
 void EditorWorkspace::PlaceLatestStampPreview()

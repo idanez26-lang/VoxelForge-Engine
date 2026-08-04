@@ -125,10 +125,29 @@ void TestSelectionUpdateAndTransientState()
                     4 * StampFixedPoint::UnitsPerVoxel &&
                 document.GetVoxelCount() == 0U,
         "UpdateTarget must move only the active preview.");
-    Require(session.RotateClockwise(document, 16U).Succeeded &&
-                session.SetMirror(
+    Require(session.Rotate90(
+                StampPlacementRotationAxis::VerticalY,
+                document, 16U).Succeeded &&
+                session.ToggleMirror(
                     StampPlacementMirrorMode::X, document, 16U).Succeeded,
         "Transient transform setup failed.");
+    const StampFixedPoint transformedTarget = session.Target();
+    const auto revisionBeforeReset = document.GetRevision();
+    Require(session.ResetTransform(document, 16U).Succeeded &&
+                session.Target() == transformedTarget &&
+                session.RotationAxis() ==
+                    StampPlacementRotationAxis::VerticalY &&
+                session.QuarterRotation() == 0U &&
+                session.Mirror() == StampPlacementMirrorMode::None &&
+                document.GetRevision() == revisionBeforeReset &&
+                document.GetVoxelCount() == 0U,
+        "ResetTransform must keep the target and reset preview state only.");
+    Require(session.Rotate90(
+                StampPlacementRotationAxis::VerticalY,
+                document, 16U).Succeeded &&
+                session.ToggleMirror(
+                    StampPlacementMirrorMode::X, document, 16U).Succeeded,
+        "Unable to restore non-neutral state before switching assets.");
 
     const auto switched = session.SelectAsset(
         &second, document, 16U, 0U,

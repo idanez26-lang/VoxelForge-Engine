@@ -305,6 +305,9 @@ private:
     void MoveLatestStampPreview(std::int32_t x, std::int32_t y, std::int32_t z);
     void RotateLatestStampPreview(bool clockwise);
     void MirrorLatestStampPreview(Stamps::StampPlacementMirrorMode mirror);
+    void ToggleLatestStampPreview(Stamps::StampPlacementMirrorMode axis);
+    void CycleLatestStampPreview();
+    void ResetLatestStampTransform();
     void PlaceLatestStampPreview();
     [[nodiscard]] bool RefreshLatestStampPreview();
     void ClearLatestStampPreview() noexcept;

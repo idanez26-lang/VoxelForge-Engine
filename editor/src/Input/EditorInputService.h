@@ -39,6 +39,8 @@ enum class EditorInputCommand : std::uint8_t
     AlignFront,
     AlignBack,
     TransformApply,
+    StampCycleMirror,
+    StampResetTransform,
     FileSave,
     EditUndo,
     EditRedo,
@@ -116,6 +118,7 @@ struct EditorCommandAvailability final
     bool CanAlignSelection = false;
     bool CanAdjustAlign = false;
     bool CanApplyTransform = false;
+    bool CanAdjustStampTransform = false;
 };
 
 struct SmartBrushSizeInputFrame final
@@ -144,7 +147,7 @@ struct SmartBrushSizeInputResult final
 class EditorInputService final
 {
 public:
-    static constexpr std::size_t BindingCount = 26U;
+    static constexpr std::size_t BindingCount = 28U;
 
     [[nodiscard]] EditorInputCommand Resolve(
         const EditorInputFrame& frame,
@@ -215,7 +218,11 @@ private:
         {EditorInputCommand::ScaleUniform, EditorInputKey::U,
          false, false, false, "U"},
         {EditorInputCommand::TransformApply, EditorInputKey::Enter,
-         false, false, false, "Enter"}
+         false, false, false, "Enter"},
+        {EditorInputCommand::StampCycleMirror, EditorInputKey::M,
+         false, false, false, "M"},
+        {EditorInputCommand::StampResetTransform, EditorInputKey::M,
+         false, true, false, "Shift+M"}
     }};
 };
 

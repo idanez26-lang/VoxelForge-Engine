@@ -224,23 +224,29 @@ void TestSessionMirrorLifecycle()
         "Mirror placement session must begin.");
     const auto originalKey = *session.CacheKey();
 
-    Require(session.SetMirror(
+    Require(session.ToggleMirror(
                 StampPlacementMirrorMode::X, document, 17U).Succeeded &&
                 session.Mirror() == StampPlacementMirrorMode::X &&
                 session.CurrentPlan()->Transform.Mirror ==
                     StampPlacementMirrorMode::X &&
                 *session.CacheKey() != originalKey,
-        "SetMirror must rebuild one shared plan.");
-    Require(session.CycleMirror(document, 17U).Succeeded &&
-                session.Mirror() == StampPlacementMirrorMode::Z,
-        "CycleMirror must advance X to Z.");
-    Require(session.CycleMirror(document, 17U).Succeeded &&
+        "ToggleMirror X must rebuild one shared plan.");
+    Require(session.ToggleMirror(
+                StampPlacementMirrorMode::Z, document, 17U).Succeeded &&
                 session.Mirror() == StampPlacementMirrorMode::XZ,
-        "CycleMirror must advance Z to XZ.");
-    Require(session.CycleMirror(document, 17U).Succeeded &&
+        "ToggleMirror Z must combine with X as XZ.");
+    Require(session.ToggleMirror(
+                StampPlacementMirrorMode::X, document, 17U).Succeeded &&
+                session.Mirror() == StampPlacementMirrorMode::Z,
+        "Toggling X again must preserve only Z.");
+    Require(session.ToggleMirror(
+                StampPlacementMirrorMode::Z, document, 17U).Succeeded &&
                 session.Mirror() == StampPlacementMirrorMode::None &&
                 *session.CacheKey() == originalKey,
-        "CycleMirror must return XZ to the neutral cache context.");
+        "Toggling Z again must return to the neutral cache context.");
+    Require(session.CycleMirror(document, 17U).Succeeded &&
+                session.Mirror() == StampPlacementMirrorMode::X,
+        "CycleMirror must remain available as the quick cycle command.");
     Require(session.Cancel() &&
                 session.Mirror() == StampPlacementMirrorMode::None,
         "Ending the placement session must discard transient mirror state.");

@@ -37,7 +37,11 @@ bool ContextuallyExclusive(
         (left == EditorInputCommand::MirrorZ &&
             right == EditorInputCommand::ScaleZ) ||
         (left == EditorInputCommand::ScaleZ &&
-            right == EditorInputCommand::MirrorZ);
+            right == EditorInputCommand::MirrorZ) ||
+        (left == EditorInputCommand::ToolMove &&
+            right == EditorInputCommand::StampCycleMirror) ||
+        (left == EditorInputCommand::StampCycleMirror &&
+            right == EditorInputCommand::ToolMove);
 }
 }
 
@@ -82,6 +86,8 @@ bool EditorInputService::IsAvailable(
     const EditorInputCommand command,
     const EditorCommandAvailability& availability) const noexcept
 {
+    if (IsToolCommand(command) && availability.CanAdjustStampTransform)
+        return false;
     if (command == EditorInputCommand::ToolMove)
         return availability.HasDocument && availability.CanMoveSelection;
     if (command == EditorInputCommand::ToolDuplicate)
@@ -114,6 +120,9 @@ bool EditorInputService::IsAvailable(
         return availability.CanAdjustAlign;
     if (command == EditorInputCommand::TransformApply)
         return availability.CanApplyTransform;
+    if (command == EditorInputCommand::StampCycleMirror ||
+        command == EditorInputCommand::StampResetTransform)
+        return availability.CanAdjustStampTransform;
     if (IsToolCommand(command)) return availability.HasDocument;
     switch (command)
     {
@@ -173,6 +182,8 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::AlignFront: return "Align.Front";
     case EditorInputCommand::AlignBack: return "Align.Back";
     case EditorInputCommand::TransformApply: return "Transform.Apply";
+    case EditorInputCommand::StampCycleMirror: return "Stamp.CycleMirror";
+    case EditorInputCommand::StampResetTransform: return "Stamp.ResetTransform";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";
     case EditorInputCommand::EditRedo: return "Edit.Redo";

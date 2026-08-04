@@ -39,6 +39,7 @@
 #include <optional>
 #include <memory>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <sstream>
 #include <span>
@@ -52,6 +53,19 @@ namespace
 // VF-0260 (nettoyage) : nom de panneau depuis la source partagee ;
 // les assistants ImGui vivent dans EditorWorkspaceUiHelpers.h.
 constexpr const char* ViewportPanelWindowName = PanelNames::Viewport;
+
+const char* StampMirrorLabel(
+    const Stamps::StampPlacementMirrorMode mirror) noexcept
+{
+    switch (mirror)
+    {
+    case Stamps::StampPlacementMirrorMode::X: return "X";
+    case Stamps::StampPlacementMirrorMode::Z: return "Z";
+    case Stamps::StampPlacementMirrorMode::XZ: return "XZ";
+    case Stamps::StampPlacementMirrorMode::None:
+    default: return "None";
+    }
+}
 }
 
 void EditorWorkspace::DrawScenePanel()
@@ -861,8 +875,22 @@ void EditorWorkspace::DrawScenePanel()
             !hoveredSelectionHandle)
             ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 
+        std::string stampViewportHelp;
         const char* viewportHelp = "Click a voxel to select it";
-        if (voxelToolState_.IsSelectionActive())
+        if (stampPlacementSession_.IsActive())
+        {
+            stampViewportHelp =
+                "Stamp placement - Rotation Y: " +
+                std::to_string(
+                    static_cast<unsigned int>(
+                        stampPlacementSession_.QuarterRotation()) * 90U) +
+                " deg - Mirror: " +
+                StampMirrorLabel(stampPlacementSession_.Mirror()) +
+                " - Q/Shift+Q rotate - X/Z toggle - M cycle - "
+                "Shift+M reset - Esc finish";
+            viewportHelp = stampViewportHelp.c_str();
+        }
+        else if (voxelToolState_.IsSelectionActive())
         {
             if (selectionInteraction_.Mode() ==
                 SelectionInteractionMode::Creating)
@@ -1005,7 +1033,8 @@ void EditorWorkspace::DrawScenePanel()
                 : "Align preview - Enter to apply - Esc to cancel";
         }
         DrawTooltip(viewportHelp);
-        if (voxelToolState_.IsSelectionActive() ||
+        if (stampPlacementSession_.IsActive() ||
+            voxelToolState_.IsSelectionActive() ||
             voxelToolState_.IsMoveActive() ||
             voxelToolState_.IsDuplicateActive() ||
             voxelToolState_.IsRotateActive() ||
