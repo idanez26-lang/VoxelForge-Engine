@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -26,6 +27,7 @@ enum class PaletteMappingStatus
     InvalidStampPalette,
     InvalidStampVoxelSet,
     InvalidStampVoxelReference,
+    InvalidRequiredLocalColorId,
     PaletteCapacityExceeded,
     AllocationFailure
 };
@@ -53,6 +55,8 @@ enum class PaletteMappingStatus
         return "A non-empty stamp palette requires at least one voxel.";
     case PaletteMappingStatus::InvalidStampVoxelReference:
         return "Every stamp voxel must reference an existing palette entry, and every palette entry must be referenced.";
+    case PaletteMappingStatus::InvalidRequiredLocalColorId:
+        return "Every required local color ID must reference an existing Stamp palette entry.";
     case PaletteMappingStatus::PaletteCapacityExceeded:
         return "No non-reserved unoccupied document palette index is available.";
     case PaletteMappingStatus::AllocationFailure:
@@ -89,6 +93,9 @@ struct PaletteMappingRequest final
     std::array<bool, 256U> OccupiedDocumentPaletteIndices{};
     std::size_t PaletteCapacity = 256U;
     std::uint8_t ReservedDocumentPaletteIndex = 0U;
+    // Nullopt maps every Stamp color. An engaged span maps only the selected
+    // local IDs; an engaged empty span intentionally produces no mapping.
+    std::optional<std::span<const std::uint8_t>> RequiredLocalColorIds;
 };
 
 /// Pure planning output. No document, history, renderer, transaction, or Undo/Redo object is

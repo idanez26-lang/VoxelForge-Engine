@@ -21,6 +21,7 @@ struct StampPlacementPlannerRequest final
     StampCollisionPolicy CollisionPolicy = StampCollisionPolicy::Overwrite;
     std::size_t PaletteCapacity = 256U;
     std::uint8_t ReservedDocumentPaletteIndex = 0U;
+    StampResourceLimits ResourceLimits{};
 };
 
 /// Pure placement planner. This is the only component allowed to resolve

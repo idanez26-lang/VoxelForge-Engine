@@ -260,6 +260,10 @@ public:
                palette_.capacity() * sizeof(StampPaletteEntry) +
                voxels_.capacity() * sizeof(StampVoxel);
     }
+    [[nodiscard]] StampResourceUsage ResourceUsage() const noexcept
+    {
+        return CalculateUsage(bounds_, palette_, voxels_);
+    }
 
     [[nodiscard]] bool operator==(const VoxelStamp& other) const noexcept = default;
 

@@ -263,6 +263,41 @@ void TestCapacityAndReservedIndex()
         "A 256-color stamp must overflow the 255 non-reserved destination slots explicitly.");
 }
 
+void TestRequiredColorSubset()
+{
+    const auto palette = Palette(
+        {Color(10U, 1U, 1U), Color(20U, 2U, 2U),
+         Color(30U, 3U, 3U)});
+    const auto voxels = Voxels(3U);
+    std::array<std::uint8_t, 2U> required{2U, 0U};
+    auto request = Request(palette, voxels);
+    request.RequiredLocalColorIds =
+        std::span<const std::uint8_t>{required};
+
+    const auto subset = PaletteMappingEngine::Plan(request);
+    Require(subset.IsSuccess() &&
+                subset.Plan.LocalToDocument ==
+                    std::vector<PaletteMappingEntry>{{0U, 1U}, {2U, 2U}} &&
+                subset.Plan.AddedColorCount == 2U,
+        "A required-color subset must map only selected local IDs in canonical order.");
+
+    const std::array<std::uint8_t, 0U> none{};
+    request.RequiredLocalColorIds =
+        std::span<const std::uint8_t>{none};
+    const auto emptySubset = PaletteMappingEngine::Plan(request);
+    Require(emptySubset.Status == PaletteMappingStatus::NoChange &&
+                emptySubset.Plan.LocalToDocument.empty() &&
+                !emptySubset.Plan.HasPaletteChanges(),
+        "An explicit empty required-color subset must produce no palette changes.");
+
+    const std::array<std::uint8_t, 1U> invalid{3U};
+    request.RequiredLocalColorIds =
+        std::span<const std::uint8_t>{invalid};
+    Require(PaletteMappingEngine::Plan(request).Status ==
+                PaletteMappingStatus::InvalidRequiredLocalColorId,
+        "A required local color outside the Stamp palette must be rejected.");
+}
+
 void TestInvalidInputsAndExtremeRgba()
 {
     auto palette = Palette({Color(0U, 255U, 0U, 0U)});
@@ -305,6 +340,7 @@ int main()
         TestSeveralExistingColorsMixedWithNewColors();
         TestLaterExactMatchIsReservedBeforeEarlierAllocation();
         TestCapacityAndReservedIndex();
+        TestRequiredColorSubset();
         TestInvalidInputsAndExtremeRgba();
     }
     catch (const std::exception& error)

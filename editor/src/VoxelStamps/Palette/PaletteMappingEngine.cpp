@@ -153,6 +153,34 @@ PaletteMappingResult PaletteMappingEngine::Plan(const PaletteMappingRequest& req
             }
         }
 
+        std::array<bool, 256U> requiredLocalColorIds{};
+        if (request.RequiredLocalColorIds)
+        {
+            for (const std::uint8_t localColorId : *request.RequiredLocalColorIds)
+            {
+                if (localColorId >= request.StampPalette.size())
+                {
+                    return MakeError(
+                        PaletteMappingStatus::InvalidRequiredLocalColorId);
+                }
+                requiredLocalColorIds[localColorId] = true;
+            }
+        }
+        else
+        {
+            std::fill_n(requiredLocalColorIds.begin(),
+                        request.StampPalette.size(), true);
+        }
+
+        if (std::none_of(requiredLocalColorIds.begin(),
+                         requiredLocalColorIds.end(),
+                         [](const bool required) { return required; }))
+        {
+            return {.Status = PaletteMappingStatus::NoChange,
+                    .Plan = {.FinalDocumentPalette =
+                                 request.DocumentPalette}};
+        }
+
         std::array<ColorIndexRecord, 255U> documentColorIndex{};
         std::size_t documentColorCount = 0U;
         for (std::size_t index = 0U; index < request.PaletteCapacity; ++index)
@@ -169,11 +197,17 @@ PaletteMappingResult PaletteMappingEngine::Plan(const PaletteMappingRequest& req
                   IsRecordLess);
 
         std::array<StampColorMappingRecord, 256U> stampColorMappings{};
-        std::size_t stampColorMappingCount = request.StampPalette.size();
-        for (std::size_t localId = 0U; localId < stampColorMappingCount; ++localId)
+        std::size_t stampColorMappingCount = 0U;
+        for (std::size_t localId = 0U;
+             localId < request.StampPalette.size(); ++localId)
         {
-            stampColorMappings[localId] = {.Color = request.StampPalette[localId].Color,
-                                           .FirstLocalColorId = static_cast<std::uint8_t>(localId)};
+            if (!requiredLocalColorIds[localId])
+            {
+                continue;
+            }
+            stampColorMappings[stampColorMappingCount++] = {
+                .Color = request.StampPalette[localId].Color,
+                .FirstLocalColorId = static_cast<std::uint8_t>(localId)};
         }
         std::sort(stampColorMappings.begin(),
                   stampColorMappings.begin() + static_cast<std::ptrdiff_t>(stampColorMappingCount),
@@ -225,6 +259,10 @@ PaletteMappingResult PaletteMappingEngine::Plan(const PaletteMappingRequest& req
         // order.
         for (const StampPaletteEntry& stampEntry : request.StampPalette)
         {
+            if (!requiredLocalColorIds[stampEntry.LocalColorId])
+            {
+                continue;
+            }
             StampColorMappingRecord* mapping =
                 FindStampMapping(stampColorMappings, stampColorMappingCount, stampEntry.Color);
             if (mapping == nullptr || mapping->FirstLocalColorId != stampEntry.LocalColorId ||
@@ -249,6 +287,10 @@ PaletteMappingResult PaletteMappingEngine::Plan(const PaletteMappingRequest& req
         plan.AddedColors.reserve(request.StampPalette.size());
         for (const StampPaletteEntry& stampEntry : request.StampPalette)
         {
+            if (!requiredLocalColorIds[stampEntry.LocalColorId])
+            {
+                continue;
+            }
             const StampColorMappingRecord* mapping =
                 FindStampMapping(stampColorMappings, stampColorMappingCount, stampEntry.Color);
             plan.LocalToDocument.push_back({.LocalColorId = stampEntry.LocalColorId,

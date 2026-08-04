@@ -25,13 +25,17 @@ void AddDiagnostic(
     std::int32_t& output) noexcept
 {
     constexpr std::int64_t units = StampFixedPoint::UnitsPerVoxel;
-    if (fixed < std::numeric_limits<std::int32_t>::min() ||
-        fixed > std::numeric_limits<std::int32_t>::max() ||
-        fixed % units != 0)
+    if (fixed % units != 0)
     {
         return false;
     }
-    output = static_cast<std::int32_t>(fixed / units);
+    const std::int64_t gridCoordinate = fixed / units;
+    if (gridCoordinate < std::numeric_limits<std::int32_t>::min() ||
+        gridCoordinate > std::numeric_limits<std::int32_t>::max())
+    {
+        return false;
+    }
+    output = static_cast<std::int32_t>(gridCoordinate);
     return true;
 }
 
@@ -186,6 +190,8 @@ StampPlacementPlan StampPlacementPlanner::Build(
         plan.CollisionPolicy = request.CollisionPolicy;
         plan.DocumentPaletteBefore = request.Document->GetPaletteSnapshot();
         plan.Statistics.TotalVoxelCount = stamp.Voxels().size();
+        plan.ResourceLimitEvaluation = EvaluateStampLimits(
+            stamp.ResourceUsage(), request.ResourceLimits);
 
         plan.CacheKey = {
             .Stamp = plan.Stamp,
@@ -194,7 +200,33 @@ StampPlacementPlan StampPlacementPlanner::Build(
             .DocumentRevision = plan.DocumentRevision,
             .TargetSubModel = plan.TargetSubModel,
             .Transform = plan.Transform,
-            .CollisionPolicy = plan.CollisionPolicy};
+            .CollisionPolicy = plan.CollisionPolicy,
+            .PaletteCapacity = request.PaletteCapacity,
+            .ReservedDocumentPaletteIndex =
+                request.ReservedDocumentPaletteIndex,
+            .ResourceLimits = request.ResourceLimits};
+
+        const bool hasSoftResourceLimitWarning =
+            plan.ResourceLimitEvaluation.Status ==
+                StampLimitStatus::SoftLimitWarning;
+        switch (plan.ResourceLimitEvaluation.Status)
+        {
+        case StampLimitStatus::Accepted:
+        case StampLimitStatus::SoftLimitWarning:
+            break;
+        case StampLimitStatus::HardLimitExceeded:
+        case StampLimitStatus::ArithmeticOverflow:
+            AddDiagnostic(
+                plan,
+                StampPlacementDiagnosticCode::HardResourceLimitExceeded,
+                StampPlacementDiagnosticSeverity::Error);
+            return plan;
+        case StampLimitStatus::InvalidConfiguration:
+            AddDiagnostic(
+                plan, StampPlacementDiagnosticCode::InvalidResourceLimits,
+                StampPlacementDiagnosticSeverity::Error);
+            return plan;
+        }
 
         bool transformSupported = true;
         if (request.Transform.QuarterTurns > 3U)
@@ -213,21 +245,123 @@ StampPlacementPlan StampPlacementPlanner::Build(
                 StampPlacementDiagnosticSeverity::Error);
             transformSupported = false;
         }
-        if (request.CollisionPolicy != StampCollisionPolicy::Overwrite)
+        bool collisionPolicySupported = true;
+        switch (request.CollisionPolicy)
         {
+        case StampCollisionPolicy::Overwrite:
+        case StampCollisionPolicy::Reject:
+        case StampCollisionPolicy::SkipOccupied:
+            break;
+        default:
+            collisionPolicySupported = false;
             AddDiagnostic(
                 plan,
                 StampPlacementDiagnosticCode::UnsupportedCollisionPolicy,
                 StampPlacementDiagnosticSeverity::Error);
+            break;
         }
 
+        plan.Voxels.reserve(stamp.Voxels().size());
+        bool representable = true;
+        bool collisionRejected = false;
+        for (std::size_t ordinal = 0U; ordinal < stamp.Voxels().size();
+             ++ordinal)
+        {
+            const StampVoxel& source = stamp.Voxels()[ordinal];
+            Asset::Voxel::VoxelPosition world{};
+            if (!MakeTransformedGridPosition(
+                    request.Transform, source.Position,
+                    stamp.Pivot().LocalPosition, world))
+            {
+                AddDiagnostic(
+                    plan,
+                    StampPlacementDiagnosticCode::PositionNotRepresentable,
+                    StampPlacementDiagnosticSeverity::Error, ordinal);
+                representable = false;
+                break;
+            }
+
+            const bool outOfBounds = !IsWithinDimensions(world, *dimensions);
+            std::optional<Asset::Voxel::Voxel> existing;
+            if (!outOfBounds)
+            {
+                existing = request.Document->GetVoxel(
+                    world, request.TargetSubModel);
+            }
+            const bool overlap = existing.has_value();
+            const bool skipped = overlap &&
+                request.CollisionPolicy ==
+                    StampCollisionPolicy::SkipOccupied;
+            const StampColor color =
+                stamp.Palette()[source.LocalColorId].Color;
+            plan.Voxels.push_back({
+                .SourceOrdinal = ordinal,
+                .LocalPosition = source.Position,
+                .WorldPosition = world,
+                .LocalPaletteIndex = source.LocalColorId,
+                .DocumentPaletteIndex = 0U,
+                .Color = color,
+                .ExistingVoxel = existing,
+                .FinalVoxel = {},
+                .Overlap = overlap,
+                .Skipped = skipped,
+                .OutOfBounds = outOfBounds});
+            ++plan.Statistics.PlannedVoxelCount;
+            if (overlap)
+            {
+                ++plan.Statistics.OverlapCount;
+            }
+            if (skipped)
+            {
+                ++plan.Statistics.SkippedVoxelCount;
+            }
+            if (outOfBounds)
+            {
+                ++plan.Statistics.OutOfBoundsCount;
+            }
+            ExtendBounds(plan.WorldBounds, world);
+
+            if (overlap &&
+                request.CollisionPolicy == StampCollisionPolicy::Reject)
+            {
+                collisionRejected = true;
+            }
+        }
+
+        std::array<bool, 256U> requiredLocalColorFlags{};
+        for (const StampPlannedVoxel& voxel : plan.Voxels)
+        {
+            if (!voxel.Skipped)
+            {
+                requiredLocalColorFlags[voxel.LocalPaletteIndex] = true;
+            }
+        }
+        std::array<std::uint8_t, 256U> requiredLocalColorIds{};
+        std::size_t requiredLocalColorCount = 0U;
+        for (std::size_t localColorId = 0U;
+             localColorId < stamp.Palette().size(); ++localColorId)
+        {
+            if (requiredLocalColorFlags[localColorId])
+            {
+                requiredLocalColorIds[requiredLocalColorCount++] =
+                    static_cast<std::uint8_t>(localColorId);
+            }
+        }
+
+        std::optional<std::span<const std::uint8_t>> requiredSelection;
+        if (request.CollisionPolicy == StampCollisionPolicy::SkipOccupied)
+        {
+            requiredSelection = std::span<const std::uint8_t>{
+                requiredLocalColorIds.data(), requiredLocalColorCount};
+        }
         PaletteMappingRequest paletteRequest{
             .StampPalette = stamp.Palette(),
             .StampVoxels = stamp.Voxels(),
             .DocumentPalette = plan.DocumentPaletteBefore,
             .PaletteCapacity = request.PaletteCapacity,
             .ReservedDocumentPaletteIndex =
-                request.ReservedDocumentPaletteIndex};
+                request.ReservedDocumentPaletteIndex,
+            .RequiredLocalColorIds = requiredSelection};
         for (std::size_t modelIndex = 0U;
              modelIndex < request.Document->GetModelCount(); ++modelIndex)
         {
@@ -273,77 +407,36 @@ StampPlacementPlan StampPlacementPlanner::Build(
                     entry.DocumentPaletteIndex;
             }
         }
-
-        plan.Voxels.reserve(stamp.Voxels().size());
-        bool representable = true;
-        bool collisionRejected = false;
-        for (std::size_t ordinal = 0U; ordinal < stamp.Voxels().size();
-             ++ordinal)
+        for (StampPlannedVoxel& voxel : plan.Voxels)
         {
-            const StampVoxel& source = stamp.Voxels()[ordinal];
-            Asset::Voxel::VoxelPosition world{};
-            if (!MakeTransformedGridPosition(
-                    request.Transform, source.Position,
-                    stamp.Pivot().LocalPosition, world))
+            if (voxel.Skipped && voxel.ExistingVoxel)
             {
-                AddDiagnostic(
-                    plan,
-                    StampPlacementDiagnosticCode::PositionNotRepresentable,
-                    StampPlacementDiagnosticSeverity::Error, ordinal);
-                representable = false;
-                break;
+                voxel.DocumentPaletteIndex =
+                    voxel.ExistingVoxel->PaletteIndex;
+                voxel.FinalVoxel = *voxel.ExistingVoxel;
+            }
+            else
+            {
+                voxel.DocumentPaletteIndex =
+                    localToDocument[voxel.LocalPaletteIndex];
+                voxel.FinalVoxel =
+                    Asset::Voxel::Voxel{voxel.DocumentPaletteIndex};
             }
 
-            const bool outOfBounds = !IsWithinDimensions(world, *dimensions);
-            std::optional<Asset::Voxel::Voxel> existing;
-            if (!outOfBounds)
+            if (!paletteMappingSucceeded || voxel.OutOfBounds)
             {
-                existing = request.Document->GetVoxel(
-                    world, request.TargetSubModel);
+                continue;
             }
-            const bool overlap = existing.has_value();
-            const std::uint8_t documentPaletteIndex =
-                paletteMappingSucceeded
-                ? localToDocument[source.LocalColorId]
-                : 0U;
-            const Asset::Voxel::Voxel finalVoxel{documentPaletteIndex};
-            const StampColor color =
-                stamp.Palette()[source.LocalColorId].Color;
-            plan.Voxels.push_back({
-                .SourceOrdinal = ordinal,
-                .LocalPosition = source.Position,
-                .WorldPosition = world,
-                .LocalPaletteIndex = source.LocalColorId,
-                .DocumentPaletteIndex = documentPaletteIndex,
-                .Color = color,
-                .ExistingVoxel = existing,
-                .FinalVoxel = finalVoxel,
-                .Overlap = overlap,
-                .OutOfBounds = outOfBounds});
-            ++plan.Statistics.PlannedVoxelCount;
-            if (overlap)
-            {
-                ++plan.Statistics.OverlapCount;
-            }
-            if (outOfBounds)
-            {
-                ++plan.Statistics.OutOfBoundsCount;
-            }
-            if (paletteMappingSucceeded && !outOfBounds &&
-                existing && existing->PaletteIndex == documentPaletteIndex)
+            if (voxel.Skipped ||
+                (voxel.ExistingVoxel &&
+                    voxel.ExistingVoxel->PaletteIndex ==
+                        voxel.DocumentPaletteIndex))
             {
                 ++plan.Statistics.UnchangedVoxelCount;
             }
-            else if (paletteMappingSucceeded && !outOfBounds)
+            else
             {
                 ++plan.Statistics.ChangedVoxelCount;
-            }
-            ExtendBounds(plan.WorldBounds, world);
-
-            if (overlap &&
-                request.CollisionPolicy == StampCollisionPolicy::Reject)
-            {
-                collisionRejected = true;
             }
         }
 
@@ -358,21 +451,28 @@ StampPlacementPlan StampPlacementPlanner::Build(
                 plan, StampPlacementDiagnosticCode::CollisionRejected,
                 StampPlacementDiagnosticSeverity::Error);
         }
+        if (hasSoftResourceLimitWarning)
+        {
+            AddDiagnostic(
+                plan,
+                StampPlacementDiagnosticCode::SoftResourceLimitExceeded,
+                StampPlacementDiagnosticSeverity::Warning);
+        }
 
         const bool hasChanges =
             plan.Statistics.ChangedVoxelCount != 0U ||
             plan.PaletteMapping.HasPaletteChanges();
+        const bool collisionAllowsCommit = collisionPolicySupported &&
+            !collisionRejected;
         if (representable && paletteMappingSucceeded &&
-            transformSupported &&
-            request.CollisionPolicy == StampCollisionPolicy::Overwrite &&
+            transformSupported && collisionAllowsCommit &&
             plan.Statistics.OutOfBoundsCount == 0U && !hasChanges)
         {
             AddDiagnostic(plan, StampPlacementDiagnosticCode::NoChanges,
                 StampPlacementDiagnosticSeverity::Information);
         }
         plan.CanCommit = representable && paletteMappingSucceeded &&
-            transformSupported &&
-            request.CollisionPolicy == StampCollisionPolicy::Overwrite &&
+            transformSupported && collisionAllowsCommit &&
             plan.Statistics.OutOfBoundsCount == 0U && hasChanges &&
             !plan.HasErrors();
     }

@@ -8,6 +8,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -66,13 +67,19 @@ StampPlacementPlan Plan(
         3 * StampFixedPoint::UnitsPerVoxel,
         StampFixedPoint::UnitsPerVoxel,
         StampFixedPoint::UnitsPerVoxel},
+    const StampCollisionPolicy collisionPolicy =
+        StampCollisionPolicy::Overwrite,
+    const StampResourceLimits& resourceLimits =
+        DefaultStampResourceLimits(),
     const std::uint64_t generation = 7U)
 {
     return StampPlacementPlanner::Build({
         .Stamp = &stamp,
         .Document = &document,
         .DocumentGeneration = generation,
-        .Transform = {.TargetPivot = target}});
+        .Transform = {.TargetPivot = target},
+        .CollisionPolicy = collisionPolicy,
+        .ResourceLimits = resourceLimits});
 }
 
 bool HasDiagnostic(
@@ -208,6 +215,131 @@ void TestOverlapAndBoundsDiagnostics()
         "Out-of-bounds cells must block commit with diagnostics.");
 }
 
+void TestCollisionPoliciesAreCompletePlanDecisions()
+{
+    const VoxelStamp stamp = MakeStamp();
+    auto document = MakeDocument();
+    const StampFixedPoint overlapTarget{
+        3 * StampFixedPoint::UnitsPerVoxel,
+        StampFixedPoint::UnitsPerVoxel,
+        StampFixedPoint::UnitsPerVoxel};
+
+    const auto rejected = Plan(stamp, document, overlapTarget,
+        StampCollisionPolicy::Reject);
+    Require(!rejected.CanCommit &&
+                rejected.Statistics.OverlapCount == 1U &&
+                rejected.Statistics.SkippedVoxelCount == 0U &&
+                HasDiagnostic(rejected,
+                    StampPlacementDiagnosticCode::CollisionRejected),
+        "Reject must preserve overlap details and block the complete plan.");
+
+    const auto rejectWithoutOverlap = Plan(stamp, document,
+        {8 * StampFixedPoint::UnitsPerVoxel,
+         StampFixedPoint::UnitsPerVoxel,
+         StampFixedPoint::UnitsPerVoxel},
+        StampCollisionPolicy::Reject);
+    Require(rejectWithoutOverlap.CanCommit &&
+                rejectWithoutOverlap.Statistics.OverlapCount == 0U,
+        "Reject must remain committable when no destination is occupied.");
+
+    const auto skipped = Plan(stamp, document, overlapTarget,
+        StampCollisionPolicy::SkipOccupied);
+    Require(skipped.CanCommit &&
+                skipped.Statistics.OverlapCount == 1U &&
+                skipped.Statistics.SkippedVoxelCount == 1U &&
+                skipped.Statistics.ChangedVoxelCount == 2U &&
+                skipped.Statistics.UnchangedVoxelCount == 1U &&
+                skipped.Voxels[1].Skipped &&
+                skipped.Voxels[1].FinalVoxel ==
+                    *skipped.Voxels[1].ExistingVoxel,
+        "SkipOccupied must retain occupied cells as exact unchanged decisions.");
+    Require(skipped.PaletteMapping.LocalToDocument.size() == 1U &&
+                skipped.PaletteMapping.LocalToDocument.front().LocalColorId ==
+                    0U,
+        "SkipOccupied must not allocate colors used only by skipped cells.");
+    const auto prepared = PreparePlaceVoxelStampOperation(skipped);
+    Require(prepared.IsReady() && prepared.Operation.Changes.size() == 2U,
+        "The operation adapter must omit cells skipped by the plan.");
+    for (const VoxelChange& change : prepared.Operation.Changes)
+    {
+        Require(change.Position != Asset::Voxel::VoxelPosition{4, 1, 1},
+            "A skipped occupied destination must never enter the operation.");
+    }
+
+    Require(document.SetVoxel({3, 1, 1}, 1U).Succeeded &&
+                document.SetVoxel({5, 1, 1}, 1U).Succeeded,
+        "Unable to complete the all-occupied SkipOccupied fixture.");
+    const auto allSkipped = Plan(stamp, document, overlapTarget,
+        StampCollisionPolicy::SkipOccupied);
+    Require(!allSkipped.CanCommit &&
+                allSkipped.Statistics.SkippedVoxelCount == 3U &&
+                allSkipped.Statistics.ChangedVoxelCount == 0U &&
+                allSkipped.PaletteStatus == PaletteMappingStatus::NoChange &&
+                !allSkipped.PaletteMapping.HasPaletteChanges() &&
+                HasDiagnostic(allSkipped,
+                    StampPlacementDiagnosticCode::NoChanges) &&
+                PreparePlaceVoxelStampOperation(allSkipped).IsNoChange(),
+        "An entirely skipped placement must be an exact no-change plan.");
+}
+
+void TestPlacementResourceLimitsAndCacheIdentity()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    const StampFixedPoint target{
+        3 * StampFixedPoint::UnitsPerVoxel,
+        StampFixedPoint::UnitsPerVoxel,
+        StampFixedPoint::UnitsPerVoxel};
+
+    StampResourceLimits soft = DefaultStampResourceLimits();
+    soft.SoftVoxelCount = 2U;
+    soft.HardVoxelCount = 3U;
+    const auto warned = Plan(stamp, document, target,
+        StampCollisionPolicy::Overwrite, soft);
+    Require(warned.CanCommit &&
+                warned.ResourceLimitEvaluation.Status ==
+                    StampLimitStatus::SoftLimitWarning &&
+                HasDiagnostic(warned,
+                    StampPlacementDiagnosticCode::
+                        SoftResourceLimitExceeded),
+        "A soft placement limit must warn without blocking planning.");
+
+    StampResourceLimits hard = soft;
+    hard.SoftVoxelCount = 1U;
+    hard.HardVoxelCount = 2U;
+    const auto refused = Plan(stamp, document, target,
+        StampCollisionPolicy::Overwrite, hard);
+    Require(!refused.CanCommit && refused.Voxels.empty() &&
+                !refused.WorldBounds.Valid &&
+                refused.ResourceLimitEvaluation.Status ==
+                    StampLimitStatus::HardLimitExceeded &&
+                HasDiagnostic(refused,
+                    StampPlacementDiagnosticCode::
+                        HardResourceLimitExceeded),
+        "A hard placement limit must refuse before the plan voxel allocation.");
+
+    StampResourceLimits invalid = soft;
+    invalid.SoftVoxelCount = 4U;
+    invalid.HardVoxelCount = 3U;
+    const auto invalidPlan = Plan(stamp, document, target,
+        StampCollisionPolicy::Overwrite, invalid);
+    Require(!invalidPlan.CanCommit && invalidPlan.Voxels.empty() &&
+                HasDiagnostic(invalidPlan,
+                    StampPlacementDiagnosticCode::InvalidResourceLimits),
+        "Invalid placement limits must fail explicitly before planning.");
+
+    const auto defaults = Plan(stamp, document);
+    const auto reducedPalette = StampPlacementPlanner::Build({
+        .Stamp = &stamp,
+        .Document = &document,
+        .DocumentGeneration = 7U,
+        .Transform = {.TargetPivot = target},
+        .PaletteCapacity = 255U});
+    Require(defaults.CacheKey != reducedPalette.CacheKey &&
+                defaults.CacheKey != warned.CacheKey,
+        "Every request option that changes a plan must participate in its cache identity.");
+}
+
 void TestUnsupportedFutureTransformsAreExplicit()
 {
     const VoxelStamp stamp = MakeStamp();
@@ -232,6 +364,31 @@ void TestUnsupportedFutureTransformsAreExplicit()
                 HasDiagnostic(mirror,
                     StampPlacementDiagnosticCode::UnsupportedMirror),
         "Unknown mirror modes must fail explicitly.");
+}
+
+void TestCoordinateRepresentabilityUsesGridCoordinates()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    constexpr std::int32_t largestAlignedFixedCoordinate =
+        std::numeric_limits<std::int32_t>::max() -
+        (std::numeric_limits<std::int32_t>::max() %
+            StampFixedPoint::UnitsPerVoxel);
+    const auto largeGridCoordinate = Plan(stamp, document,
+        {largestAlignedFixedCoordinate, 0, 0});
+    Require(largeGridCoordinate.Statistics.PlannedVoxelCount == 3U &&
+                largeGridCoordinate.Statistics.OutOfBoundsCount == 3U &&
+                !HasDiagnostic(largeGridCoordinate,
+                    StampPlacementDiagnosticCode::
+                        PositionNotRepresentable),
+        "A valid fixed-point sum must be range-checked after conversion to a grid coordinate.");
+
+    const auto fractional = Plan(stamp, document, {1, 0, 0});
+    Require(!fractional.CanCommit &&
+                HasDiagnostic(fractional,
+                    StampPlacementDiagnosticCode::
+                        PositionNotRepresentable),
+        "A fractional voxel destination must remain explicitly unrepresentable.");
 }
 
 void TestStalePlansAreDetectedByRevisionAndGeneration()
@@ -323,7 +480,10 @@ int main()
         TestValidPlanIsCompleteAndDeterministic();
         TestPreviewAndPlacementArePurePlanAdapters();
         TestOverlapAndBoundsDiagnostics();
+        TestCollisionPoliciesAreCompletePlanDecisions();
+        TestPlacementResourceLimitsAndCacheIdentity();
         TestUnsupportedFutureTransformsAreExplicit();
+        TestCoordinateRepresentabilityUsesGridCoordinates();
         TestStalePlansAreDetectedByRevisionAndGeneration();
         TestSessionLifecycleAndCache();
         TestStaleSessionRebuildRequiresAnotherCommitAttempt();

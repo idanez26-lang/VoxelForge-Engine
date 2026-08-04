@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VoxelStamps/Palette/PaletteMappingEngine.h"
+#include "VoxelStamps/StampResourceLimits.h"
 #include "VoxelStamps/StampTypes.h"
 
 #include "VoxelForge/Asset/Voxel/VoxelDocument.h"
@@ -73,6 +74,9 @@ struct StampPlacementCacheKey final
     std::size_t TargetSubModel = 0U;
     StampPlacementTransform Transform{};
     StampCollisionPolicy CollisionPolicy = StampCollisionPolicy::Overwrite;
+    std::size_t PaletteCapacity = 256U;
+    std::uint8_t ReservedDocumentPaletteIndex = 0U;
+    StampResourceLimits ResourceLimits{};
 
     [[nodiscard]] bool operator==(
         const StampPlacementCacheKey&) const noexcept = default;
@@ -99,6 +103,9 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
     PositionNotRepresentable,
     OutOfBounds,
     CollisionRejected,
+    SoftResourceLimitExceeded,
+    HardResourceLimitExceeded,
+    InvalidResourceLimits,
     NoChanges,
     AllocationFailure
 };
@@ -123,7 +130,7 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
     case StampPlacementDiagnosticCode::UnsupportedMirror:
         return "Stamp mirror must be None, X, Z, or XZ.";
     case StampPlacementDiagnosticCode::UnsupportedCollisionPolicy:
-        return "Only the non-blocking overwrite collision policy is supported.";
+        return "The selected Stamp collision policy is unknown.";
     case StampPlacementDiagnosticCode::PaletteMappingFailed:
         return "The Stamp palette cannot be mapped into the active document.";
     case StampPlacementDiagnosticCode::PositionNotRepresentable:
@@ -132,6 +139,12 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
         return "One or more Stamp voxels lie outside the target sub-model.";
     case StampPlacementDiagnosticCode::CollisionRejected:
         return "The selected collision policy rejects an occupied destination.";
+    case StampPlacementDiagnosticCode::SoftResourceLimitExceeded:
+        return "Stamp placement exceeds a soft resource limit but remains allowed.";
+    case StampPlacementDiagnosticCode::HardResourceLimitExceeded:
+        return "Stamp placement exceeds a hard resource limit.";
+    case StampPlacementDiagnosticCode::InvalidResourceLimits:
+        return "Stamp placement resource limits are invalid.";
     case StampPlacementDiagnosticCode::NoChanges:
         return "The planned Stamp already matches the target document.";
     case StampPlacementDiagnosticCode::AllocationFailure:
@@ -173,6 +186,7 @@ struct StampPlacementStatistics final
     std::size_t PlannedVoxelCount = 0U;
     std::size_t ChangedVoxelCount = 0U;
     std::size_t UnchangedVoxelCount = 0U;
+    std::size_t SkippedVoxelCount = 0U;
     std::size_t OverlapCount = 0U;
     std::size_t OutOfBoundsCount = 0U;
     std::size_t AddedPaletteColorCount = 0U;
@@ -193,6 +207,7 @@ struct StampPlannedVoxel final
     std::optional<Asset::Voxel::Voxel> ExistingVoxel;
     Asset::Voxel::Voxel FinalVoxel{};
     bool Overlap = false;
+    bool Skipped = false;
     bool OutOfBounds = false;
 
     [[nodiscard]] bool operator==(
@@ -216,6 +231,7 @@ struct StampPlacementPlan final
     Asset::Voxel::VoxelDocumentPaletteSnapshot DocumentPaletteBefore{};
     PaletteMappingPlan PaletteMapping{};
     PaletteMappingStatus PaletteStatus = PaletteMappingStatus::Success;
+    StampLimitEvaluation ResourceLimitEvaluation{};
     StampPlacementBounds WorldBounds{};
     StampPlacementStatistics Statistics{};
     std::vector<StampPlacementDiagnostic> Diagnostics;

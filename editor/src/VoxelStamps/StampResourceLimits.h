@@ -20,6 +20,9 @@ struct StampResourceLimits final
     std::uint64_t HardFileBytes = 128U * Mebibyte;
     std::uint32_t SoftChunkCount = 32U;
     std::uint32_t HardChunkCount = 64U;
+
+    [[nodiscard]] bool operator==(
+        const StampResourceLimits&) const noexcept = default;
 };
 
 [[nodiscard]] const StampResourceLimits& DefaultStampResourceLimits() noexcept;

@@ -42,7 +42,7 @@ PlaceVoxelStampPreparation PreparePlaceVoxelStampOperation(
         operation.Changes.reserve(plan.Statistics.ChangedVoxelCount);
         for (const StampPlannedVoxel& voxel : plan.Voxels)
         {
-            if (voxel.OutOfBounds ||
+            if (voxel.OutOfBounds || voxel.Skipped ||
                 (voxel.ExistingVoxel &&
                     voxel.ExistingVoxel->PaletteIndex ==
                         voxel.FinalVoxel.PaletteIndex))
