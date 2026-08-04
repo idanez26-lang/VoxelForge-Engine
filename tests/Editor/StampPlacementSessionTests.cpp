@@ -9,6 +9,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -21,12 +22,13 @@ void Require(const bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
-Asset::Voxel::VoxelDocument MakeDocument()
+Asset::Voxel::VoxelDocument MakeDocument(
+    const Asset::Vox::VoxDimensions dimensions = {16U, 4U, 4U})
 {
     Asset::Vox::VoxModel source{};
     source.Version = 150U;
     source.Palette = Asset::Vox::DefaultVoxPalette();
-    source.Models.push_back({.Dimensions = {16U, 4U, 4U}});
+    source.Models.push_back({.Dimensions = dimensions});
     const auto loaded = Asset::Voxel::VoxDocumentLoader{}.Build(
         source, "stamp-placement-session-test.vox");
     Require(loaded.Succeeded() && loaded.Document,
@@ -52,6 +54,53 @@ VoxelStamp MakeStamp(
         DefaultStampResourceLimits(), &validation);
     Require(stamp && validation.IsValid(),
         "Unable to create Stamp placement session fixture.");
+    return *stamp;
+}
+
+VoxelStamp MakeLargeSixSidedStamp()
+{
+    constexpr std::int32_t width = 18;
+    constexpr std::int32_t height = 24;
+    constexpr std::int32_t depth = 49;
+    constexpr std::size_t expectedVoxelCount = 4633U;
+    std::vector<StampVoxel> voxels;
+    voxels.reserve(expectedVoxelCount);
+    std::size_t interiorAdded = 0U;
+    for (std::int32_t x = 0; x < width; ++x)
+    {
+        for (std::int32_t y = 0; y < height; ++y)
+        {
+            for (std::int32_t z = 0; z < depth; ++z)
+            {
+                const bool boundary = x == 0 || x == width - 1 ||
+                    y == 0 || y == height - 1 || z == 0 || z == depth - 1;
+                if (boundary || interiorAdded < 9U)
+                {
+                    voxels.push_back({{x, y, z}, 0U});
+                    if (!boundary) ++interiorAdded;
+                }
+            }
+        }
+    }
+    Require(voxels.size() == expectedVoxelCount,
+        "Large Stamp fixture must match the real 4633-voxel creation.");
+
+    constexpr std::int32_t fixed = StampFixedPoint::UnitsPerVoxel;
+    StampValidationResult validation{};
+    const auto stamp = VoxelStamp::TryCreate(
+        {Core::UUID{0x4633U}, "large-six-sided-stamp"},
+        {{}, {width - 1, height - 1, depth - 1},
+         {static_cast<std::uint32_t>(width),
+          static_cast<std::uint32_t>(height),
+          static_cast<std::uint32_t>(depth)}},
+        {.RequestedMode = StampPivotMode::Center,
+         .ResolvedMode = StampPivotMode::Center,
+         .LocalPosition = {9 * fixed, 12 * fixed, 24 * fixed}},
+        {},
+        {{0U, {40U, 180U, 105U, 255U}}},
+        std::move(voxels), DefaultStampResourceLimits(), &validation);
+    Require(stamp && validation.IsValid(),
+        "Unable to create the large six-sided Stamp fixture.");
     return *stamp;
 }
 
@@ -226,6 +275,37 @@ void TestContinuousPlacementAndIndependentUndo()
         "Esc-equivalent Cancel must not mutate document or history.");
 }
 
+void TestGizmoTransformPlacesTheCompleteStampAtomically()
+{
+    auto document = MakeDocument();
+    EditSession editSession(document, 16U);
+    VoxelEditHistory history;
+    StampPlacementSession session;
+    const VoxelStamp stamp = MakeStamp();
+    constexpr std::int32_t fixed = StampFixedPoint::UnitsPerVoxel;
+    const StampFixedPoint target{6 * fixed, 0, 2 * fixed};
+    Require(session.Begin(stamp, document, 16U, 0U, {}).Succeeded &&
+                session.SetGizmoTransform(
+                    target, 1U, document, 16U).Succeeded &&
+                session.Target() == target &&
+                session.QuarterRotation() == 1U &&
+                session.CurrentPlan() != nullptr &&
+                session.CurrentPlan()->Statistics.TotalVoxelCount == 2U &&
+                session.CurrentPlan()->Statistics.ChangedVoxelCount == 2U,
+        "The gizmo must move and rotate the complete Stamp preview.");
+
+    const auto placed = session.PlaceOnce(
+        document, 16U, editSession, history);
+    Require(placed && document.GetVoxelCount() == 2U &&
+                document.GetVoxel({6, 0, 2}).has_value() &&
+                document.GetVoxel({6, 0, 1}).has_value() &&
+                history.UndoCount() == 1U && editSession.Rebuilds == 1U,
+        "Gizmo confirmation must place every Stamp voxel in one history operation.");
+    Require(history.Undo(editSession) && document.GetVoxelCount() == 0U &&
+                history.UndoCount() == 0U && history.RedoCount() == 1U,
+        "One Undo must remove the complete gizmo-placed Stamp.");
+}
+
 void TestOrdinalOnlyAdvancesAfterSuccessfulPlacement()
 {
     auto document = MakeDocument();
@@ -336,6 +416,42 @@ void TestDocumentSwitchCancelsAndRestartIsNeutral()
         "A new application session must not restore transient transforms.");
 }
 
+void TestRealScaleSixSidedStampRotatesPlacesAndUndoes()
+{
+    auto document = MakeDocument({64U, 64U, 64U});
+    EditSession editSession(document, 16U);
+    VoxelEditHistory history;
+    StampPlacementSession session;
+    const VoxelStamp stamp = MakeLargeSixSidedStamp();
+    constexpr std::int32_t fixed = StampFixedPoint::UnitsPerVoxel;
+    const StampFixedPoint target{32 * fixed, 32 * fixed, 32 * fixed};
+
+    Require(session.Begin(stamp, document, 16U, 0U, target).Succeeded &&
+                session.CurrentPlan() != nullptr &&
+                session.CurrentPlan()->Statistics.TotalVoxelCount == 4633U &&
+                session.CurrentPlan()->Statistics.ChangedVoxelCount == 4633U,
+        "The real-scale Stamp preview must contain every source voxel.");
+    const auto originalBounds = session.CurrentPlan()->WorldBounds;
+    Require(session.SetGizmoTransform(
+                target, 1U, document, 16U).Succeeded &&
+                session.QuarterRotation() == 1U &&
+                session.CurrentPlan() != nullptr &&
+                session.CurrentPlan()->WorldBounds != originalBounds &&
+                session.CurrentPlan()->Statistics.TotalVoxelCount == 4633U &&
+                session.CurrentPlan()->Statistics.ChangedVoxelCount == 4633U,
+        "Rotate Y must rotate every cell of a real-scale Stamp.");
+
+    const auto placed = session.PlaceOnce(
+        document, 16U, editSession, history);
+    Require(placed && document.GetVoxelCount() == 4633U &&
+                history.UndoCount() == 1U && editSession.Rebuilds == 1U &&
+                editSession.Completions == 1U,
+        "One confirmation must place all 4633 Stamp voxels atomically.");
+    Require(history.Undo(editSession) && document.GetVoxelCount() == 0U &&
+                history.UndoCount() == 0U && history.RedoCount() == 1U,
+        "One Undo must remove the complete 4633-voxel Stamp.");
+}
+
 } // namespace
 
 int main()
@@ -344,8 +460,10 @@ int main()
     {
         TestSelectionUpdateAndTransientState();
         TestContinuousPlacementAndIndependentUndo();
+        TestGizmoTransformPlacesTheCompleteStampAtomically();
         TestOrdinalOnlyAdvancesAfterSuccessfulPlacement();
         TestDocumentSwitchCancelsAndRestartIsNeutral();
+        TestRealScaleSixSidedStampRotatesPlacesAndUndoes();
     }
     catch (const std::exception& error)
     {

@@ -2347,3 +2347,59 @@ set_tests_properties(
     VoxelForge.Editor.StampPerformance
     PROPERTIES LABELS "Performance"
 )
+
+# STAMP-23: one aggregate gate plus the public, headless editor diagnostic
+# switches. Every scenario injects and removes its own project/profile roots.
+add_executable(
+    VoxelForgeEditorVoxelStampSmokeTests
+    Editor/VoxelStampSmokeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelStampSmokeTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorVoxelStampSmokeTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelStampReleaseSmoke
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelStampSmokeTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.VoxelStampReleaseSmoke
+    PROPERTIES
+        LABELS "Smoke;StampRelease"
+        TIMEOUT 30
+)
+
+if(TARGET VoxelForgeEditor)
+    add_test(
+        NAME VoxelForge.Editor.VoxelStampMvpSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-stamp-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.VoxelStampCorruptionSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-stamp-corruption-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.VoxelStampLibrarySmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-stamp-library-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.VoxelStampVariantSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-stamp-variant-smoke-test
+    )
+    add_test(
+        NAME VoxelForge.Editor.VoxelStampSmartPlacementSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-stamp-smart-placement-smoke-test
+    )
+    set_tests_properties(
+        VoxelForge.Editor.VoxelStampMvpSmoke
+        VoxelForge.Editor.VoxelStampCorruptionSmoke
+        VoxelForge.Editor.VoxelStampLibrarySmoke
+        VoxelForge.Editor.VoxelStampVariantSmoke
+        VoxelForge.Editor.VoxelStampSmartPlacementSmoke
+        PROPERTIES
+            LABELS "Smoke;StampRelease"
+            TIMEOUT 30
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    )
+endif()

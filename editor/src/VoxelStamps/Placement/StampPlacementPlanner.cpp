@@ -39,6 +39,35 @@ void AddDiagnostic(
     return true;
 }
 
+// STAMP-23 : un Stamp de largeur ou de profondeur impaire a un pivot centre
+// sur un DEMI voxel (ex. "mur" 18x24x49 -> pivot Z = 24,5). Une rotation de
+// 90 ou 270 degres echange X et Z, donc ce demi-voxel change d'axe et la
+// somme n'est plus un multiple exact d'UnitsPerVoxel : le plan entier etait
+// refuse (PositionNotRepresentable) et l'apercu disparaissait.
+// Le residu est IDENTIQUE pour tous les voxels du Stamp, donc arrondir au
+// voxel le plus proche translate le Stamp d'un demi-voxel sans jamais le
+// deformer. Reserve aux rotations qui echangent les axes ; les rotations 0
+// et 180 gardent le refus strict (une cible sous-voxel reste une erreur).
+[[nodiscard]] bool MakeRoundedGridCoordinate(
+    const std::int64_t fixed,
+    std::int32_t& output) noexcept
+{
+    constexpr std::int64_t units = StampFixedPoint::UnitsPerVoxel;
+    const std::int64_t shifted = fixed + units / 2;
+    std::int64_t gridCoordinate = shifted / units;
+    if (shifted % units != 0 && shifted < 0)
+    {
+        --gridCoordinate; // division tronquee -> plancher pour les negatifs
+    }
+    if (gridCoordinate < std::numeric_limits<std::int32_t>::min() ||
+        gridCoordinate > std::numeric_limits<std::int32_t>::max())
+    {
+        return false;
+    }
+    output = static_cast<std::int32_t>(gridCoordinate);
+    return true;
+}
+
 [[nodiscard]] bool MakeTransformedGridPosition(
     const StampPlacementTransform& transform,
     const StampLocalPosition local,
@@ -95,15 +124,27 @@ void AddDiagnostic(
         return false;
     }
 
-    return MakeGridCoordinate(
+    // Seules les rotations qui echangent X et Z peuvent transferer un pivot
+    // demi-voxel d'un axe a l'autre (cf. MakeRoundedGridCoordinate).
+    const bool axesSwapped =
+        transform.QuarterTurns == 1U || transform.QuarterTurns == 3U;
+    const auto toGrid = [axesSwapped](
+        const std::int64_t fixed, std::int32_t& coordinate) noexcept
+    {
+        return axesSwapped
+            ? MakeRoundedGridCoordinate(fixed, coordinate)
+            : MakeGridCoordinate(fixed, coordinate);
+    };
+
+    return toGrid(
                static_cast<std::int64_t>(transform.TargetPivot.X) +
                    rotatedX,
                output.X) &&
-        MakeGridCoordinate(
+        toGrid(
                static_cast<std::int64_t>(transform.TargetPivot.Y) +
                    relativeY,
                output.Y) &&
-        MakeGridCoordinate(
+        toGrid(
                static_cast<std::int64_t>(transform.TargetPivot.Z) +
                    rotatedZ,
                output.Z);

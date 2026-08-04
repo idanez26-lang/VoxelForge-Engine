@@ -2,6 +2,7 @@
 
 #include "VoxelStamps/Placement/StampPlacementPlan.h"
 
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -62,7 +63,7 @@ void StampPreviewController::Move(
 
     const Stamps::StampPlacementSessionResult result =
         placement_.TranslateTarget(
-            x, y, z, *document, documents_.Generation());
+            x, y, z, *document, editSession_.VoxelModelGeneration());
     if (!result.Succeeded)
     {
         console_.AddMessage(
@@ -81,6 +82,57 @@ void StampPreviewController::Move(
         : "Live Stamp Preview: valid preview active.");
 }
 
+bool StampPreviewController::ApplyGizmoDelta(
+    const Stamps::StampFixedPoint baseTarget,
+    const std::uint8_t baseQuarterTurns,
+    const Asset::Voxel::VoxelPosition translation,
+    const std::int32_t quarterTurnDelta)
+{
+    Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
+    if (!placement_.IsActive() || document == nullptr)
+    {
+        return false;
+    }
+
+    const auto targetComponent = [](const std::int32_t base,
+                                    const std::int32_t delta,
+                                    std::int32_t& output) noexcept
+    {
+        constexpr std::int64_t fixedUnits =
+            Stamps::StampFixedPoint::UnitsPerVoxel;
+        const std::int64_t value =
+            static_cast<std::int64_t>(base) +
+            static_cast<std::int64_t>(delta) * fixedUnits;
+        if (value < std::numeric_limits<std::int32_t>::min() ||
+            value > std::numeric_limits<std::int32_t>::max())
+        {
+            return false;
+        }
+        output = static_cast<std::int32_t>(value);
+        return true;
+    };
+    Stamps::StampFixedPoint target{};
+    if (!targetComponent(baseTarget.X, translation.X, target.X) ||
+        !targetComponent(baseTarget.Y, translation.Y, target.Y) ||
+        !targetComponent(baseTarget.Z, translation.Z, target.Z))
+    {
+        return false;
+    }
+    const std::int32_t turns =
+        (static_cast<std::int32_t>(baseQuarterTurns) + quarterTurnDelta) % 4;
+    const std::uint8_t normalizedTurns = static_cast<std::uint8_t>(
+        turns < 0 ? turns + 4 : turns);
+    const Stamps::StampPlacementSessionResult result =
+        placement_.SetGizmoTransform(
+            target, normalizedTurns, *document,
+            editSession_.VoxelModelGeneration());
+    if (result.PreviewChanged)
+    {
+        onHighlightsChanged_();
+    }
+    return result.Succeeded;
+}
+
 void StampPreviewController::Rotate(const bool clockwise)
 {
     Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
@@ -91,7 +143,7 @@ void StampPreviewController::Rotate(const bool clockwise)
 
     const Stamps::StampPlacementSessionResult result = placement_.Rotate90(
         Stamps::StampPlacementRotationAxis::VerticalY,
-        *document, documents_.Generation(), clockwise);
+        *document, editSession_.VoxelModelGeneration(), clockwise);
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();
@@ -121,7 +173,8 @@ void StampPreviewController::Mirror(
     }
 
     const Stamps::StampPlacementSessionResult result =
-        placement_.SetMirror(mirror, *document, documents_.Generation());
+        placement_.SetMirror(
+            mirror, *document, editSession_.VoxelModelGeneration());
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();
@@ -149,7 +202,8 @@ void StampPreviewController::ToggleMirror(
     }
 
     const Stamps::StampPlacementSessionResult result =
-        placement_.ToggleMirror(axis, *document, documents_.Generation());
+        placement_.ToggleMirror(
+            axis, *document, editSession_.VoxelModelGeneration());
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();
@@ -174,7 +228,7 @@ void StampPreviewController::CycleMirror()
     }
 
     const Stamps::StampPlacementSessionResult result =
-        placement_.CycleMirror(*document, documents_.Generation());
+        placement_.CycleMirror(*document, editSession_.VoxelModelGeneration());
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();
@@ -199,7 +253,7 @@ void StampPreviewController::ResetTransform()
     }
 
     const Stamps::StampPlacementSessionResult result =
-        placement_.ResetTransform(*document, documents_.Generation());
+        placement_.ResetTransform(*document, editSession_.VoxelModelGeneration());
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();
@@ -213,18 +267,33 @@ void StampPreviewController::ResetTransform()
     console_.AddMessage("Live Stamp Preview: transform reset.");
 }
 
-void StampPreviewController::Place()
+bool StampPreviewController::Place()
 {
     Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
     if (document == nullptr || editInProgress_ || history_.IsBusy())
     {
-        return;
+        console_.AddMessage(
+            "Place Stamp failed: the document or Undo history is busy.");
+        return false;
     }
 
+    console_.AddMessage("Place Stamp: command received.");
     editInProgress_ = true;
-    const Stamps::StampPlacementSessionPlaceResult result =
+    Stamps::StampPlacementSessionPlaceResult result =
         placement_.PlaceOnce(
-            *document, documents_.Generation(), editSession_, history_);
+            *document, editSession_.VoxelModelGeneration(),
+            editSession_, history_);
+    // A UI confirmation is a single user action. If an unrelated document
+    // revision made the immutable plan stale, refresh once and immediately
+    // execute the now-current plan instead of requiring a mysterious second
+    // click.
+    if (result.Status ==
+        Stamps::StampPlacementSessionPlaceStatus::PreviewRefreshed)
+    {
+        result = placement_.PlaceOnce(
+            *document, editSession_.VoxelModelGeneration(),
+            editSession_, history_);
+    }
     editInProgress_ = false;
     if (result.PreviewChanged)
     {
@@ -236,33 +305,34 @@ void StampPreviewController::Place()
         console_.AddMessage(
             "Place Stamp: the document changed; preview refreshed. "
             "Click again to place.");
-        return;
+        return false;
     }
     if (result.Status ==
         Stamps::StampPlacementSessionPlaceStatus::DocumentChanged)
     {
         console_.AddMessage(
             "Place Stamp: active document changed; placement cancelled.");
-        return;
+        return false;
     }
     if (result.Status == Stamps::StampPlacementSessionPlaceStatus::Inactive)
     {
-        return;
+        return false;
     }
     if (result.Status == Stamps::StampPlacementSessionPlaceStatus::NoChange)
     {
         console_.AddMessage(
             "Place Stamp: preview already matches the document.");
-        return;
+        return false;
     }
     if (!result)
     {
         console_.AddMessage(
             "Place Stamp failed: " + result.History.Message);
-        return;
+        return false;
     }
 
     console_.AddMessage("Placed Stamp: " + result.History.Label);
+    return true;
 }
 
 bool StampPreviewController::Refresh()
@@ -274,7 +344,7 @@ bool StampPreviewController::Refresh()
     }
 
     const Stamps::StampPlacementSessionResult result =
-        placement_.Rebuild(*document, documents_.Generation());
+        placement_.Rebuild(*document, editSession_.VoxelModelGeneration());
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();

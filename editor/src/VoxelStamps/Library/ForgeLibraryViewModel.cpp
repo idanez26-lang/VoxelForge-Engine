@@ -603,7 +603,9 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::ActivateSelected(
     RecordRecent(item->CatalogEntry.Reference);
     if (ForgeLibraryItem* const mutableItem = FindItem(*selectedId_))
         mutableItem->Recent = true;
-    statusMessage_ = "Stamp placement active. Move in the viewport, click to place, Esc to finish.";
+    statusMessage_ =
+        "Stamp Placement active in Tool Options. Use the Move/Rotate Y "
+        "gizmo, then press Enter or choose Place Full Stamp; Esc cancels.";
     return {
         .Succeeded = true,
         .SessionActivated = true,

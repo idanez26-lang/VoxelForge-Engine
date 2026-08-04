@@ -276,6 +276,7 @@ void TestActiveStampTransformContext()
     stamp.CanCancelInteraction = true;
     stamp.CanAdjustRotation = true;
     stamp.CanAdjustMirror = true;
+    stamp.CanApplyTransform = true;
     stamp.CanAdjustStampTransform = true;
 
     Require(
@@ -291,6 +292,8 @@ void TestActiveStampTransformContext()
                 EditorInputCommand::StampCycleMirror &&
             Resolve(service, EditorInputKey::M, stamp, false, true) ==
                 EditorInputCommand::StampResetTransform &&
+            Resolve(service, EditorInputKey::Enter, stamp) ==
+                EditorInputCommand::TransformApply &&
             Resolve(service, EditorInputKey::Escape, stamp) ==
                 EditorInputCommand::InteractionCancel,
         "Active Stamp placement shortcuts do not own their transform commands.");

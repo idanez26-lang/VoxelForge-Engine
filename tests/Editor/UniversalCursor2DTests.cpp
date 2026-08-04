@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 namespace
 {
@@ -282,6 +283,41 @@ void TestFacePlanGhostSurfaceCullsSharedFaces()
             duplicateSurface.Cells.front().GhostIndex == 0U,
         "Duplicate Face ghost coordinates must remain stable and must not "
         "duplicate surface geometry.");
+
+    // Match the size of the creation used during manual validation. A full
+    // boundary shell contains 4624 cells; nine interior cells bring the
+    // fixture to 4633 while preserving exposed surfaces in every direction.
+    std::vector<GhostVoxel> largeStamp;
+    largeStamp.reserve(4633U);
+    std::size_t interiorAdded = 0U;
+    for (int x = 0; x < 18; ++x)
+    {
+        for (int y = 0; y < 24; ++y)
+        {
+            for (int z = 0; z < 49; ++z)
+            {
+                const bool boundary = x == 0 || x == 17 ||
+                    y == 0 || y == 23 || z == 0 || z == 48;
+                if (boundary || interiorAdded < 9U)
+                {
+                    largeStamp.push_back(ghost({x, y, z}));
+                    if (!boundary) ++interiorAdded;
+                }
+            }
+        }
+    }
+    const FacePlanGhostSurface largeSurface =
+        BuildFacePlanGhostSurface(largeStamp);
+    std::uint8_t largeSurfaceSides = 0U;
+    for (const FacePlanGhostSurfaceCell& cell : largeSurface.Cells)
+        largeSurfaceSides = static_cast<std::uint8_t>(
+            largeSurfaceSides | cell.ExposedFaceMask);
+    Require(largeStamp.size() == 4633U &&
+            largeSurface.ExposedFaceCount != 0U &&
+            largeSurface.ExposedFaceCount < largeStamp.size() * 6U &&
+            largeSurfaceSides == 0x3FU,
+        "A 4633-cell Stamp preview must retain exposed geometry on all six "
+        "sides while culling its hidden internal faces.");
 
     const FacePlanGhostVoxelBounds left =
         MakeFacePlanGhostVoxelBounds({10, 20, 30});

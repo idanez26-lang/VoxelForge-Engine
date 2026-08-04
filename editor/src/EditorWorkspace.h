@@ -283,6 +283,7 @@ private:
     void DrawExplorerPanel();
     void DrawToolsPanel();
     void DrawToolOptionsPanel();
+    void DrawStampPlacementToolOptions();
     void DrawScenePanel();
     void DrawWelcomeScreen();
     void DrawInspectorPanel();
@@ -313,8 +314,12 @@ private:
     void ToggleLatestStampPreview(Stamps::StampPlacementMirrorMode axis);
     void CycleLatestStampPreview();
     void ResetLatestStampTransform();
+    void RequestLatestStampPlacement() noexcept;
     void PlaceLatestStampPreview();
+    [[nodiscard]] bool CanPlaceLatestStampPreview() const noexcept;
     [[nodiscard]] bool RefreshLatestStampPreview();
+    [[nodiscard]] std::optional<SelectionBounds>
+        CurrentStampPreviewBounds() const noexcept;
     void ClearLatestStampPreview() noexcept;
     void ConsumeFileDialogResult();
     [[nodiscard]] bool DrawPathInput(
@@ -492,6 +497,13 @@ private:
     Stamps::SaveSelectionAsStampWorkflow saveSelectionAsStampWorkflow_{
         stampProjectLibraryRepository_, stampJsonCatalogStore_};
     Stamps::StampPlacementSession stampPlacementSession_;
+    ActiveVoxelTool stampGizmoTool_ = ActiveVoxelTool::Move;
+    bool stampPlacementRequested_ = false;
+    std::string stampPlacementUiMessage_;
+    bool stampGizmoDragActive_ = false;
+    Stamps::StampFixedPoint stampGizmoDragStartTarget_{};
+    std::uint8_t stampGizmoDragStartQuarterTurns_ = 0U;
+    SelectionBounds stampGizmoDragStartBounds_{};
     Stamps::ForgeLibraryViewModel forgeLibraryViewModel_{
         stampCatalogService_, stampUserCatalogService_, stampAssetCache_,
         stampPlacementSession_};

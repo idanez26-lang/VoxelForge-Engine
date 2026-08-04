@@ -297,6 +297,7 @@ void AppendTransformGizmo(
     for (const TransformGizmoAxisView& axis : gizmo.Axes)
     {
         if (centerOnly) break;
+        if (!axis.Enabled) continue;
         const Vec3 shaftEnd = axis.HasArrowHead
             ? axis.ArrowBaseCenter : axis.End;
         const float thickness = axis.Thickness > 0.0F
@@ -1696,10 +1697,7 @@ bool ViewportRenderer::EnsureHighlights()
             SmartBrushGhostGeometryStyle::VoxelBoxes &&
         ghostPreviewCount <= IndividualGhostOutlineLimit;
     const bool drawIndividualVoxelPreviewOutlines =
-        smartBrushGhostGeometryStyle_ ==
-            SmartBrushGhostGeometryStyle::ExposedFaceSurface
-        ? voxelPreviewGhosts_.size() <= IndividualGhostOutlineLimit
-        : drawIndividualGhostOutlines;
+        voxelPreviewGhosts_.size() <= IndividualGhostOutlineLimit;
     if (smartBrushGhostGeometryStyle_ ==
         SmartBrushGhostGeometryStyle::ExposedFaceSurface)
     {
@@ -1749,9 +1747,53 @@ bool ViewportRenderer::EnsureHighlights()
             AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
                 drawIndividualGhostOutlines);
     }
-    for (const GhostVoxel& ghost : voxelPreviewGhosts_)
-        AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
-            drawIndividualVoxelPreviewOutlines);
+    if (drawIndividualVoxelPreviewOutlines)
+    {
+        for (const GhostVoxel& ghost : voxelPreviewGhosts_)
+            AppendGhostVoxel(ghostVertices, ghostIndices, ghost, modelCenter_,
+                true);
+    }
+    else if (!voxelPreviewGhosts_.empty())
+    {
+        // Large reusable creations must read as one complete object. Drawing
+        // all six faces of every translucent cell creates thousands of
+        // overlapping internal surfaces, which look like sliced or missing
+        // sides. Materialize only the exact exposed envelope instead.
+        const FacePlanGhostSurface stampSurface =
+            BuildFacePlanGhostSurface(voxelPreviewGhosts_);
+        ghostVertices.reserve(
+            ghostVertices.size() + stampSurface.ExposedFaceCount * 4U);
+        ghostIndices.reserve(
+            ghostIndices.size() + stampSurface.ExposedFaceCount * 6U);
+        for (const FacePlanGhostSurfaceCell& cell : stampSurface.Cells)
+        {
+            const GhostVoxel& ghost =
+                voxelPreviewGhosts_[cell.GhostIndex];
+            const FacePlanGhostVoxelBounds voxelBounds =
+                MakeFacePlanGhostVoxelBounds(ghost.Position);
+            std::array<float, 4> fillColor = ghost.Color;
+            fillColor[3] = std::clamp(ghost.Alpha, 0.0F, 1.0F);
+            const std::array<float, 3> minimum{
+                voxelBounds.Minimum[0] - modelCenter_.X,
+                voxelBounds.Minimum[1] - modelCenter_.Y,
+                voxelBounds.Minimum[2] - modelCenter_.Z};
+            const std::array<float, 3> maximum{
+                voxelBounds.Maximum[0] - modelCenter_.X,
+                voxelBounds.Maximum[1] - modelCenter_.Y,
+                voxelBounds.Maximum[2] - modelCenter_.Z};
+            for (std::size_t side = 0U; side < GuideFaces.size(); ++side)
+            {
+                const auto ghostSide =
+                    static_cast<FacePlanGhostSide>(side);
+                if ((cell.ExposedFaceMask &
+                    FacePlanGhostSideBit(ghostSide)) != 0U)
+                {
+                    AppendBoxFace(ghostVertices, ghostIndices,
+                        minimum, maximum, fillColor, ghostSide);
+                }
+            }
+        }
+    }
     if (smartBrushGhostGeometryStyle_ ==
             SmartBrushGhostGeometryStyle::VoxelBoxes &&
         !drawIndividualGhostOutlines && ghostPreviewCount != 0U)

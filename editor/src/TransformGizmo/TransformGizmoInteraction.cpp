@@ -118,7 +118,7 @@ TransformGizmoAxis TransformGizmoInteraction::UpdateHover(
     {
         for (const TransformGizmoAxisView& axis : view.Axes)
         {
-            if (!axis.HasScaleHandle) continue;
+            if (!axis.Enabled || !axis.HasScaleHandle) continue;
             const auto end = TransformGizmoModel::ProjectWorldToScreen(
                 axis.End, input.Viewport, input.ViewProjection);
             if (!end) continue;
@@ -139,6 +139,7 @@ TransformGizmoAxis TransformGizmoInteraction::UpdateHover(
     }
     for (const TransformGizmoAxisView& axis : view.Axes)
     {
+        if (!axis.Enabled) continue;
         if (view.Mode == TransformGizmoMode::Scale &&
             !axis.HasScaleHandle)
             continue;
@@ -273,6 +274,7 @@ bool TransformGizmoInteraction::BeginDrag(
         [axis](const TransformGizmoAxisView& candidate)
         { return candidate.Axis == axis; });
     if (axisView == view.Axes.end() ||
+        !axisView->Enabled ||
         (view.Mode == TransformGizmoMode::Scale &&
          !axisView->HasScaleHandle))
         return false;

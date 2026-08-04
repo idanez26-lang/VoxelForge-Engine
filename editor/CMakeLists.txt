@@ -336,6 +336,8 @@ target_sources(
     VoxelForgeEditorVoxelStamps
     PRIVATE
         src/VoxelStamps/StampResourceLimits.cpp
+        # STAMP-23: isolated headless V1 release-gate smoke scenarios.
+        src/VoxelStamps/Diagnostics/VoxelStampSmokeTest.cpp
         src/VoxelStamps/Capture/StampCaptureService.cpp
         src/VoxelStamps/Capture/StampAutoPivotResolver.cpp
         src/VoxelStamps/Format/VfstampReader.cpp

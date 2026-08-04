@@ -206,6 +206,23 @@ StampPlacementSessionResult StampPlacementSession::SetQuarterRotation(
     return BuildCurrent(document, documentGeneration);
 }
 
+StampPlacementSessionResult StampPlacementSession::SetGizmoTransform(
+    const StampFixedPoint targetPivot,
+    const std::uint8_t quarterTurns,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+    transform_.TargetPivot = targetPivot;
+    transform_.RotationAxis = StampPlacementRotationAxis::VerticalY;
+    transform_.QuarterTurns = static_cast<std::uint8_t>(quarterTurns % 4U);
+    smartPlacementOrientationLocked_ = true;
+    return BuildCurrent(document, documentGeneration);
+}
+
 StampPlacementSessionResult StampPlacementSession::Rotate90(
     const StampPlacementRotationAxis axis,
     const Asset::Voxel::VoxelDocument& document,

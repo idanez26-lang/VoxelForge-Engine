@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 #include "EditorWindowTitle.h"
+#include "VoxelStamps/Diagnostics/VoxelStampSmokeTest.h"
 #include "VoxelStamps/Library/StampCatalogService.h"
 #include "VoxelStamps/Library/StampJsonCatalogStore.h"
 #include "VoxelStamps/Library/StampProjectLibraryRepository.h"
@@ -21,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -94,6 +96,8 @@ struct CommandLine final
     bool StampLivePreviewVisualTest = false;
     bool StampPlacementVisualTest = false;
     bool ForgeLibraryVisualTest = false;
+    std::optional<VoxelForge::Editor::Stamps::VoxelStampSmokeMode>
+        VoxelStampSmokeTest;
     bool VoxelSelectionSmokeTest = false;
     bool VoxelSelectionVisualTest = false;
     bool EraseVoxelSmokeTest = false;
@@ -160,6 +164,31 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
             argument == "--stamp-placement-visual-test";
         result.ForgeLibraryVisualTest |=
             argument == "--forge-library-visual-test";
+        if (argument == "--voxel-stamp-smoke-test")
+        {
+            result.VoxelStampSmokeTest =
+                VoxelForge::Editor::Stamps::VoxelStampSmokeMode::Mvp;
+        }
+        else if (argument == "--voxel-stamp-corruption-smoke-test")
+        {
+            result.VoxelStampSmokeTest =
+                VoxelForge::Editor::Stamps::VoxelStampSmokeMode::Corruption;
+        }
+        else if (argument == "--voxel-stamp-library-smoke-test")
+        {
+            result.VoxelStampSmokeTest =
+                VoxelForge::Editor::Stamps::VoxelStampSmokeMode::Library;
+        }
+        else if (argument == "--voxel-stamp-variant-smoke-test")
+        {
+            result.VoxelStampSmokeTest =
+                VoxelForge::Editor::Stamps::VoxelStampSmokeMode::Variant;
+        }
+        else if (argument == "--voxel-stamp-smart-placement-smoke-test")
+        {
+            result.VoxelStampSmokeTest = VoxelForge::Editor::Stamps::
+                VoxelStampSmokeMode::SmartPlacement;
+        }
         result.VoxelSelectionSmokeTest |=
             argument == "--voxel-selection-smoke-test" ||
             argument == "--selection-system-smoke-test" ||
@@ -550,6 +579,15 @@ int main(const int argumentCount, char* arguments[])
     {
         const CommandLine commandLine =
             ParseCommandLine(argumentCount, arguments);
+        if (commandLine.VoxelStampSmokeTest)
+        {
+            const VoxelForge::Editor::Stamps::VoxelStampSmokeResult smoke =
+                VoxelForge::Editor::Stamps::RunVoxelStampSmokeTest(
+                    *commandLine.VoxelStampSmokeTest);
+            (smoke.Succeeded ? std::cout : std::cerr)
+                << smoke.Message << '\n';
+            return smoke.Succeeded ? 0 : 1;
+        }
         ViewportTestFixture viewportFixture;
         const bool viewportTest =
             commandLine.ViewportSmokeTest || commandLine.ViewportVisualTest ||

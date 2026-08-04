@@ -449,7 +449,7 @@ bool TransformGizmoModel::Update(
         result[2] *= intensity;
         return result;
     };
-    const auto makeAxis = [&next, &sizings, &styled, mode, worldCenter](
+    const auto makeAxis = [&context, &next, &sizings, &styled, mode, worldCenter](
         const std::size_t index,
         const TransformGizmoAxis axis,
         const std::array<float, 4U> color)
@@ -458,6 +458,8 @@ bool TransformGizmoModel::Update(
         const Vec3 direction = AxisVector(axis);
         TransformGizmoAxisView result;
         result.Axis = axis;
+        result.Enabled = context.AxisEnabled[index];
+        if (!result.Enabled) return result;
         result.Start = worldCenter;
         result.End = worldCenter + direction * sizing.WorldLength;
         result.Color = styled(axis, color);

@@ -576,6 +576,12 @@ void EditorWorkspace::Draw()
         ImGui::ShowDemoWindow(&showImGuiDemo_);
     }
 
+    if (stampPlacementRequested_)
+    {
+        stampPlacementRequested_ = false;
+        PlaceLatestStampPreview();
+    }
+
     DrawStatusBar();
     DrawAboutPopup();
     DrawProjectDialogs();
@@ -925,14 +931,16 @@ void EditorWorkspace::DrawMainMenuBar()
         }
 
         if (ImGui::MenuItem(
-                "Place Stamp Preview (Developer)", nullptr, false,
-                liveStampPreviewActive && voxelDocumentSession_.HasActiveDocument() &&
-                    !voxelEditInProgress_))
+                "Place Full Stamp",
+                shortcut(EditorInputCommand::TransformApply), false,
+                CanPlaceLatestStampPreview()))
         {
-            PlaceLatestStampPreview();
+            RequestLatestStampPlacement();
         }
 
-        if (ImGui::MenuItem("Clear Stamp Preview", "Esc", false, liveStampPreviewActive))
+        if (ImGui::MenuItem(
+                "Cancel Stamp Placement", "Esc", false,
+                liveStampPreviewActive))
         {
             ClearLatestStampPreview();
         }
@@ -1338,6 +1346,7 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
     const bool stampTransform = documentHistory &&
         stampPlacementSession_.IsActive() && !voxelEditInProgress_ &&
         !voxelEditHistory_.IsBusy();
+    const bool stampPlacement = CanPlaceLatestStampPreview();
     return {
         documentHistory,
         documentHistory
@@ -1368,13 +1377,14 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
         voxelToolState_.IsScaleActive() && CanScaleSelection(),
         CanAlignSelection(),
         voxelToolState_.IsAlignActive() && CanAlignSelection(),
-        (voxelToolState_.IsRotateActive() ||
-         voxelToolState_.IsMirrorActive() ||
-         voxelToolState_.IsScaleActive() ||
-         voxelToolState_.IsAlignActive()) &&
-            transformPreviewModel_.IsActive() &&
-            !transformPreviewModel_.HasCollisions() &&
-            !transformPreviewModel_.HasOutOfBounds(),
+        stampPlacement ||
+            ((voxelToolState_.IsRotateActive() ||
+              voxelToolState_.IsMirrorActive() ||
+              voxelToolState_.IsScaleActive() ||
+              voxelToolState_.IsAlignActive()) &&
+             transformPreviewModel_.IsActive() &&
+             !transformPreviewModel_.HasCollisions() &&
+             !transformPreviewModel_.HasOutOfBounds()),
         stampTransform};
 }
 
@@ -1504,7 +1514,9 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         static_cast<void>(BeginVoxelAlignPreview(VoxelAlignDirection::Back));
         break;
     case EditorInputCommand::TransformApply:
-        if (voxelToolState_.IsRotateActive())
+        if (stampPlacementSession_.IsActive())
+            RequestLatestStampPlacement();
+        else if (voxelToolState_.IsRotateActive())
             static_cast<void>(ApplyVoxelRotate());
         else if (voxelToolState_.IsMirrorActive())
             static_cast<void>(ApplyVoxelMirror());
@@ -1824,9 +1836,12 @@ void EditorWorkspace::DrawToolsPanel()
     ImGui::TextUnformatted("TOOLS");
     ImGui::TextDisabled("Active");
     ImGui::SameLine();
-    ImGui::TextUnformatted(
-        activeTool.Name.data(),
-        activeTool.Name.data() + activeTool.Name.size());
+    if (stampPlacementSession_.IsActive())
+        ImGui::TextUnformatted("Stamp Placement");
+    else
+        ImGui::TextUnformatted(
+            activeTool.Name.data(),
+            activeTool.Name.data() + activeTool.Name.size());
     ImGui::Separator();
 
     constexpr float MinimumToolbarHeight = 96.0F;
@@ -1835,15 +1850,31 @@ void EditorWorkspace::DrawToolsPanel()
     if (ImGui::BeginChild(
             "##CreateTools", ImVec2(0.0F, toolbarHeight), true))
     {
-        EditorToolbar::Draw(
-            {activeDocument != nullptr, canSave, voxelToolState_.ActiveTool(),
-             CanMoveSelection(), CanDuplicateSelection(), CanRotateSelection(),
-             CanMirrorSelection(), CanScaleSelection(), CanAlignSelection()},
-            editorInputService_,
-            {[this](const EditorInputCommand command)
-             {
-                 ExecuteInputCommand(command);
-             }});
+        if (stampPlacementSession_.IsActive())
+        {
+            ImGui::TextDisabled("ACTIVE TOOL");
+            ImGui::TextUnformatted("Stamp Placement");
+            ImGui::Spacing();
+            ImGui::TextWrapped(
+                "The complete Stamp is attached to the viewport gizmo.");
+            ImGui::Spacing();
+            ImGui::TextDisabled(
+                "Use Tool Options to place or cancel the Stamp.");
+        }
+        else
+        {
+            EditorToolbar::Draw(
+                {activeDocument != nullptr, canSave,
+                 voxelToolState_.ActiveTool(), CanMoveSelection(),
+                 CanDuplicateSelection(), CanRotateSelection(),
+                 CanMirrorSelection(), CanScaleSelection(),
+                 CanAlignSelection()},
+                editorInputService_,
+                {[this](const EditorInputCommand command)
+                 {
+                     ExecuteInputCommand(command);
+                 }});
+        }
     }
     ImGui::EndChild();
     ImGui::End();
@@ -1865,12 +1896,117 @@ void EditorWorkspace::DrawToolOptionsPanel()
     if (ImGui::BeginChild(
             "##ActiveToolOptions", ImVec2(0.0F, optionsHeight), true))
     {
-        smartBrushPreviewRefreshRequested_ =
-            ToolPanel::Draw(toolManager_, toolContext_) ||
-            smartBrushPreviewRefreshRequested_;
+        if (stampPlacementSession_.IsActive())
+            DrawStampPlacementToolOptions();
+        else
+            smartBrushPreviewRefreshRequested_ =
+                ToolPanel::Draw(toolManager_, toolContext_) ||
+                smartBrushPreviewRefreshRequested_;
     }
     ImGui::EndChild();
     ImGui::End();
+}
+
+void EditorWorkspace::DrawStampPlacementToolOptions()
+{
+    const bool gizmoBusy = transformGizmoManager_.IsDragging();
+
+    ImGui::TextDisabled("ACTIVE TOOL");
+    ImGui::TextUnformatted("Stamp Placement");
+    ImGui::Spacing();
+    ImGui::TextWrapped(
+        "Move or rotate the complete preview, then confirm its placement.");
+    ImGui::SeparatorText("MANIPULATOR");
+
+    ImGui::BeginDisabled(gizmoBusy);
+    if (ImGui::RadioButton(
+            "Move", stampGizmoTool_ == ActiveVoxelTool::Move))
+    {
+        stampGizmoTool_ = ActiveVoxelTool::Move;
+        static_cast<void>(transformGizmoManager_.OnToolChanged(
+            stampGizmoTool_));
+    }
+    if (ImGui::RadioButton(
+            "Rotation gizmo (Y)",
+            stampGizmoTool_ == ActiveVoxelTool::Rotate))
+    {
+        stampGizmoTool_ = ActiveVoxelTool::Rotate;
+        static_cast<void>(transformGizmoManager_.OnToolChanged(
+            stampGizmoTool_));
+    }
+    ImGui::TextDisabled(
+        "Rotation Y: %u degrees",
+        static_cast<unsigned int>(
+            stampPlacementSession_.QuarterRotation()) * 90U);
+    if (ImGui::Button("Rotate left 90  [Q]", ImVec2(-1.0F, 0.0F)))
+    {
+        stampGizmoTool_ = ActiveVoxelTool::Rotate;
+        static_cast<void>(transformGizmoManager_.OnToolChanged(
+            stampGizmoTool_));
+        RotateLatestStampPreview(false);
+    }
+    if (ImGui::Button(
+            "Rotate right 90  [Shift+Q]", ImVec2(-1.0F, 0.0F)))
+    {
+        stampGizmoTool_ = ActiveVoxelTool::Rotate;
+        static_cast<void>(transformGizmoManager_.OnToolChanged(
+            stampGizmoTool_));
+        RotateLatestStampPreview(true);
+    }
+    if (ImGui::Button("Reset transform", ImVec2(-1.0F, 0.0F)))
+        ResetLatestStampTransform();
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("PLACEMENT");
+    const Stamps::StampPlacementPlan* const plan =
+        stampPlacementSession_.CurrentPlan();
+    if (plan != nullptr)
+    {
+        ImGui::Text("%zu voxels", plan->Statistics.TotalVoxelCount);
+        ImGui::TextDisabled(
+            "%zu cells changed", plan->Statistics.ChangedVoxelCount);
+        ImGui::TextDisabled(
+            "%zu overlaps", plan->Statistics.OverlapCount);
+        if (plan->Statistics.OutOfBoundsCount != 0U)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0F, 0.42F, 0.35F, 1.0F),
+                "%zu out of bounds",
+                plan->Statistics.OutOfBoundsCount);
+        }
+    }
+
+    const bool canPlace = CanPlaceLatestStampPreview();
+    ImGui::BeginDisabled(!canPlace);
+    ImGui::PushStyleColor(
+        ImGuiCol_Button, ImVec4(0.08F, 0.48F, 0.28F, 1.0F));
+    ImGui::PushStyleColor(
+        ImGuiCol_ButtonHovered, ImVec4(0.10F, 0.62F, 0.35F, 1.0F));
+    ImGui::PushStyleColor(
+        ImGuiCol_ButtonActive, ImVec4(0.07F, 0.38F, 0.22F, 1.0F));
+    if (ImGui::Button(
+            "PLACE FULL STAMP", ImVec2(-1.0F, 38.0F)))
+    {
+        RequestLatestStampPlacement();
+    }
+    ImGui::PopStyleColor(3);
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("Enter confirms the complete Stamp");
+    if (!stampPlacementUiMessage_.empty())
+    {
+        ImGui::TextWrapped("%s", stampPlacementUiMessage_.c_str());
+    }
+    if (!canPlace && plan != nullptr)
+    {
+        ImGui::TextWrapped(
+            plan->Statistics.OutOfBoundsCount != 0U
+                ? "Move the Stamp completely inside the model."
+                : "This preview cannot change the document here.");
+    }
+
+    ImGui::Spacing();
+    if (ImGui::Button("Cancel placement  [Esc]", ImVec2(-1.0F, 0.0F)))
+        ClearLatestStampPreview();
 }
 
 
@@ -2666,9 +2802,15 @@ void EditorWorkspace::DrawAssetBrowserPanel()
 
 void EditorWorkspace::DrawForgeLibraryPanel()
 {
+    // STAMP-23 : la generation qui identifie le document pour les Stamps est
+    // celle de VoxelEditSession (VoxelModelGeneration), car c'est elle que
+    // ExecutePlaceVoxelStampOperation revalide au moment du commit. Utiliser
+    // voxelDocumentSession_.Generation() ici faisait diverger les deux
+    // compteurs (ClearVoxelViewport n'incremente que le premier) et le
+    // placement etait refuse in extremis.
     const Stamps::ForgeLibraryPanelResult result = forgeLibraryPanel_.Draw(
         &showForgeLibrary_, voxelDocumentSession_.ActiveDocument(),
-        voxelDocumentSession_.Generation());
+        VoxelModelGeneration());
     if (result.SaveSelectionRequested)
         BeginSaveSelectionAsStamp();
     if (result.ShowAssetsRequested)
@@ -2677,7 +2819,16 @@ void EditorWorkspace::DrawForgeLibraryPanel()
         ImGui::SetWindowFocus(AssetsPanelWindowName);
     }
     if (result.SessionActivated)
+    {
+        stampGizmoTool_ = ActiveVoxelTool::Move;
+        stampPlacementRequested_ = false;
+        stampPlacementUiMessage_ =
+            "Ready: move the preview, then place the complete Stamp.";
+        stampGizmoDragActive_ = false;
+        stampGizmoDragStartBounds_ = {};
+        transformGizmoManager_.Reset();
         UpdateVoxelHighlights();
+    }
     if (!result.Message.empty())
         AddConsoleMessage("Forge Library: " + result.Message);
 }
@@ -2939,11 +3090,44 @@ void EditorWorkspace::CycleLatestStampPreview()
 void EditorWorkspace::ResetLatestStampTransform()
 {
     stampPreview_.ResetTransform();
+    stampPlacementUiMessage_.clear();
+}
+
+void EditorWorkspace::RequestLatestStampPlacement() noexcept
+{
+    if (!CanPlaceLatestStampPreview()) return;
+    stampPlacementRequested_ = true;
+    stampPlacementUiMessage_ = "Placement requested...";
 }
 
 void EditorWorkspace::PlaceLatestStampPreview()
 {
-    stampPreview_.Place();
+    const Stamps::StampPlacementPlan* const plan =
+        stampPlacementSession_.CurrentPlan();
+    const std::size_t changed = plan != nullptr
+        ? plan->Statistics.ChangedVoxelCount : 0U;
+    if (stampPreview_.Place())
+    {
+        stampPlacementUiMessage_ =
+            "STAMP PLACED: " + std::to_string(changed) +
+            " cells. Move the preview before placing another copy.";
+    }
+    else
+    {
+        stampPlacementUiMessage_ =
+            "Placement failed. The detailed reason is shown in Console.";
+    }
+}
+
+bool EditorWorkspace::CanPlaceLatestStampPreview() const noexcept
+{
+    const Stamps::StampPlacementPlan* const plan =
+        stampPlacementSession_.CurrentPlan();
+    return stampPlacementSession_.IsActive() &&
+        voxelDocumentSession_.HasActiveDocument() &&
+        !voxelEditInProgress_ && !voxelEditHistory_.IsBusy() &&
+        !transformGizmoManager_.IsDragging() && plan != nullptr &&
+        plan->CanCommit && plan->Statistics.ChangedVoxelCount != 0U;
 }
 
 bool EditorWorkspace::RefreshLatestStampPreview()
@@ -2951,8 +3135,27 @@ bool EditorWorkspace::RefreshLatestStampPreview()
     return stampPreview_.Refresh();
 }
 
+std::optional<SelectionBounds>
+EditorWorkspace::CurrentStampPreviewBounds() const noexcept
+{
+    const Stamps::StampPlacementPlan* const plan =
+        stampPlacementSession_.CurrentPlan();
+    if (plan == nullptr || !plan->WorldBounds.Valid)
+        return std::nullopt;
+    return SelectionBounds{
+        plan->WorldBounds.Minimum,
+        plan->WorldBounds.Maximum,
+        true};
+}
+
 void EditorWorkspace::ClearLatestStampPreview() noexcept
 {
+    stampPlacementRequested_ = false;
+    stampPlacementUiMessage_.clear();
+    static_cast<void>(transformGizmoManager_.CancelInteraction());
+    stampGizmoDragActive_ = false;
+    stampGizmoDragStartBounds_ = {};
+    stampGizmoTool_ = ActiveVoxelTool::Move;
     stampPreview_.Clear();
 }
 
@@ -6671,7 +6874,11 @@ void EditorWorkspace::CommitPencilViewportInteractionV2()
 void EditorWorkspace::UpdateTransformGizmo(
     const float viewportHeightPixels) noexcept
 {
-    if (useViewportInteractionV2_ &&
+    const std::optional<SelectionBounds> stampBounds =
+        CurrentStampPreviewBounds();
+    const bool stampGizmo = stampPlacementSession_.IsActive() &&
+        stampBounds.has_value();
+    if (!stampGizmo && useViewportInteractionV2_ &&
         (voxelToolState_.IsSelectionActive() ||
          voxelToolState_.IsMoveActive()))
     {
@@ -6681,14 +6888,18 @@ void EditorWorkspace::UpdateTransformGizmo(
     }
     const Asset::Voxel::VoxelDocument* document =
         voxelDocumentSession_.ActiveDocument();
-    const SelectionBounds gizmoBounds =
-        transformGizmoManager_.IsDragging() &&
-            transformPreviewModel_.IsActive()
-        ? transformPreviewModel_.PreviewBounds()
-        : selectionService_.EditableBounds();
-    if (document != nullptr && !selectionService_.Empty() &&
-        selectionService_.DocumentGeneration() ==
-            voxelDocumentSession_.Generation() && gizmoBounds.Valid)
+    const SelectionBounds gizmoBounds = stampGizmo
+        ? *stampBounds
+        : transformGizmoManager_.IsDragging() &&
+                transformPreviewModel_.IsActive()
+            ? transformPreviewModel_.PreviewBounds()
+            : selectionService_.EditableBounds();
+    const bool gizmoSourceValid = stampGizmo
+        ? document != nullptr && voxelDocumentSession_.Generation() != 0U
+        : document != nullptr && !selectionService_.Empty() &&
+            selectionService_.DocumentGeneration() ==
+                voxelDocumentSession_.Generation();
+    if (gizmoSourceValid && gizmoBounds.Valid)
     {
         static_cast<void>(transformPivotManager_.UpdateFromBounds(
             gizmoBounds, voxelModelCenter_));
@@ -6699,14 +6910,19 @@ void EditorWorkspace::UpdateTransformGizmo(
     }
     TransformGizmoUpdateContext context;
     context.DocumentActive = document != nullptr;
-    context.SelectionEmpty = selectionService_.Empty();
+    context.SelectionEmpty = stampGizmo
+        ? false : selectionService_.Empty();
     context.Closing =
         closeRequest_.State() != EditorCloseRequestState::None;
     context.ActiveDocumentGeneration = voxelDocumentSession_.Generation();
     context.SelectionDocumentGeneration =
-        selectionService_.DocumentGeneration();
+        stampGizmo ? voxelDocumentSession_.Generation()
+                   : selectionService_.DocumentGeneration();
     context.Bounds = gizmoBounds;
-    context.ActiveTool = voxelToolState_.ActiveTool();
+    context.ActiveTool = stampGizmo
+        ? stampGizmoTool_ : voxelToolState_.ActiveTool();
+    if (stampGizmo && stampGizmoTool_ == ActiveVoxelTool::Rotate)
+        context.AxisEnabled = {{false, true, false}};
     context.CameraPosition = viewportCamera_.GetPosition();
     context.CameraForward = viewportCamera_.GetForward();
     context.VerticalFieldOfViewDegrees =

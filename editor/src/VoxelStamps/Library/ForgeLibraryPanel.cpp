@@ -171,6 +171,20 @@ ForgeLibraryPanelResult ForgeLibraryPanel::Draw(
     ImGui::TextUnformatted("FORGE LIBRARY");
     ImGui::SameLine();
     ImGui::TextDisabled("%s", ScopeLabel(viewModel_.Scope()));
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Select or double-click a creation to start its exact preview.\n"
+            "Stamp Placement commands are shown in Tool Options. Drag the "
+            "Move gizmo axes, or choose Rotate Y and drag its ring. Enter or "
+            "PLACE FULL STAMP confirms the complete preview.\n"
+            "Q/Shift+Q rotate, X/Z mirror, "
+            "M cycles mirrors, Shift+M resets, Esc cancels.\n"
+            "Refresh rebuilds the derived catalogue; source .vfstamp assets "
+            "remain authoritative.");
+    }
     ImGui::Separator();
     DrawToolbar(panelResult);
     if (viewModel_.NeedsRefresh())

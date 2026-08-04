@@ -6,6 +6,7 @@
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -391,6 +392,88 @@ void TestCoordinateRepresentabilityUsesGridCoordinates()
         "A fractional voxel destination must remain explicitly unrepresentable.");
 }
 
+// STAMP-23 : un Stamp de profondeur impaire a un pivot centre sur un demi
+// voxel ; la rotation 90/270 transfere ce demi-voxel sur l'autre axe. Le plan
+// doit alors etre arrondi au voxel le plus proche (translation uniforme) et
+// non refuse en bloc — sinon la rotation est impossible sur la plupart des
+// Stamps reels (cas observe : "mur" 18x24x49).
+void TestHalfVoxelPivotRotatesWithoutLosingVoxels()
+{
+    StampValidationResult validation{};
+    const auto halfPivotStamp = VoxelStamp::TryCreate(
+        {Core::UUID{0x5354414d503233ULL}, "stamp-23-half-pivot"},
+        {{0, 0, 0}, {0, 0, 2}, {1U, 1U, 3U}},
+        {.RequestedMode = StampPivotMode::Center,
+         .ResolvedMode = StampPivotMode::Center,
+         // Z = 1,5 voxel : exactement le cas d'une profondeur impaire.
+         .LocalPosition = {0, 0, 3 * StampFixedPoint::UnitsPerVoxel / 2}},
+        {},
+        {{0U, {11U, 22U, 33U, 255U}}},
+        {{{0, 0, 0}, 0U}, {{0, 0, 1}, 0U}, {{0, 0, 2}, 0U}},
+        DefaultStampResourceLimits(), &validation);
+    Require(halfPivotStamp && validation.IsValid(),
+        "Half-voxel pivot Stamp fixture must be valid.");
+
+    const auto document = MakeDocument();
+    // La cible reprend le residu du pivot, exactement comme la session reelle
+    // (SelectAsset initialise la cible sur le pivot du Stamp) : sans rotation
+    // les deux residus s'annulent et la position reste exacte.
+    const StampFixedPoint target{
+        6 * StampFixedPoint::UnitsPerVoxel,
+        2 * StampFixedPoint::UnitsPerVoxel,
+        3 * StampFixedPoint::UnitsPerVoxel +
+            StampFixedPoint::UnitsPerVoxel / 2};
+
+    const auto unrotated = StampPlacementPlanner::Build({
+        .Stamp = &*halfPivotStamp,
+        .Document = &document,
+        .DocumentGeneration = 7U,
+        .Transform = {.TargetPivot = target},
+        .CollisionPolicy = StampCollisionPolicy::Overwrite,
+        .ResourceLimits = DefaultStampResourceLimits()});
+    Require(unrotated.CanCommit &&
+            unrotated.Statistics.PlannedVoxelCount == 3U,
+        "The unrotated half-voxel pivot Stamp must plan every voxel.");
+
+    for (const std::uint8_t quarterTurns : {1U, 3U})
+    {
+        const auto rotated = StampPlacementPlanner::Build({
+            .Stamp = &*halfPivotStamp,
+            .Document = &document,
+            .DocumentGeneration = 7U,
+            .Transform = {
+                .TargetPivot = target, .QuarterTurns = quarterTurns},
+            .CollisionPolicy = StampCollisionPolicy::Overwrite,
+            .ResourceLimits = DefaultStampResourceLimits()});
+        Require(!HasDiagnostic(rotated,
+                    StampPlacementDiagnosticCode::PositionNotRepresentable),
+            "A half-voxel pivot must not make a quarter rotation unrepresentable.");
+        Require(rotated.CanCommit &&
+                rotated.Statistics.PlannedVoxelCount == 3U &&
+                rotated.Statistics.OutOfBoundsCount == 0U,
+            "A quarter rotation must keep every voxel of the Stamp.");
+
+        // La forme reste rigide : trois cellules distinctes et contigues sur
+        // l'axe X apres la rotation, meme Y et meme Z.
+        Require(rotated.Voxels.size() == 3U,
+            "The rotated plan must expose one cell per source voxel.");
+        std::int32_t minimumX = rotated.Voxels[0].WorldPosition.X;
+        std::int32_t maximumX = minimumX;
+        for (const auto& voxel : rotated.Voxels)
+        {
+            minimumX = std::min(minimumX, voxel.WorldPosition.X);
+            maximumX = std::max(maximumX, voxel.WorldPosition.X);
+            Require(voxel.WorldPosition.Y ==
+                        rotated.Voxels[0].WorldPosition.Y &&
+                    voxel.WorldPosition.Z ==
+                        rotated.Voxels[0].WorldPosition.Z,
+                "A quarter rotation must not deform the Stamp.");
+        }
+        Require(maximumX - minimumX == 2,
+            "The rotated Stamp must stay three contiguous cells long.");
+    }
+}
+
 void TestStalePlansAreDetectedByRevisionAndGeneration()
 {
     const VoxelStamp stamp = MakeStamp();
@@ -483,6 +566,7 @@ int main()
         TestPlacementResourceLimitsAndCacheIdentity();
         TestUnsupportedFutureTransformsAreExplicit();
         TestCoordinateRepresentabilityUsesGridCoordinates();
+        TestHalfVoxelPivotRotatesWithoutLosingVoxels();
         TestStalePlansAreDetectedByRevisionAndGeneration();
         TestSessionLifecycleAndCache();
         TestStaleSessionRebuildRequiresAnotherCommitAttempt();

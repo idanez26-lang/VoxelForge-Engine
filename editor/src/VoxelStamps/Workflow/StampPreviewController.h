@@ -31,12 +31,17 @@ public:
         HighlightsChangedCallback onHighlightsChanged);
 
     void Move(std::int32_t x, std::int32_t y, std::int32_t z);
+    bool ApplyGizmoDelta(
+        Stamps::StampFixedPoint baseTarget,
+        std::uint8_t baseQuarterTurns,
+        Asset::Voxel::VoxelPosition translation,
+        std::int32_t quarterTurnDelta);
     void Rotate(bool clockwise);
     void Mirror(Stamps::StampPlacementMirrorMode mirror);
     void ToggleMirror(Stamps::StampPlacementMirrorMode axis);
     void CycleMirror();
     void ResetTransform();
-    void Place();
+    [[nodiscard]] bool Place();
     bool Refresh();
     void Clear() noexcept;
 

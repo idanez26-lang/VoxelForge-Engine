@@ -802,14 +802,25 @@ void EditorWorkspace::CancelTransformGizmoInteraction() noexcept
         TransformGizmoMode::Scale;
     const bool changed = static_cast<bool>(
         transformGizmoManager_.CancelInteraction());
-    const bool previewCancelled = transformPreviewModel_.CancelPreview();
+    bool stampRestored = false;
+    if (stampGizmoDragActive_ && stampPlacementSession_.IsActive())
+    {
+        stampRestored = stampPreview_.ApplyGizmoDelta(
+            stampGizmoDragStartTarget_,
+            stampGizmoDragStartQuarterTurns_,
+            {}, 0);
+    }
+    stampGizmoDragActive_ = false;
+    stampGizmoDragStartBounds_ = {};
+    const bool previewCancelled = stampPlacementSession_.IsActive()
+        ? false : transformPreviewModel_.CancelPreview();
     if (rotate) voxelRotateStatusMessage_.clear();
     if (scale)
     {
         voxelScaleTargetDimensions_.reset();
         voxelScaleStatusMessage_.clear();
     }
-    if (changed || previewCancelled) UpdateVoxelHighlights();
+    if (changed || stampRestored || previewCancelled) UpdateVoxelHighlights();
 }
 
 } // namespace VoxelForge::Editor

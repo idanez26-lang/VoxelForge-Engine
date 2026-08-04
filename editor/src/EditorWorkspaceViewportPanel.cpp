@@ -286,8 +286,53 @@ void EditorWorkspace::DrawScenePanel()
             EditorInputCommand::EditRedo)) + ")";
     DrawTooltip(redoTooltip.c_str());
 
+    if (stampPlacementSession_.IsActive())
+    {
+        const bool gizmoBusy = transformGizmoManager_.IsDragging();
+        ImGui::SeparatorText("STAMP PLACEMENT");
+        ImGui::BeginDisabled(gizmoBusy);
+        if (ImGui::RadioButton(
+                "Move", stampGizmoTool_ == ActiveVoxelTool::Move))
+        {
+            stampGizmoTool_ = ActiveVoxelTool::Move;
+            static_cast<void>(transformGizmoManager_.OnToolChanged(
+                stampGizmoTool_));
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton(
+                "Rotate Y", stampGizmoTool_ == ActiveVoxelTool::Rotate))
+        {
+            stampGizmoTool_ = ActiveVoxelTool::Rotate;
+            static_cast<void>(transformGizmoManager_.OnToolChanged(
+                stampGizmoTool_));
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        const bool canPlaceStamp = CanPlaceLatestStampPreview();
+        ImGui::BeginDisabled(!canPlaceStamp);
+        if (ImGui::Button("PLACE FULL STAMP  [Enter]"))
+            RequestLatestStampPlacement();
+        ImGui::EndDisabled();
+        DrawTooltip("Place the complete preview as one Undo/Redo operation");
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel [Esc]"))
+            ClearLatestStampPreview();
+        const Stamps::StampPlacementPlan* const currentStampPlan =
+            stampPlacementSession_.CurrentPlan();
+        if (currentStampPlan != nullptr)
+        {
+            ImGui::TextDisabled(
+                "%zu source voxels | %zu cells will change | %zu overlaps | %zu out of bounds",
+                currentStampPlan->Statistics.TotalVoxelCount,
+                currentStampPlan->Statistics.ChangedVoxelCount,
+                currentStampPlan->Statistics.OverlapCount,
+                currentStampPlan->Statistics.OutOfBoundsCount);
+        }
+    }
+
     bool eraseRequested = false;
     bool addRequested = false;
+    ImGui::BeginDisabled(stampPlacementSession_.IsActive());
     const AddVoxelTarget addTarget = ResolveAddVoxelTarget();
     ImGui::BeginDisabled(!addTarget);
     if (ImGui::Button("Add Adjacent"))
@@ -301,6 +346,7 @@ void EditorWorkspace::DrawScenePanel()
         eraseRequested = true;
     ImGui::EndDisabled();
     DrawTooltip("Erase the selected voxel (Delete)");
+    ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::TextDisabled("Delete");
     if (voxelSaveState_.IsDirty())
@@ -368,7 +414,8 @@ void EditorWorkspace::DrawScenePanel()
         const ImGuiIO& io = ImGui::GetIO();
         SelectionHandles selectionHandles{};
         std::optional<SelectionHandle> hoveredSelectionHandle;
-        if (!useViewportInteractionV2_ &&
+        if (!stampPlacementSession_.IsActive() &&
+            !useViewportInteractionV2_ &&
             (voxelToolState_.IsSelectionActive() ||
              voxelToolState_.IsMoveActive() ||
              voxelToolState_.IsDuplicateActive() ||
@@ -508,14 +555,6 @@ void EditorWorkspace::DrawScenePanel()
         }
         bool selectionInputAvailable = imageHovered && sceneFocused &&
             !inputBlocked && !cameraControl;
-        const bool stampPreviewConsumesPointer = selectionInputAvailable &&
-            stampPlacementSession_.CurrentPreview() != nullptr &&
-            ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-        if (stampPreviewConsumesPointer)
-        {
-            PlaceLatestStampPreview();
-            selectionInputAvailable = false;
-        }
         const Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
         const auto previousWorkplaneHit = workplaneHit_;
@@ -584,15 +623,26 @@ void EditorWorkspace::DrawScenePanel()
         gizmoPointerInput.Viewport = currentViewportRectangle_;
         gizmoPointerInput.ViewProjection = viewportCamera_.GetViewProjection();
         gizmoPointerInput.Ray = viewportRay;
-        const bool gizmoToolAvailable = !useViewportInteractionV2_ &&
-            (voxelToolState_.IsMoveActive() && CanMoveSelection()) ||
-            (voxelToolState_.IsRotateActive() && CanRotateSelection()) ||
-            (voxelToolState_.IsScaleActive() && CanScaleSelection());
+        const std::optional<SelectionBounds> stampBounds =
+            CurrentStampPreviewBounds();
+        const bool stampGizmo = stampPlacementSession_.IsActive() &&
+            stampBounds.has_value();
+        const bool selectionGizmoToolAvailable = !useViewportInteractionV2_ &&
+            ((voxelToolState_.IsMoveActive() && CanMoveSelection()) ||
+             (voxelToolState_.IsRotateActive() && CanRotateSelection()) ||
+             (voxelToolState_.IsScaleActive() && CanScaleSelection()));
+        const bool gizmoToolAvailable = stampGizmo ||
+            selectionGizmoToolAvailable;
+        const SelectionBounds gizmoContextBounds = stampGizmo
+            ? stampGizmoDragActive_
+                ? stampGizmoDragStartBounds_ : *stampBounds
+            : selectionService_.EditableBounds();
         const TransformGizmoRuntimeContext gizmoContext{
             document != nullptr,
             document != nullptr && voxelDocumentSession_.Generation() != 0U,
-            !selectionService_.Empty() &&
-                selectionService_.EditableBounds().Valid,
+            stampGizmo ? gizmoContextBounds.Valid
+                       : !selectionService_.Empty() &&
+                            selectionService_.EditableBounds().Valid,
             gizmoToolAvailable,
             sceneFocused && currentViewportRectangle_.Width > 0.0F &&
                 currentViewportRectangle_.Height > 0.0F,
@@ -601,13 +651,15 @@ void EditorWorkspace::DrawScenePanel()
             cameraControl,
             dragDropActive,
             closeRequest_.State() != EditorCloseRequestState::None,
-            document == nullptr || !transformPreviewModel_.IsActive() ||
-                transformPreviewModel_.IsValidFor(
-                    *document, selectionService_,
-                    voxelDocumentSession_.Generation()),
-            voxelToolState_.ActiveTool(),
+            stampGizmo ? stampPlacementSession_.CurrentPreview() != nullptr
+                       : document == nullptr ||
+                            !transformPreviewModel_.IsActive() ||
+                            transformPreviewModel_.IsValidFor(
+                                *document, selectionService_,
+                                voxelDocumentSession_.Generation()),
+            stampGizmo ? stampGizmoTool_ : voxelToolState_.ActiveTool(),
             voxelDocumentSession_.Generation(),
-            selectionService_.EditableBounds()};
+            gizmoContextBounds};
         const TransformGizmoCancellation gizmoContextCancellation =
             transformGizmoManager_.UpdateContext(gizmoContext);
         if (gizmoContextCancellation)
@@ -624,12 +676,21 @@ void EditorWorkspace::DrawScenePanel()
             TransformGizmoCursorRecommendation::ResizeAll)
             ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
         bool gizmoCaptured = false;
-        if (!stampPreviewConsumesPointer && gizmoInputAvailable && gizmoAxisHovered &&
+        if (gizmoInputAvailable && gizmoAxisHovered &&
             ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         {
             gizmoCaptured =
                 transformGizmoManager_.BeginInteraction(gizmoPointerInput);
-            if (gizmoCaptured &&
+            if (gizmoCaptured && stampGizmo)
+            {
+                stampGizmoDragActive_ = true;
+                stampGizmoDragStartTarget_ =
+                    stampPlacementSession_.Target();
+                stampGizmoDragStartQuarterTurns_ =
+                    stampPlacementSession_.QuarterRotation();
+                stampGizmoDragStartBounds_ = *stampBounds;
+            }
+            else if (gizmoCaptured &&
                 (voxelToolState_.IsMoveActive() ||
                  voxelToolState_.IsScaleActive()))
                 gizmoCaptured = transformPreviewModel_.BeginPreview(
@@ -649,7 +710,19 @@ void EditorWorkspace::DrawScenePanel()
             ImGui::IsMouseDown(ImGuiMouseButton_Left) && document &&
             transformGizmoManager_.UpdateInteraction(gizmoPointerInput))
         {
-            if (transformGizmoManager_.Mode() == TransformGizmoMode::Move)
+            if (stampGizmoDragActive_)
+            {
+                const bool moved = stampPreview_.ApplyGizmoDelta(
+                    stampGizmoDragStartTarget_,
+                    stampGizmoDragStartQuarterTurns_,
+                    transformGizmoManager_.Mode() == TransformGizmoMode::Move
+                        ? transformGizmoManager_.Delta()
+                        : Asset::Voxel::VoxelPosition{},
+                    transformGizmoManager_.Mode() == TransformGizmoMode::Rotate
+                        ? transformGizmoManager_.QuarterTurns() : 0);
+                if (!moved) CancelTransformGizmoInteraction();
+            }
+            else if (transformGizmoManager_.Mode() == TransformGizmoMode::Move)
                 static_cast<void>(transformPreviewModel_.SetDelta(
                     *document, selectionService_,
                     voxelDocumentSession_.Generation(),
@@ -691,7 +764,10 @@ void EditorWorkspace::DrawScenePanel()
             CancelTransformGizmoInteraction();
         const bool gizmoConsumesPointer = gizmoCaptured || gizmoAxisHovered ||
             transformGizmoManager_.IsDragging();
-        const bool interactionV2ToolActive = useViewportInteractionV2_ &&
+        if (stampPlacementSession_.IsActive())
+            selectionInputAvailable = false;
+        const bool interactionV2ToolActive =
+            !stampPlacementSession_.IsActive() && useViewportInteractionV2_ &&
             (voxelToolState_.IsSelectionActive() ||
              voxelToolState_.IsMoveActive());
         if (interactionV2ToolActive)
@@ -880,14 +956,15 @@ void EditorWorkspace::DrawScenePanel()
         if (stampPlacementSession_.IsActive())
         {
             stampViewportHelp =
-                "Stamp placement - Rotation Y: " +
+                "Stamp placement - Drag gizmo axes to move - Select Rotate Y "
+                "for the ring - Enter places the full Stamp - Rotation Y: " +
                 std::to_string(
                     static_cast<unsigned int>(
                         stampPlacementSession_.QuarterRotation()) * 90U) +
                 " deg - Mirror: " +
                 StampMirrorLabel(stampPlacementSession_.Mirror()) +
                 " - Q/Shift+Q rotate - X/Z toggle - M cycle - "
-                "Shift+M reset - Esc finish";
+                "Shift+M reset - Esc cancel";
             viewportHelp = stampViewportHelp.c_str();
         }
         else if (voxelToolState_.IsSelectionActive())
@@ -1478,7 +1555,13 @@ void EditorWorkspace::DrawScenePanel()
         {
             const TransformGizmoDragRelease gizmoRelease =
                 transformGizmoManager_.EndInteraction();
-            if (gizmoRelease.WasDragging)
+            if (gizmoRelease.WasDragging && stampGizmoDragActive_)
+            {
+                stampGizmoDragActive_ = false;
+                stampGizmoDragStartBounds_ = {};
+                UpdateVoxelHighlights();
+            }
+            else if (gizmoRelease.WasDragging)
             {
                 if (gizmoRelease.Mode == TransformGizmoMode::Rotate)
                 {
@@ -1504,7 +1587,7 @@ void EditorWorkspace::DrawScenePanel()
                     static_cast<void>(ApplyVoxelMove());
                 UpdateVoxelHighlights();
             }
-            else
+            else if (!stampPlacementSession_.IsActive())
             {
                 const SelectionPointerRelease release =
                     selectionInteraction_.PointerUp();

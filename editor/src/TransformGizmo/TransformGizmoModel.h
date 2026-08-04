@@ -66,6 +66,7 @@ struct TransformGizmoAxisView final
     bool HasRotationRing = false;
     float RotationRingRadius = 0.0F;
     std::array<Vec3, RotationRingSegmentCount> RotationRingPoints{};
+    bool Enabled = true;
 
     [[nodiscard]] bool operator==(
         const TransformGizmoAxisView&) const noexcept = default;
@@ -97,6 +98,7 @@ struct TransformGizmoUpdateContext final
     std::uint64_t SelectionDocumentGeneration = 0U;
     SelectionBounds Bounds{};
     ActiveVoxelTool ActiveTool = ActiveVoxelTool::None;
+    std::array<bool, 3U> AxisEnabled{{true, true, true}};
     bool PivotValid = false;
     Vec3 PivotWorldPosition{};
     Vec3 CameraPosition{};

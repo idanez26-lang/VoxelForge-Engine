@@ -612,6 +612,23 @@ void TestNoDocumentOrHistoryMutation()
             !history.CanUndo() && !history.CanRedo(),
         "Gizmo evaluation must not create or modify edit history.");
 }
+
+void TestAxisFilteringForRestrictedTransforms()
+{
+    TransformGizmoModel model;
+    TransformGizmoUpdateContext context = MakeProjectedContext(
+        {}, Normalize(Vec3{1.0F, 1.0F, 1.0F}), 20.0F);
+    context.ActiveTool = ActiveVoxelTool::Rotate;
+    context.AxisEnabled = {{false, true, false}};
+    Require(model.Update(context) && model.View().Visible &&
+                !model.View().Axes[0].Enabled &&
+                model.View().Axes[1].Enabled &&
+                !model.View().Axes[2].Enabled &&
+                !model.View().Axes[0].HasRotationRing &&
+                model.View().Axes[1].HasRotationRing &&
+                !model.View().Axes[2].HasRotationRing,
+        "A restricted transform must expose only its supported gizmo axis.");
+}
 }
 
 int main()
@@ -625,6 +642,7 @@ int main()
         TestSelectionShapeControlsHybridWorldSize();
         TestImmutableRenderViewAndConstantPrimitives();
         TestNoDocumentOrHistoryMutation();
+        TestAxisFilteringForRestrictedTransforms();
     }
     catch (const std::exception& error)
     {

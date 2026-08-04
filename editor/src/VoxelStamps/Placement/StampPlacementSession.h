@@ -163,6 +163,11 @@ public:
         std::uint8_t quarterTurns,
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult SetGizmoTransform(
+        StampFixedPoint targetPivot,
+        std::uint8_t quarterTurns,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
     [[nodiscard]] StampPlacementSessionResult Rotate90(
         StampPlacementRotationAxis axis,
         const Asset::Voxel::VoxelDocument& document,
