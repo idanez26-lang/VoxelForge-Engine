@@ -78,6 +78,27 @@ StampPlacementPlan Plan(
             .QuarterTurns = quarterTurns}});
 }
 
+// STAMP-24 : meme fixture, mais l'axe de rotation devient explicite.
+StampPlacementPlan PlanAroundAxis(
+    const VoxelStamp& stamp,
+    const Asset::Voxel::VoxelDocument& document,
+    const StampPlacementRotationAxis axis,
+    const std::uint8_t quarterTurns,
+    const StampFixedPoint target = {
+        5 * StampFixedPoint::UnitsPerVoxel,
+        StampFixedPoint::UnitsPerVoxel,
+        5 * StampFixedPoint::UnitsPerVoxel})
+{
+    return StampPlacementPlanner::Build({
+        .Stamp = &stamp,
+        .Document = &document,
+        .DocumentGeneration = 15U,
+        .Transform = {
+            .TargetPivot = target,
+            .RotationAxis = axis,
+            .QuarterTurns = quarterTurns}});
+}
+
 void RequirePositions(
     const StampPlacementPlan& plan,
     const std::array<Position, 3U>& expected)
@@ -89,6 +110,67 @@ void RequirePositions(
         Require(plan.Voxels[index].WorldPosition == expected[index],
             "Quarter rotation produced an unexpected exact grid cell.");
     }
+}
+
+// STAMP-24 : un quart de tour autour de X ou de Z est une permutation exacte
+// des coordonnees, au meme titre que la rotation Y historique. Le Stamp
+// fixture occupe (0,0,0), (2,0,0) et (0,0,1) autour d'un pivot en (1,0,1),
+// pose sur une cible en (5,1,5).
+void TestQuarterTurnsAroundEachAxis()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+
+    // Autour de X : (y, z) -> (-z, y). Le Stamp bascule a la verticale.
+    const auto lateral = PlanAroundAxis(
+        stamp, document, StampPlacementRotationAxis::LateralX, 1U);
+    Require(lateral.CanCommit && !lateral.HasErrors(),
+        "A quarter turn around X must produce a committable plan.");
+    RequirePositions(lateral, {{{4, 2, 5}, {6, 2, 5}, {4, 1, 5}}});
+
+    // Autour de Z : (x, y) -> (-y, x). Le Stamp bascule sur le cote.
+    const auto depth = PlanAroundAxis(
+        stamp, document, StampPlacementRotationAxis::DepthZ, 1U);
+    Require(depth.CanCommit && !depth.HasErrors(),
+        "A quarter turn around Z must produce a committable plan.");
+    RequirePositions(depth, {{{5, 0, 4}, {5, 2, 4}, {5, 0, 5}}});
+
+    // Deux quarts de tour autour de X : (x, y, z) -> (x, -y, -z).
+    const auto lateralHalf = PlanAroundAxis(
+        stamp, document, StampPlacementRotationAxis::LateralX, 2U);
+    RequirePositions(lateralHalf, {{{4, 1, 6}, {6, 1, 6}, {4, 1, 5}}});
+
+    // Quatre quarts de tour ramenent a l'identite sur chaque axe.
+    for (const auto axis : {StampPlacementRotationAxis::LateralX,
+             StampPlacementRotationAxis::VerticalY,
+             StampPlacementRotationAxis::DepthZ})
+    {
+        const auto identity = PlanAroundAxis(stamp, document, axis, 0U);
+        Require(identity.CanCommit &&
+                identity.Voxels.size() == stamp.Voxels().size(),
+            "A zero quarter turn must keep the Stamp untouched on every axis.");
+    }
+
+    // L'axe participe a l'identite du plan : meme nombre de quarts de tour,
+    // trois resultats distincts.
+    const auto vertical = PlanAroundAxis(
+        stamp, document, StampPlacementRotationAxis::VerticalY, 1U);
+    Require(lateral.CacheKey != vertical.CacheKey &&
+            depth.CacheKey != vertical.CacheKey &&
+            lateral.CacheKey != depth.CacheKey,
+        "The rotation axis must participate in plan cache identity.");
+    Require(lateral.Voxels != vertical.Voxels &&
+            depth.Voxels != vertical.Voxels,
+        "Each rotation axis must produce its own cells.");
+
+    // Un axe inconnu reste une erreur explicite.
+    const auto unknownAxis = PlanAroundAxis(stamp, document,
+        static_cast<StampPlacementRotationAxis>(7U), 1U);
+    Require(!unknownAxis.CanCommit &&
+            !unknownAxis.Diagnostics.empty() &&
+            unknownAxis.Diagnostics.front().Code ==
+                StampPlacementDiagnosticCode::UnsupportedRotation,
+        "An unknown rotation axis must produce the rotation diagnostic.");
 }
 
 void TestExactQuarterTurnsRespectPivot()
@@ -233,6 +315,7 @@ int main()
     try
     {
         TestExactQuarterTurnsRespectPivot();
+        TestQuarterTurnsAroundEachAxis();
         TestPreviewPlacementPaletteAndOverlapSharePlan();
         TestRotationDiagnosticsAndCacheKey();
         TestSessionRotationLifecycle();

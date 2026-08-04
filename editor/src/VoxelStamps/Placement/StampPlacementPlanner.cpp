@@ -102,30 +102,43 @@ void AddDiagnostic(
         return false;
     }
 
+    // STAMP-24 : un seul axe actif a la fois. Chaque quart de tour est une
+    // permutation exacte des coordonnees, appliquee QuarterTurns fois autour
+    // de RotationAxis (matrices de rotation directes standard) :
+    //   X : (y, z) -> (-z,  y)
+    //   Y : (x, z) -> ( z, -x)
+    //   Z : (x, y) -> (-y,  x)
+    if (transform.QuarterTurns > 3U) return false;
     std::int64_t rotatedX = mirroredX;
+    std::int64_t rotatedY = relativeY;
     std::int64_t rotatedZ = mirroredZ;
-    switch (transform.QuarterTurns)
+    for (std::uint8_t turn = 0U; turn < transform.QuarterTurns; ++turn)
     {
-    case 0U:
-        break;
-    case 1U:
-        rotatedX = mirroredZ;
-        rotatedZ = -mirroredX;
-        break;
-    case 2U:
-        rotatedX = -mirroredX;
-        rotatedZ = -mirroredZ;
-        break;
-    case 3U:
-        rotatedX = -mirroredZ;
-        rotatedZ = mirroredX;
-        break;
-    default:
-        return false;
+        const std::int64_t previousX = rotatedX;
+        const std::int64_t previousY = rotatedY;
+        const std::int64_t previousZ = rotatedZ;
+        switch (transform.RotationAxis)
+        {
+        case StampPlacementRotationAxis::LateralX:
+            rotatedY = -previousZ;
+            rotatedZ = previousY;
+            break;
+        case StampPlacementRotationAxis::VerticalY:
+            rotatedX = previousZ;
+            rotatedZ = -previousX;
+            break;
+        case StampPlacementRotationAxis::DepthZ:
+            rotatedX = -previousY;
+            rotatedY = previousX;
+            break;
+        default:
+            return false;
+        }
     }
 
-    // Seules les rotations qui echangent X et Z peuvent transferer un pivot
-    // demi-voxel d'un axe a l'autre (cf. MakeRoundedGridCoordinate).
+    // Un nombre IMPAIR de quarts de tour echange les deux axes du plan de
+    // rotation : un pivot demi-voxel change alors d'axe et la somme n'est
+    // plus un multiple exact d'UnitsPerVoxel (cf. MakeRoundedGridCoordinate).
     const bool axesSwapped =
         transform.QuarterTurns == 1U || transform.QuarterTurns == 3U;
     const auto toGrid = [axesSwapped](
@@ -142,7 +155,7 @@ void AddDiagnostic(
                output.X) &&
         toGrid(
                static_cast<std::int64_t>(transform.TargetPivot.Y) +
-                   relativeY,
+                   rotatedY,
                output.Y) &&
         toGrid(
                static_cast<std::int64_t>(transform.TargetPivot.Z) +
@@ -285,7 +298,13 @@ StampPlacementPlan StampPlacementPlanner::Build(
         }
 
         bool transformSupported = true;
-        if (request.Transform.QuarterTurns > 3U)
+        if (request.Transform.QuarterTurns > 3U ||
+            (request.Transform.RotationAxis !=
+                 StampPlacementRotationAxis::VerticalY &&
+             request.Transform.RotationAxis !=
+                 StampPlacementRotationAxis::LateralX &&
+             request.Transform.RotationAxis !=
+                 StampPlacementRotationAxis::DepthZ))
         {
             AddDiagnostic(
                 plan, StampPlacementDiagnosticCode::UnsupportedRotation,

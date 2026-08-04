@@ -33,12 +33,15 @@ enum class StampPlacementMirrorMode : std::uint8_t
     XZ
 };
 
-/// STAMP-15 supports exact quarter turns around the vertical Y axis only.
-/// Keeping the axis explicit avoids changing the transform contract when
-/// additional exact grid axes are introduced later.
+/// STAMP-24: exact quarter turns around any single grid axis. Only one axis
+/// is active at a time — QuarterTurns is always interpreted against
+/// RotationAxis, never composed with another axis. Every rotation stays an
+/// exact permutation of grid coordinates.
 enum class StampPlacementRotationAxis : std::uint8_t
 {
-    VerticalY
+    VerticalY,
+    LateralX,
+    DepthZ
 };
 
 struct StampPlacementTransform final
@@ -147,7 +150,7 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
     case StampPlacementDiagnosticCode::InvalidVariantIdentity:
         return "Resolved Stamp Variant identity does not match the active Stamp.";
     case StampPlacementDiagnosticCode::UnsupportedRotation:
-        return "Stamp rotation must be an exact vertical quarter turn (0, 90, 180, or 270 degrees).";
+        return "Stamp rotation must be an exact quarter turn (0, 90, 180, or 270 degrees) around a single grid axis.";
     case StampPlacementDiagnosticCode::UnsupportedMirror:
         return "Stamp mirror must be None, X, Z, or XZ.";
     case StampPlacementDiagnosticCode::UnsupportedCollisionPolicy:
