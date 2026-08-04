@@ -193,8 +193,16 @@ std::string CalculateVfstampLogicalContentHash(const VoxelStamp& stamp)
     HashLe(hash, static_cast<std::uint8_t>(pivot.LocalNormal.X)); HashLe(hash, static_cast<std::uint8_t>(pivot.LocalNormal.Y)); HashLe(hash, static_cast<std::uint8_t>(pivot.LocalNormal.Z)); HashLe(hash, pivot.AutoPolicyVersion);
     HashLe(hash, std::uint8_t{1U}); HashLe(hash, std::uint8_t{1U}); HashLe(hash, std::uint8_t{1U});
     for (const StampPaletteEntry& entry : stamp.Palette()) { HashLe(hash, entry.LocalColorId); HashLe(hash, entry.Color.Red); HashLe(hash, entry.Color.Green); HashLe(hash, entry.Color.Blue); HashLe(hash, entry.Color.Alpha); HashLe(hash, static_cast<std::uint8_t>(entry.HasSourcePaletteIndex)); HashLe(hash, entry.SourcePaletteIndex); }
-    const std::vector<StampVoxel> voxels = SortedVoxels(stamp);
-    for (const StampVoxel& voxel : voxels) { HashI32(hash, voxel.Position.X); HashI32(hash, voxel.Position.Y); HashI32(hash, voxel.Position.Z); HashLe(hash, voxel.LocalColorId); }
+    if (std::is_sorted(
+            stamp.Voxels().begin(), stamp.Voxels().end(), IsVoxelLess))
+    {
+        for (const StampVoxel& voxel : stamp.Voxels()) { HashI32(hash, voxel.Position.X); HashI32(hash, voxel.Position.Y); HashI32(hash, voxel.Position.Z); HashLe(hash, voxel.LocalColorId); }
+    }
+    else
+    {
+        const std::vector<StampVoxel> voxels = SortedVoxels(stamp);
+        for (const StampVoxel& voxel : voxels) { HashI32(hash, voxel.Position.X); HashI32(hash, voxel.Position.Y); HashI32(hash, voxel.Position.Z); HashLe(hash, voxel.LocalColorId); }
+    }
     return Hex64(hash);
 }
 

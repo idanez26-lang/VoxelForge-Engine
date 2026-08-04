@@ -96,6 +96,19 @@ struct StampPlacementSessionPlaceResult final
     }
 };
 
+/// STAMP-22 counters expose proportional work without introducing timers into
+/// product code. They let tests and diagnostics prove that an unchanged idle
+/// preview reuses its immutable plan and snapshot.
+struct StampPlacementSessionMetrics final
+{
+    std::uint64_t BuildRequests = 0U;
+    std::uint64_t PlannerBuilds = 0U;
+    std::uint64_t AssistedPlannerBuilds = 0U;
+    std::uint64_t PlanCacheHits = 0U;
+    std::uint64_t PreviewBuilds = 0U;
+    std::uint64_t PreviewChanges = 0U;
+};
+
 /// UI-independent owner of one active Stamp placement. It owns the selected
 /// Stamp or Variant group, transform, current immutable plan, preview snapshot,
 /// cache key and placement ordinal. No document pointer is retained. A cache
@@ -231,6 +244,8 @@ public:
     [[nodiscard]] bool SmartPlacementAppliedToPreview() const noexcept;
     [[nodiscard]] const StampSmartPlacementSuggestion*
         CurrentSmartPlacementSuggestion() const noexcept;
+    [[nodiscard]] StampPlacementSessionMetrics Metrics() const noexcept;
+    void ResetMetrics() noexcept;
 
 private:
     [[nodiscard]] StampPlacementSessionResult BuildCurrent(
@@ -260,6 +275,8 @@ private:
     bool smartPlacementTemporarilyBypassed_ = false;
     bool smartPlacementOrientationLocked_ = false;
     bool smartPlacementAppliedToPreview_ = false;
+    bool smartPlacementAssistRequestedForPlan_ = false;
+    StampPlacementSessionMetrics metrics_{};
     StampCollisionPolicy collisionPolicy_ = StampCollisionPolicy::Overwrite;
     std::size_t targetSubModel_ = 0U;
     std::uintptr_t documentInstanceToken_ = 0U;

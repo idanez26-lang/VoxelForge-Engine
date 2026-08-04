@@ -163,8 +163,17 @@ public:
         }
 
         std::array<bool, 256U> referencedPaletteIds{};
+        const bool strictlyPositionSorted = std::adjacent_find(
+            voxels.begin(), voxels.end(),
+            [](const StampVoxel& left, const StampVoxel& right)
+            {
+                return !PositionLess(left.Position, right.Position);
+            }) == voxels.end();
         std::unordered_set<StampLocalPosition, PositionHash> positions;
-        positions.reserve(voxels.size());
+        if (!strictlyPositionSorted)
+        {
+            positions.reserve(voxels.size());
+        }
 
         bool touchesMinimumX = false;
         bool touchesMinimumY = false;
@@ -185,7 +194,8 @@ public:
                 return MakeError(StampDomainError::NonNormalizedCoordinates);
             }
 
-            if (!positions.insert(voxel.Position).second)
+            if (!strictlyPositionSorted &&
+                !positions.insert(voxel.Position).second)
             {
                 return MakeError(StampDomainError::DuplicateVoxelPosition);
             }
@@ -281,6 +291,15 @@ private:
             return value;
         }
     };
+
+    [[nodiscard]] static bool PositionLess(
+        const StampLocalPosition& left,
+        const StampLocalPosition& right) noexcept
+    {
+        if (left.X != right.X) return left.X < right.X;
+        if (left.Y != right.Y) return left.Y < right.Y;
+        return left.Z < right.Z;
+    }
 
     VoxelStamp(
         StampIdentity identity,

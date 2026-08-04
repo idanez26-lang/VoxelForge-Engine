@@ -2327,3 +2327,23 @@ set_tests_properties(
     VoxelForge.Editor.StampSmartPlacement
     PROPERTIES LABELS "Smoke"
 )
+
+# STAMP-22: resource preflights, bounded caches, catalogue query isolation,
+# realistic placement densities and stable unchanged previews.
+add_executable(
+    VoxelForgeEditorStampPerformanceTests
+    Editor/StampPerformanceTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampPerformanceTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampPerformanceTests)
+add_test(
+    NAME VoxelForge.Editor.StampPerformance
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampPerformanceTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.StampPerformance
+    PROPERTIES LABELS "Performance"
+)

@@ -12,6 +12,8 @@ namespace VoxelForge::Editor::Stamps
 namespace
 {
 
+constexpr std::uint64_t VfstampVoxelRecordSize = 13U;
+
 struct DirectoryEntry final
 {
     std::uint32_t Id = 0U;
@@ -305,6 +307,43 @@ VfstampReadResult ReadVfstampBytes(
             entries.push_back(entry);
         }
 
+        // A canonical V1 VOX0 begins with its declared record count followed by
+        // fixed-size records. Inspect matching payloads directly in the validated
+        // input span so a hostile hard-limit count is refused before the reader
+        // allocates/copies any chunk payload representation. Structurally valid
+        // containers with opaque VOX0 data remain the decoder's responsibility.
+        bool softVoxelLimit = false;
+        for (const DirectoryEntry& entry : entries)
+        {
+            if (entry.Id != VfstampChunkVox0 || entry.Size < sizeof(std::uint64_t))
+            {
+                continue;
+            }
+            const std::uint64_t voxelCount = ReadU64(
+                bytes, static_cast<std::size_t>(entry.Offset));
+            if (MultiplyWouldOverflow(voxelCount, VfstampVoxelRecordSize))
+            {
+                continue;
+            }
+            const std::uint64_t voxelBytes = voxelCount * VfstampVoxelRecordSize;
+            if (AddWouldOverflow(sizeof(std::uint64_t), voxelBytes) ||
+                sizeof(std::uint64_t) + voxelBytes != entry.Size)
+            {
+                continue;
+            }
+            const StampLimitEvaluation voxelLimits = EvaluateStampLimits(
+                {.VoxelCount = voxelCount}, limits);
+            if (!voxelLimits.IsAllowed())
+            {
+                return MakeError(
+                    VfstampReadError::DecodedLimitExceeded,
+                    "Vfstamp VOX0 record count exceeds the configured hard limit.",
+                    entry.Id);
+            }
+            softVoxelLimit = voxelLimits.HasWarning();
+            break;
+        }
+
         const StampLimitEvaluation decodedLimits = EvaluateStampLimits(
             {.DecodedBytes = decodedPayloadBytes,
              .FileBytes = static_cast<std::uint64_t>(bytes.size()),
@@ -462,7 +501,8 @@ VfstampReadResult ReadVfstampBytes(
         {
             result.Warnings.push_back(VfstampReadWarning::NewerMinorVersion);
         }
-        if (softFileLimit || softContainerLimit || softDecodedLimit)
+        if (softFileLimit || softContainerLimit || softDecodedLimit ||
+            softVoxelLimit)
         {
             result.Warnings.push_back(VfstampReadWarning::SoftResourceLimitExceeded);
         }

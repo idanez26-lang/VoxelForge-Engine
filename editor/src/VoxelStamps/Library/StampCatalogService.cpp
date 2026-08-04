@@ -30,13 +30,6 @@ namespace
     return result;
 }
 
-[[nodiscard]] bool ContainsInsensitive(
-    const std::string_view haystack,
-    const std::string_view needle)
-{
-    return needle.empty() || LowerAscii(haystack).find(LowerAscii(needle)) != std::string::npos;
-}
-
 [[nodiscard]] bool EntryLess(const StampCatalogEntry& left, const StampCatalogEntry& right)
 {
     if (left.Reference.Id.Value() != right.Reference.Id.Value())
@@ -103,7 +96,23 @@ StampCatalogService::StampCatalogService(
 void StampCatalogService::InvalidateCache() noexcept
 {
     cachedCatalogue_ = {};
+    cachedSearchText_.clear();
+    cachedSearchBytes_ = 0U;
     cacheValid_ = false;
+    ++metrics_.CacheInvalidations;
+}
+
+StampCatalogServiceMetrics StampCatalogService::Metrics() const noexcept
+{
+    StampCatalogServiceMetrics result = metrics_;
+    result.SearchIndexEntries = cachedSearchText_.size();
+    result.SearchIndexBytes = cachedSearchBytes_;
+    return result;
+}
+
+void StampCatalogService::ResetMetrics() noexcept
+{
+    metrics_ = {};
 }
 
 void StampCatalogService::StoreCache(const StampCatalog& catalogue)
@@ -111,7 +120,30 @@ void StampCatalogService::StoreCache(const StampCatalog& catalogue)
     // Copy before invalidating/replacing the cache. If allocation fails, callers
     // catch it and explicitly invalidate rather than serving a stale catalogue.
     StampCatalog replacement = catalogue;
+    std::sort(replacement.Entries.begin(), replacement.Entries.end(), EntryLess);
+    std::vector<std::string> searchText;
+    searchText.reserve(replacement.Entries.size());
+    std::size_t searchBytes = 0U;
+    for (const StampCatalogEntry& entry : replacement.Entries)
+    {
+        const std::string path = GenericUtf8Path(entry.Reference.RelativePath);
+        const std::string uuid = entry.Reference.Id.ToString();
+        std::string searchable;
+        searchable.reserve(entry.FileName.size() + path.size() +
+            entry.Reference.ContentHash.size() + uuid.size() + 3U);
+        searchable += LowerAscii(entry.FileName);
+        searchable.push_back('\n');
+        searchable += LowerAscii(path);
+        searchable.push_back('\n');
+        searchable += LowerAscii(entry.Reference.ContentHash);
+        searchable.push_back('\n');
+        searchable += LowerAscii(uuid);
+        searchBytes += searchable.size();
+        searchText.push_back(std::move(searchable));
+    }
     cachedCatalogue_ = std::move(replacement);
+    cachedSearchText_ = std::move(searchText);
+    cachedSearchBytes_ = searchBytes;
     cacheValid_ = true;
 }
 
@@ -119,7 +151,12 @@ StampCatalogResult StampCatalogService::LoadCachedCatalogue()
 {
     try
     {
-        if (cacheValid_) return {.Catalog = cachedCatalogue_};
+        if (cacheValid_)
+        {
+            ++metrics_.CacheHits;
+            return {.Catalog = cachedCatalogue_};
+        }
+        ++metrics_.StoreLoads;
         StampCatalogResult result = store_.LoadCatalogue();
         if (result.Succeeded()) StoreCache(result.Catalog);
         return result;
@@ -135,6 +172,8 @@ StampCatalogResult StampCatalogService::RebuildCatalogue()
 {
     try
     {
+        ++metrics_.Rebuilds;
+        ++metrics_.SourceInventoryScans;
         StampLibraryResult inventory = sources_.RebuildSourceInventory();
         if (!inventory.Succeeded())
             return Failure(StampCatalogError::IoFailure, inventory.Message);
@@ -175,6 +214,7 @@ StampCatalogResult StampCatalogService::RebuildCatalogue()
                 return result;
             }
 
+            ++metrics_.SourceReads;
             StampLibraryResult read = sources_.Read(asset.Reference);
             if (!read.Succeeded() || !read.Stamp || read.Reference != asset.Reference)
             {
@@ -219,25 +259,60 @@ StampCatalogResult StampCatalogService::Query(const StampCatalogQuery& query)
 {
     try
     {
-        StampCatalogResult result = LoadCachedCatalogue();
-        if (!result.Succeeded()) return result;
+        ++metrics_.Queries;
+        StampCatalogResult result;
+        if (!cacheValid_)
+        {
+            ++metrics_.StoreLoads;
+            StampCatalogResult loaded = store_.LoadCatalogue();
+            if (!loaded.Succeeded())
+            {
+                return loaded;
+            }
+            StoreCache(loaded.Catalog);
+            result.Diagnostics = std::move(loaded.Diagnostics);
+        }
+        else
+        {
+            ++metrics_.CacheHits;
+        }
 
-        result.Catalog.Entries.erase(
-            std::remove_if(result.Catalog.Entries.begin(), result.Catalog.Entries.end(),
-                [&query](const StampCatalogEntry& entry) {
-                    if (query.Id && entry.Reference.Id != *query.Id) return true;
-                    if (!query.ContentHash.empty() && entry.Reference.ContentHash != query.ContentHash)
-                        return true;
-                    if (!query.RelativePath.empty() && PortablePathKey(entry.Reference.RelativePath) !=
-                        PortablePathKey(query.RelativePath))
-                        return true;
-                    return !ContainsInsensitive(entry.FileName, query.Text) &&
-                           !ContainsInsensitive(GenericUtf8Path(entry.Reference.RelativePath), query.Text) &&
-                           !ContainsInsensitive(entry.Reference.ContentHash, query.Text) &&
-                           !ContainsInsensitive(entry.Reference.Id.ToString(), query.Text);
-                }),
-            result.Catalog.Entries.end());
-        std::sort(result.Catalog.Entries.begin(), result.Catalog.Entries.end(), EntryLess);
+        result.Catalog.Version = cachedCatalogue_.Version;
+        const std::string portablePath = query.RelativePath.empty()
+            ? std::string{}
+            : PortablePathKey(query.RelativePath);
+        const std::string text = LowerAscii(query.Text);
+        const bool broadQuery = !query.Id && query.ContentHash.empty() &&
+            portablePath.empty() && text.empty();
+        if (broadQuery)
+        {
+            result.Catalog.Entries.reserve(cachedCatalogue_.Entries.size());
+        }
+        for (std::size_t index = 0U;
+             index < cachedCatalogue_.Entries.size(); ++index)
+        {
+            const StampCatalogEntry& entry = cachedCatalogue_.Entries[index];
+            if (query.Id && entry.Reference.Id != *query.Id)
+            {
+                continue;
+            }
+            if (!query.ContentHash.empty() &&
+                entry.Reference.ContentHash != query.ContentHash)
+            {
+                continue;
+            }
+            if (!portablePath.empty() &&
+                PortablePathKey(entry.Reference.RelativePath) != portablePath)
+            {
+                continue;
+            }
+            if (!text.empty() &&
+                cachedSearchText_[index].find(text) == std::string::npos)
+            {
+                continue;
+            }
+            result.Catalog.Entries.push_back(entry);
+        }
         return result;
     }
     catch (const std::bad_alloc&)

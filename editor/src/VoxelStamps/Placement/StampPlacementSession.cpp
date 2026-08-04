@@ -72,6 +72,7 @@ StampPlacementSessionResult StampPlacementSession::Begin(
     smartPlacementTemporarilyBypassed_ = false;
     smartPlacementOrientationLocked_ = false;
     smartPlacementAppliedToPreview_ = false;
+    smartPlacementAssistRequestedForPlan_ = false;
     collisionPolicy_ = collisionPolicy;
     placementSessionSeed_ = 0U;
     placementOrdinal_ = 0U;
@@ -107,6 +108,7 @@ StampPlacementSessionResult StampPlacementSession::BeginVariantGroup(
     smartPlacementTemporarilyBypassed_ = false;
     smartPlacementOrientationLocked_ = false;
     smartPlacementAppliedToPreview_ = false;
+    smartPlacementAssistRequestedForPlan_ = false;
     collisionPolicy_ = collisionPolicy;
     placementSessionSeed_ = placementSessionSeed;
     placementOrdinal_ = 0U;
@@ -544,6 +546,7 @@ bool StampPlacementSession::Cancel() noexcept
     smartPlacementTemporarilyBypassed_ = false;
     smartPlacementOrientationLocked_ = false;
     smartPlacementAppliedToPreview_ = false;
+    smartPlacementAssistRequestedForPlan_ = false;
     collisionPolicy_ = StampCollisionPolicy::Overwrite;
     targetSubModel_ = 0U;
     documentInstanceToken_ = 0U;
@@ -684,6 +687,16 @@ StampPlacementSession::CurrentSmartPlacementSuggestion() const noexcept
     return smartPlacementSuggestion_ ? &*smartPlacementSuggestion_ : nullptr;
 }
 
+StampPlacementSessionMetrics StampPlacementSession::Metrics() const noexcept
+{
+    return metrics_;
+}
+
+void StampPlacementSession::ResetMetrics() noexcept
+{
+    metrics_ = {};
+}
+
 bool StampPlacementSession::MatchesDocumentContext(
     const Asset::Voxel::VoxelDocument& document,
     const std::uint64_t documentGeneration) const noexcept
@@ -791,8 +804,80 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
             .PlanChanged = changed,
             .PreviewChanged = previewChanged};
     }
+    ++metrics_.BuildRequests;
+
+    const std::optional<StampSmartPlacementSuggestion> previousSuggestion =
+        smartPlacementSuggestion_;
+    const StampSmartPlacementSuggestion nextSuggestion = SuggestPlacement({
+        .Stamp = &*stamp_,
+        .UserTransform = transform_,
+        .Target = smartPlacementTarget_,
+        .Enabled = smartPlacementEnabled_ &&
+            smartPlacementMode_ != StampSmartPlacementMode::Off,
+        .TemporarilyBypassed = smartPlacementTemporarilyBypassed_,
+        .OrientationLockedByUser = smartPlacementOrientationLocked_});
+    const bool assistRequested =
+        smartPlacementMode_ == StampSmartPlacementMode::PreviewAssist &&
+        nextSuggestion.Available();
+
+    const bool reusableInputs = plan_ &&
+        plan_->Stamp == stamp_->Identity() &&
+        plan_->Variant == variantIdentity_ &&
+        plan_->CollisionPolicy == collisionPolicy_ &&
+        plan_->CacheKey.PaletteCapacity == 256U &&
+        plan_->CacheKey.ReservedDocumentPaletteIndex == 0U &&
+        plan_->CacheKey.ResourceLimits == DefaultStampResourceLimits() &&
+        plan_->IsCurrent(document, documentGeneration, targetSubModel_);
+    bool reuseCurrentPlan = false;
+    bool nextAppliedToPreview = false;
+    if (reusableInputs && !assistRequested &&
+        plan_->Transform == transform_)
+    {
+        reuseCurrentPlan = true;
+    }
+    else if (reusableInputs && assistRequested &&
+             plan_->Transform == nextSuggestion.Transform)
+    {
+        reuseCurrentPlan = true;
+        nextAppliedToPreview = true;
+    }
+    else if (reusableInputs && assistRequested &&
+             smartPlacementAssistRequestedForPlan_ &&
+             previousSuggestion && *previousSuggestion == nextSuggestion &&
+             !smartPlacementAppliedToPreview_ &&
+             plan_->Transform == transform_)
+    {
+        // The identical suggestion was already rejected because it would have
+        // turned an allowed manual placement into a refusal. Reuse that safe
+        // fallback until an input or document revision changes.
+        reuseCurrentPlan = true;
+    }
+
+    smartPlacementSuggestion_ = nextSuggestion;
+    if (reuseCurrentPlan)
+    {
+        smartPlacementAppliedToPreview_ = nextAppliedToPreview;
+        smartPlacementAssistRequestedForPlan_ = assistRequested;
+        ++metrics_.PlanCacheHits;
+        const StampPlacementDiagnosticCode firstDiagnostic =
+            plan_->Diagnostics.empty()
+            ? StampPlacementDiagnosticCode::None
+            : plan_->Diagnostics.front().Code;
+        const bool succeeded =
+            plan_->WorldBounds.Valid && !plan_->Voxels.empty();
+        return {
+            .Code = succeeded
+                ? StampPlacementSessionResultCode::Succeeded
+                : StampPlacementSessionResultCode::InvalidPlan,
+            .Succeeded = succeeded,
+            .PlanChanged = false,
+            .PreviewChanged = false,
+            .Diagnostic = firstDiagnostic};
+    }
+
     const auto buildPlan = [&](const StampPlacementTransform& transform)
     {
+        ++metrics_.PlannerBuilds;
         return StampPlacementPlanner::Build({
             .Stamp = &*stamp_,
             .Variant = variantIdentity_,
@@ -804,26 +889,18 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
     };
 
     StampPlacementPlan next = buildPlan(transform_);
-    smartPlacementSuggestion_ = SuggestPlacement({
-        .Stamp = &*stamp_,
-        .UserTransform = transform_,
-        .Target = smartPlacementTarget_,
-        .Enabled = smartPlacementEnabled_ &&
-            smartPlacementMode_ != StampSmartPlacementMode::Off,
-        .TemporarilyBypassed = smartPlacementTemporarilyBypassed_,
-        .OrientationLockedByUser = smartPlacementOrientationLocked_});
     smartPlacementAppliedToPreview_ = false;
-    if (smartPlacementMode_ == StampSmartPlacementMode::PreviewAssist &&
-        smartPlacementSuggestion_->Available())
+    if (assistRequested)
     {
-        if (smartPlacementSuggestion_->Transform == transform_)
+        if (nextSuggestion.Transform == transform_)
         {
             smartPlacementAppliedToPreview_ = true;
         }
         else
         {
+            ++metrics_.AssistedPlannerBuilds;
             StampPlacementPlan assisted =
-                buildPlan(smartPlacementSuggestion_->Transform);
+                buildPlan(nextSuggestion.Transform);
             if (!next.CanCommit || assisted.CanCommit)
             {
                 next = std::move(assisted);
@@ -831,6 +908,7 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
             }
         }
     }
+    smartPlacementAssistRequestedForPlan_ = assistRequested;
     const StampPlacementDiagnosticCode firstDiagnostic =
         next.Diagnostics.empty()
         ? StampPlacementDiagnosticCode::None
@@ -841,8 +919,13 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
         plan_->Voxels != next.Voxels ||
         plan_->PaletteMapping != next.PaletteMapping;
     plan_ = std::move(next);
+    ++metrics_.PreviewBuilds;
     const bool previewChanged =
         preview_.Activate(BuildStampPreview(*plan_));
+    if (previewChanged)
+    {
+        ++metrics_.PreviewChanges;
+    }
     const bool succeeded =
         plan_->WorldBounds.Valid && !plan_->Voxels.empty();
     return {
