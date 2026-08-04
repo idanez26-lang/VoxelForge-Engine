@@ -1,11 +1,27 @@
 #include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 
+#include "Commands/Voxel/VoxelEditSession.h"
+
 #include <memory>
 #include <new>
+#include <string>
 #include <utility>
 
 namespace VoxelForge::Editor::Stamps
 {
+namespace
+{
+VoxelEditHistoryResult ExecutionResult(
+    const VoxelEditHistoryResultCode code,
+    std::string message)
+{
+    return {
+        .Code = code,
+        .Changed = false,
+        .Label = "Place Voxel Stamp",
+        .Message = std::move(message)};
+}
+}
 
 PlaceVoxelStampPreparation PreparePlaceVoxelStampOperation(
     const StampPlacementPlan& plan) noexcept
@@ -80,6 +96,59 @@ PlaceVoxelStampPreparation PreparePlaceVoxelStampOperation(
     {
         return {.Status = PlaceVoxelStampPreparationStatus::AllocationFailure};
     }
+}
+
+VoxelEditHistoryResult ExecutePlaceVoxelStampOperation(
+    const StampPlacementPlan& plan,
+    VoxelEditSession& session,
+    VoxelEditHistory& history)
+{
+    Asset::Voxel::VoxelDocument* const document =
+        session.ActiveVoxelDocument();
+    const std::uint64_t generation = session.VoxelModelGeneration();
+    if (document == nullptr)
+    {
+        return ExecutionResult(
+            VoxelEditHistoryResultCode::InvalidOperation,
+            "Stamp placement requires an active VoxelDocument.");
+    }
+    if (!plan.IsCurrent(*document, generation, plan.TargetSubModel))
+    {
+        return ExecutionResult(
+            VoxelEditHistoryResultCode::InvalidOperation,
+            "The Stamp placement plan no longer matches the active document, generation or revision.");
+    }
+
+    PlaceVoxelStampPreparation prepared =
+        PreparePlaceVoxelStampOperation(plan);
+    if (prepared.IsNoChange())
+    {
+        return ExecutionResult(
+            VoxelEditHistoryResultCode::NoChange,
+            std::string(PlaceVoxelStampPreparationStatusMessage(
+                prepared.Status)));
+    }
+    if (!prepared.IsReady())
+    {
+        std::string message =
+            std::string(PlaceVoxelStampPreparationStatusMessage(
+                prepared.Status));
+        if (prepared.Status ==
+            PlaceVoxelStampPreparationStatus::PaletteMappingFailed)
+        {
+            message += " ";
+            message += PaletteMappingStatusMessage(
+                prepared.PaletteStatus);
+        }
+        return ExecutionResult(
+            prepared.Status ==
+                    PlaceVoxelStampPreparationStatus::AllocationFailure
+                ? VoxelEditHistoryResultCode::Failed
+                : VoxelEditHistoryResultCode::InvalidOperation,
+            std::move(message));
+    }
+
+    return history.Execute(session, std::move(prepared.Operation));
 }
 
 } // namespace VoxelForge::Editor::Stamps

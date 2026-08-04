@@ -157,33 +157,17 @@ void StampPreviewController::Place()
         return;
     }
 
-    Stamps::PlaceVoxelStampPreparation prepared =
-        Stamps::PreparePlaceVoxelStampOperation(*plan);
-    if (!prepared.IsReady())
+    editInProgress_ = true;
+    const VoxelEditHistoryResult result =
+        Stamps::ExecutePlaceVoxelStampOperation(
+            *plan, editSession_, history_);
+    editInProgress_ = false;
+    if (result.Code == VoxelEditHistoryResultCode::NoChange)
     {
-        if (prepared.IsNoChange())
-        {
-            console_.AddMessage(
-                "Place Stamp: preview already matches the document.");
-            return;
-        }
         console_.AddMessage(
-            "Place Stamp: " +
-            std::string(Stamps::PlaceVoxelStampPreparationStatusMessage(
-                prepared.Status)) +
-            (prepared.Status ==
-                    Stamps::PlaceVoxelStampPreparationStatus::PaletteMappingFailed
-                ? " Palette: " +
-                    std::string(Stamps::PaletteMappingStatusMessage(
-                        prepared.PaletteStatus))
-                : ""));
+            "Place Stamp: preview already matches the document.");
         return;
     }
-
-    editInProgress_ = true;
-    const VoxelEditHistoryResult result = history_.Execute(
-        editSession_, std::move(prepared.Operation));
-    editInProgress_ = false;
     if (!result)
     {
         console_.AddMessage("Place Stamp failed: " + result.Message);

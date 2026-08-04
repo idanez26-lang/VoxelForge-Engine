@@ -94,7 +94,10 @@ public:
         : document_(&document), model_(CompatibilityModel(document))
     {
     }
-    std::uint64_t VoxelModelGeneration() const noexcept override { return 1U; }
+    std::uint64_t VoxelModelGeneration() const noexcept override
+    {
+        return Generation;
+    }
     Voxel::VoxelModel* ActiveVoxelModel() noexcept override { return &model_; }
     Asset::Voxel::VoxelDocument* ActiveVoxelDocument() noexcept override
     {
@@ -103,7 +106,12 @@ public:
     CommandResult RebuildActiveVoxelMesh() override
     {
         ++Rebuilds;
-        const auto result = cache_.Synchronize(*document_, 1U);
+        if (FailRebuild)
+        {
+            return CommandResult::Failure(
+                "Simulated Stamp mesh rebuild failure.");
+        }
+        const auto result = cache_.Synchronize(*document_, Generation);
         return result.Succeeded
             ? CommandResult::Success()
             : CommandResult::Failure(result.Message);
@@ -113,6 +121,8 @@ public:
     Asset::Voxel::VoxelDocument* document_;
     Voxel::VoxelModel model_;
     Mesh::VoxelDocumentMeshCache cache_;
+    std::uint64_t Generation = 1U;
+    bool FailRebuild = false;
     std::size_t Rebuilds = 0U;
     std::size_t Completed = 0U;
 };
@@ -138,13 +148,17 @@ VoxelStamp Stamp()
 StampPlacementPlan Plan(
     const VoxelStamp& stamp,
     const Asset::Voxel::VoxelDocument& document,
-    const StampFixedPoint target = {})
+    const StampFixedPoint target = {},
+    const StampCollisionPolicy collisionPolicy =
+        StampCollisionPolicy::Overwrite,
+    const std::uint64_t documentGeneration = 1U)
 {
     return StampPlacementPlanner::Build({
         .Stamp = &stamp,
         .Document = &document,
-        .DocumentGeneration = 1U,
-        .Transform = {.TargetPivot = target}});
+        .DocumentGeneration = documentGeneration,
+        .Transform = {.TargetPivot = target},
+        .CollisionPolicy = collisionPolicy});
 }
 
 PlaceVoxelStampPreparation Prepare(
@@ -165,14 +179,18 @@ void TestPreviewPlacementUndoRedo()
     const VoxelStamp stamp = Stamp();
     const StampPlacementPlan plan = Plan(stamp, document);
     const auto preview = StampLivePreviewBuilder::Build(plan);
-    auto prepared = PreparePlaceVoxelStampOperation(plan);
+    const auto prepared = PreparePlaceVoxelStampOperation(plan);
     Require(prepared.IsReady() && prepared.Operation.PaletteChange &&
                 prepared.Operation.Changes.size() == preview.Voxels.size(),
         "New colors must prepare one composite operation.");
+    const auto paletteBefore = document.GetPaletteSnapshot();
     const auto revision = document.GetRevision();
-    Require(history.Execute(session, std::move(prepared.Operation)) &&
+    Require(ExecutePlaceVoxelStampOperation(plan, session, history) &&
                 document.GetRevision() == revision + 1U &&
-                session.Rebuilds == 1U && history.UndoCount() == 1U,
+                session.Rebuilds == 1U && session.Completed == 1U &&
+                history.UndoCount() == 1U && history.RedoCount() == 0U &&
+                document.GetPaletteSnapshot() ==
+                    plan.PaletteMapping.FinalDocumentPalette,
         "Placement must execute as one revision and rebuild.");
     for (std::size_t index = 0U; index < preview.Voxels.size(); ++index)
     {
@@ -184,12 +202,22 @@ void TestPreviewPlacementUndoRedo()
             "Committed color must exactly match preview and plan.");
     }
     Require(history.Undo(session) && document.GetVoxelCount() == 0U &&
-                history.RedoCount() == 1U,
+                document.GetPaletteSnapshot() == paletteBefore &&
+                history.UndoCount() == 0U && history.RedoCount() == 1U,
         "Undo must remove only the placement.");
     Require(history.Redo(session) &&
                 document.GetVoxelCount() == preview.Voxels.size() &&
-                session.Rebuilds == 3U,
+                document.GetPaletteSnapshot() ==
+                    plan.PaletteMapping.FinalDocumentPalette &&
+                session.Rebuilds == 3U && session.Completed == 3U &&
+                history.UndoCount() == 1U && history.RedoCount() == 0U,
         "Redo must restore the placement exactly.");
+    for (const auto& planned : plan.Voxels)
+    {
+        const auto voxel = document.GetVoxel(planned.WorldPosition);
+        Require(voxel && *voxel == planned.FinalVoxel,
+            "Redo must use the exact stored Stamp result.");
+    }
 }
 
 void TestMultiplePlacementsAndOutOfBoundsFailure()
@@ -198,14 +226,16 @@ void TestMultiplePlacementsAndOutOfBoundsFailure()
     Session session(document);
     VoxelEditHistory history;
     const VoxelStamp stamp = Stamp();
-    auto first = Prepare(stamp, document, {});
-    Require(first.IsReady() &&
-                history.Execute(session, std::move(first.Operation)),
+    const auto firstPlan = Plan(stamp, document);
+    Require(static_cast<bool>(ExecutePlaceVoxelStampOperation(
+                firstPlan, session, history)),
         "First placement failed.");
-    auto second = Prepare(stamp, document,
+    const auto secondPlan = Plan(stamp, document,
         {2 * StampFixedPoint::UnitsPerVoxel, 0, 0});
+    const auto second = PreparePlaceVoxelStampOperation(secondPlan);
     Require(second.IsReady() && !second.Operation.PaletteChange &&
-                history.Execute(session, std::move(second.Operation)) &&
+                ExecutePlaceVoxelStampOperation(
+                    secondPlan, session, history) &&
                 history.UndoCount() == 2U && session.Rebuilds == 2U,
         "Second placement must reuse colors in a separate operation.");
 
@@ -218,6 +248,74 @@ void TestMultiplePlacementsAndOutOfBoundsFailure()
                     PlaceVoxelStampPreparationStatus::InvalidPreview &&
                 document.GetRevision() == revision,
         "Out-of-bounds plan must fail before mutation.");
+}
+
+void TestCollisionPoliciesExecuteAtomically()
+{
+    const VoxelStamp stamp = Stamp();
+
+    auto overwriteDocument = Document();
+    Require(overwriteDocument.SetVoxel({0, 0, 0}, 1U).Succeeded,
+        "Unable to create overwrite fixture.");
+    const auto overwritePlan = Plan(stamp, overwriteDocument);
+    Session overwriteSession(overwriteDocument);
+    VoxelEditHistory overwriteHistory;
+    Require(ExecutePlaceVoxelStampOperation(
+                overwritePlan, overwriteSession, overwriteHistory) &&
+                overwriteDocument.GetVoxel({0, 0, 0}) ==
+                    overwritePlan.Voxels[0U].FinalVoxel &&
+                overwriteDocument.GetVoxel({1, 0, 0}) ==
+                    overwritePlan.Voxels[1U].FinalVoxel &&
+                overwriteHistory.UndoCount() == 1U,
+        "Overwrite must replace and add in one operation.");
+    Require(overwriteHistory.Undo(overwriteSession) &&
+                overwriteDocument.GetVoxel({0, 0, 0}) ==
+                    Asset::Voxel::Voxel{1U} &&
+                !overwriteDocument.GetVoxel({1, 0, 0}),
+        "Overwrite Undo must restore the occupied destination exactly.");
+
+    auto skipDocument = Document();
+    Require(skipDocument.SetVoxel({0, 0, 0}, 1U).Succeeded,
+        "Unable to create SkipOccupied fixture.");
+    const auto skipPlan = Plan(stamp, skipDocument, {},
+        StampCollisionPolicy::SkipOccupied);
+    Require(skipPlan.CanCommit && skipPlan.Statistics.SkippedVoxelCount == 1U,
+        "SkipOccupied plan must identify the occupied destination.");
+    Session skipSession(skipDocument);
+    VoxelEditHistory skipHistory;
+    Require(ExecutePlaceVoxelStampOperation(
+                skipPlan, skipSession, skipHistory) &&
+                skipDocument.GetVoxel({0, 0, 0}) ==
+                    Asset::Voxel::Voxel{1U} &&
+                skipDocument.GetVoxel({1, 0, 0}) ==
+                    skipPlan.Voxels[1U].FinalVoxel &&
+                skipHistory.UndoCount() == 1U,
+        "SkipOccupied must preserve occupied cells and add free cells.");
+    Require(skipHistory.Undo(skipSession) &&
+                skipDocument.GetVoxel({0, 0, 0}) ==
+                    Asset::Voxel::Voxel{1U} &&
+                !skipDocument.GetVoxel({1, 0, 0}),
+        "SkipOccupied Undo must preserve the pre-existing voxel.");
+
+    auto rejectDocument = Document();
+    Require(rejectDocument.SetVoxel({0, 0, 0}, 1U).Succeeded,
+        "Unable to create Reject fixture.");
+    const auto rejectPlan = Plan(stamp, rejectDocument, {},
+        StampCollisionPolicy::Reject);
+    const auto rejectPalette = rejectDocument.GetPaletteSnapshot();
+    const auto rejectRevision = rejectDocument.GetRevision();
+    const auto rejectVoxelCount = rejectDocument.GetVoxelCount();
+    Session rejectSession(rejectDocument);
+    VoxelEditHistory rejectHistory;
+    const auto rejected = ExecutePlaceVoxelStampOperation(
+        rejectPlan, rejectSession, rejectHistory);
+    Require(rejected.Code == VoxelEditHistoryResultCode::InvalidOperation &&
+                rejectDocument.GetPaletteSnapshot() == rejectPalette &&
+                rejectDocument.GetRevision() == rejectRevision &&
+                rejectDocument.GetVoxelCount() == rejectVoxelCount &&
+                rejectHistory.UndoCount() == 0U &&
+                rejectSession.Rebuilds == 0U,
+        "Reject must refuse the whole placement before mutation.");
 }
 
 void TestOverlapNoChangeAndSharedPaletteAcrossSubModels()
@@ -238,11 +336,15 @@ void TestOverlapNoChangeAndSharedPaletteAcrossSubModels()
                 history.Execute(session, std::move(sharedPalette.Operation))),
         "Shared-palette placement failed.");
     const auto unchangedRevision = document.GetRevision();
+    const auto noChangePlan = Plan(stamp, document);
     const auto noChange =
-        PreparePlaceVoxelStampOperation(Plan(stamp, document));
+        PreparePlaceVoxelStampOperation(noChangePlan);
+    const auto noChangeResult = ExecutePlaceVoxelStampOperation(
+        noChangePlan, session, history);
     Require(noChange.IsNoChange() &&
+                noChangeResult.Code == VoxelEditHistoryResultCode::NoChange &&
                 document.GetRevision() == unchangedRevision &&
-                history.UndoCount() == 1U,
+                history.UndoCount() == 1U && session.Rebuilds == 1U,
         "Identical overlap must create no history operation.");
 
     Require(document.SetVoxel({0, 0, 0}, 1U).Succeeded,
@@ -278,22 +380,146 @@ void TestInvalidAndStalePlan()
                 PlaceVoxelStampPreparationStatus::InvalidInput,
         "Empty plan must fail safely.");
 
+    const VoxelStamp stamp = Stamp();
+    auto invalidDocument = Document();
+    Session invalidSession(invalidDocument);
+    VoxelEditHistory invalidHistory;
+    const auto invalidResult = ExecutePlaceVoxelStampOperation(
+        invalid, invalidSession, invalidHistory);
+    Require(invalidResult.Code ==
+                VoxelEditHistoryResultCode::InvalidOperation &&
+                invalidDocument.GetVoxelCount() == 0U &&
+                invalidHistory.UndoCount() == 0U,
+        "Empty plan execution must fail without mutation.");
+
+    const auto missingDocumentPlan = Plan(stamp, invalidDocument);
+    invalidSession.document_ = nullptr;
+    const auto missingDocumentResult = ExecutePlaceVoxelStampOperation(
+        missingDocumentPlan, invalidSession, invalidHistory);
+    Require(missingDocumentResult.Code ==
+                VoxelEditHistoryResultCode::InvalidOperation &&
+                invalidDocument.GetVoxelCount() == 0U &&
+                invalidHistory.UndoCount() == 0U,
+        "Placement without an active document must fail safely.");
+
+    auto generationDocument = Document();
+    const auto generationPlan = Plan(stamp, generationDocument);
+    Session generationSession(generationDocument);
+    generationSession.Generation = 2U;
+    VoxelEditHistory generationHistory;
+    const auto generationResult = ExecutePlaceVoxelStampOperation(
+        generationPlan, generationSession, generationHistory);
+    Require(generationResult.Code ==
+                VoxelEditHistoryResultCode::InvalidOperation &&
+                generationDocument.GetVoxelCount() == 0U &&
+                generationHistory.UndoCount() == 0U &&
+                generationSession.Rebuilds == 0U,
+        "A stale document generation must fail before preparation.");
+
+    auto revisionDocument = Document();
+    const auto revisionPlan = Plan(stamp, revisionDocument);
+    Require(revisionDocument.SetVoxel({8, 0, 0}, 1U).Succeeded,
+        "Unable to advance the document revision.");
+    const auto revisionPalette = revisionDocument.GetPaletteSnapshot();
+    const auto revision = revisionDocument.GetRevision();
+    Session revisionSession(revisionDocument);
+    VoxelEditHistory revisionHistory;
+    const auto revisionResult = ExecutePlaceVoxelStampOperation(
+        revisionPlan, revisionSession, revisionHistory);
+    Require(revisionResult.Code ==
+                VoxelEditHistoryResultCode::InvalidOperation &&
+                revisionDocument.GetPaletteSnapshot() == revisionPalette &&
+                revisionDocument.GetRevision() == revision &&
+                revisionDocument.GetVoxelCount() == 1U &&
+                revisionHistory.UndoCount() == 0U &&
+                revisionSession.Rebuilds == 0U,
+        "A stale document revision must fail without mutation.");
+
+    auto plannedDocument = Document();
+    const auto identityPlan = Plan(stamp, plannedDocument);
+    auto activeDocument = Document();
+    Session identitySession(activeDocument);
+    VoxelEditHistory identityHistory;
+    const auto identityResult = ExecutePlaceVoxelStampOperation(
+        identityPlan, identitySession, identityHistory);
+    Require(identityResult.Code ==
+                VoxelEditHistoryResultCode::InvalidOperation &&
+                activeDocument.GetVoxelCount() == 0U &&
+                identityHistory.UndoCount() == 0U &&
+                identitySession.Rebuilds == 0U,
+        "A plan from another document instance must fail before mutation.");
+
+    auto preconditionDocument = Document();
+    const auto preconditionPlan = Plan(stamp, preconditionDocument);
+    auto prepared = PreparePlaceVoxelStampOperation(preconditionPlan);
+    Require(prepared.IsReady() && preconditionDocument.SetVoxel(
+                preconditionPlan.Voxels.front().WorldPosition, 1U).Succeeded,
+        "Unable to create stale transaction fixture.");
+    Session preconditionSession(preconditionDocument);
+    VoxelEditHistory preconditionHistory;
+    const auto before = preconditionDocument.GetPaletteSnapshot();
+    const auto preconditionRevision = preconditionDocument.GetRevision();
+    Require(!preconditionHistory.Execute(
+                preconditionSession, std::move(prepared.Operation)) &&
+                preconditionDocument.GetPaletteSnapshot() == before &&
+                preconditionDocument.GetRevision() == preconditionRevision &&
+                preconditionHistory.UndoCount() == 0U,
+        "Stored operation preconditions must prevent partial mutation.");
+}
+
+void TestRollbackOnRebuildFailure()
+{
     auto document = Document();
     const VoxelStamp stamp = Stamp();
-    const StampPlacementPlan plan = Plan(stamp, document);
-    auto prepared = PreparePlaceVoxelStampOperation(plan);
-    Require(prepared.IsReady() &&
-                document.SetVoxel(plan.Voxels.front().WorldPosition, 1U).Succeeded,
-        "Unable to create stale transaction fixture.");
+    const auto plan = Plan(stamp, document);
+    const auto paletteBefore = document.GetPaletteSnapshot();
+    const auto revisionBefore = document.GetRevision();
+    const bool dirtyBefore = document.IsDirty();
     Session session(document);
+    session.FailRebuild = true;
     VoxelEditHistory history;
-    const auto before = document.GetPaletteSnapshot();
-    const auto revision = document.GetRevision();
-    Require(!history.Execute(session, std::move(prepared.Operation)) &&
-                document.GetPaletteSnapshot() == before &&
-                document.GetRevision() == revision &&
-                history.UndoCount() == 0U,
-        "Stale transaction must fail without further mutation.");
+
+    const auto result = ExecutePlaceVoxelStampOperation(
+        plan, session, history);
+    Require(result.Code == VoxelEditHistoryResultCode::Failed &&
+                document.GetPaletteSnapshot() == paletteBefore &&
+                document.GetVoxelCount() == 0U &&
+                document.GetRevision() == revisionBefore &&
+                document.IsDirty() == dirtyBefore &&
+                history.UndoCount() == 0U && history.RedoCount() == 0U &&
+                session.Rebuilds == 1U && session.Completed == 0U,
+        "Rebuild failure must roll back document, palette and history.");
+    const auto* grid = session.model_.GetGrid(0U);
+    Require(grid != nullptr && grid->Get(0U, 0U, 0U) &&
+                !grid->Get(0U, 0U, 0U)->IsOccupied() &&
+                grid->Get(1U, 0U, 0U) &&
+                !grid->Get(1U, 0U, 0U)->IsOccupied(),
+        "Rebuild failure must roll back the compatibility grid.");
+}
+
+void TestHistoryMemoryLimitRefusesBeforeMutation()
+{
+    auto document = Document();
+    const VoxelStamp stamp = Stamp();
+    const auto plan = Plan(stamp, document);
+    const auto paletteBefore = document.GetPaletteSnapshot();
+    const auto revisionBefore = document.GetRevision();
+    const bool dirtyBefore = document.IsDirty();
+    Session session(document);
+    VoxelEditHistory history({
+        .MaximumCommandCount = 100U,
+        .MaximumEstimatedMemory = 1U});
+
+    const auto result = ExecutePlaceVoxelStampOperation(
+        plan, session, history);
+    Require(result.Code == VoxelEditHistoryResultCode::LimitExceeded &&
+                document.GetPaletteSnapshot() == paletteBefore &&
+                document.GetVoxelCount() == 0U &&
+                document.GetRevision() == revisionBefore &&
+                document.IsDirty() == dirtyBefore &&
+                history.UndoCount() == 0U && history.RedoCount() == 0U &&
+                session.Rebuilds == 0U && session.Completed == 0U,
+        "History memory refusal must happen before any Stamp mutation.");
 }
 
 void TestFullPaletteFailsWithoutMutation()
@@ -345,7 +571,7 @@ void TestLargeStampUsesOneOperationAndOneRebuild()
     const auto preview = StampLivePreviewBuilder::Build(plan);
     Require(preview.IsActive() && preview.Voxels.size() == 4096U,
         "Large preview must retain every planned voxel.");
-    auto prepared = PreparePlaceVoxelStampOperation(plan);
+    const auto prepared = PreparePlaceVoxelStampOperation(plan);
     Require(prepared.IsReady() &&
                 prepared.Operation.Changes.size() == 4096U,
         "Large stamp must remain one composite operation.");
@@ -353,7 +579,7 @@ void TestLargeStampUsesOneOperationAndOneRebuild()
     Session session(document);
     VoxelEditHistory history;
     const auto revision = document.GetRevision();
-    Require(history.Execute(session, std::move(prepared.Operation)) &&
+    Require(ExecutePlaceVoxelStampOperation(plan, session, history) &&
                 document.GetRevision() == revision + 1U &&
                 session.Rebuilds == 1U && history.UndoCount() == 1U,
         "Large stamp must commit and rebuild exactly once.");
@@ -367,9 +593,12 @@ int main()
     {
         TestPreviewPlacementUndoRedo();
         TestMultiplePlacementsAndOutOfBoundsFailure();
+        TestCollisionPoliciesExecuteAtomically();
         TestOverlapNoChangeAndSharedPaletteAcrossSubModels();
         TestPreviewClearDoesNotMutate();
         TestInvalidAndStalePlan();
+        TestRollbackOnRebuildFailure();
+        TestHistoryMemoryLimitRefusesBeforeMutation();
         TestFullPaletteFailsWithoutMutation();
         TestLargeStampUsesOneOperationAndOneRebuild();
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VoxelHistory/VoxelEditOperation.h"
+#include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelStamps/Placement/StampPlacementPlan.h"
 
 #include <string_view>
@@ -67,5 +68,14 @@ struct PlaceVoxelStampPreparation final
 /// by StampPlacementPlanner. This function never reads a document or replans.
 [[nodiscard]] PlaceVoxelStampPreparation PreparePlaceVoxelStampOperation(
     const StampPlacementPlan& plan) noexcept;
+
+/// Validates that the immutable plan still belongs to the active document,
+/// generation and revision, prepares its stored before/after data, then
+/// submits exactly one atomic history operation. Undo and Redo consume only
+/// that stored operation and never invoke the planner again.
+[[nodiscard]] VoxelEditHistoryResult ExecutePlaceVoxelStampOperation(
+    const StampPlacementPlan& plan,
+    VoxelEditSession& session,
+    VoxelEditHistory& history);
 
 } // namespace VoxelForge::Editor::Stamps
