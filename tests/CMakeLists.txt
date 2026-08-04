@@ -2272,3 +2272,18 @@ set_tests_properties(
     VoxelForge.Editor.ForgeLibrarySmoke
     PROPERTIES LABELS "Smoke"
 )
+
+# STAMP-19: Smart Variant resolution is a pure deterministic domain service.
+add_executable(
+    VoxelForgeEditorStampVariantTests
+    Editor/StampVariantTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampVariantTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorStampVariantTests)
+add_test(
+    NAME VoxelForge.Editor.StampVariant
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampVariantTests>
+)

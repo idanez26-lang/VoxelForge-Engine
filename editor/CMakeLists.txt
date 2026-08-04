@@ -346,6 +346,9 @@ target_sources(
         src/VoxelStamps/Library/StampJsonCatalogStore.cpp
         src/VoxelStamps/Library/StampCatalogService.cpp
         src/VoxelStamps/Library/ForgeLibraryViewModel.cpp
+        # STAMP-19: pure deterministic Smart Variant domain and resolver.
+        src/VoxelStamps/Variants/StampVariantGroup.cpp
+        src/VoxelStamps/Variants/StampVariantResolver.cpp
         src/VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.cpp
         src/VoxelStamps/Preview/StampLivePreviewBuilder.cpp
         src/VoxelStamps/Validation/StampValidationService.cpp
