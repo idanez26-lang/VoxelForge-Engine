@@ -677,8 +677,21 @@ bool EditorWorkspace::RunForgeLibraryVisualStep(const std::size_t frame)
         PlaceLatestStampPreview();
     if (frame == 1200U)
     {
-        forgeLibraryViewModel_.SetFilter(
-            Stamps::ForgeLibraryFilter::Favorites);
+        forgeLibraryViewModel_.SetSection(
+            Stamps::ForgeLibrarySection::Recent);
+        static_cast<void>(forgeLibraryViewModel_.Refresh());
+        if (!forgeLibraryViewModel_.Items().empty())
+        {
+            const Core::UUID id = forgeLibraryViewModel_.Items().front()
+                .CatalogEntry.Reference.Id;
+            static_cast<void>(forgeLibraryViewModel_.Select(id));
+            static_cast<void>(forgeLibraryViewModel_.ToggleFavorite(id));
+        }
+    }
+    if (frame == 1440U)
+    {
+        forgeLibraryViewModel_.SetSection(
+            Stamps::ForgeLibrarySection::Favorites);
         static_cast<void>(forgeLibraryViewModel_.Refresh());
     }
     return true;

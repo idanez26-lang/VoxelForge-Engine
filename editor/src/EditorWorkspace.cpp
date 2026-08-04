@@ -268,13 +268,15 @@ EditorWorkspace::EditorWorkspace(
     Project::ProjectManager& projectManager,
     WindowTitleCallback windowTitleCallback,
     std::filesystem::path preferencesFilePath,
-    const bool simulatedFileDialogs)
+    const bool simulatedFileDialogs,
+    Core::UserDataPaths userDataPaths)
     : projectManager_(projectManager),
       windowTitleCallback_(std::move(windowTitleCallback)),
       fileDialogService_(simulatedFileDialogs
           ? CreateSimulatedFileDialogService()
           : CreateSDLFileDialogService()),
       projectFolderOpener_(CreateSDLProjectFolderOpener()),
+      stampUserLibraryRepository_(userDataPaths),
       transformGizmoManager_(
           transformGizmoModel_, transformGizmoInteraction_,
           transformPivotManager_),
@@ -833,6 +835,7 @@ void EditorWorkspace::DrawMainMenuBar()
             showForgeLibrary_ = true;
             stampCatalogService_.InvalidateCache();
             static_cast<void>(forgeLibraryViewModel_.Refresh());
+            ImGui::SetWindowFocus(ForgeLibraryPanelWindowName);
         }
 
         const bool liveStampPreviewActive =
@@ -2668,6 +2671,11 @@ void EditorWorkspace::DrawForgeLibraryPanel()
         voxelDocumentSession_.Generation());
     if (result.SaveSelectionRequested)
         BeginSaveSelectionAsStamp();
+    if (result.ShowAssetsRequested)
+    {
+        showAssetBrowser_ = true;
+        ImGui::SetWindowFocus(AssetsPanelWindowName);
+    }
     if (result.SessionActivated)
         UpdateVoxelHighlights();
     if (!result.Message.empty())

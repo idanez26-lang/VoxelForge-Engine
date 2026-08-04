@@ -8,11 +8,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace VoxelForge::Editor::Stamps
@@ -31,12 +32,28 @@ enum class ForgeLibrarySortMode : std::uint8_t
     Type
 };
 
-enum class ForgeLibraryFilter : std::uint8_t
+enum class ForgeLibraryScope : std::uint8_t
 {
-    All,
-    Favorites,
-    Project
+    Project,
+    My
 };
+
+enum class ForgeLibrarySection : std::uint8_t
+{
+    Assets,
+    Creations,
+    Brushes,
+    Favorites,
+    Recent
+};
+
+inline constexpr std::array<ForgeLibrarySection, 5U>
+    ForgeLibraryNavigationSections{
+        ForgeLibrarySection::Assets,
+        ForgeLibrarySection::Creations,
+        ForgeLibrarySection::Brushes,
+        ForgeLibrarySection::Favorites,
+        ForgeLibrarySection::Recent};
 
 enum class ForgeLibraryEmptyState : std::uint8_t
 {
@@ -45,6 +62,10 @@ enum class ForgeLibraryEmptyState : std::uint8_t
     EmptyProject,
     NoSearchResults,
     FavoritesEmpty,
+    RecentEmpty,
+    BrushesEmpty,
+    UserLibraryUnavailable,
+    AssetsManagedExternally,
     CatalogUnavailable
 };
 
@@ -91,6 +112,9 @@ struct ForgeLibraryItem final
 {
     StampCatalogEntry CatalogEntry;
     std::string DisplayName;
+    std::string Category;
+    bool Favorite = false;
+    bool Recent = false;
 
     [[nodiscard]] bool operator==(const ForgeLibraryItem&) const noexcept = default;
 };
@@ -102,6 +126,10 @@ struct ForgeLibrarySelectionDetails final
     std::uint64_t VoxelCount = 0U;
     std::uint32_t PaletteCount = 0U;
     bool PreviewAvailable = false;
+    bool SourceAvailable = false;
+    bool Favorite = false;
+    StampLibraryScope Scope = StampLibraryScope::Project;
+    std::string Category;
 };
 
 struct ForgeLibraryOperationResult final
@@ -122,8 +150,14 @@ public:
         StampCatalogService& catalogue,
         StampAssetCache& assetCache,
         StampPlacementSession& placementSession);
+    ForgeLibraryViewModel(
+        StampCatalogService& projectCatalogue,
+        StampCatalogService& userCatalogue,
+        StampAssetCache& assetCache,
+        StampPlacementSession& placementSession);
 
     [[nodiscard]] ForgeLibraryOperationResult Refresh();
+    [[nodiscard]] ForgeLibraryOperationResult RebuildActiveCatalogue();
     void ResetForProjectChange() noexcept;
 
     void SetSearchText(std::string text);
@@ -132,8 +166,16 @@ public:
     [[nodiscard]] ForgeLibraryDisplayMode DisplayMode() const noexcept;
     void SetSortMode(ForgeLibrarySortMode mode);
     [[nodiscard]] ForgeLibrarySortMode SortMode() const noexcept;
-    void SetFilter(ForgeLibraryFilter filter);
-    [[nodiscard]] ForgeLibraryFilter Filter() const noexcept;
+    void SetScope(ForgeLibraryScope scope);
+    [[nodiscard]] ForgeLibraryScope Scope() const noexcept;
+    [[nodiscard]] bool ScopeAvailable(ForgeLibraryScope scope) const noexcept;
+    void SetSection(ForgeLibrarySection section);
+    [[nodiscard]] ForgeLibrarySection Section() const noexcept;
+    void SetCategory(std::string category);
+    [[nodiscard]] const std::string& Category() const noexcept;
+    [[nodiscard]] const std::vector<std::string>& Categories() const noexcept;
+    [[nodiscard]] bool ToggleFavorite(const Core::UUID& id);
+    [[nodiscard]] bool IsFavorite(const Core::UUID& id) const noexcept;
 
     [[nodiscard]] bool Select(const Core::UUID& id);
     void ClearSelection() noexcept;
@@ -156,11 +198,24 @@ public:
     [[nodiscard]] bool NeedsRefresh() const noexcept;
 
 private:
+    using TrackedIdentity =
+        std::pair<StampLibraryScope, std::uint64_t>;
+
     void SortItems();
+    void ApplySectionAndCategoryFilters();
     void ReconcileSelection();
     void EnsureThumbnail(const ForgeLibraryItem& item);
     void ReconcileThumbnailCache();
     [[nodiscard]] const ForgeLibraryItem* FindItem(const Core::UUID& id) const noexcept;
+    [[nodiscard]] ForgeLibraryItem* FindItem(const Core::UUID& id) noexcept;
+    [[nodiscard]] StampCatalogService* ActiveCatalogue() noexcept;
+    [[nodiscard]] const StampCatalogService* ActiveCatalogue() const noexcept;
+    [[nodiscard]] StampLibraryScope ActiveLibraryScope() const noexcept;
+    [[nodiscard]] TrackedIdentity IdentityFor(const Core::UUID& id) const noexcept;
+    [[nodiscard]] static bool ContainsIdentity(
+        const std::vector<TrackedIdentity>& identities,
+        const TrackedIdentity& identity) noexcept;
+    void RecordRecent(const StampAssetReference& reference);
 
     struct ThumbnailCacheEntry final
     {
@@ -168,19 +223,25 @@ private:
         std::shared_ptr<const ForgeLibraryThumbnail> Thumbnail;
     };
 
-    StampCatalogService& catalogue_;
+    StampCatalogService& projectCatalogue_;
+    StampCatalogService* userCatalogue_ = nullptr;
     StampAssetCache& assetCache_;
     StampPlacementSession& placementSession_;
     std::vector<ForgeLibraryItem> items_;
-    std::unordered_map<std::uint64_t, ThumbnailCacheEntry> thumbnailCache_;
+    std::map<TrackedIdentity, ThumbnailCacheEntry> thumbnailCache_;
+    std::vector<TrackedIdentity> favorites_;
+    std::vector<TrackedIdentity> recent_;
     std::optional<Core::UUID> selectedId_;
     std::shared_ptr<const VoxelStamp> selectedStamp_;
     std::optional<ForgeLibrarySelectionDetails> selectedDetails_;
     std::string searchText_;
+    std::string category_;
+    std::vector<std::string> categories_;
     std::string statusMessage_;
     ForgeLibraryDisplayMode displayMode_ = ForgeLibraryDisplayMode::Grid;
     ForgeLibrarySortMode sortMode_ = ForgeLibrarySortMode::Name;
-    ForgeLibraryFilter filter_ = ForgeLibraryFilter::All;
+    ForgeLibraryScope scope_ = ForgeLibraryScope::Project;
+    ForgeLibrarySection section_ = ForgeLibrarySection::Creations;
     ForgeLibraryEmptyState emptyState_ = ForgeLibraryEmptyState::None;
     std::size_t thumbnailBuildCount_ = 0U;
     bool needsRefresh_ = true;

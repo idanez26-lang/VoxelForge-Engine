@@ -13,6 +13,7 @@ struct ForgeLibraryPanelResult final
 {
     bool SessionActivated = false;
     bool SaveSelectionRequested = false;
+    bool ShowAssetsRequested = false;
     std::string Message;
 };
 
@@ -30,7 +31,7 @@ public:
         std::size_t targetSubModel = 0U);
 
 private:
-    void DrawToolbar();
+    void DrawToolbar(ForgeLibraryPanelResult& result);
     [[nodiscard]] bool DrawContent(
         const ForgeLibraryResponsiveLayout& layout,
         ForgeLibraryPanelResult& result);

@@ -75,7 +75,9 @@
 #include "VoxelStamps/Library/ForgeLibraryViewModel.h"
 #include "VoxelStamps/Library/StampAssetCache.h"
 #include "VoxelStamps/Library/StampJsonCatalogStore.h"
+#include "VoxelStamps/Library/StampMemoryCatalogStore.h"
 #include "VoxelStamps/Library/StampProjectLibraryRepository.h"
+#include "VoxelStamps/Library/StampUserLibraryRepository.h"
 #include "VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.h"
 #include "VoxelStamps/Workflow/StampPreviewController.h"
 #include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
@@ -98,6 +100,7 @@
 #include "VoxelForge/Voxel/VoxelGrid.h"
 #include "VoxelForge/Voxel/VoxelModel.h"
 #include "VoxelForge/Mesh/VoxelDocumentMeshCache.h"
+#include "VoxelForge/Core/UserDataPaths.h"
 
 #include <array>
 #include <chrono>
@@ -130,7 +133,9 @@ public:
         WindowTitleCallback windowTitleCallback,
         std::filesystem::path preferencesFilePath =
             ProjectDialogPreferences::DefaultStorageFilePath(),
-        bool simulatedFileDialogs = false);
+        bool simulatedFileDialogs = false,
+        Core::UserDataPaths userDataPaths =
+            Core::UserDataPaths::FromSystemEnvironment());
     ~EditorWorkspace();
 
     void Draw();
@@ -475,15 +480,21 @@ private:
     WorkplaneService workplaneService_;
     SelectionService selectionService_;
     Stamps::StampProjectLibraryRepository stampProjectLibraryRepository_;
-    Stamps::StampAssetCache stampAssetCache_{stampProjectLibraryRepository_};
+    Stamps::StampUserLibraryRepository stampUserLibraryRepository_;
+    Stamps::StampAssetCache stampAssetCache_{
+        stampProjectLibraryRepository_, stampUserLibraryRepository_};
     Stamps::StampJsonCatalogStore stampJsonCatalogStore_;
+    Stamps::StampMemoryCatalogStore stampUserCatalogStore_;
     Stamps::StampCatalogService stampCatalogService_{
         stampProjectLibraryRepository_, stampJsonCatalogStore_};
+    Stamps::StampCatalogService stampUserCatalogService_{
+        stampUserLibraryRepository_, stampUserCatalogStore_};
     Stamps::SaveSelectionAsStampWorkflow saveSelectionAsStampWorkflow_{
         stampProjectLibraryRepository_, stampJsonCatalogStore_};
     Stamps::StampPlacementSession stampPlacementSession_;
     Stamps::ForgeLibraryViewModel forgeLibraryViewModel_{
-        stampCatalogService_, stampAssetCache_, stampPlacementSession_};
+        stampCatalogService_, stampUserCatalogService_, stampAssetCache_,
+        stampPlacementSession_};
     Stamps::ForgeLibraryPanel forgeLibraryPanel_{forgeLibraryViewModel_};
     std::uint64_t stampLivePreviewVisualDocumentRevision_ = 0U;
     std::optional<std::chrono::steady_clock::time_point>

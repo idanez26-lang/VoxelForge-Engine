@@ -81,7 +81,9 @@ public:
         const std::uint64_t id,
         const std::string& name,
         const std::uint32_t width,
-        const std::uint8_t red)
+        const std::uint8_t red,
+        const std::string& category = {},
+        const StampLibraryScope scope = StampLibraryScope::Project)
     {
         VoxelStamp stamp = MakeStamp(id, width, red);
         stamp = VoxelStamp::TryCreate(
@@ -96,8 +98,12 @@ public:
                 .Id = stamp.Identity().Id,
                 .ContentHash = stamp.Identity().ContentHash,
                 .RelativePath =
-                    std::filesystem::path("Assets/ForgeLibrary/Creations") /
-                    name},
+                    (scope == StampLibraryScope::Project
+                        ? std::filesystem::path(
+                              "Assets/ForgeLibrary/Creations")
+                        : std::filesystem::path("Library/Creations")) /
+                    category / name,
+                .Scope = scope},
             .Stamp = std::move(stamp),
             .Bytes = 100U + id});
     }
@@ -201,11 +207,15 @@ public:
 struct Fixture final
 {
     MemoryRepository Repository;
+    MemoryRepository UserRepository;
     MemoryStore Store;
+    MemoryStore UserStore;
     StampPlacementSession Session;
     StampCatalogService Catalog{Repository, Store};
-    StampAssetCache AssetCache{Repository};
-    ForgeLibraryViewModel ViewModel{Catalog, AssetCache, Session};
+    StampCatalogService UserCatalog{UserRepository, UserStore};
+    StampAssetCache AssetCache{Repository, UserRepository};
+    ForgeLibraryViewModel ViewModel{
+        Catalog, UserCatalog, AssetCache, Session};
 };
 
 void TestEmptyAndCompleteViews()
@@ -278,13 +288,13 @@ void TestSearchSortFiltersAndModes()
     Require(fixture.ViewModel.Items()[0].DisplayName == "StoneArch",
         "Prepared Type sorting must remain deterministic.");
 
-    fixture.ViewModel.SetFilter(ForgeLibraryFilter::Favorites);
+    fixture.ViewModel.SetSection(ForgeLibrarySection::Favorites);
     Require(fixture.ViewModel.Refresh().Succeeded &&
             fixture.ViewModel.Items().empty() &&
             fixture.ViewModel.EmptyState() ==
                 ForgeLibraryEmptyState::FavoritesEmpty,
-        "Favorites must be an intentionally empty prepared V1 view.");
-    fixture.ViewModel.SetFilter(ForgeLibraryFilter::Project);
+        "Favorites with no favorited creation must expose an empty state.");
+    fixture.ViewModel.SetSection(ForgeLibrarySection::Creations);
     Require(fixture.ViewModel.Refresh().Succeeded &&
             fixture.ViewModel.Items().size() == 2U,
         "Project filter must expose the Project Library catalogue.");
@@ -344,6 +354,122 @@ void TestSelectionRenameDeletionAndActivation()
         "Deleting a selected source must clear stale selection safely.");
 }
 
+void TestOfficialNavigationScopesFavoritesAndRecent()
+{
+    Require(
+        ForgeLibraryNavigationSections[0] == ForgeLibrarySection::Assets &&
+            ForgeLibraryNavigationSections[1] ==
+                ForgeLibrarySection::Creations &&
+            ForgeLibraryNavigationSections[2] ==
+                ForgeLibrarySection::Brushes &&
+            ForgeLibraryNavigationSections[3] ==
+                ForgeLibrarySection::Favorites &&
+            ForgeLibraryNavigationSections[4] ==
+                ForgeLibrarySection::Recent,
+        "Forge Library navigation must keep Assets, Creations, Brushes, Favorites and Recent distinct.");
+
+    Fixture fixture;
+    fixture.Repository.Add(
+        100U, "Oak.vfstamp", 3U, 80U, "Nature/Trees");
+    fixture.Repository.Add(
+        200U, "Arch.vfstamp", 2U, 90U, "Architecture/Doors");
+    fixture.UserRepository.Add(
+        100U, "PersonalRock.vfstamp", 4U, 100U, "Nature/Rocks",
+        StampLibraryScope::User);
+
+    Require(
+        fixture.ViewModel.Scope() == ForgeLibraryScope::Project &&
+            fixture.ViewModel.Section() == ForgeLibrarySection::Creations &&
+            fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().size() == 2U &&
+            fixture.ViewModel.Categories().size() == 2U,
+        "Project Creations must be the default Forge Library content view.");
+
+    fixture.ViewModel.SetSearchText("Nature");
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().size() == 1U &&
+            fixture.ViewModel.Items().front().DisplayName == "Oak",
+        "Search must match category/path tokens as well as creation names.");
+    fixture.ViewModel.SetSearchText({});
+    fixture.ViewModel.SetCategory("Architecture/Doors");
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().size() == 1U &&
+            fixture.ViewModel.Items().front().DisplayName == "Arch",
+        "Custom folder categories must filter creations without a compiled enum.");
+
+    fixture.ViewModel.SetCategory({});
+    Require(fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Select(Core::UUID{100U}) &&
+            fixture.ViewModel.ToggleFavorite(Core::UUID{100U}) &&
+            fixture.ViewModel.IsFavorite(Core::UUID{100U}),
+        "A Project creation must be selectable and favoritable.");
+    fixture.ViewModel.SetSection(ForgeLibrarySection::Favorites);
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().size() == 1U &&
+            fixture.ViewModel.Items().front().DisplayName == "Oak",
+        "Favorites must expose only favorited creations.");
+
+    fixture.ViewModel.SetSection(ForgeLibrarySection::Creations);
+    Require(fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Select(Core::UUID{100U}),
+        "Favorite fixture must return to Creations.");
+    auto document = MakeDocument();
+    Require(
+        fixture.ViewModel.ActivateSelected(document, 18U).SessionActivated,
+        "Activating a creation must begin its exact placement session.");
+    fixture.ViewModel.SetSection(ForgeLibrarySection::Recent);
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().size() == 1U &&
+            fixture.ViewModel.Items().front().DisplayName == "Oak",
+        "Recent must contain creations used for placement, newest first.");
+
+    fixture.ViewModel.SetSection(ForgeLibrarySection::Brushes);
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().empty() &&
+            fixture.ViewModel.EmptyState() ==
+                ForgeLibraryEmptyState::BrushesEmpty,
+        "Brushes must remain distinct and must never contain Stamp creations.");
+
+    fixture.ViewModel.SetScope(ForgeLibraryScope::My);
+    fixture.ViewModel.SetSection(ForgeLibrarySection::Creations);
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().size() == 1U &&
+            fixture.ViewModel.Items().front().DisplayName == "PersonalRock" &&
+            fixture.ViewModel.Items().front().CatalogEntry.Reference.Scope ==
+                StampLibraryScope::User &&
+            !fixture.ViewModel.IsFavorite(Core::UUID{100U}),
+        "My Library must use its own scope, catalogue and favorite identity even when UUIDs overlap.");
+    fixture.ViewModel.SetSearchText("Rocks");
+    Require(
+        fixture.ViewModel.Refresh().Succeeded &&
+            fixture.ViewModel.Items().size() == 1U,
+        "My Library search must include custom category tokens.");
+}
+
+void TestMissingSourcePresentation()
+{
+    Fixture fixture;
+    fixture.Repository.Add(300U, "MissingSoon.vfstamp", 2U, 120U);
+    Require(fixture.ViewModel.Refresh().Succeeded,
+        "Missing-source fixture must refresh before removal.");
+    fixture.Repository.Sources.clear();
+    Require(
+        !fixture.ViewModel.Select(Core::UUID{300U}) &&
+            fixture.ViewModel.SelectedId() != nullptr &&
+            fixture.ViewModel.SelectedDetails() != nullptr &&
+            fixture.ViewModel.SelectedDetails()->Name == "MissingSoon" &&
+            !fixture.ViewModel.SelectedDetails()->SourceAvailable &&
+            fixture.ViewModel.SelectedPreviewStamp() == nullptr &&
+            !fixture.ViewModel.StatusMessage().empty(),
+        "A missing source must retain an identifiable card selection and expose an unavailable preview.");
+}
+
 void TestResponsiveLayoutAndLongNames()
 {
     Require(
@@ -396,6 +522,8 @@ int main()
         TestEmptyAndCompleteViews();
         TestSearchSortFiltersAndModes();
         TestSelectionRenameDeletionAndActivation();
+        TestOfficialNavigationScopesFavoritesAndRecent();
+        TestMissingSourcePresentation();
         TestResponsiveLayoutAndLongNames();
     }
     catch (const std::exception& error)

@@ -28,6 +28,30 @@ constexpr float CardLabelHeight = 24.0F;
     return "Name";
 }
 
+[[nodiscard]] const char* ScopeLabel(const ForgeLibraryScope scope) noexcept
+{
+    return scope == ForgeLibraryScope::Project ? "Project" : "My Library";
+}
+
+[[nodiscard]] const char* SourceLabel(const StampLibraryScope scope) noexcept
+{
+    return scope == StampLibraryScope::Project ? "Project" : "My Library";
+}
+
+[[nodiscard]] const char* SectionLabel(
+    const ForgeLibrarySection section) noexcept
+{
+    switch (section)
+    {
+    case ForgeLibrarySection::Assets: return "Assets";
+    case ForgeLibrarySection::Creations: return "Creations";
+    case ForgeLibrarySection::Brushes: return "Brushes";
+    case ForgeLibrarySection::Favorites: return "Favorites";
+    case ForgeLibrarySection::Recent: return "Recent";
+    }
+    return "Creations";
+}
+
 [[nodiscard]] bool ActiveButton(
     const char* const label,
     const bool active)
@@ -146,9 +170,9 @@ ForgeLibraryPanelResult ForgeLibraryPanel::Draw(
 
     ImGui::TextUnformatted("FORGE LIBRARY");
     ImGui::SameLine();
-    ImGui::TextDisabled("Project");
+    ImGui::TextDisabled("%s", ScopeLabel(viewModel_.Scope()));
     ImGui::Separator();
-    DrawToolbar();
+    DrawToolbar(panelResult);
     if (viewModel_.NeedsRefresh())
     {
         const ForgeLibraryOperationResult refresh = viewModel_.Refresh();
@@ -201,8 +225,45 @@ ForgeLibraryPanelResult ForgeLibraryPanel::Draw(
     return panelResult;
 }
 
-void ForgeLibraryPanel::DrawToolbar()
+void ForgeLibraryPanel::DrawToolbar(ForgeLibraryPanelResult& result)
 {
+    ImGui::SetNextItemWidth(-1.0F);
+    if (ImGui::BeginCombo(
+            "##ForgeLibrarySection", SectionLabel(viewModel_.Section())))
+    {
+        for (const ForgeLibrarySection section :
+             ForgeLibraryNavigationSections)
+        {
+            if (ImGui::Selectable(
+                    SectionLabel(section),
+                    section == viewModel_.Section()))
+            {
+                if (section == ForgeLibrarySection::Assets)
+                    result.ShowAssetsRequested = true;
+                else
+                    viewModel_.SetSection(section);
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::SetNextItemWidth(-1.0F);
+    if (ImGui::BeginCombo(
+            "##ForgeLibraryScope", ScopeLabel(viewModel_.Scope())))
+    {
+        constexpr ForgeLibraryScope scopes[] = {
+            ForgeLibraryScope::Project, ForgeLibraryScope::My};
+        for (const ForgeLibraryScope scope : scopes)
+        {
+            ImGui::BeginDisabled(!viewModel_.ScopeAvailable(scope));
+            if (ImGui::Selectable(
+                    ScopeLabel(scope), viewModel_.Scope() == scope))
+                viewModel_.SetScope(scope);
+            ImGui::EndDisabled();
+        }
+        ImGui::EndCombo();
+    }
+
     if (viewModel_.SearchText() != searchBuffer_.data())
     {
         std::snprintf(
@@ -247,23 +308,24 @@ void ForgeLibraryPanel::DrawToolbar()
     }
     ImGui::SameLine();
     if (ImGui::Button("Refresh"))
-        static_cast<void>(viewModel_.Refresh());
+        static_cast<void>(viewModel_.RebuildActiveCatalogue());
 
-    if (ActiveButton("All", viewModel_.Filter() == ForgeLibraryFilter::All))
-        viewModel_.SetFilter(ForgeLibraryFilter::All);
-    ImGui::SameLine();
-    if (ActiveButton(
-            "Favorites",
-            viewModel_.Filter() == ForgeLibraryFilter::Favorites))
+    ImGui::SetNextItemWidth(-1.0F);
+    const char* const categoryLabel = viewModel_.Category().empty()
+        ? "All categories"
+        : viewModel_.Category().c_str();
+    if (ImGui::BeginCombo("##ForgeLibraryCategory", categoryLabel))
     {
-        viewModel_.SetFilter(ForgeLibraryFilter::Favorites);
-    }
-    ImGui::SameLine();
-    if (ActiveButton(
-            "Project",
-            viewModel_.Filter() == ForgeLibraryFilter::Project))
-    {
-        viewModel_.SetFilter(ForgeLibraryFilter::Project);
+        if (ImGui::Selectable(
+                "All categories", viewModel_.Category().empty()))
+            viewModel_.SetCategory({});
+        for (const std::string& category : viewModel_.Categories())
+        {
+            if (ImGui::Selectable(
+                    category.c_str(), viewModel_.Category() == category))
+                viewModel_.SetCategory(category);
+        }
+        ImGui::EndCombo();
     }
 
     ImGui::SetNextItemWidth(-1.0F);
@@ -306,9 +368,18 @@ bool ForgeLibraryPanel::DrawEmptyState(ForgeLibraryPanelResult& result)
         explanation = "Open or create a project to use its Forge Library.";
         break;
     case ForgeLibraryEmptyState::EmptyProject:
-        title = "This Project Library is empty";
-        explanation =
-            "Select voxels, then save them as a reusable Stamp.";
+        if (viewModel_.Scope() == ForgeLibraryScope::Project)
+        {
+            title = "This Project Library is empty";
+            explanation =
+                "Select voxels, then save them as a reusable Stamp.";
+        }
+        else
+        {
+            title = "My Library is empty";
+            explanation =
+                "Local creations installed for this profile will appear here.";
+        }
         break;
     case ForgeLibraryEmptyState::NoSearchResults:
         title = "No matching Stamps";
@@ -316,8 +387,24 @@ bool ForgeLibraryPanel::DrawEmptyState(ForgeLibraryPanelResult& result)
         break;
     case ForgeLibraryEmptyState::FavoritesEmpty:
         title = "No favorites yet";
+        explanation = "Use the Favorite button on a creation to keep it here.";
+        break;
+    case ForgeLibraryEmptyState::RecentEmpty:
+        title = "No recent creations";
+        explanation = "Creations used for placement will appear here.";
+        break;
+    case ForgeLibraryEmptyState::BrushesEmpty:
+        title = "Brushes are separate";
         explanation =
-            "Favorite Stamps will appear here in a future Forge Library update.";
+            "Smart Tool brush profiles are not reusable voxel creations.";
+        break;
+    case ForgeLibraryEmptyState::UserLibraryUnavailable:
+        title = "My Library is unavailable";
+        explanation = "The local VoxelForge Studio library is not configured.";
+        break;
+    case ForgeLibraryEmptyState::AssetsManagedExternally:
+        title = "Assets workspace";
+        explanation = "Project files are shown in the primary Assets panel.";
         break;
     case ForgeLibraryEmptyState::CatalogUnavailable:
         if (!viewModel_.StatusMessage().empty())
@@ -340,7 +427,8 @@ bool ForgeLibraryPanel::DrawEmptyState(ForgeLibraryPanelResult& result)
     ImGui::TextDisabled("%s", explanation);
     ImGui::PopTextWrapPos();
 
-    if (viewModel_.EmptyState() == ForgeLibraryEmptyState::EmptyProject)
+    if (viewModel_.EmptyState() == ForgeLibraryEmptyState::EmptyProject &&
+        viewModel_.Scope() == ForgeLibraryScope::Project)
     {
         ImGui::Dummy(ImVec2(0.0F, 6.0F));
         result.SaveSelectionRequested |= ImGui::Button(
@@ -399,13 +487,16 @@ bool ForgeLibraryPanel::DrawGrid(const std::size_t requestedColumns)
             mouse.y >= start.y && mouse.y <= start.y + cardHeight;
         if (cardHovered)
             ImGui::SetTooltip(
-                "%s\n%u x %u x %u\n%llu voxels",
+                "%s\n%s\n%s\n%u x %u x %u\n%llu voxels%s",
                 item.DisplayName.c_str(),
+                item.Category.c_str(),
+                SourceLabel(item.CatalogEntry.Reference.Scope),
                 item.CatalogEntry.Dimensions.X,
                 item.CatalogEntry.Dimensions.Y,
                 item.CatalogEntry.Dimensions.Z,
                 static_cast<unsigned long long>(
-                    item.CatalogEntry.VoxelCount));
+                    item.CatalogEntry.VoxelCount),
+                item.Favorite ? "\nFavorite" : "");
         if (cardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             static_cast<void>(viewModel_.Select(item.CatalogEntry.Reference.Id));
         if (cardHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
@@ -436,8 +527,9 @@ bool ForgeLibraryPanel::DrawList(const bool compact)
         else
         {
             std::snprintf(
-                label, sizeof(label), "%s    %u x %u x %u    %llu voxels",
+                label, sizeof(label), "%s    %s    %u x %u x %u    %llu voxels",
                 item.DisplayName.c_str(),
+                item.Category.c_str(),
                 item.CatalogEntry.Dimensions.X,
                 item.CatalogEntry.Dimensions.Y,
                 item.CatalogEntry.Dimensions.Z,
@@ -473,6 +565,20 @@ void ForgeLibraryPanel::DrawDetails()
         details->Dimensions.X, details->Dimensions.Y, details->Dimensions.Z,
         static_cast<unsigned long long>(details->VoxelCount),
         details->PaletteCount);
+    ImGui::TextDisabled(
+        "%s  |  %s",
+        details->Category.c_str(), SourceLabel(details->Scope));
+    if (!details->SourceAvailable)
+        ImGui::TextDisabled("Source unavailable - refresh the library.");
+    const char* const favoriteLabel = details->Favorite
+        ? "Remove Favorite"
+        : "Add Favorite";
+    if (ImGui::Button(favoriteLabel))
+    {
+        const Core::UUID* const selected = viewModel_.SelectedId();
+        if (selected != nullptr)
+            static_cast<void>(viewModel_.ToggleFavorite(*selected));
+    }
     if (const ForgeLibraryThumbnail* const thumbnail =
             viewModel_.SelectedThumbnail())
     {

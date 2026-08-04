@@ -123,7 +123,12 @@ EditorLayer::EditorLayer(
               transformGizmoFoundationSmokeTest ||
               transformPanelSmokeTest ||
               saveOnExitSmokeTest || stampLivePreviewVisualTest ||
-              stampPlacementVisualTest || forgeLibraryVisualTest),
+              stampPlacementVisualTest || forgeLibraryVisualTest,
+          smokeTestFrameLimit != 0U
+              ? Core::UserDataPaths(
+                    startupVoxPath.parent_path() / ".voxelforge-test-config",
+                    startupVoxPath.parent_path() / ".voxelforge-test-local")
+              : Core::UserDataPaths::FromSystemEnvironment()),
       applicationCloseCallback_(std::move(applicationCloseCallback)),
       smokeTestFrameLimit_(smokeTestFrameLimit),
       startupVoxPath_(std::move(startupVoxPath)),

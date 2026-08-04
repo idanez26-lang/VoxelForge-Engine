@@ -1,5 +1,7 @@
 #include "VoxelStamps/Library/ForgeLibraryViewModel.h"
 
+#include "VoxelStamps/Library/StampLibraryPaths.h"
+
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -31,6 +33,32 @@ namespace
         result.resize(result.size() - extension.size());
     }
     return result.empty() ? std::string("Untitled Stamp") : result;
+}
+
+[[nodiscard]] bool EqualsInsensitive(
+    const std::string_view left,
+    const std::string_view right)
+{
+    return LowerAscii(left) == LowerAscii(right);
+}
+
+[[nodiscard]] std::string CategoryFrom(const StampCatalogEntry& entry)
+{
+    const std::filesystem::path& root =
+        entry.Reference.Scope == StampLibraryScope::Project
+        ? ProjectCreationsRelativePath
+        : UserCreationsRelativePath;
+    const std::filesystem::path relative =
+        entry.Reference.RelativePath.lexically_normal().lexically_relative(root);
+    if (relative.empty() || relative.is_absolute())
+        return "Uncategorized";
+    const auto first = relative.begin();
+    if (first != relative.end() && *first == "..")
+        return "Uncategorized";
+    const std::filesystem::path category = relative.parent_path();
+    return category.empty() || category == "."
+        ? std::string("Uncategorized")
+        : category.generic_string();
 }
 
 [[nodiscard]] bool NameLess(
@@ -132,7 +160,19 @@ ForgeLibraryViewModel::ForgeLibraryViewModel(
     StampCatalogService& catalogue,
     StampAssetCache& assetCache,
     StampPlacementSession& placementSession)
-    : catalogue_(catalogue),
+    : projectCatalogue_(catalogue),
+      assetCache_(assetCache),
+      placementSession_(placementSession)
+{
+}
+
+ForgeLibraryViewModel::ForgeLibraryViewModel(
+    StampCatalogService& projectCatalogue,
+    StampCatalogService& userCatalogue,
+    StampAssetCache& assetCache,
+    StampPlacementSession& placementSession)
+    : projectCatalogue_(projectCatalogue),
+      userCatalogue_(&userCatalogue),
       assetCache_(assetCache),
       placementSession_(placementSession)
 {
@@ -142,52 +182,101 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::Refresh()
 {
     try
     {
-        StampCatalogResult result = catalogue_.Query({.Text = searchText_});
+        items_.clear();
+        categories_.clear();
+        if (section_ == ForgeLibrarySection::Assets)
+        {
+            ReconcileSelection();
+            emptyState_ = ForgeLibraryEmptyState::AssetsManagedExternally;
+            statusMessage_ = "Project files remain available in the Assets workspace.";
+            needsRefresh_ = false;
+            return {.Succeeded = true, .Message = statusMessage_};
+        }
+        if (section_ == ForgeLibrarySection::Brushes)
+        {
+            ReconcileSelection();
+            emptyState_ = ForgeLibraryEmptyState::BrushesEmpty;
+            statusMessage_ = "Brush profiles are separate from reusable creations.";
+            needsRefresh_ = false;
+            return {.Succeeded = true, .Message = statusMessage_};
+        }
+
+        StampCatalogService* const catalogue = ActiveCatalogue();
+        if (catalogue == nullptr)
+        {
+            ReconcileSelection();
+            emptyState_ = ForgeLibraryEmptyState::UserLibraryUnavailable;
+            statusMessage_ = "My Library is not configured for this session.";
+            needsRefresh_ = false;
+            return {.Message = statusMessage_};
+        }
+
+        StampCatalogResult result = catalogue->Query({.Text = searchText_});
         if (result.Error == StampCatalogError::Missing)
         {
-            result = catalogue_.RebuildCatalogue();
+            result = catalogue->RebuildCatalogue();
             if (result.Succeeded() && !searchText_.empty())
-                result = catalogue_.Query({.Text = searchText_});
+                result = catalogue->Query({.Text = searchText_});
         }
         if (!result.Succeeded())
         {
-            items_.clear();
             ReconcileSelection();
             statusMessage_ = result.Message;
-            emptyState_ =
-                result.Error == StampCatalogError::NotConfigured ||
-                result.Error == StampCatalogError::InvalidProjectRoot
+            emptyState_ = scope_ == ForgeLibraryScope::My &&
+                (result.Error == StampCatalogError::NotConfigured ||
+                 result.Error == StampCatalogError::InvalidProjectRoot)
+                ? ForgeLibraryEmptyState::UserLibraryUnavailable
+                : result.Error == StampCatalogError::NotConfigured ||
+                  result.Error == StampCatalogError::InvalidProjectRoot
                 ? ForgeLibraryEmptyState::NoProject
                 : ForgeLibraryEmptyState::CatalogUnavailable;
             needsRefresh_ = false;
             return {.Message = statusMessage_};
         }
 
-        items_.clear();
-        if (filter_ != ForgeLibraryFilter::Favorites)
+        items_.reserve(result.Catalog.Entries.size());
+        for (StampCatalogEntry& entry : result.Catalog.Entries)
         {
-            items_.reserve(result.Catalog.Entries.size());
-            for (StampCatalogEntry& entry : result.Catalog.Entries)
-            {
-                ForgeLibraryItem item;
-                item.DisplayName = DisplayName(entry);
-                item.CatalogEntry = std::move(entry);
-                items_.push_back(std::move(item));
-            }
+            ForgeLibraryItem item;
+            item.DisplayName = DisplayName(entry);
+            item.Category = CategoryFrom(entry);
+            item.Favorite = ContainsIdentity(
+                favorites_, {entry.Reference.Scope, entry.Reference.Id.Value()});
+            item.Recent = ContainsIdentity(
+                recent_, {entry.Reference.Scope, entry.Reference.Id.Value()});
+            item.CatalogEntry = std::move(entry);
+            categories_.push_back(item.Category);
+            items_.push_back(std::move(item));
         }
+        std::sort(categories_.begin(), categories_.end(),
+            [](const std::string& left, const std::string& right)
+            {
+                return LowerAscii(left) < LowerAscii(right);
+            });
+        categories_.erase(
+            std::unique(categories_.begin(), categories_.end(),
+                [](const std::string& left, const std::string& right)
+                {
+                    return EqualsInsensitive(left, right);
+                }),
+            categories_.end());
+
+        ApplySectionAndCategoryFilters();
         SortItems();
         for (const ForgeLibraryItem& item : items_) EnsureThumbnail(item);
-        if (searchText_.empty() &&
-            filter_ != ForgeLibraryFilter::Favorites)
+        if (searchText_.empty() && category_.empty() &&
+            section_ == ForgeLibrarySection::Creations)
         {
             ReconcileThumbnailCache();
         }
         ReconcileSelection();
         needsRefresh_ = false;
-        if (filter_ == ForgeLibraryFilter::Favorites)
-            emptyState_ = ForgeLibraryEmptyState::FavoritesEmpty;
-        else if (items_.empty() && !searchText_.empty())
+        if (items_.empty() && (!searchText_.empty() || !category_.empty()))
             emptyState_ = ForgeLibraryEmptyState::NoSearchResults;
+        else if (items_.empty() && section_ == ForgeLibrarySection::Favorites)
+            emptyState_ = ForgeLibraryEmptyState::FavoritesEmpty;
+        else if (items_.empty() && section_ == ForgeLibrarySection::Recent)
+            emptyState_ = ForgeLibraryEmptyState::RecentEmpty;
         else if (items_.empty())
             emptyState_ = ForgeLibraryEmptyState::EmptyProject;
         else
@@ -209,19 +298,61 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::Refresh()
     }
 }
 
+ForgeLibraryOperationResult ForgeLibraryViewModel::RebuildActiveCatalogue()
+{
+    StampCatalogService* const catalogue = ActiveCatalogue();
+    if (catalogue == nullptr)
+        return Refresh();
+    catalogue->InvalidateCache();
+    const StampCatalogResult rebuilt = catalogue->RebuildCatalogue();
+    if (!rebuilt.Succeeded())
+    {
+        needsRefresh_ = false;
+        statusMessage_ = rebuilt.Message;
+        emptyState_ = scope_ == ForgeLibraryScope::My &&
+            (rebuilt.Error == StampCatalogError::NotConfigured ||
+             rebuilt.Error == StampCatalogError::InvalidProjectRoot)
+            ? ForgeLibraryEmptyState::UserLibraryUnavailable
+            : rebuilt.Error == StampCatalogError::NotConfigured ||
+              rebuilt.Error == StampCatalogError::InvalidProjectRoot
+            ? ForgeLibraryEmptyState::NoProject
+            : ForgeLibraryEmptyState::CatalogUnavailable;
+        return {.Message = statusMessage_};
+    }
+    needsRefresh_ = true;
+    return Refresh();
+}
+
 void ForgeLibraryViewModel::ResetForProjectChange() noexcept
 {
-    catalogue_.InvalidateCache();
+    projectCatalogue_.InvalidateCache();
     static_cast<void>(
         assetCache_.InvalidateScope(StampLibraryScope::Project));
     items_.clear();
     selectedId_.reset();
     selectedStamp_.reset();
     selectedDetails_.reset();
-    thumbnailCache_.clear();
+    std::erase_if(thumbnailCache_,
+        [](const auto& entry)
+        {
+            return entry.first.first == StampLibraryScope::Project;
+        });
+    std::erase_if(favorites_,
+        [](const TrackedIdentity& identity)
+        {
+            return identity.first == StampLibraryScope::Project;
+        });
+    std::erase_if(recent_,
+        [](const TrackedIdentity& identity)
+        {
+            return identity.first == StampLibraryScope::Project;
+        });
     searchText_.clear();
+    category_.clear();
+    categories_.clear();
     statusMessage_.clear();
-    filter_ = ForgeLibraryFilter::All;
+    scope_ = ForgeLibraryScope::Project;
+    section_ = ForgeLibrarySection::Creations;
     sortMode_ = ForgeLibrarySortMode::Name;
     emptyState_ = ForgeLibraryEmptyState::None;
     // Grid/List is an artist preference and intentionally survives project changes.
@@ -263,16 +394,88 @@ ForgeLibrarySortMode ForgeLibraryViewModel::SortMode() const noexcept
     return sortMode_;
 }
 
-void ForgeLibraryViewModel::SetFilter(const ForgeLibraryFilter filter)
+void ForgeLibraryViewModel::SetScope(const ForgeLibraryScope scope)
 {
-    if (filter_ == filter) return;
-    filter_ = filter;
+    if (scope_ == scope) return;
+    scope_ = scope;
+    category_.clear();
+    categories_.clear();
+    ClearSelection();
     needsRefresh_ = true;
 }
 
-ForgeLibraryFilter ForgeLibraryViewModel::Filter() const noexcept
+ForgeLibraryScope ForgeLibraryViewModel::Scope() const noexcept
 {
-    return filter_;
+    return scope_;
+}
+
+bool ForgeLibraryViewModel::ScopeAvailable(
+    const ForgeLibraryScope scope) const noexcept
+{
+    return scope == ForgeLibraryScope::Project || userCatalogue_ != nullptr;
+}
+
+void ForgeLibraryViewModel::SetSection(const ForgeLibrarySection section)
+{
+    if (section_ == section) return;
+    section_ = section;
+    category_.clear();
+    ClearSelection();
+    needsRefresh_ = true;
+}
+
+ForgeLibrarySection ForgeLibraryViewModel::Section() const noexcept
+{
+    return section_;
+}
+
+void ForgeLibraryViewModel::SetCategory(std::string category)
+{
+    if (category_ == category) return;
+    category_ = std::move(category);
+    ClearSelection();
+    needsRefresh_ = true;
+}
+
+const std::string& ForgeLibraryViewModel::Category() const noexcept
+{
+    return category_;
+}
+
+const std::vector<std::string>&
+ForgeLibraryViewModel::Categories() const noexcept
+{
+    return categories_;
+}
+
+bool ForgeLibraryViewModel::ToggleFavorite(const Core::UUID& id)
+{
+    ForgeLibraryItem* const item = FindItem(id);
+    if (item == nullptr) return false;
+    const TrackedIdentity identity{
+        item->CatalogEntry.Reference.Scope, id.Value()};
+    const auto tracked = std::find(
+        favorites_.begin(), favorites_.end(), identity);
+    if (tracked == favorites_.end())
+    {
+        favorites_.push_back(identity);
+        item->Favorite = true;
+    }
+    else
+    {
+        favorites_.erase(tracked);
+        item->Favorite = false;
+    }
+    if (selectedDetails_ && selectedId_ && *selectedId_ == id)
+        selectedDetails_->Favorite = item->Favorite;
+    if (section_ == ForgeLibrarySection::Favorites && !item->Favorite)
+        needsRefresh_ = true;
+    return item->Favorite;
+}
+
+bool ForgeLibraryViewModel::IsFavorite(const Core::UUID& id) const noexcept
+{
+    return ContainsIdentity(favorites_, IdentityFor(id));
 }
 
 bool ForgeLibraryViewModel::Select(const Core::UUID& id)
@@ -295,7 +498,10 @@ bool ForgeLibraryViewModel::Select(const Core::UUID& id)
             .Name = item->DisplayName,
             .Dimensions = item->CatalogEntry.Dimensions,
             .VoxelCount = item->CatalogEntry.VoxelCount,
-            .PaletteCount = item->CatalogEntry.PaletteCount};
+            .PaletteCount = item->CatalogEntry.PaletteCount,
+            .Favorite = item->Favorite,
+            .Scope = item->CatalogEntry.Reference.Scope,
+            .Category = item->Category};
         statusMessage_ = loaded.Message;
         return false;
     }
@@ -307,7 +513,11 @@ bool ForgeLibraryViewModel::Select(const Core::UUID& id)
         .Dimensions = item->CatalogEntry.Dimensions,
         .VoxelCount = item->CatalogEntry.VoxelCount,
         .PaletteCount = item->CatalogEntry.PaletteCount,
-        .PreviewAvailable = ThumbnailFor(id) != nullptr};
+        .PreviewAvailable = ThumbnailFor(id) != nullptr,
+        .SourceAvailable = true,
+        .Favorite = item->Favorite,
+        .Scope = item->CatalogEntry.Reference.Scope,
+        .Category = item->Category};
     statusMessage_ = "Stamp selected. Double-click it or choose Use Stamp.";
     return true;
 }
@@ -338,7 +548,7 @@ const VoxelStamp* ForgeLibraryViewModel::SelectedPreviewStamp() const noexcept
 const ForgeLibraryThumbnail* ForgeLibraryViewModel::ThumbnailFor(
     const Core::UUID& id) const noexcept
 {
-    const auto thumbnail = thumbnailCache_.find(id.Value());
+    const auto thumbnail = thumbnailCache_.find(IdentityFor(id));
     return thumbnail == thumbnailCache_.end() ||
             !thumbnail->second.Thumbnail ||
             !thumbnail->second.Thumbnail->Available()
@@ -390,6 +600,9 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::ActivateSelected(
                 activated.Diagnostic))};
     }
 
+    RecordRecent(item->CatalogEntry.Reference);
+    if (ForgeLibraryItem* const mutableItem = FindItem(*selectedId_))
+        mutableItem->Recent = true;
     statusMessage_ = "Stamp placement active. Move in the viewport, click to place, Esc to finish.";
     return {
         .Succeeded = true,
@@ -415,10 +628,60 @@ bool ForgeLibraryViewModel::NeedsRefresh() const noexcept
 
 void ForgeLibraryViewModel::SortItems()
 {
-    // Date/type metadata is deliberately not synthesized in V1. Those modes
-    // are stable, prepared ordering contracts and fall back to name until the
-    // authoritative catalogue gains the corresponding derived fields.
+    if (section_ == ForgeLibrarySection::Recent)
+    {
+        std::stable_sort(items_.begin(), items_.end(),
+            [this](const ForgeLibraryItem& left,
+                   const ForgeLibraryItem& right)
+            {
+                const TrackedIdentity leftIdentity{
+                    left.CatalogEntry.Reference.Scope,
+                    left.CatalogEntry.Reference.Id.Value()};
+                const TrackedIdentity rightIdentity{
+                    right.CatalogEntry.Reference.Scope,
+                    right.CatalogEntry.Reference.Id.Value()};
+                const auto leftPosition =
+                    std::find(recent_.begin(), recent_.end(), leftIdentity);
+                const auto rightPosition =
+                    std::find(recent_.begin(), recent_.end(), rightIdentity);
+                return leftPosition < rightPosition;
+            });
+        return;
+    }
+    if (sortMode_ == ForgeLibrarySortMode::Type)
+    {
+        std::stable_sort(items_.begin(), items_.end(),
+            [](const ForgeLibraryItem& left,
+               const ForgeLibraryItem& right)
+            {
+                const std::string leftCategory = LowerAscii(left.Category);
+                const std::string rightCategory = LowerAscii(right.Category);
+                return leftCategory == rightCategory
+                    ? NameLess(left, right)
+                    : leftCategory < rightCategory;
+            });
+        return;
+    }
+    // Date metadata is not synthesized in V1; it falls back to stable name.
     std::stable_sort(items_.begin(), items_.end(), NameLess);
+}
+
+void ForgeLibraryViewModel::ApplySectionAndCategoryFilters()
+{
+    items_.erase(
+        std::remove_if(items_.begin(), items_.end(),
+            [this](const ForgeLibraryItem& item)
+            {
+                if (!category_.empty() &&
+                    !EqualsInsensitive(item.Category, category_))
+                    return true;
+                if (section_ == ForgeLibrarySection::Favorites)
+                    return !item.Favorite;
+                if (section_ == ForgeLibrarySection::Recent)
+                    return !item.Recent;
+                return false;
+            }),
+        items_.end());
 }
 
 void ForgeLibraryViewModel::ReconcileSelection()
@@ -429,7 +692,9 @@ void ForgeLibraryViewModel::ReconcileSelection()
 
 void ForgeLibraryViewModel::EnsureThumbnail(const ForgeLibraryItem& item)
 {
-    const std::uint64_t key = item.CatalogEntry.Reference.Id.Value();
+    const TrackedIdentity key{
+        item.CatalogEntry.Reference.Scope,
+        item.CatalogEntry.Reference.Id.Value()};
     const auto existing = thumbnailCache_.find(key);
     if (existing != thumbnailCache_.end() &&
         existing->second.ContentHash ==
@@ -460,12 +725,18 @@ void ForgeLibraryViewModel::ReconcileThumbnailCache()
     for (auto cached = thumbnailCache_.begin();
          cached != thumbnailCache_.end();)
     {
+        if (cached->first.first != ActiveLibraryScope())
+        {
+            ++cached;
+            continue;
+        }
         const bool stillPresent = std::any_of(
             items_.begin(),
             items_.end(),
-            [id = cached->first](const ForgeLibraryItem& item)
+            [identity = cached->first](const ForgeLibraryItem& item)
             {
-                return item.CatalogEntry.Reference.Id.Value() == id;
+                return item.CatalogEntry.Reference.Scope == identity.first &&
+                    item.CatalogEntry.Reference.Id.Value() == identity.second;
             });
         if (!stillPresent)
             cached = thumbnailCache_.erase(cached);
@@ -482,6 +753,67 @@ const ForgeLibraryItem* ForgeLibraryViewModel::FindItem(
             return candidate.CatalogEntry.Reference.Id == id;
         });
     return item == items_.end() ? nullptr : &*item;
+}
+
+ForgeLibraryItem* ForgeLibraryViewModel::FindItem(
+    const Core::UUID& id) noexcept
+{
+    const auto item = std::find_if(items_.begin(), items_.end(),
+        [&id](const ForgeLibraryItem& candidate)
+        {
+            return candidate.CatalogEntry.Reference.Id == id;
+        });
+    return item == items_.end() ? nullptr : &*item;
+}
+
+StampCatalogService* ForgeLibraryViewModel::ActiveCatalogue() noexcept
+{
+    return scope_ == ForgeLibraryScope::Project
+        ? &projectCatalogue_
+        : userCatalogue_;
+}
+
+const StampCatalogService*
+ForgeLibraryViewModel::ActiveCatalogue() const noexcept
+{
+    return scope_ == ForgeLibraryScope::Project
+        ? &projectCatalogue_
+        : userCatalogue_;
+}
+
+StampLibraryScope ForgeLibraryViewModel::ActiveLibraryScope() const noexcept
+{
+    return scope_ == ForgeLibraryScope::Project
+        ? StampLibraryScope::Project
+        : StampLibraryScope::User;
+}
+
+ForgeLibraryViewModel::TrackedIdentity ForgeLibraryViewModel::IdentityFor(
+    const Core::UUID& id) const noexcept
+{
+    return {ActiveLibraryScope(), id.Value()};
+}
+
+bool ForgeLibraryViewModel::ContainsIdentity(
+    const std::vector<TrackedIdentity>& identities,
+    const TrackedIdentity& identity) noexcept
+{
+    return std::find(identities.begin(), identities.end(), identity) !=
+        identities.end();
+}
+
+void ForgeLibraryViewModel::RecordRecent(
+    const StampAssetReference& reference)
+{
+    constexpr std::size_t MaximumRecent = 24U;
+    const TrackedIdentity identity{
+        reference.Scope, reference.Id.Value()};
+    recent_.erase(
+        std::remove(recent_.begin(), recent_.end(), identity),
+        recent_.end());
+    recent_.insert(recent_.begin(), identity);
+    if (recent_.size() > MaximumRecent)
+        recent_.resize(MaximumRecent);
 }
 
 } // namespace VoxelForge::Editor::Stamps
