@@ -19,6 +19,7 @@ enum class StampVariantResolutionError : std::uint8_t
     FixedVariantDisabled,
     FixedVariantUnavailable,
     NoValidVariants,
+    AllocationFailure,
     UnsupportedSelectionMode
 };
 
@@ -39,6 +40,8 @@ enum class StampVariantResolutionError : std::uint8_t
         return "The explicitly selected fixed variant source is unavailable.";
     case StampVariantResolutionError::NoValidVariants:
         return "The group contains no valid variant for its selection mode.";
+    case StampVariantResolutionError::AllocationFailure:
+        return "Smart Variant resolution ran out of memory.";
     case StampVariantResolutionError::UnsupportedSelectionMode:
         return "The group selection mode is not supported.";
     }

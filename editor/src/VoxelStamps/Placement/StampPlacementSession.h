@@ -2,7 +2,9 @@
 
 #include "Preview/VoxelPreview.h"
 #include "VoxelHistory/VoxelEditHistory.h"
+#include "VoxelStamps/Library/StampAssetCache.h"
 #include "VoxelStamps/Placement/StampPlacementPlanner.h"
+#include "VoxelStamps/Variants/StampVariantResolver.h"
 #include "VoxelStamps/VoxelStamp.h"
 
 #include "VoxelForge/Asset/Voxel/VoxelDocument.h"
@@ -20,6 +22,8 @@ enum class StampPlacementSessionResultCode : std::uint8_t
     Succeeded,
     Inactive,
     MissingAsset,
+    VariantResolutionFailed,
+    VariantAssetUnavailable,
     DocumentChanged,
     InvalidPlan
 };
@@ -35,6 +39,10 @@ enum class StampPlacementSessionResultCode : std::uint8_t
         return "No Stamp placement session is active.";
     case StampPlacementSessionResultCode::MissingAsset:
         return "The selected Stamp asset is unavailable.";
+    case StampPlacementSessionResultCode::VariantResolutionFailed:
+        return "The active Smart Variant group has no resolvable variant.";
+    case StampPlacementSessionResultCode::VariantAssetUnavailable:
+        return "The resolved Smart Variant source asset is unavailable.";
     case StampPlacementSessionResultCode::DocumentChanged:
         return "The active voxel document changed; Stamp placement was cancelled.";
     case StampPlacementSessionResultCode::InvalidPlan:
@@ -59,6 +67,9 @@ struct StampPlacementSessionResult final
     bool PreviewChanged = false;
     StampPlacementDiagnosticCode Diagnostic =
         StampPlacementDiagnosticCode::None;
+    StampVariantResolutionError VariantError =
+        StampVariantResolutionError::None;
+    StampLibraryError LibraryError = StampLibraryError::None;
 };
 
 enum class StampPlacementSessionPlaceStatus : std::uint8_t
@@ -85,8 +96,9 @@ struct StampPlacementSessionPlaceResult final
 };
 
 /// UI-independent owner of one active Stamp placement. It owns the selected
-/// Stamp, transform, current immutable plan, preview snapshot, cache key and
-/// placement ordinal. No document pointer is retained.
+/// Stamp or Variant group, transform, current immutable plan, preview snapshot,
+/// cache key and placement ordinal. No document pointer is retained. A cache
+/// passed to BeginVariantGroup must outlive the active placement session.
 class StampPlacementSession final
 {
 public:
@@ -104,6 +116,16 @@ public:
         std::uint64_t documentGeneration,
         std::size_t targetSubModel,
         StampFixedPoint targetPivot,
+        StampCollisionPolicy collisionPolicy =
+            StampCollisionPolicy::Overwrite);
+    [[nodiscard]] StampPlacementSessionResult BeginVariantGroup(
+        StampVariantGroup group,
+        StampAssetCache& assetCache,
+        std::uint64_t placementSessionSeed,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration,
+        std::size_t targetSubModel = 0U,
+        StampFixedPoint targetPivot = {},
         StampCollisionPolicy collisionPolicy =
             StampCollisionPolicy::Overwrite);
     [[nodiscard]] StampPlacementSessionResult Rebuild(
@@ -152,6 +174,9 @@ public:
     [[nodiscard]] StampPlacementSessionResult ResetTransform(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult RenewVariantSeed(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
     [[nodiscard]] StampPlacementSessionPlaceResult PlaceOnce(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration,
@@ -174,9 +199,19 @@ public:
     [[nodiscard]] StampPlacementMirrorMode Mirror() const noexcept;
     [[nodiscard]] std::size_t TargetSubModel() const noexcept;
     [[nodiscard]] std::uint64_t PlacementOrdinal() const noexcept;
+    [[nodiscard]] bool IsVariantPlacement() const noexcept;
+    [[nodiscard]] const StampVariantGroup* ActiveVariantGroup() const noexcept;
+    [[nodiscard]] const StampVariantResolutionReport*
+        CurrentVariantResolution() const noexcept;
+    [[nodiscard]] const StampPlacementVariantIdentity*
+        CurrentVariantIdentity() const noexcept;
+    [[nodiscard]] std::uint64_t PlacementSessionSeed() const noexcept;
 
 private:
     [[nodiscard]] StampPlacementSessionResult BuildCurrent(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult ResolveCurrentVariant(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
     [[nodiscard]] bool MatchesDocumentContext(
@@ -185,11 +220,18 @@ private:
 
     StampPlacementSessionState state_ = StampPlacementSessionState::Empty;
     std::optional<VoxelStamp> stamp_;
+    std::optional<StampVariantGroup> variantGroup_;
+    StampAssetCache* variantAssetCache_ = nullptr;
+    std::optional<StampVariantResolutionReport> variantResolution_;
+    std::optional<StampPlacementVariantIdentity> variantIdentity_;
     std::optional<StampPlacementPlan> plan_;
     VoxelPreviewSession preview_;
     StampPlacementTransform transform_{};
     StampCollisionPolicy collisionPolicy_ = StampCollisionPolicy::Overwrite;
     std::size_t targetSubModel_ = 0U;
+    std::uintptr_t documentInstanceToken_ = 0U;
+    std::uint64_t documentGeneration_ = 0U;
+    std::uint64_t placementSessionSeed_ = 0U;
     std::uint64_t placementOrdinal_ = 0U;
 };
 

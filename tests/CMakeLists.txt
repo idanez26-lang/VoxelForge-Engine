@@ -2287,3 +2287,23 @@ add_test(
     NAME VoxelForge.Editor.StampVariant
     COMMAND $<TARGET_FILE:VoxelForgeEditorStampVariantTests>
 )
+
+# STAMP-20: resolved variant identity is retained through atomic placement and
+# source-independent Undo/Redo without rerolling.
+add_executable(
+    VoxelForgeEditorStampVariantPlacementTests
+    Editor/StampVariantPlacementTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampVariantPlacementTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampVariantPlacementTests)
+add_test(
+    NAME VoxelForge.Editor.StampVariantPlacement
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampVariantPlacementTests>
+)
+set_tests_properties(
+    VoxelForge.Editor.StampVariantPlacement
+    PROPERTIES LABELS "Smoke"
+)

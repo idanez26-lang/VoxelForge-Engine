@@ -55,6 +55,24 @@ PlaceVoxelStampPreparation PreparePlaceVoxelStampOperation(
     {
         VoxelEditOperation operation;
         operation.Label = "Place Voxel Stamp";
+        if (plan.Variant)
+        {
+            operation.StampVariantMetadata =
+                std::make_shared<VoxelEditStampVariantMetadata>(
+                    VoxelEditStampVariantMetadata{
+                        .GroupId = plan.Variant->GroupId,
+                        .GroupRevision = plan.Variant->GroupRevision,
+                        .VariantId = plan.Variant->VariantId,
+                        .StampId = plan.Variant->StampId,
+                        .ExpectedContentHash =
+                            plan.Variant->ExpectedContentHash,
+                        .PlacementSessionSeed =
+                            plan.Variant->PlacementSessionSeed,
+                        .SelectionSeed = plan.Variant->SelectionSeed,
+                        .PlacementOrdinal = plan.Variant->PlacementOrdinal,
+                        .ReplayPolicy = VoxelEditStampReplayPolicy::
+                            RestoreStoredOperation});
+        }
         operation.Changes.reserve(plan.Statistics.ChangedVoxelCount);
         for (const StampPlannedVoxel& voxel : plan.Voxels)
         {

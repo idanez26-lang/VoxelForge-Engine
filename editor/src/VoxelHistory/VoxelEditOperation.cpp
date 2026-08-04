@@ -39,6 +39,17 @@ std::size_t EstimateVoxelEditOperationMemory(
             return maximum;
         result += sizeof(VoxelPaletteChange);
     }
+    if (operation.StampVariantMetadata)
+    {
+        if (result > maximum - sizeof(VoxelEditStampVariantMetadata))
+            return maximum;
+        result += sizeof(VoxelEditStampVariantMetadata);
+        if (operation.StampVariantMetadata->ExpectedContentHash.size() >
+            maximum - result)
+            return maximum;
+        result +=
+            operation.StampVariantMetadata->ExpectedContentHash.size();
+    }
     return result;
 }
 

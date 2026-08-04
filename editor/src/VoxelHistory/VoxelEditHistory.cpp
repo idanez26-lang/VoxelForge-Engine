@@ -19,10 +19,11 @@ VoxelEditHistoryResult Result(
     std::string message = {},
     std::shared_ptr<const VoxelEditSelectionTransition> selection = {},
     const VoxelEditSelectionState selectionState =
-        VoxelEditSelectionState::None)
+        VoxelEditSelectionState::None,
+    std::shared_ptr<const VoxelEditStampVariantMetadata> stampVariant = {})
 {
     return {code, changed, std::move(label), std::move(message),
-        std::move(selection), selectionState};
+        std::move(selection), selectionState, std::move(stampVariant)};
 }
 
 class BusyGuard final
@@ -113,7 +114,8 @@ VoxelEditHistoryResult VoxelEditHistory::Execute(
     EnforceLimits();
     return Result(VoxelEditHistoryResultCode::Applied, true, label, {},
         pending.Operation.SelectionTransition,
-        VoxelEditSelectionState::After);
+        VoxelEditSelectionState::After,
+        pending.Operation.StampVariantMetadata);
 }
 
 VoxelEditHistoryResult VoxelEditHistory::Undo(VoxelEditSession& session)
@@ -144,7 +146,8 @@ VoxelEditHistoryResult VoxelEditHistory::Undo(VoxelEditSession& session)
         SynchronizeDirty(session, *document);
     return Result(VoxelEditHistoryResultCode::Applied, true, label, {},
         operation.Operation.SelectionTransition,
-        VoxelEditSelectionState::Before);
+        VoxelEditSelectionState::Before,
+        operation.Operation.StampVariantMetadata);
 }
 
 VoxelEditHistoryResult VoxelEditHistory::Redo(VoxelEditSession& session)
@@ -175,7 +178,8 @@ VoxelEditHistoryResult VoxelEditHistory::Redo(VoxelEditSession& session)
         SynchronizeDirty(session, *document);
     return Result(VoxelEditHistoryResultCode::Applied, true, label, {},
         operation.Operation.SelectionTransition,
-        VoxelEditSelectionState::After);
+        VoxelEditSelectionState::After,
+        operation.Operation.StampVariantMetadata);
 }
 
 void VoxelEditHistory::MarkSavedState(

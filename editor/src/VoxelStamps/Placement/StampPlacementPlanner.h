@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace VoxelForge::Editor::Stamps
 {
@@ -14,6 +15,7 @@ namespace VoxelForge::Editor::Stamps
 struct StampPlacementPlannerRequest final
 {
     const VoxelStamp* Stamp = nullptr;
+    std::optional<StampPlacementVariantIdentity> Variant;
     const Asset::Voxel::VoxelDocument* Document = nullptr;
     std::uint64_t DocumentGeneration = 0U;
     std::size_t TargetSubModel = 0U;

@@ -180,6 +180,7 @@ StampPlacementPlan StampPlacementPlanner::Build(
 
         const VoxelStamp& stamp = *request.Stamp;
         plan.Stamp = stamp.Identity();
+        plan.Variant = request.Variant;
         plan.Document = MakeStampDocumentIdentity(*request.Document);
         plan.DocumentGeneration = request.DocumentGeneration;
         plan.DocumentRevision = request.Document->GetRevision();
@@ -193,8 +194,22 @@ StampPlacementPlan StampPlacementPlanner::Build(
         plan.ResourceLimitEvaluation = EvaluateStampLimits(
             stamp.ResourceUsage(), request.ResourceLimits);
 
+        if (plan.Variant &&
+            (plan.Variant->GroupId.Value() == 0U ||
+             plan.Variant->VariantId.Value() == 0U ||
+             plan.Variant->StampId != plan.Stamp.Id ||
+             plan.Variant->ExpectedContentHash.empty() ||
+             plan.Variant->ExpectedContentHash != plan.Stamp.ContentHash))
+        {
+            AddDiagnostic(
+                plan, StampPlacementDiagnosticCode::InvalidVariantIdentity,
+                StampPlacementDiagnosticSeverity::Error);
+            return plan;
+        }
+
         plan.CacheKey = {
             .Stamp = plan.Stamp,
+            .Variant = plan.Variant,
             .Document = plan.Document,
             .DocumentGeneration = plan.DocumentGeneration,
             .DocumentRevision = plan.DocumentRevision,

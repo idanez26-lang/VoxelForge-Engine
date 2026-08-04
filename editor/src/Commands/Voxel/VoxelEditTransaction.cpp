@@ -284,6 +284,22 @@ CommandResult ApplyVoxelEditOperation(
 {
     if (operation.Changes.empty() && !operation.PaletteChange)
         return CommandResult::Failure("Voxel edit operation is empty.");
+    if (operation.StampVariantMetadata)
+    {
+        const VoxelEditStampVariantMetadata& metadata =
+            *operation.StampVariantMetadata;
+        if (metadata.GroupId.Value() == 0U ||
+            metadata.VariantId.Value() == 0U ||
+            metadata.StampId.Value() == 0U ||
+            metadata.ExpectedContentHash.empty() ||
+            metadata.ExpectedContentHash.size() > 128U ||
+            metadata.ReplayPolicy !=
+                VoxelEditStampReplayPolicy::RestoreStoredOperation)
+        {
+            return CommandResult::Failure(
+                "Stamp Variant history metadata is invalid; replay was refused before mutation.");
+        }
+    }
     if (session.VoxelModelGeneration() != modelGeneration)
         return CommandResult::Failure("The voxel model session has changed.");
     Voxel::VoxelModel* model = session.ActiveVoxelModel();

@@ -56,14 +56,52 @@ StampPlacementSessionResult StampPlacementSession::Begin(
 {
     plan_.reset();
     static_cast<void>(preview_.Clear());
+    variantGroup_.reset();
+    variantAssetCache_ = nullptr;
+    variantResolution_.reset();
+    variantIdentity_.reset();
     stamp_ = std::move(stamp);
     targetSubModel_ = targetSubModel;
+    documentInstanceToken_ =
+        reinterpret_cast<std::uintptr_t>(&document);
+    documentGeneration_ = documentGeneration;
     transform_ = {};
     transform_.TargetPivot = targetPivot;
     collisionPolicy_ = collisionPolicy;
+    placementSessionSeed_ = 0U;
     placementOrdinal_ = 0U;
     state_ = StampPlacementSessionState::Active;
     return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::BeginVariantGroup(
+    StampVariantGroup group,
+    StampAssetCache& assetCache,
+    const std::uint64_t placementSessionSeed,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration,
+    const std::size_t targetSubModel,
+    const StampFixedPoint targetPivot,
+    const StampCollisionPolicy collisionPolicy)
+{
+    stamp_.reset();
+    plan_.reset();
+    static_cast<void>(preview_.Clear());
+    variantGroup_ = std::move(group);
+    variantAssetCache_ = &assetCache;
+    variantResolution_.reset();
+    variantIdentity_.reset();
+    targetSubModel_ = targetSubModel;
+    documentInstanceToken_ =
+        reinterpret_cast<std::uintptr_t>(&document);
+    documentGeneration_ = documentGeneration;
+    transform_ = {};
+    transform_.TargetPivot = targetPivot;
+    collisionPolicy_ = collisionPolicy;
+    placementSessionSeed_ = placementSessionSeed;
+    placementOrdinal_ = 0U;
+    state_ = StampPlacementSessionState::Active;
+    return ResolveCurrentVariant(document, documentGeneration);
 }
 
 StampPlacementSessionResult StampPlacementSession::Rebuild(
@@ -74,7 +112,9 @@ StampPlacementSessionResult StampPlacementSession::Rebuild(
     {
         return {};
     }
-    return BuildCurrent(document, documentGeneration);
+    return variantGroup_ && !stamp_
+        ? ResolveCurrentVariant(document, documentGeneration)
+        : BuildCurrent(document, documentGeneration);
 }
 
 StampPlacementSessionResult StampPlacementSession::SetTarget(
@@ -294,19 +334,55 @@ StampPlacementSessionResult StampPlacementSession::ResetTransform(
     return BuildCurrent(document, documentGeneration);
 }
 
+StampPlacementSessionResult StampPlacementSession::RenewVariantSeed(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!IsActive() || !variantGroup_ || variantAssetCache_ == nullptr)
+    {
+        return {};
+    }
+    if (!MatchesDocumentContext(document, documentGeneration))
+    {
+        const bool previewChanged = CurrentPreview() != nullptr;
+        const bool changed = Cancel();
+        return {
+            .Code = StampPlacementSessionResultCode::DocumentChanged,
+            .Succeeded = false,
+            .PlanChanged = changed,
+            .PreviewChanged = previewChanged};
+    }
+    placementSessionSeed_ =
+        RenewSessionSeed(placementSessionSeed_);
+    return ResolveCurrentVariant(document, documentGeneration);
+}
+
 StampPlacementSessionPlaceResult StampPlacementSession::PlaceOnce(
     const Asset::Voxel::VoxelDocument& document,
     const std::uint64_t documentGeneration,
     VoxelEditSession& editSession,
     VoxelEditHistory& history)
 {
-    if (!IsActive() || !plan_)
+    if (!IsActive())
     {
         return {
             .Status = StampPlacementSessionPlaceStatus::Inactive,
             .History = SessionHistoryResult(
                 VoxelEditHistoryResultCode::InvalidOperation,
                 "No Stamp placement session is active.")};
+    }
+    if (!plan_)
+    {
+        const std::string message = variantResolution_ &&
+                !variantResolution_->Succeeded()
+            ? std::string(variantResolution_->Message)
+            : variantResolution_
+            ? "The resolved Smart Variant source asset is unavailable."
+            : "The active Stamp placement has no valid plan.";
+        return {
+            .Status = StampPlacementSessionPlaceStatus::Rejected,
+            .History = SessionHistoryResult(
+                VoxelEditHistoryResultCode::InvalidOperation, message)};
     }
     if (!MatchesDocumentContext(document, documentGeneration))
     {
@@ -355,8 +431,9 @@ StampPlacementSessionPlaceResult StampPlacementSession::PlaceOnce(
     }
 
     ++placementOrdinal_;
-    const StampPlacementSessionResult refreshed =
-        BuildCurrent(document, documentGeneration);
+    const StampPlacementSessionResult refreshed = variantGroup_
+        ? ResolveCurrentVariant(document, documentGeneration)
+        : BuildCurrent(document, documentGeneration);
     return {
         .Status = StampPlacementSessionPlaceStatus::Placed,
         .PreviewChanged = refreshed.PreviewChanged,
@@ -369,11 +446,18 @@ bool StampPlacementSession::Cancel() noexcept
         preview_.Current() != nullptr ||
         state_ == StampPlacementSessionState::Active;
     stamp_.reset();
+    variantGroup_.reset();
+    variantAssetCache_ = nullptr;
+    variantResolution_.reset();
+    variantIdentity_.reset();
     plan_.reset();
     static_cast<void>(preview_.Clear());
     transform_ = {};
     collisionPolicy_ = StampCollisionPolicy::Overwrite;
     targetSubModel_ = 0U;
+    documentInstanceToken_ = 0U;
+    documentGeneration_ = 0U;
+    placementSessionSeed_ = 0U;
     placementOrdinal_ = 0U;
     state_ = StampPlacementSessionState::Cancelled;
     return changed;
@@ -387,7 +471,7 @@ StampPlacementSessionState StampPlacementSession::State() const noexcept
 bool StampPlacementSession::IsActive() const noexcept
 {
     return state_ == StampPlacementSessionState::Active &&
-        stamp_.has_value();
+        (stamp_.has_value() || variantGroup_.has_value());
 }
 
 bool StampPlacementSession::IsCurrent(
@@ -450,14 +534,121 @@ std::uint64_t StampPlacementSession::PlacementOrdinal() const noexcept
     return placementOrdinal_;
 }
 
+bool StampPlacementSession::IsVariantPlacement() const noexcept
+{
+    return IsActive() && variantGroup_.has_value();
+}
+
+const StampVariantGroup*
+StampPlacementSession::ActiveVariantGroup() const noexcept
+{
+    return variantGroup_ ? &*variantGroup_ : nullptr;
+}
+
+const StampVariantResolutionReport*
+StampPlacementSession::CurrentVariantResolution() const noexcept
+{
+    return variantResolution_ ? &*variantResolution_ : nullptr;
+}
+
+const StampPlacementVariantIdentity*
+StampPlacementSession::CurrentVariantIdentity() const noexcept
+{
+    return variantIdentity_ ? &*variantIdentity_ : nullptr;
+}
+
+std::uint64_t StampPlacementSession::PlacementSessionSeed() const noexcept
+{
+    return placementSessionSeed_;
+}
+
 bool StampPlacementSession::MatchesDocumentContext(
     const Asset::Voxel::VoxelDocument& document,
     const std::uint64_t documentGeneration) const noexcept
 {
-    return plan_ &&
-        plan_->Document.InstanceToken ==
+    return documentInstanceToken_ ==
             reinterpret_cast<std::uintptr_t>(&document) &&
-        plan_->DocumentGeneration == documentGeneration;
+        documentGeneration_ == documentGeneration;
+}
+
+StampPlacementSessionResult StampPlacementSession::ResolveCurrentVariant(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!variantGroup_ || variantAssetCache_ == nullptr)
+    {
+        return {};
+    }
+    if (!MatchesDocumentContext(document, documentGeneration))
+    {
+        const bool previewChanged = CurrentPreview() != nullptr;
+        const bool changed = Cancel();
+        return {
+            .Code = StampPlacementSessionResultCode::DocumentChanged,
+            .Succeeded = false,
+            .PlanChanged = changed,
+            .PreviewChanged = previewChanged};
+    }
+
+    const bool hadPlan = plan_.has_value();
+    const bool previewChanged = CurrentPreview() != nullptr;
+    plan_.reset();
+    static_cast<void>(preview_.Clear());
+    stamp_.reset();
+    variantIdentity_.reset();
+    try
+    {
+        variantResolution_ = ResolveVariant(
+            *variantGroup_, placementSessionSeed_, placementOrdinal_);
+        if (!variantResolution_->Succeeded())
+        {
+            return {
+                .Code =
+                    StampPlacementSessionResultCode::VariantResolutionFailed,
+                .Succeeded = false,
+                .PlanChanged = hadPlan,
+                .PreviewChanged = previewChanged,
+                .VariantError = variantResolution_->Error};
+        }
+
+        StampAssetCacheResult loaded = variantAssetCache_->GetOrLoad(
+            variantResolution_->Resolved->Stamp);
+        if (!loaded.Succeeded())
+        {
+            return {
+                .Code =
+                    StampPlacementSessionResultCode::VariantAssetUnavailable,
+                .Succeeded = false,
+                .PlanChanged = hadPlan,
+                .PreviewChanged = previewChanged,
+                .LibraryError = loaded.Error};
+        }
+
+        stamp_ = *loaded.Stamp;
+        variantIdentity_ = StampPlacementVariantIdentity{
+            .GroupId = variantGroup_->Id(),
+            .GroupRevision = variantGroup_->Revision(),
+            .VariantId = variantResolution_->Resolved->VariantId,
+            .StampId = variantResolution_->Resolved->Stamp.Id,
+            .ExpectedContentHash =
+                variantResolution_->Resolved->Stamp.ContentHash,
+            .PlacementSessionSeed = placementSessionSeed_,
+            .SelectionSeed = variantResolution_->SelectionSeed,
+            .PlacementOrdinal = placementOrdinal_};
+        return BuildCurrent(document, documentGeneration);
+    }
+    catch (...)
+    {
+        stamp_.reset();
+        variantIdentity_.reset();
+        variantResolution_.reset();
+        return {
+            .Code = StampPlacementSessionResultCode::VariantResolutionFailed,
+            .Succeeded = false,
+            .PlanChanged = hadPlan,
+            .PreviewChanged = previewChanged,
+            .VariantError = StampVariantResolutionError::AllocationFailure};
+    }
 }
 
 StampPlacementSessionResult StampPlacementSession::BuildCurrent(
@@ -468,7 +659,7 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
     {
         return {};
     }
-    if (plan_ && !MatchesDocumentContext(document, documentGeneration))
+    if (!MatchesDocumentContext(document, documentGeneration))
     {
         const bool previewChanged = CurrentPreview() != nullptr;
         const bool changed = Cancel();
@@ -480,6 +671,7 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
     }
     StampPlacementPlan next = StampPlacementPlanner::Build({
         .Stamp = &*stamp_,
+        .Variant = variantIdentity_,
         .Document = &document,
         .DocumentGeneration = documentGeneration,
         .TargetSubModel = targetSubModel_,

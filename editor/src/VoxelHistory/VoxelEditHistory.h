@@ -46,6 +46,7 @@ struct VoxelEditHistoryResult final
     std::string Message;
     std::shared_ptr<const VoxelEditSelectionTransition> SelectionTransition;
     VoxelEditSelectionState SelectionState = VoxelEditSelectionState::None;
+    std::shared_ptr<const VoxelEditStampVariantMetadata> StampVariantMetadata;
 
     [[nodiscard]] explicit operator bool() const noexcept
     {

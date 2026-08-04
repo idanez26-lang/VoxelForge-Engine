@@ -65,9 +65,27 @@ struct StampDocumentIdentity final
         const StampDocumentIdentity&) const noexcept = default;
 };
 
+/// Exact Smart Variant facts resolved before planning.  They participate in
+/// plan/cache identity and are copied unchanged into history on commit.
+struct StampPlacementVariantIdentity final
+{
+    Core::UUID GroupId{0U};
+    std::uint64_t GroupRevision = 0U;
+    Core::UUID VariantId{0U};
+    Core::UUID StampId{0U};
+    std::string ExpectedContentHash;
+    std::uint64_t PlacementSessionSeed = 0U;
+    std::uint64_t SelectionSeed = 0U;
+    std::uint64_t PlacementOrdinal = 0U;
+
+    [[nodiscard]] bool operator==(
+        const StampPlacementVariantIdentity&) const noexcept = default;
+};
+
 struct StampPlacementCacheKey final
 {
     StampIdentity Stamp{};
+    std::optional<StampPlacementVariantIdentity> Variant;
     StampDocumentIdentity Document{};
     std::uint64_t DocumentGeneration = 0U;
     std::uint64_t DocumentRevision = 0U;
@@ -96,6 +114,7 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
     MissingDocument,
     InvalidDocumentGeneration,
     InvalidSubModel,
+    InvalidVariantIdentity,
     UnsupportedRotation,
     UnsupportedMirror,
     UnsupportedCollisionPolicy,
@@ -125,6 +144,8 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
         return "The active voxel document generation is invalid.";
     case StampPlacementDiagnosticCode::InvalidSubModel:
         return "The target voxel sub-model does not exist.";
+    case StampPlacementDiagnosticCode::InvalidVariantIdentity:
+        return "Resolved Stamp Variant identity does not match the active Stamp.";
     case StampPlacementDiagnosticCode::UnsupportedRotation:
         return "Stamp rotation must be an exact vertical quarter turn (0, 90, 180, or 270 degrees).";
     case StampPlacementDiagnosticCode::UnsupportedMirror:
@@ -220,6 +241,7 @@ struct StampPlannedVoxel final
 struct StampPlacementPlan final
 {
     StampIdentity Stamp{};
+    std::optional<StampPlacementVariantIdentity> Variant;
     StampDocumentIdentity Document{};
     std::uint64_t DocumentGeneration = 0U;
     std::uint64_t DocumentRevision = 0U;
