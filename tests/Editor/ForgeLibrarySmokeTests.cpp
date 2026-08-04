@@ -1,7 +1,6 @@
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelStamps/Library/ForgeLibraryViewModel.h"
-#include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
@@ -219,19 +218,18 @@ void RunSmoke()
             placement.CurrentPreview() != nullptr,
         "Use must activate the shared placement preview.");
 
-    auto first = PreparePlaceVoxelStampOperation(*placement.CurrentPlan());
-    Require(first.IsReady() &&
-            history.Execute(editSession, std::move(first.Operation)),
+    const auto first = placement.PlaceOnce(
+        document, 18U, editSession, history);
+    Require(static_cast<bool>(first),
         "First Forge Library placement must commit.");
-    placement.MarkPlacementCommitted();
     Require(placement.TranslateTarget(3, 0, 0, document, 18U).Succeeded,
         "Persistent preview must move for a second placement.");
-    auto second = PreparePlaceVoxelStampOperation(*placement.CurrentPlan());
-    Require(second.IsReady() &&
-            history.Execute(editSession, std::move(second.Operation)),
+    const auto second = placement.PlaceOnce(
+        document, 18U, editSession, history);
+    Require(static_cast<bool>(second),
         "Second Forge Library placement must commit.");
-    placement.MarkPlacementCommitted();
-    Require(history.UndoCount() == 2U &&
+    Require(placement.PlacementOrdinal() == 2U &&
+            history.UndoCount() == 2U &&
             static_cast<bool>(history.Undo(editSession)) &&
             static_cast<bool>(history.Redo(editSession)),
         "Forge Library smoke Undo/Redo must remain atomic.");

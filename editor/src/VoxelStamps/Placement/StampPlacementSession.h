@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Preview/VoxelPreview.h"
+#include "VoxelHistory/VoxelEditHistory.h"
 #include "VoxelStamps/Placement/StampPlacementPlanner.h"
 #include "VoxelStamps/VoxelStamp.h"
 
@@ -9,9 +10,38 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 
 namespace VoxelForge::Editor::Stamps
 {
+
+enum class StampPlacementSessionResultCode : std::uint8_t
+{
+    Succeeded,
+    Inactive,
+    MissingAsset,
+    DocumentChanged,
+    InvalidPlan
+};
+
+[[nodiscard]] constexpr std::string_view StampPlacementSessionResultMessage(
+    const StampPlacementSessionResultCode code) noexcept
+{
+    switch (code)
+    {
+    case StampPlacementSessionResultCode::Succeeded:
+        return "Stamp placement session is active.";
+    case StampPlacementSessionResultCode::Inactive:
+        return "No Stamp placement session is active.";
+    case StampPlacementSessionResultCode::MissingAsset:
+        return "The selected Stamp asset is unavailable.";
+    case StampPlacementSessionResultCode::DocumentChanged:
+        return "The active voxel document changed; Stamp placement was cancelled.";
+    case StampPlacementSessionResultCode::InvalidPlan:
+        return "The Stamp placement plan is invalid.";
+    }
+    return "Unknown Stamp placement session status.";
+}
 
 enum class StampPlacementSessionState : std::uint8_t
 {
@@ -22,11 +52,36 @@ enum class StampPlacementSessionState : std::uint8_t
 
 struct StampPlacementSessionResult final
 {
+    StampPlacementSessionResultCode Code =
+        StampPlacementSessionResultCode::Inactive;
     bool Succeeded = false;
     bool PlanChanged = false;
     bool PreviewChanged = false;
     StampPlacementDiagnosticCode Diagnostic =
         StampPlacementDiagnosticCode::None;
+};
+
+enum class StampPlacementSessionPlaceStatus : std::uint8_t
+{
+    Placed,
+    PreviewRefreshed,
+    NoChange,
+    Inactive,
+    DocumentChanged,
+    Rejected
+};
+
+struct StampPlacementSessionPlaceResult final
+{
+    StampPlacementSessionPlaceStatus Status =
+        StampPlacementSessionPlaceStatus::Inactive;
+    bool PreviewChanged = false;
+    VoxelEditHistoryResult History{};
+
+    [[nodiscard]] explicit operator bool() const noexcept
+    {
+        return Status == StampPlacementSessionPlaceStatus::Placed;
+    }
 };
 
 /// UI-independent owner of one active Stamp placement. It owns the selected
@@ -35,6 +90,14 @@ struct StampPlacementSessionResult final
 class StampPlacementSession final
 {
 public:
+    [[nodiscard]] StampPlacementSessionResult SelectAsset(
+        const VoxelStamp* stamp,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration,
+        std::size_t targetSubModel = 0U,
+        StampFixedPoint targetPivot = {},
+        StampCollisionPolicy collisionPolicy =
+            StampCollisionPolicy::Overwrite);
     [[nodiscard]] StampPlacementSessionResult Begin(
         VoxelStamp stamp,
         const Asset::Voxel::VoxelDocument& document,
@@ -47,6 +110,10 @@ public:
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
     [[nodiscard]] StampPlacementSessionResult SetTarget(
+        StampFixedPoint targetPivot,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult UpdateTarget(
         StampFixedPoint targetPivot,
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
@@ -73,8 +140,12 @@ public:
     [[nodiscard]] StampPlacementSessionResult CycleMirror(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionPlaceResult PlaceOnce(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration,
+        VoxelEditSession& editSession,
+        VoxelEditHistory& history);
     [[nodiscard]] bool Cancel() noexcept;
-    void MarkPlacementCommitted() noexcept;
 
     [[nodiscard]] StampPlacementSessionState State() const noexcept;
     [[nodiscard]] bool IsActive() const noexcept;
@@ -95,6 +166,9 @@ private:
     [[nodiscard]] StampPlacementSessionResult BuildCurrent(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    [[nodiscard]] bool MatchesDocumentContext(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration) const noexcept;
 
     StampPlacementSessionState state_ = StampPlacementSessionState::Empty;
     std::optional<VoxelStamp> stamp_;

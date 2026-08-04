@@ -1,6 +1,5 @@
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
-#include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 #include "VoxelStamps/Placement/StampPlacementSession.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
@@ -141,25 +140,25 @@ void RunScenario()
     const std::size_t undoBeforeStaleClick = history.UndoCount();
     Require(!placement.IsCurrent(document, 14U),
         "External edit must stale the current plan.");
-    const auto refreshed = placement.Rebuild(document, 14U);
-    Require(refreshed.Succeeded && placement.IsCurrent(document, 14U) &&
+    const auto refreshed = placement.PlaceOnce(
+        document, 14U, editSession, history);
+    Require(refreshed.Status ==
+                StampPlacementSessionPlaceStatus::PreviewRefreshed &&
+                placement.IsCurrent(document, 14U) &&
                 history.UndoCount() == undoBeforeStaleClick,
         "Stale click must refresh without placement.");
 
-    auto first =
-        PreparePlaceVoxelStampOperation(*placement.CurrentPlan());
-    Require(first.IsReady() &&
-                history.Execute(editSession, std::move(first.Operation)),
+    const auto first = placement.PlaceOnce(
+        document, 14U, editSession, history);
+    Require(static_cast<bool>(first),
         "Second click must commit the refreshed plan.");
-    placement.MarkPlacementCommitted();
     Require(placement.PlacementOrdinal() == 1U &&
                 editSession.Rebuilds() == 1U &&
                 editSession.Completions() == 1U &&
                 history.UndoCount() == 1U,
         "One placement must create one transaction and rebuild.");
 
-    Require(placement.Rebuild(document, 14U).Succeeded &&
-                placement.CurrentPreview() != nullptr &&
+    Require(placement.CurrentPreview() != nullptr &&
                 placement.CurrentPreview()->State ==
                     VoxelPreviewState::Overlap,
         "Preview must persist and refresh after placement.");

@@ -1,6 +1,5 @@
 #include "VoxelStamps/Workflow/StampPreviewController.h"
 
-#include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 #include "VoxelStamps/Placement/StampPlacementPlan.h"
 
 #include <string>
@@ -8,6 +7,18 @@
 
 namespace VoxelForge::Editor
 {
+namespace
+{
+std::string SessionFailureMessage(
+    const Stamps::StampPlacementSessionResult& result)
+{
+    return result.Diagnostic != Stamps::StampPlacementDiagnosticCode::None
+        ? std::string(Stamps::StampPlacementDiagnosticMessage(
+            result.Diagnostic))
+        : std::string(Stamps::StampPlacementSessionResultMessage(
+            result.Code));
+}
+}
 
 StampPreviewController::StampPreviewController(
     Stamps::StampPlacementSession& placement,
@@ -43,8 +54,7 @@ void StampPreviewController::Move(
     {
         console_.AddMessage(
             "Live Stamp Preview: " +
-            std::string(Stamps::StampPlacementDiagnosticMessage(
-                result.Diagnostic)));
+            SessionFailureMessage(result));
         return;
     }
     if (result.PreviewChanged)
@@ -77,8 +87,7 @@ void StampPreviewController::Rotate(const bool clockwise)
     {
         console_.AddMessage(
             "Live Stamp Preview: " +
-            std::string(Stamps::StampPlacementDiagnosticMessage(
-                result.Diagnostic)));
+            SessionFailureMessage(result));
         return;
     }
 
@@ -108,8 +117,7 @@ void StampPreviewController::Mirror(
     {
         console_.AddMessage(
             "Live Stamp Preview: " +
-            std::string(Stamps::StampPlacementDiagnosticMessage(
-                result.Diagnostic)));
+            SessionFailureMessage(result));
         return;
     }
 
@@ -136,33 +144,40 @@ void StampPreviewController::Mirror(
 void StampPreviewController::Place()
 {
     Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
-    const Stamps::StampPlacementPlan* plan = placement_.CurrentPlan();
-    if (plan == nullptr || document == nullptr ||
-        editInProgress_ || history_.IsBusy())
+    if (document == nullptr || editInProgress_ || history_.IsBusy())
     {
         return;
     }
 
-    if (!placement_.IsCurrent(*document, documents_.Generation()))
+    editInProgress_ = true;
+    const Stamps::StampPlacementSessionPlaceResult result =
+        placement_.PlaceOnce(
+            *document, documents_.Generation(), editSession_, history_);
+    editInProgress_ = false;
+    if (result.PreviewChanged)
     {
-        const Stamps::StampPlacementSessionResult refreshed =
-            placement_.Rebuild(*document, documents_.Generation());
-        if (refreshed.PreviewChanged)
-        {
-            onHighlightsChanged_();
-        }
+        onHighlightsChanged_();
+    }
+    if (result.Status ==
+        Stamps::StampPlacementSessionPlaceStatus::PreviewRefreshed)
+    {
         console_.AddMessage(
             "Place Stamp: the document changed; preview refreshed. "
             "Click again to place.");
         return;
     }
-
-    editInProgress_ = true;
-    const VoxelEditHistoryResult result =
-        Stamps::ExecutePlaceVoxelStampOperation(
-            *plan, editSession_, history_);
-    editInProgress_ = false;
-    if (result.Code == VoxelEditHistoryResultCode::NoChange)
+    if (result.Status ==
+        Stamps::StampPlacementSessionPlaceStatus::DocumentChanged)
+    {
+        console_.AddMessage(
+            "Place Stamp: active document changed; placement cancelled.");
+        return;
+    }
+    if (result.Status == Stamps::StampPlacementSessionPlaceStatus::Inactive)
+    {
+        return;
+    }
+    if (result.Status == Stamps::StampPlacementSessionPlaceStatus::NoChange)
     {
         console_.AddMessage(
             "Place Stamp: preview already matches the document.");
@@ -170,13 +185,12 @@ void StampPreviewController::Place()
     }
     if (!result)
     {
-        console_.AddMessage("Place Stamp failed: " + result.Message);
+        console_.AddMessage(
+            "Place Stamp failed: " + result.History.Message);
         return;
     }
 
-    placement_.MarkPlacementCommitted();
-    static_cast<void>(Refresh());
-    console_.AddMessage("Placed Stamp: " + result.Label);
+    console_.AddMessage("Placed Stamp: " + result.History.Label);
 }
 
 bool StampPreviewController::Refresh()

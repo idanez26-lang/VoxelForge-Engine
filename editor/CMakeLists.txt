@@ -437,6 +437,11 @@ target_link_libraries(
         VoxelForgeMesh
         VoxelForgeEditorVoxelSelection
         VoxelForgeEditorTransformPreview)
+# STAMP-16: StampPlacementSession exposes and executes VoxelEditHistory-backed
+# placement, so consumers of the Stamp library need the command implementation.
+target_link_libraries(
+    VoxelForgeEditorVoxelStamps
+    PUBLIC VoxelForgeEditorCommands)
 if(MSVC)
     target_compile_options(VoxelForgeEditorCommands PRIVATE /W4 /permissive-)
 else()

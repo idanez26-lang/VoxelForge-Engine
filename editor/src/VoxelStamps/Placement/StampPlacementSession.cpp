@@ -1,12 +1,50 @@
 #include "VoxelStamps/Placement/StampPlacementSession.h"
 
+#include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 #include "VoxelStamps/Preview/StampLivePreviewBuilder.h"
 
 #include <limits>
+#include <string>
 #include <utility>
 
 namespace VoxelForge::Editor::Stamps
 {
+namespace
+{
+VoxelEditHistoryResult SessionHistoryResult(
+    const VoxelEditHistoryResultCode code,
+    std::string message)
+{
+    return {
+        .Code = code,
+        .Changed = false,
+        .Label = "Place Voxel Stamp",
+        .Message = std::move(message)};
+}
+}
+
+StampPlacementSessionResult StampPlacementSession::SelectAsset(
+    const VoxelStamp* const stamp,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration,
+    const std::size_t targetSubModel,
+    const StampFixedPoint targetPivot,
+    const StampCollisionPolicy collisionPolicy)
+{
+    if (stamp == nullptr)
+    {
+        const bool previewChanged = CurrentPreview() != nullptr;
+        const bool changed = Cancel();
+        return {
+            .Code = StampPlacementSessionResultCode::MissingAsset,
+            .Succeeded = false,
+            .PlanChanged = changed,
+            .PreviewChanged = previewChanged,
+            .Diagnostic = StampPlacementDiagnosticCode::MissingStamp};
+    }
+    return Begin(*stamp, document, documentGeneration, targetSubModel,
+        targetPivot, collisionPolicy);
+}
 
 StampPlacementSessionResult StampPlacementSession::Begin(
     VoxelStamp stamp,
@@ -16,6 +54,8 @@ StampPlacementSessionResult StampPlacementSession::Begin(
     const StampFixedPoint targetPivot,
     const StampCollisionPolicy collisionPolicy)
 {
+    plan_.reset();
+    static_cast<void>(preview_.Clear());
     stamp_ = std::move(stamp);
     targetSubModel_ = targetSubModel;
     transform_ = {};
@@ -38,6 +78,14 @@ StampPlacementSessionResult StampPlacementSession::Rebuild(
 }
 
 StampPlacementSessionResult StampPlacementSession::SetTarget(
+    const StampFixedPoint targetPivot,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    return UpdateTarget(targetPivot, document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::UpdateTarget(
     const StampFixedPoint targetPivot,
     const Asset::Voxel::VoxelDocument& document,
     const std::uint64_t documentGeneration)
@@ -84,6 +132,7 @@ StampPlacementSessionResult StampPlacementSession::TranslateTarget(
         !translated(transform_.TargetPivot.Z, z, target.Z))
     {
         return {
+            .Code = StampPlacementSessionResultCode::InvalidPlan,
             .Diagnostic =
                 StampPlacementDiagnosticCode::PositionNotRepresentable};
     }
@@ -159,6 +208,75 @@ StampPlacementSessionResult StampPlacementSession::CycleMirror(
     return SetMirror(next, document, documentGeneration);
 }
 
+StampPlacementSessionPlaceResult StampPlacementSession::PlaceOnce(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration,
+    VoxelEditSession& editSession,
+    VoxelEditHistory& history)
+{
+    if (!IsActive() || !plan_)
+    {
+        return {
+            .Status = StampPlacementSessionPlaceStatus::Inactive,
+            .History = SessionHistoryResult(
+                VoxelEditHistoryResultCode::InvalidOperation,
+                "No Stamp placement session is active.")};
+    }
+    if (!MatchesDocumentContext(document, documentGeneration))
+    {
+        const bool previewChanged = CurrentPreview() != nullptr;
+        static_cast<void>(Cancel());
+        return {
+            .Status = StampPlacementSessionPlaceStatus::DocumentChanged,
+            .PreviewChanged = previewChanged,
+            .History = SessionHistoryResult(
+                VoxelEditHistoryResultCode::InvalidOperation,
+                "The active voxel document changed; Stamp placement was cancelled.")};
+    }
+    if (!IsCurrent(document, documentGeneration))
+    {
+        const StampPlacementSessionResult refreshed =
+            BuildCurrent(document, documentGeneration);
+        return {
+            .Status = StampPlacementSessionPlaceStatus::PreviewRefreshed,
+            .PreviewChanged = refreshed.PreviewChanged,
+            .History = SessionHistoryResult(
+                VoxelEditHistoryResultCode::InvalidOperation,
+                "The document revision changed; the Stamp preview was refreshed.")};
+    }
+    if (placementOrdinal_ == std::numeric_limits<std::uint64_t>::max())
+    {
+        return {
+            .Status = StampPlacementSessionPlaceStatus::Rejected,
+            .History = SessionHistoryResult(
+                VoxelEditHistoryResultCode::LimitExceeded,
+                "The Stamp placement ordinal is exhausted.")};
+    }
+
+    VoxelEditHistoryResult executed = ExecutePlaceVoxelStampOperation(
+        *plan_, editSession, history);
+    if (executed.Code == VoxelEditHistoryResultCode::NoChange)
+    {
+        return {
+            .Status = StampPlacementSessionPlaceStatus::NoChange,
+            .History = std::move(executed)};
+    }
+    if (!executed)
+    {
+        return {
+            .Status = StampPlacementSessionPlaceStatus::Rejected,
+            .History = std::move(executed)};
+    }
+
+    ++placementOrdinal_;
+    const StampPlacementSessionResult refreshed =
+        BuildCurrent(document, documentGeneration);
+    return {
+        .Status = StampPlacementSessionPlaceStatus::Placed,
+        .PreviewChanged = refreshed.PreviewChanged,
+        .History = std::move(executed)};
+}
+
 bool StampPlacementSession::Cancel() noexcept
 {
     const bool changed = stamp_.has_value() || plan_.has_value() ||
@@ -173,15 +291,6 @@ bool StampPlacementSession::Cancel() noexcept
     placementOrdinal_ = 0U;
     state_ = StampPlacementSessionState::Cancelled;
     return changed;
-}
-
-void StampPlacementSession::MarkPlacementCommitted() noexcept
-{
-    if (IsActive() &&
-        placementOrdinal_ != std::numeric_limits<std::uint64_t>::max())
-    {
-        ++placementOrdinal_;
-    }
 }
 
 StampPlacementSessionState StampPlacementSession::State() const noexcept
@@ -250,6 +359,16 @@ std::uint64_t StampPlacementSession::PlacementOrdinal() const noexcept
     return placementOrdinal_;
 }
 
+bool StampPlacementSession::MatchesDocumentContext(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration) const noexcept
+{
+    return plan_ &&
+        plan_->Document.InstanceToken ==
+            reinterpret_cast<std::uintptr_t>(&document) &&
+        plan_->DocumentGeneration == documentGeneration;
+}
+
 StampPlacementSessionResult StampPlacementSession::BuildCurrent(
     const Asset::Voxel::VoxelDocument& document,
     const std::uint64_t documentGeneration)
@@ -257,6 +376,16 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
     if (!stamp_)
     {
         return {};
+    }
+    if (plan_ && !MatchesDocumentContext(document, documentGeneration))
+    {
+        const bool previewChanged = CurrentPreview() != nullptr;
+        const bool changed = Cancel();
+        return {
+            .Code = StampPlacementSessionResultCode::DocumentChanged,
+            .Succeeded = false,
+            .PlanChanged = changed,
+            .PreviewChanged = previewChanged};
     }
     StampPlacementPlan next = StampPlacementPlanner::Build({
         .Stamp = &*stamp_,
@@ -277,8 +406,13 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
     plan_ = std::move(next);
     const bool previewChanged =
         preview_.Activate(BuildStampPreview(*plan_));
+    const bool succeeded =
+        plan_->WorldBounds.Valid && !plan_->Voxels.empty();
     return {
-        .Succeeded = plan_->WorldBounds.Valid && !plan_->Voxels.empty(),
+        .Code = succeeded
+            ? StampPlacementSessionResultCode::Succeeded
+            : StampPlacementSessionResultCode::InvalidPlan,
+        .Succeeded = succeeded,
         .PlanChanged = planChanged,
         .PreviewChanged = previewChanged,
         .Diagnostic = firstDiagnostic};

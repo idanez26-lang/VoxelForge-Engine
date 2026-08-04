@@ -438,9 +438,8 @@ void TestSessionLifecycleAndCache()
                 session.Target().X ==
                     5 * StampFixedPoint::UnitsPerVoxel,
         "Target change must rebuild one new plan.");
-    session.MarkPlacementCommitted();
-    Require(session.PlacementOrdinal() == 1U,
-        "Placement ordinal must advance only on commit.");
+    Require(session.PlacementOrdinal() == 0U,
+        "Planning and target updates must not consume a placement ordinal.");
     Require(session.Cancel() && !session.IsActive() &&
                 session.State() == StampPlacementSessionState::Cancelled &&
                 session.CurrentPlan() == nullptr &&

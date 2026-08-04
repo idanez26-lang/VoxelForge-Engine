@@ -2128,6 +2128,22 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorPlaceVoxelStampOperationSmokeTests>
 )
 
+# STAMP-16: the active session owns continuous placement, ordinal advancement,
+# stale-preview confirmation and document-switch cancellation.
+add_executable(
+    VoxelForgeEditorStampPlacementSessionTests
+    Editor/StampPlacementSessionTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampPlacementSessionTests
+    PRIVATE VoxelForgeEditorVoxelStamps VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorStampPlacementSessionTests)
+add_test(
+    NAME VoxelForge.Editor.StampPlacementSession
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampPlacementSessionTests>
+)
+
 # STAMP-14: one immutable plan is shared by preview and placement.
 add_executable(
     VoxelForgeEditorStampPlacementPlanningTests

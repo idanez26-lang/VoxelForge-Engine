@@ -380,8 +380,8 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::ActivateSelected(
         return {.Message = loaded.Message};
 
     const StampFixedPoint initialTarget = loaded.Stamp->Pivot().LocalPosition;
-    const StampPlacementSessionResult activated = placementSession_.Begin(
-        *loaded.Stamp, document, documentGeneration,
+    const StampPlacementSessionResult activated = placementSession_.SelectAsset(
+        loaded.Stamp.get(), document, documentGeneration,
         targetSubModel, initialTarget);
     if (!activated.Succeeded)
     {

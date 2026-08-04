@@ -1,6 +1,5 @@
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
-#include "VoxelStamps/Placement/PlaceVoxelStampOperation.h"
 #include "VoxelStamps/Placement/StampPlacementSession.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
@@ -149,13 +148,12 @@ void RunScenario()
         "Mirror and rotation must update the persistent shared preview.");
 
     const auto plannedVoxels = placement.CurrentPlan()->Voxels;
-    auto prepared =
-        PreparePlaceVoxelStampOperation(*placement.CurrentPlan());
-    Require(prepared.IsReady() &&
-                history.Execute(editSession, std::move(prepared.Operation)),
+    const auto placed = placement.PlaceOnce(
+        document, 17U, editSession, history);
+    Require(static_cast<bool>(placed),
         "Mirrored placement must commit atomically.");
-    placement.MarkPlacementCommitted();
-    Require(history.UndoCount() == 1U && editSession.Rebuilds() == 1U &&
+    Require(placement.PlacementOrdinal() == 1U &&
+                history.UndoCount() == 1U && editSession.Rebuilds() == 1U &&
                 editSession.Completions() == 1U,
         "One click must remain one transaction and one mesh rebuild.");
     for (const StampPlannedVoxel& voxel : plannedVoxels)
