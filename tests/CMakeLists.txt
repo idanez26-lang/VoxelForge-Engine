@@ -944,6 +944,19 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorTransformPreviewTests>
 )
 add_executable(
+    VoxelForgeEditorVoxelPlacementPreviewTests
+    Editor/VoxelPlacementPreviewTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorVoxelPlacementPreviewTests
+    PRIVATE VoxelForgeEditorTransformPreview
+)
+vf_configure_test(VoxelForgeEditorVoxelPlacementPreviewTests)
+add_test(
+    NAME VoxelForge.Editor.VoxelPlacementPreview
+    COMMAND $<TARGET_FILE:VoxelForgeEditorVoxelPlacementPreviewTests>
+)
+add_executable(
     VoxelForgeEditorViewportInteractionV2Tests
     Editor/ViewportInteractionV2Tests.cpp
 )

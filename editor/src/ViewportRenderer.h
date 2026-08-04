@@ -145,7 +145,7 @@ public:
         std::optional<VoxelBoxBounds> boxPreview,
         std::span<const Asset::Voxel::VoxelPosition> linePreview,
         std::optional<VoxelSpherePreview> spherePreview,
-        std::span<const GhostVoxel> smartBrushGhostPreview,
+        const VoxelPlacementPreview* smartBrushPreview,
         SmartBrushGhostGeometryStyle smartBrushGhostGeometryStyle,
         Vec3 modelCenter) noexcept;
     void ConfigureTransformPreview(
@@ -162,6 +162,8 @@ public:
     /// Consumes a prepared generic snapshot. It never receives a document or
     /// participates in picking, history, or asset mutation.
     void ConfigureVoxelPreview(const VoxelPreviewData* preview) noexcept;
+    void ConfigureVoxelPlacementPreview(
+        const VoxelPlacementPreview* preview) noexcept;
     void ConfigureTransformGizmo(
         const TransformGizmoView* gizmo) noexcept;
     void ClearModel() noexcept;

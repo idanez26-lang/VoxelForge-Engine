@@ -1,15 +1,40 @@
 #include "Preview/VoxelPreview.h"
 
 #include <algorithm>
-#include <utility>
+#include <array>
 #include <limits>
 #include <new>
+#include <utility>
 
 namespace VoxelForge::Editor
 {
 namespace
 {
 constexpr std::int32_t FixedUnits = 256;
+
+[[nodiscard]] std::array<float, 4U> PreviewColor(
+    const Asset::Vox::VoxColor source,
+    const VoxelPreviewSemantic semantic) noexcept
+{
+    const std::array<float, 4U> tint =
+        semantic == VoxelPreviewSemantic::Overlap
+        ? std::array<float, 4U>{1.0F, 0.50F, 0.12F, 1.0F}
+        : semantic == VoxelPreviewSemantic::Invalid
+        ? std::array<float, 4U>{0.95F, 0.16F, 0.18F, 1.0F}
+        : std::array<float, 4U>{0.22F, 0.90F, 0.38F, 1.0F};
+    constexpr float scale = 1.0F / 255.0F;
+    const std::array<float, 4U> normalized{
+        source.Red * scale,
+        source.Green * scale,
+        source.Blue * scale,
+        source.Alpha * scale};
+    std::array<float, 4U> result{};
+    for (std::size_t index = 0U; index < 3U; ++index)
+        result[index] = normalized[index] * 0.78F + tint[index] * 0.22F;
+    result[3] = 1.0F;
+    return result;
+}
+
 [[nodiscard]] bool MakeGrid(
     const std::int32_t target,
     const std::int32_t local,
@@ -27,6 +52,35 @@ constexpr std::int32_t FixedUnits = 256;
     output = static_cast<std::int32_t>(fixed / FixedUnits);
     return true;
 }
+}
+
+VoxelPlacementPreview BuildVoxelPlacementPreview(
+    const VoxelPreviewData& preview,
+    const std::uint64_t revision) noexcept
+{
+    try
+    {
+        std::vector<VoxelPreviewInstance> instances;
+        instances.reserve(preview.Voxels.size());
+        for (const VoxelPreviewVoxel& voxel : preview.Voxels)
+        {
+            const VoxelPreviewSemantic semantic =
+                preview.State == VoxelPreviewState::Invalid
+                ? VoxelPreviewSemantic::Invalid
+                : voxel.OverlapsExisting
+                ? VoxelPreviewSemantic::Overlap
+                : VoxelPreviewSemantic::Valid;
+            instances.push_back({
+                voxel.Position, semantic, PreviewColor(voxel.Color, semantic),
+                0.52F});
+        }
+        return VoxelPlacementPreview::FromInstances(
+            revision, std::move(instances));
+    }
+    catch (const std::bad_alloc&)
+    {
+        return {};
+    }
 }
 
 VoxelPreviewData VoxelPreviewBuilder::Build(const VoxelPreviewBuildRequest& request) noexcept
@@ -85,6 +139,7 @@ VoxelPreviewData VoxelPreviewBuilder::Build(const VoxelPreviewBuildRequest& requ
             result.WorldBounds.Maximum.Y = std::max(result.WorldBounds.Maximum.Y, voxel.Position.Y);
             result.WorldBounds.Maximum.Z = std::max(result.WorldBounds.Maximum.Z, voxel.Position.Z);
         }
+        result.Placement = BuildVoxelPlacementPreview(result);
     }
     catch (const std::bad_alloc&)
     {
@@ -113,6 +168,7 @@ bool VoxelPreviewSession::Activate(VoxelPreviewData preview)
     }
 
     preview.Revision = ++revision_;
+    preview.Placement = preview.Placement.WithRevision(preview.Revision);
     preview_ = std::move(preview);
     return true;
 }

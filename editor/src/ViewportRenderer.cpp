@@ -1,5 +1,6 @@
 #include "ViewportRenderer.h"
 #include "Preview/FacePlanGhostSurface.h"
+#include "Transform/TransformPlacementPreviewAdapter.h"
 #include "ViewportInteractionV2/ViewportPresentation.h"
 #include "VoxelModelTransform.h"
 #include "VoxelViewportState.h"
@@ -432,9 +433,8 @@ struct ViewportRenderer::TransformPreviewSnapshot final
 {
     std::uint64_t Revision = 0U;
     bool DrawSourceGhost = true;
-    std::vector<TransformPreviewVoxel> Voxels;
+    VoxelPlacementPreview Placement;
     std::vector<Asset::Voxel::VoxelPosition> SourcePositions;
-    std::array<Asset::Voxel::VoxelColor, 256U> Palette{};
     SelectionBounds SourceBounds{};
     SelectionBounds PreviewBounds{};
     SelectionBounds CollisionBounds{};
@@ -1124,10 +1124,14 @@ void ViewportRenderer::ConfigureHighlights(
     std::optional<VoxelBoxBounds> boxPreview,
     const std::span<const Asset::Voxel::VoxelPosition> linePreview,
     std::optional<VoxelSpherePreview> spherePreview,
-    const std::span<const GhostVoxel> smartBrushGhostPreview,
+    const VoxelPlacementPreview* smartBrushPreview,
     const SmartBrushGhostGeometryStyle smartBrushGhostGeometryStyle,
     const Vec3 modelCenter) noexcept
 {
+    const std::span<const VoxelPreviewInstance> smartBrushInstances =
+        smartBrushPreview != nullptr
+        ? smartBrushPreview->Instances()
+        : std::span<const VoxelPreviewInstance>{};
     if (hovered)
     {
         const auto hoveredPosition = ToVoxelPosition(*hovered);
@@ -1157,13 +1161,13 @@ void ViewportRenderer::ConfigureHighlights(
         equals(linePreviewHighlights_, linePreview) &&
         spherePreviewHighlight_ == spherePreview &&
         smartBrushGhostGeometryStyle_ == smartBrushGhostGeometryStyle &&
-        smartBrushGhostPreview_.size() == smartBrushGhostPreview.size() &&
+        smartBrushGhostPreview_.size() == smartBrushInstances.size() &&
         std::equal(smartBrushGhostPreview_.begin(), smartBrushGhostPreview_.end(),
-            smartBrushGhostPreview.begin(), smartBrushGhostPreview.end(),
-            [](const GhostVoxel& stored, const GhostVoxel& incoming)
+            smartBrushInstances.begin(), smartBrushInstances.end(),
+            [](const GhostVoxel& stored, const VoxelPreviewInstance& incoming)
             {
                 return stored.Position == incoming.Position &&
-                    stored.State == incoming.State && stored.Color == incoming.Color &&
+                    stored.Color == incoming.Color &&
                     stored.Alpha == incoming.Alpha;
             }) &&
         modelCenter_.X == modelCenter.X && modelCenter_.Y == modelCenter.Y &&
@@ -1188,8 +1192,11 @@ void ViewportRenderer::ConfigureHighlights(
     linePreviewHighlights_.assign(linePreview.begin(), linePreview.end());
     spherePreviewHighlight_ = spherePreview;
     smartBrushGhostGeometryStyle_ = smartBrushGhostGeometryStyle;
-    smartBrushGhostPreview_.assign(
-        smartBrushGhostPreview.begin(), smartBrushGhostPreview.end());
+    smartBrushGhostPreview_.clear();
+    smartBrushGhostPreview_.reserve(smartBrushInstances.size());
+    for (const VoxelPreviewInstance& instance : smartBrushInstances)
+        smartBrushGhostPreview_.push_back({instance.Position,
+            GhostVoxelState::Added, instance.Color, instance.Alpha});
     modelCenter_ = modelCenter;
     highlightsDirty_ = hoveredHighlight_.has_value() ||
         !selectedHighlights_.empty() ||
@@ -1226,14 +1233,9 @@ void ViewportRenderer::ConfigureTransformPreview(
         TransformPreviewSnapshot& snapshot = *transformPreview_;
         snapshot.Revision = preview->Revision;
         snapshot.DrawSourceGhost = preview->DrawSourceGhost;
-        snapshot.Voxels.assign(preview->Voxels.begin(), preview->Voxels.end());
+        snapshot.Placement = BuildTransformPlacementPreview(*preview);
         snapshot.SourcePositions.assign(
             preview->SourcePositions.begin(), preview->SourcePositions.end());
-        std::fill(snapshot.Palette.begin(), snapshot.Palette.end(),
-            Asset::Voxel::VoxelColor{});
-        std::copy_n(preview->Palette.begin(),
-            std::min(preview->Palette.size(), snapshot.Palette.size()),
-            snapshot.Palette.begin());
         snapshot.SourceBounds = preview->SourceBounds;
         snapshot.PreviewBounds = preview->PreviewBounds;
         snapshot.CollisionBounds = preview->CollisionBounds;
@@ -1358,6 +1360,13 @@ void ViewportRenderer::ConfigureInteractionV2(
 
 void ViewportRenderer::ConfigureVoxelPreview(const VoxelPreviewData* preview) noexcept
 {
+    ConfigureVoxelPlacementPreview(
+        preview != nullptr ? &preview->Placement : nullptr);
+}
+
+void ViewportRenderer::ConfigureVoxelPlacementPreview(
+    const VoxelPlacementPreview* preview) noexcept
+{
     if (preview == nullptr || !preview->IsActive())
     {
         if (voxelPreviewGhosts_.empty()) return;
@@ -1366,32 +1375,17 @@ void ViewportRenderer::ConfigureVoxelPreview(const VoxelPreviewData* preview) no
         highlightsDirty_ = true;
         return;
     }
-    if (voxelPreviewRevision_ == preview->Revision) return;
+    if (!voxelPreviewGhosts_.empty() &&
+        voxelPreviewRevision_ == preview->Revision())
+        return;
     try
     {
         voxelPreviewGhosts_.clear();
-        voxelPreviewGhosts_.reserve(preview->Voxels.size());
-        const std::array<float, 4> stateTint = preview->State == VoxelPreviewState::Overlap
-            ? std::array<float, 4>{1.0F, 0.50F, 0.12F, 1.0F}
-            : preview->State == VoxelPreviewState::Invalid
-            ? std::array<float, 4>{0.95F, 0.16F, 0.18F, 1.0F}
-            : std::array<float, 4>{0.22F, 0.90F, 0.38F, 1.0F};
-        constexpr float colorScale = 1.0F / 255.0F;
-        for (const VoxelPreviewVoxel& voxel : preview->Voxels)
-        {
-            const std::array<float, 4> source{voxel.Color.Red * colorScale,
-                voxel.Color.Green * colorScale, voxel.Color.Blue * colorScale,
-                voxel.Color.Alpha * colorScale};
-            const bool overlap = voxel.OverlapsExisting;
-            const std::array<float, 4>& tint = overlap
-                ? std::array<float, 4>{1.0F, 0.50F, 0.12F, 1.0F} : stateTint;
-            std::array<float, 4> color{};
-            for (std::size_t index = 0U; index < 3U; ++index)
-                color[index] = source[index] * 0.78F + tint[index] * 0.22F;
-            color[3] = 1.0F;
-            voxelPreviewGhosts_.push_back({voxel.Position, GhostVoxelState::Added, color, 0.52F});
-        }
-        voxelPreviewRevision_ = preview->Revision;
+        voxelPreviewGhosts_.reserve(preview->Instances().size());
+        for (const VoxelPreviewInstance& instance : preview->Instances())
+            voxelPreviewGhosts_.push_back({instance.Position,
+                GhostVoxelState::Added, instance.Color, instance.Alpha});
+        voxelPreviewRevision_ = preview->Revision();
         highlightsDirty_ = true;
     }
     catch (const std::bad_alloc&)
@@ -1475,7 +1469,7 @@ bool ViewportRenderer::EnsureHighlights()
         transformOutlineCount = 2U;
         if (transformPreview_->Plan.DrawIndividualVoxels)
             transformOutlineCount += transformPreview_->SourcePositions.size() +
-                transformPreview_->Voxels.size();
+                transformPreview_->Placement.Instances().size();
         else if (transformPreview_->Plan.DrawIndividualCollisions)
             transformOutlineCount +=
                 transformPreview_->Plan.CollisionVoxelCount +
@@ -1615,40 +1609,20 @@ bool ViewportRenderer::EnsureHighlights()
                      preview.SourcePositions)
                     AppendVoxelOutline(vertices, indices, position,
                         modelCenter_, sourceGhostColor);
-            for (const TransformPreviewVoxel& voxel : preview.Voxels)
-            {
-                std::array<float, 4> color{};
-                if (voxel.State == TransformPreviewVoxelState::Collision)
-                    color = collisionColor;
-                else if (voxel.State ==
-                    TransformPreviewVoxelState::OutOfBounds)
-                    color = outOfBoundsColor;
-                else
-                {
-                    const Asset::Voxel::VoxelColor paletteColor =
-                        preview.Palette[voxel.Value.PaletteIndex];
-                    constexpr float scale = 1.0F / 255.0F;
-                    color = {
-                        paletteColor.Red * scale,
-                        paletteColor.Green * scale,
-                        paletteColor.Blue * scale,
-                        1.0F};
-                }
-                AppendVoxelOutline(vertices, indices, voxel.PreviewPosition,
-                    modelCenter_, color);
-            }
+            for (const VoxelPreviewInstance& instance :
+                 preview.Placement.Instances())
+                AppendVoxelOutline(vertices, indices, instance.Position,
+                    modelCenter_, instance.Color);
         }
         else if (preview.Plan.DrawIndividualCollisions)
         {
-            for (const TransformPreviewVoxel& voxel : preview.Voxels)
+            for (const VoxelPreviewInstance& instance :
+                 preview.Placement.Instances())
             {
-                if (voxel.State == TransformPreviewVoxelState::Collision)
+                if (instance.Semantic == VoxelPreviewSemantic::Overlap ||
+                    instance.Semantic == VoxelPreviewSemantic::Invalid)
                     AppendVoxelOutline(vertices, indices,
-                        voxel.PreviewPosition, modelCenter_, collisionColor);
-                else if (voxel.State ==
-                    TransformPreviewVoxelState::OutOfBounds)
-                    AppendVoxelOutline(vertices, indices,
-                        voxel.PreviewPosition, modelCenter_, outOfBoundsColor);
+                        instance.Position, modelCenter_, instance.Color);
             }
         }
         else
@@ -2299,7 +2273,7 @@ void ViewportRenderer::ClearModel() noexcept
         std::span<const Asset::Voxel::VoxelPosition>{}, std::nullopt,
         std::nullopt,
         std::nullopt, std::span<const Asset::Voxel::VoxelPosition>{},
-        std::nullopt, std::span<const GhostVoxel>{},
+        std::nullopt, nullptr,
         SmartBrushGhostGeometryStyle::VoxelBoxes, {});
     highlightGeometry_.reset();
     smartBrushGhostGeometry_.reset();
@@ -2553,7 +2527,7 @@ std::size_t ViewportRenderer::TransformPreviewDestinationPrimitiveCount()
 {
     if (!transformPreview_) return 0U;
     return transformPreview_->Plan.DrawIndividualVoxels
-        ? transformPreview_->Voxels.size()
+        ? transformPreview_->Placement.Instances().size()
         : static_cast<std::size_t>(transformPreview_->PreviewBounds.Valid);
 }
 

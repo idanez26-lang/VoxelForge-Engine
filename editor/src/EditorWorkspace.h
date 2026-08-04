@@ -577,7 +577,7 @@ private:
     VoxelBoxInteraction voxelBoxInteraction_;
     VoxelLineInteraction voxelLineInteraction_;
     VoxelSphereInteraction voxelSphereInteraction_;
-    VoxelPlacementPreview voxelPlacementPreview_;
+    VoxelToolPlacementPreview voxelPlacementPreview_;
     // Current frame target for the universal screen-space cursor overlay.
     std::optional<UniversalCursor2DTarget> universalCursor2DTarget_;
     const Asset::Voxel::VoxelDocument* pencilPreviewDocument_ = nullptr;

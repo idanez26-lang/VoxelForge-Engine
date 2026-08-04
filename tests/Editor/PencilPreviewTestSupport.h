@@ -9,7 +9,7 @@
 
 namespace VoxelForge::Editor
 {
-inline VoxelPlacementPreview EvaluatePencilPlanForTest(
+inline VoxelToolPlacementPreview EvaluatePencilPlanForTest(
     const Asset::Voxel::VoxelDocument* document, const std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit, const bool pencilActive,
     const std::optional<Asset::Voxel::VoxelPosition> workplaneTarget = std::nullopt,
@@ -64,7 +64,7 @@ inline VoxelPlacementPreview EvaluatePencilPlanForTest(
         brush.ExistingPositions, brush.Statistics, brush.RenderPlan};
 }
 
-inline VoxelPlacementPreview EvaluatePencilPlanForTest(
+inline VoxelToolPlacementPreview EvaluatePencilPlanForTest(
     const Asset::Voxel::VoxelDocument* document, const std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit, const bool pencilActive,
     const std::optional<Asset::Voxel::VoxelPosition> workplaneTarget,

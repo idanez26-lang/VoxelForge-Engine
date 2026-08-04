@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Preview/VoxelPlacementPreview.h"
 #include "SmartTools/SmartPreviewTypes.h"
 #include "SmartTools/SmartToolPlan.h"
 
@@ -27,6 +28,7 @@ struct SmartPreviewData final
     SmartBrushRenderPlan RenderPlan{};
     std::vector<GhostVoxel> GhostVoxels;
     std::vector<Asset::Voxel::VoxelPosition> AffectedPositions;
+    VoxelPlacementPreview Placement;
     std::string Error;
 
     [[nodiscard]] bool CanCommit() const noexcept

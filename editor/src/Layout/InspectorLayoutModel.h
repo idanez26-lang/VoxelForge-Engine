@@ -25,7 +25,7 @@ struct InspectorLayoutInput final
         VoxelPickingInteractionState::Unavailable;
     ActiveVoxelTool Tool = ActiveVoxelTool::None;
     std::size_t PaletteIndex = 0U;
-    VoxelPlacementPreview Placement;
+    VoxelToolPlacementPreview Placement;
     std::optional<VoxelToolResult> LastPencilResult;
     std::optional<VoxelEraserResult> LastEraserResult;
 };

@@ -2,7 +2,7 @@
 
 namespace VoxelForge::Editor
 {
-bool VoxelPlacementPreview::IsVisible() const noexcept
+bool VoxelToolPlacementPreview::IsVisible() const noexcept
 {
     return Position.has_value() &&
         (Status == VoxelPlacementPreviewStatus::Valid ||
@@ -10,12 +10,12 @@ bool VoxelPlacementPreview::IsVisible() const noexcept
          Status == VoxelPlacementPreviewStatus::Occupied);
 }
 
-bool VoxelPlacementPreview::IsValid() const noexcept
+bool VoxelToolPlacementPreview::IsValid() const noexcept
 {
     return Status == VoxelPlacementPreviewStatus::Valid && Position.has_value();
 }
 
-VoxelPlacementPreview EvaluateVoxelEraserPreview(
+VoxelToolPlacementPreview EvaluateVoxelEraserPreview(
     const Asset::Voxel::VoxelDocument* document, const std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit, const bool eraserActive,
     const bool blocked) noexcept

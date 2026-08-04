@@ -181,7 +181,9 @@ endif()
 add_library(VoxelForgeEditorTransformPreview STATIC)
 target_sources(
     VoxelForgeEditorTransformPreview
-    PRIVATE src/Transform/TransformPreviewModel.cpp
+    PRIVATE
+        src/Transform/TransformPlacementPreviewAdapter.cpp
+        src/Transform/TransformPreviewModel.cpp
 )
 target_include_directories(
     VoxelForgeEditorTransformPreview
@@ -189,7 +191,8 @@ target_include_directories(
 )
 target_link_libraries(
     VoxelForgeEditorTransformPreview
-    PUBLIC VoxelForgeEditorVoxelSelection VoxelForgeAsset
+    PUBLIC VoxelForgeEditorVoxelSelection VoxelForgeEditorVoxelPreview
+        VoxelForgeAsset
 )
 target_compile_features(VoxelForgeEditorTransformPreview PUBLIC cxx_std_20)
 if(MSVC)
@@ -315,6 +318,7 @@ endif()
 
 add_library(
     VoxelForgeEditorVoxelPreview STATIC
+    src/Preview/VoxelPlacementPreview.cpp
     src/Preview/VoxelPreview.cpp
     src/Preview/UniversalCursor2D.cpp
 )

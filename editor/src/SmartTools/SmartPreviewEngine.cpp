@@ -24,6 +24,40 @@ constexpr std::array<float, 4> kEmptyColor{0.54F, 0.58F, 0.64F, 1.0F};
     }
 }
 
+[[nodiscard]] VoxelPreviewSemantic SemanticFor(
+    const GhostVoxelState state) noexcept
+{
+    switch (state)
+    {
+    case GhostVoxelState::Added: return VoxelPreviewSemantic::Added;
+    case GhostVoxelState::Erased: return VoxelPreviewSemantic::Erased;
+    case GhostVoxelState::Painted: return VoxelPreviewSemantic::Painted;
+    case GhostVoxelState::Ignored: return VoxelPreviewSemantic::Ignored;
+    case GhostVoxelState::Clipped: return VoxelPreviewSemantic::Clipped;
+    case GhostVoxelState::Invalid:
+    default: return VoxelPreviewSemantic::Invalid;
+    }
+}
+
+[[nodiscard]] VoxelPreviewStats AggregateStatistics(
+    const SmartToolPlan& plan) noexcept
+{
+    const SmartToolPlanStatistics& source = plan.Statistics();
+    VoxelPreviewStats result;
+    result.Total = source.Total;
+    result.Invalid = source.Invalid;
+    result.Clipped = source.Clipped;
+    result.Ignored = source.Unchanged;
+    switch (plan.Action())
+    {
+    case SmartAction::Add: result.Added = source.Changed; break;
+    case SmartAction::Erase: result.Erased = source.Changed; break;
+    case SmartAction::Paint: result.Painted = source.Changed; break;
+    default: result.Painted = source.Changed; break;
+    }
+    return result;
+}
+
 [[nodiscard]] std::array<float, 4> BaseColor(
     const SmartToolPlanCell& cell) noexcept
 {
@@ -55,14 +89,25 @@ SmartPreviewData SmartPreviewEngine::Build(const SmartToolPlan& plan)
     // above stay exact either way.
     if (data.RenderPlan.Mode == SmartBrushRenderMode::DetailedCells)
     {
+        std::vector<VoxelPreviewInstance> instances;
+        instances.reserve(plan.Cells().size());
         data.GhostVoxels.reserve(plan.Cells().size());
         data.AffectedPositions = plan.AffectedPositions();
         for (const SmartToolPlanCell& cell : plan.Cells())
         {
-            data.GhostVoxels.push_back({cell.WorldPosition,
-                StateFor(cell.PreviewState), BaseColor(cell), 1.0F});
+            const GhostVoxelState state = StateFor(cell.PreviewState);
+            const std::array<float, 4U> color = BaseColor(cell);
+            data.GhostVoxels.push_back(
+                {cell.WorldPosition, state, color, 1.0F});
+            instances.push_back({
+                cell.WorldPosition, SemanticFor(state), color, 1.0F});
         }
+        data.Placement = VoxelPlacementPreview::FromInstances(
+            plan.PlanId(), std::move(instances));
     }
+    else
+        data.Placement = VoxelPlacementPreview::Aggregate(
+            plan.PlanId(), AggregateStatistics(plan));
     return data;
 }
 

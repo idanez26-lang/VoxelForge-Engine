@@ -27,7 +27,7 @@ enum class VoxelPreviewTool
     Eraser
 };
 
-struct VoxelPlacementPreview final
+struct VoxelToolPlacementPreview final
 {
     VoxelPlacementPreviewStatus Status =
         VoxelPlacementPreviewStatus::Unavailable;
@@ -43,7 +43,7 @@ struct VoxelPlacementPreview final
     [[nodiscard]] bool IsValid() const noexcept;
 };
 
-[[nodiscard]] VoxelPlacementPreview EvaluateVoxelEraserPreview(
+[[nodiscard]] VoxelToolPlacementPreview EvaluateVoxelEraserPreview(
     const Asset::Voxel::VoxelDocument* document,
     std::size_t subModelIndex,
     const std::optional<VoxelRaycastHit>& hit,

@@ -48,6 +48,7 @@ VoxelPreviewData StampLivePreviewBuilder::Build(
             result.Voxels.push_back({
                 voxel.WorldPosition, voxel.Color, voxel.Overlap});
         }
+        result.Placement = BuildVoxelPlacementPreview(result);
     }
     catch (const std::bad_alloc&)
     {

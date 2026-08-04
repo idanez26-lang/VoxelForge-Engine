@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Preview/VoxelPlacementPreview.h"
+
 #include "VoxelForge/Asset/Vox/VoxModel.h"
 #include "VoxelForge/Asset/Voxel/VoxelDocument.h"
 #include "VoxelForge/Core/UUID.h"
@@ -79,12 +81,17 @@ struct VoxelPreviewData final
     VoxelPreviewTransform Transform{};
     VoxelPreviewState State = VoxelPreviewState::Invalid;
     std::uint64_t Revision = 0U;
+    VoxelPlacementPreview Placement;
 
     [[nodiscard]] bool IsActive() const noexcept
     {
         return SourceId.Value() != 0U && !Voxels.empty();
     }
 };
+
+[[nodiscard]] VoxelPlacementPreview BuildVoxelPlacementPreview(
+    const VoxelPreviewData& preview,
+    std::uint64_t revision = 0U) noexcept;
 
 struct VoxelPreviewBuildRequest final
 {

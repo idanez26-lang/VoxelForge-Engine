@@ -146,7 +146,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     std::optional<VoxelBoxBounds> boxPreview;
     std::vector<Asset::Voxel::VoxelPosition> linePreview;
     std::optional<VoxelSpherePreview> spherePreview;
-    std::span<const GhostVoxel> smartBrushGhostPreview;
+    const VoxelPlacementPreview* smartBrushPlacementPreview = nullptr;
     const SmartToolExactPreviewMesh* exactSmartToolPreview = nullptr;
     SmartToolPlanPtr exactSmartToolPlan;
     smartBrushGhostPreview_ = nullptr;
@@ -312,7 +312,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         {
             const SmartPreviewData& preview = *smartBrushGhostPreview_;
             if (faceAddPlanGhostPresentation)
-                smartBrushGhostPreview = preview.GhostVoxels;
+                smartBrushPlacementPreview = &preview.Placement;
             voxelPlacementPreview_.Tool = smartEraseActive
                 ? VoxelPreviewTool::Eraser : VoxelPreviewTool::Pencil;
             voxelPlacementPreview_.Position = anchor;
@@ -714,7 +714,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         boxPreview,
         linePreview,
         spherePreview,
-        smartBrushGhostPreview,
+        smartBrushPlacementPreview,
         faceAddPlanGhostPresentation
             ? SmartBrushGhostGeometryStyle::ExposedFaceSurface
             : SmartBrushGhostGeometryStyle::VoxelBoxes,

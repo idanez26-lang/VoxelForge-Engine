@@ -89,6 +89,14 @@ void TestEmptyAndExactGhosts()
     Require(preview.GhostVoxels.front().Color ==
             std::array<float, 4>{0.84F, 0.18F, 0.36F, 1.0F},
         "The preview did not expose the exact final palette colour.");
+    const auto common = preview.Placement.Instances();
+    Require(common.size() == preview.GhostVoxels.size() &&
+            common.front().Position == preview.GhostVoxels.front().Position &&
+            common.front().Semantic == VoxelPreviewSemantic::Added &&
+            common.front().Color == preview.GhostVoxels.front().Color &&
+            common.front().Alpha == preview.GhostVoxels.front().Alpha &&
+            preview.Placement.Statistics().Added == 1U,
+        "Smart Preview and the common renderer contract diverged.");
 }
 
 void TestDiagnosticsAndColours()
@@ -197,6 +205,13 @@ void TestAggregatePlansSkipGhostConstruction()
         "Aggregate plans should not pay for per-cell ghost construction.");
     Require(preview.Statistics.Total > 256U && preview.CanCommit(),
         "Aggregate previews keep exact statistics and commitability.");
+    Require(preview.Placement.IsActive() &&
+            preview.Placement.Instances().empty() &&
+            !preview.Placement.InstancesComplete() &&
+            preview.Placement.RenderMode() ==
+                VoxelPreviewRenderMode::AggregateBounds &&
+            preview.Placement.Statistics().Total == preview.Statistics.Total,
+        "Aggregate Smart Preview did not preserve the common exact statistics.");
 
     const SmartPreviewData detailed = SmartPreviewEngine::Build(
         *Plan(Request(SmartAction::Add, States{}, {2, 2, 2}, 2)));
