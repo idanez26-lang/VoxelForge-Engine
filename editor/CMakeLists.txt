@@ -338,6 +338,7 @@ target_sources(
         src/VoxelStamps/Format/VfstampWriter.cpp
         src/VoxelStamps/Library/StampProjectLibraryRepository.cpp
         src/VoxelStamps/Library/StampUserLibraryRepository.cpp
+        src/VoxelStamps/Library/StampAssetCache.cpp
         src/VoxelStamps/Library/StampJsonCatalogStore.cpp
         src/VoxelStamps/Library/StampCatalogService.cpp
         src/VoxelStamps/Library/ForgeLibraryViewModel.cpp

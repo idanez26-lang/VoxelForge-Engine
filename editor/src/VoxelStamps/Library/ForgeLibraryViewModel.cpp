@@ -130,10 +130,10 @@ ForgeLibraryResponsiveLayout ResolveForgeLibraryResponsiveLayout(
 
 ForgeLibraryViewModel::ForgeLibraryViewModel(
     StampCatalogService& catalogue,
-    IStampLibraryRepository& repository,
+    StampAssetCache& assetCache,
     StampPlacementSession& placementSession)
     : catalogue_(catalogue),
-      repository_(repository),
+      assetCache_(assetCache),
       placementSession_(placementSession)
 {
 }
@@ -212,6 +212,8 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::Refresh()
 void ForgeLibraryViewModel::ResetForProjectChange() noexcept
 {
     catalogue_.InvalidateCache();
+    static_cast<void>(
+        assetCache_.InvalidateScope(StampLibraryScope::Project));
     items_.clear();
     selectedId_.reset();
     selectedStamp_.reset();
@@ -283,8 +285,9 @@ bool ForgeLibraryViewModel::Select(const Core::UUID& id)
         return false;
     }
 
-    StampLibraryResult loaded = repository_.Read(item->CatalogEntry.Reference);
-    if (!loaded.Succeeded() || !loaded.Stamp)
+    const StampAssetCacheResult loaded =
+        assetCache_.GetOrLoad(item->CatalogEntry.Reference);
+    if (!loaded.Succeeded())
     {
         selectedId_ = id;
         selectedStamp_.reset();
@@ -298,7 +301,7 @@ bool ForgeLibraryViewModel::Select(const Core::UUID& id)
     }
 
     selectedId_ = id;
-    selectedStamp_ = std::move(*loaded.Stamp);
+    selectedStamp_ = loaded.Stamp;
     selectedDetails_ = ForgeLibrarySelectionDetails{
         .Name = item->DisplayName,
         .Dimensions = item->CatalogEntry.Dimensions,
@@ -329,7 +332,7 @@ ForgeLibraryViewModel::SelectedDetails() const noexcept
 
 const VoxelStamp* ForgeLibraryViewModel::SelectedPreviewStamp() const noexcept
 {
-    return selectedStamp_ ? &*selectedStamp_ : nullptr;
+    return selectedStamp_.get();
 }
 
 const ForgeLibraryThumbnail* ForgeLibraryViewModel::ThumbnailFor(
@@ -371,13 +374,14 @@ ForgeLibraryOperationResult ForgeLibraryViewModel::ActivateSelected(
     if (item == nullptr)
         return {.Message = "The selected Stamp is no longer available."};
 
-    StampLibraryResult loaded = repository_.Read(item->CatalogEntry.Reference);
-    if (!loaded.Succeeded() || !loaded.Stamp)
+    const StampAssetCacheResult loaded =
+        assetCache_.GetOrLoad(item->CatalogEntry.Reference);
+    if (!loaded.Succeeded())
         return {.Message = loaded.Message};
 
     const StampFixedPoint initialTarget = loaded.Stamp->Pivot().LocalPosition;
     const StampPlacementSessionResult activated = placementSession_.Begin(
-        std::move(*loaded.Stamp), document, documentGeneration,
+        *loaded.Stamp, document, documentGeneration,
         targetSubModel, initialTarget);
     if (!activated.Succeeded)
     {
@@ -434,8 +438,9 @@ void ForgeLibraryViewModel::EnsureThumbnail(const ForgeLibraryItem& item)
         return;
     }
 
-    StampLibraryResult loaded = repository_.Read(item.CatalogEntry.Reference);
-    if (!loaded.Succeeded() || !loaded.Stamp)
+    const StampAssetCacheResult loaded =
+        assetCache_.GetOrLoad(item.CatalogEntry.Reference);
+    if (!loaded.Succeeded())
     {
         thumbnailCache_.erase(key);
         return;

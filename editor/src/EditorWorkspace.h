@@ -73,6 +73,7 @@
 #include "VoxelStamps/Library/StampCatalogService.h"
 #include "VoxelStamps/Library/ForgeLibraryPanel.h"
 #include "VoxelStamps/Library/ForgeLibraryViewModel.h"
+#include "VoxelStamps/Library/StampAssetCache.h"
 #include "VoxelStamps/Library/StampJsonCatalogStore.h"
 #include "VoxelStamps/Library/StampProjectLibraryRepository.h"
 #include "VoxelStamps/Workflow/SaveSelectionAsStampWorkflow.h"
@@ -471,6 +472,7 @@ private:
     WorkplaneService workplaneService_;
     SelectionService selectionService_;
     Stamps::StampProjectLibraryRepository stampProjectLibraryRepository_;
+    Stamps::StampAssetCache stampAssetCache_{stampProjectLibraryRepository_};
     Stamps::StampJsonCatalogStore stampJsonCatalogStore_;
     Stamps::StampCatalogService stampCatalogService_{
         stampProjectLibraryRepository_, stampJsonCatalogStore_};
@@ -478,8 +480,7 @@ private:
         stampProjectLibraryRepository_, stampJsonCatalogStore_};
     Stamps::StampPlacementSession stampPlacementSession_;
     Stamps::ForgeLibraryViewModel forgeLibraryViewModel_{
-        stampCatalogService_, stampProjectLibraryRepository_,
-        stampPlacementSession_};
+        stampCatalogService_, stampAssetCache_, stampPlacementSession_};
     Stamps::ForgeLibraryPanel forgeLibraryPanel_{forgeLibraryViewModel_};
     std::uint64_t stampLivePreviewVisualDocumentRevision_ = 0U;
     std::optional<std::chrono::steady_clock::time_point>

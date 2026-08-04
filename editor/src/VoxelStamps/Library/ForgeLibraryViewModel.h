@@ -1,5 +1,6 @@
 #pragma once
 
+#include "VoxelStamps/Library/StampAssetCache.h"
 #include "VoxelStamps/Library/StampCatalogService.h"
 #include "VoxelStamps/Placement/StampPlacementSession.h"
 
@@ -112,14 +113,14 @@ struct ForgeLibraryOperationResult final
 
 /// UI-independent presentation model for the Project Forge Library. It owns no
 /// placement rules: catalogue discovery is delegated to StampCatalogService,
-/// source loading to IStampLibraryRepository and preview activation to the
+/// decoded source reuse to StampAssetCache and preview activation to the
 /// existing StampPlacementSession.
 class ForgeLibraryViewModel final
 {
 public:
     ForgeLibraryViewModel(
         StampCatalogService& catalogue,
-        IStampLibraryRepository& repository,
+        StampAssetCache& assetCache,
         StampPlacementSession& placementSession);
 
     [[nodiscard]] ForgeLibraryOperationResult Refresh();
@@ -168,12 +169,12 @@ private:
     };
 
     StampCatalogService& catalogue_;
-    IStampLibraryRepository& repository_;
+    StampAssetCache& assetCache_;
     StampPlacementSession& placementSession_;
     std::vector<ForgeLibraryItem> items_;
     std::unordered_map<std::uint64_t, ThumbnailCacheEntry> thumbnailCache_;
     std::optional<Core::UUID> selectedId_;
-    std::optional<VoxelStamp> selectedStamp_;
+    std::shared_ptr<const VoxelStamp> selectedStamp_;
     std::optional<ForgeLibrarySelectionDetails> selectedDetails_;
     std::string searchText_;
     std::string statusMessage_;

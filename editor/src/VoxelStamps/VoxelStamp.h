@@ -254,6 +254,12 @@ public:
     {
         return voxels_;
     }
+    [[nodiscard]] std::size_t RetainedBytes() const noexcept
+    {
+        return sizeof(VoxelStamp) + identity_.ContentHash.capacity() + 1U +
+               palette_.capacity() * sizeof(StampPaletteEntry) +
+               voxels_.capacity() * sizeof(StampVoxel);
+    }
 
     [[nodiscard]] bool operator==(const VoxelStamp& other) const noexcept = default;
 

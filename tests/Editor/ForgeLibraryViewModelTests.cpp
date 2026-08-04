@@ -123,6 +123,25 @@ public:
         return {.Reference = source->Reference, .Stamp = source->Stamp};
     }
 
+    [[nodiscard]] StampLibrarySourceFactsResult InspectSource(
+        const StampAssetReference& reference) const override
+    {
+        const auto source = std::find_if(
+            Sources.begin(), Sources.end(),
+            [&reference](const Source& candidate) {
+                return candidate.Reference == reference;
+            });
+        if (source == Sources.end())
+            return {.Error = StampLibraryError::AssetNotFound,
+                    .Message = "Fixture Stamp is missing."};
+        return {.Facts = StampLibrarySourceFacts{
+                    .FileBytes = source->Bytes,
+                    .LastWriteTime =
+                        std::filesystem::file_time_type{} +
+                        std::filesystem::file_time_type::duration(
+                            source->Bytes)}};
+    }
+
     [[nodiscard]] StampLibraryResult EnumerateSourceAssets() const override
     {
         StampLibraryResult result;
@@ -185,7 +204,8 @@ struct Fixture final
     MemoryStore Store;
     StampPlacementSession Session;
     StampCatalogService Catalog{Repository, Store};
-    ForgeLibraryViewModel ViewModel{Catalog, Repository, Session};
+    StampAssetCache AssetCache{Repository};
+    ForgeLibraryViewModel ViewModel{Catalog, AssetCache, Session};
 };
 
 void TestEmptyAndCompleteViews()

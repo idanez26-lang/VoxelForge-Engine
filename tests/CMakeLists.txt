@@ -1983,6 +1983,20 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorStampUserLibraryTests>
 )
 
+add_executable(
+    VoxelForgeEditorStampAssetCacheTests
+    Editor/StampAssetCacheTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampAssetCacheTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorStampAssetCacheTests)
+add_test(
+    NAME VoxelForge.Editor.StampAssetCache
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampAssetCacheTests>
+)
+
 add_executable(VoxelForgeEditorStampCatalogTests Editor/StampCatalogTests.cpp)
 target_link_libraries(VoxelForgeEditorStampCatalogTests PRIVATE VoxelForgeEditorVoxelStamps)
 vf_configure_test(VoxelForgeEditorStampCatalogTests)

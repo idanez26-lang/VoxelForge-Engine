@@ -67,6 +67,13 @@ public:
             return {.Error = StampLibraryError::AssetNotFound};
         return {.Reference = Reference, .Stamp = *Stamp};
     }
+    [[nodiscard]] StampLibrarySourceFactsResult InspectSource(
+        const StampAssetReference& reference) const override
+    {
+        if (!Stamp || reference != Reference)
+            return {.Error = StampLibraryError::AssetNotFound};
+        return {.Facts = StampLibrarySourceFacts{.FileBytes = 256U}};
+    }
     [[nodiscard]] StampLibraryResult EnumerateSourceAssets() const override
     {
         return Stamp
@@ -185,7 +192,8 @@ void RunSmoke()
     SmokeStore store;
     StampCatalogService catalog(repository, store);
     StampPlacementSession placement;
-    ForgeLibraryViewModel library(catalog, repository, placement);
+    StampAssetCache assetCache(repository);
+    ForgeLibraryViewModel library(catalog, assetCache, placement);
     auto document = MakeDocument();
     SmokeEditSession editSession(document);
     VoxelEditHistory history;

@@ -367,6 +367,60 @@ StampLibraryResult StampFilesystemLibraryRepository::Read(
     return read;
 }
 
+StampLibrarySourceFactsResult
+StampFilesystemLibraryRepository::InspectSource(
+    const StampAssetReference& reference) const
+{
+    if (reference.Scope != scope_)
+    {
+        return {
+            .Error = StampLibraryError::InvalidReference,
+            .Message = "Stamp reference belongs to a different library scope."};
+    }
+
+    std::filesystem::path absolute;
+    const StampLibraryResult resolved = ResolvePath(reference.RelativePath, absolute);
+    if (!resolved.Succeeded())
+        return {.Error = resolved.Error, .Message = resolved.Message};
+
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(absolute, error);
+    if (error || !std::filesystem::exists(status))
+        return {.Error = StampLibraryError::AssetNotFound,
+                .Message = std::string(StampLibraryErrorMessage(
+                    StampLibraryError::AssetNotFound))};
+    if (std::filesystem::is_symlink(status))
+        return {.Error = StampLibraryError::SymbolicLinkRejected,
+                .Message = std::string(StampLibraryErrorMessage(
+                    StampLibraryError::SymbolicLinkRejected))};
+    if (!std::filesystem::is_regular_file(status))
+        return {.Error = StampLibraryError::AssetNotRegularFile,
+                .Message = std::string(StampLibraryErrorMessage(
+                    StampLibraryError::AssetNotRegularFile))};
+
+    const std::filesystem::path canonical =
+        std::filesystem::weakly_canonical(absolute, error);
+    if (error || !IsPathWithin(
+            canonical, repositoryRoot_ / creationsRelativePath_))
+        return {.Error = StampLibraryError::PathEscapesProjectLibrary,
+                .Message = std::string(StampLibraryErrorMessage(
+                    StampLibraryError::PathEscapesProjectLibrary))};
+
+    const std::uintmax_t fileBytes = std::filesystem::file_size(absolute, error);
+    if (error)
+        return {.Error = StampLibraryError::IoFailure,
+                .Message = error.message()};
+    const std::filesystem::file_time_type lastWriteTime =
+        std::filesystem::last_write_time(absolute, error);
+    if (error)
+        return {.Error = StampLibraryError::IoFailure,
+                .Message = error.message()};
+
+    return {.Facts = StampLibrarySourceFacts{
+                .FileBytes = fileBytes,
+                .LastWriteTime = lastWriteTime}};
+}
+
 StampLibraryResult StampFilesystemLibraryRepository::Install(
     const VoxelStamp& stamp,
     const StampInstallOptions& options)

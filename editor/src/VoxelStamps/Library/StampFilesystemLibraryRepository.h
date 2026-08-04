@@ -33,6 +33,8 @@ public:
         const StampInstallOptions& options = {}) override;
     [[nodiscard]] StampLibraryResult Read(
         const StampAssetReference& reference) const override;
+    [[nodiscard]] StampLibrarySourceFactsResult InspectSource(
+        const StampAssetReference& reference) const override;
     [[nodiscard]] StampLibraryResult EnumerateSourceAssets() const override;
     [[nodiscard]] StampLibraryResult Remove(
         const StampAssetReference& reference) override;

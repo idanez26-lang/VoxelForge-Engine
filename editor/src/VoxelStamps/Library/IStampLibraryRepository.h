@@ -78,6 +78,27 @@ struct StampLibraryAsset final
     [[nodiscard]] bool operator==(const StampLibraryAsset&) const noexcept = default;
 };
 
+struct StampLibrarySourceFacts final
+{
+    std::uintmax_t FileBytes = 0U;
+    std::filesystem::file_time_type LastWriteTime{};
+
+    [[nodiscard]] bool operator==(
+        const StampLibrarySourceFacts&) const noexcept = default;
+};
+
+struct StampLibrarySourceFactsResult final
+{
+    StampLibraryError Error = StampLibraryError::None;
+    std::string Message{StampLibraryErrorMessage(StampLibraryError::None)};
+    std::optional<StampLibrarySourceFacts> Facts;
+
+    [[nodiscard]] bool Succeeded() const noexcept
+    {
+        return Error == StampLibraryError::None && Facts.has_value();
+    }
+};
+
 struct StampLibraryDiagnostic final
 {
     StampLibraryError Code = StampLibraryError::None;
@@ -116,6 +137,13 @@ public:
         const StampInstallOptions& options = {}) = 0;
     [[nodiscard]] virtual StampLibraryResult Read(
         const StampAssetReference& reference) const = 0;
+    [[nodiscard]] virtual StampLibrarySourceFactsResult InspectSource(
+        const StampAssetReference&) const
+    {
+        return {
+            .Error = StampLibraryError::IoFailure,
+            .Message = "Stamp repository does not expose source facts."};
+    }
     [[nodiscard]] virtual StampLibraryResult EnumerateSourceAssets() const = 0;
     [[nodiscard]] virtual StampLibraryResult Remove(
         const StampAssetReference& reference) = 0;
