@@ -27,6 +27,7 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <cmath>
 #include <chrono>
@@ -60,6 +61,24 @@ SmartToolExactPreviewComposer::Source EditorWorkspace::ExactPreviewSource(
     SmartToolExactPreviewComposer::Source source;
     source.Document = &document;
     source.ModelIndex = 0U;
+
+    // VF-0265 : interrupteur de diagnostic. Avec VOXELFORGE_LEGACY_EXACT_PREVIEW
+    // defini, on rend exactement le comportement d'avant le chantier — copie du
+    // document, remaillage complet, mesh unique monolithique. C'est le seul
+    // moyen d'attribuer un symptome ressenti (ici un decrochage du curseur au
+    // survol rapide) au nouveau chemin ou a autre chose, sans deviner.
+    // Lu une seule fois : ce n'est pas un reglage produit.
+    static const bool legacyExactPreview = []
+    {
+        const char* const value = std::getenv("VOXELFORGE_LEGACY_EXACT_PREVIEW");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }();
+    if (legacyExactPreview)
+    {
+        source.DocumentChunks = nullptr;
+        source.AssembleMesh = true;
+        return source;
+    }
     // Le cache de chunks décrit le document SANS le plan. Il n'est exploitable
     // que s'il décrit bien CE document, à CETTE révision, pour CE sous-modèle.
     // SynchronizeVoxelDocumentRendering tourne en tête de frame, donc le cas
