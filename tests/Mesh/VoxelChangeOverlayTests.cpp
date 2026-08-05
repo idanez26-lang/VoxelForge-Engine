@@ -74,6 +74,15 @@ VoxelDocument MakeDocument()
     return std::move(*loaded.Document);
 }
 
+// Construite UNE fois. La version précédente la reconstruisait dix-neuf fois —
+// 46 000 voxels à chaque appel, à travers le chargeur Vox — et c'était là que
+// partaient les huit secondes du test, pas dans le maillage qu'il vérifie.
+const VoxelDocument& BaseDocument()
+{
+    static const VoxelDocument document = MakeDocument();
+    return document;
+}
+
 // Identité d'une face, indépendante de l'ordre d'émission : le coin minimal, la
 // normale et la couleur. Numérique et non textuelle — sur des dizaines de
 // milliers de faces et une dizaine de scénarios, des clés en chaînes de
@@ -150,7 +159,7 @@ void CheckGoldenEquality(
     const std::string_view scenario,
     const std::vector<VoxelDocumentChange>& changes)
 {
-    const auto document = MakeDocument();
+    const VoxelDocument& document = BaseDocument();
 
     Asset::Voxel::VoxelDocumentOperationResult validation{};
     const auto overlay =
@@ -182,7 +191,8 @@ void CheckGoldenEquality(
     std::sort(assembled.begin(), assembled.end());
 
     // Oracle : un document dans lequel les changements sont réellement commis.
-    auto mutated = MakeDocument();
+    // Une copie de la fixture, pas une reconstruction.
+    VoxelDocument mutated = BaseDocument();
     Require(mutated.ApplyVoxelChanges(changes).Succeeded,
         std::string("L'oracle doit pouvoir appliquer les changements : ") +
             std::string(scenario));
@@ -197,7 +207,7 @@ void CheckGoldenEquality(
 
 void TestGoldenEqualityAcrossScenarios()
 {
-    const auto reference = MakeDocument();
+    const VoxelDocument& reference = BaseDocument();
     constexpr VoxelPosition interior{20, 20, 20};
     constexpr VoxelPosition onChunkBorder{31, 20, 20};
     constexpr VoxelPosition onThreeBorders{31, 31, 31};
@@ -239,7 +249,9 @@ void TestGoldenEqualityAcrossScenarios()
 // les caches de mesh.
 void TestOverlayNeverMutates()
 {
-    auto document = MakeDocument();
+    // Une copie : ce test vérifie l'absence de mutation, il ne doit pas risquer
+    // de laisser une trace sur la fixture partagée.
+    VoxelDocument document = BaseDocument();
     const std::uint64_t revisionBefore = document.GetRevision();
     const std::uint64_t countBefore = document.GetVoxelCount();
     const auto boundsBefore = document.GetBounds(0U);
@@ -280,7 +292,7 @@ void TestOverlayNeverMutates()
 // constructeur les perdrait silencieusement.
 void TestBoundsCoverAdditionsAndDirtyBoxIsDilated()
 {
-    const auto document = MakeDocument();
+    const VoxelDocument& document = BaseDocument();
     Asset::Voxel::VoxelDocumentOperationResult validation{};
     const auto overlay = VoxelChangeOverlay::TryCreate(
         document, {{Add({Filled + 2, 5, 5}, 6U)}}, 0U, validation);
@@ -314,14 +326,15 @@ void TestRejectionsMatchCommit()
         {Add({0, 0, 0}, 3U)},
         {Add({12, 12, 12}, 3U), Add({12, 12, 12}, 4U)}};
 
+    // Un refus ne modifie rien : la même copie sert pour tous les cas.
+    VoxelDocument applied = BaseDocument();
     for (const auto& changes : refused)
     {
-        const auto document = MakeDocument();
+        const VoxelDocument& document = BaseDocument();
         Asset::Voxel::VoxelDocumentOperationResult validation{};
         const auto overlay =
             VoxelChangeOverlay::TryCreate(document, changes, 0U, validation);
 
-        auto applied = MakeDocument();
         const auto appliedResult = applied.ApplyVoxelChanges(changes);
 
         Require(!overlay.has_value() && !validation.Succeeded &&
@@ -332,7 +345,7 @@ void TestRejectionsMatchCommit()
     }
 
     // Un sous-modèle inexistant est refusé avant toute validation.
-    const auto document = MakeDocument();
+    const VoxelDocument& document = BaseDocument();
     Asset::Voxel::VoxelDocumentOperationResult validation{};
     Require(!VoxelChangeOverlay::TryCreate(document, {}, 9U, validation)
                  .has_value() &&
