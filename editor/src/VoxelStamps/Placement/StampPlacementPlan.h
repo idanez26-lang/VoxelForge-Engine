@@ -51,6 +51,13 @@ struct StampPlacementTransform final
         StampPlacementRotationAxis::VerticalY;
     std::uint8_t QuarterTurns = 0U;
     StampPlacementMirrorMode Mirror = StampPlacementMirrorMode::None;
+    // STAMP-25 : demi-cran de 45 degres, ajoute apres les quarts de tour
+    // (angle total = QuarterTurns * 90 + 45). Contrairement aux quarts de
+    // tour, 45 degres n'est PAS une symetrie de la grille : le placement
+    // reechantillonne alors le Stamp et le plan est marque approximatif.
+    // Place en DERNIER volontairement : une initialisation positionnelle
+    // existante garde ainsi la meme signification.
+    bool HalfQuarterStep = false;
 
     [[nodiscard]] bool operator==(
         const StampPlacementTransform&) const noexcept = default;
@@ -119,6 +126,7 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
     InvalidSubModel,
     InvalidVariantIdentity,
     UnsupportedRotation,
+    ApproximateRotation,
     UnsupportedMirror,
     UnsupportedCollisionPolicy,
     PaletteMappingFailed,
@@ -168,6 +176,8 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
         return "Resolved Stamp Variant identity does not match the active Stamp.";
     case StampPlacementDiagnosticCode::UnsupportedRotation:
         return "Stamp rotation must be an exact quarter turn (0, 90, 180, or 270 degrees) around a single grid axis.";
+    case StampPlacementDiagnosticCode::ApproximateRotation:
+        return "A 45 degree rotation resamples the Stamp: cell count and edges change.";
     case StampPlacementDiagnosticCode::UnsupportedMirror:
         return "Stamp mirror must be None, X, Z, or XZ.";
     case StampPlacementDiagnosticCode::UnsupportedCollisionPolicy:
@@ -232,6 +242,10 @@ struct StampPlacementStatistics final
     std::size_t OutOfBoundsCount = 0U;
     std::size_t AddedPaletteColorCount = 0U;
     std::size_t ReusedPaletteColorCount = 0U;
+    // STAMP-25 : vrai quand la rotation a 45 degres a reechantillonne le
+    // Stamp. Dans ce cas PlannedVoxelCount peut differer de TotalVoxelCount :
+    // l'interface doit annoncer l'ecart a l'artiste.
+    bool ApproximateRotation = false;
 
     [[nodiscard]] bool operator==(
         const StampPlacementStatistics&) const noexcept = default;

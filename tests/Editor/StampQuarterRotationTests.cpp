@@ -6,12 +6,16 @@
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -97,6 +101,17 @@ StampPlacementPlan PlanAroundAxis(
             .TargetPivot = target,
             .RotationAxis = axis,
             .QuarterTurns = quarterTurns}});
+}
+
+[[nodiscard]] bool HasDiagnostic(
+    const StampPlacementPlan& plan,
+    const StampPlacementDiagnosticCode code)
+{
+    for (const StampPlacementDiagnostic& diagnostic : plan.Diagnostics)
+    {
+        if (diagnostic.Code == code) return true;
+    }
+    return false;
 }
 
 void RequirePositions(
@@ -264,6 +279,107 @@ void TestRotationDiagnosticsAndCacheKey()
         "Rotated out-of-bounds cells must block commit.");
 }
 
+// STAMP-25 : 45 degres n'est pas une symetrie de la grille. Le plan doit
+// reechantillonner, se declarer approximatif, et surtout rester PLEIN : le
+// piege classique (parcourir les sources au lieu des destinations) laisse
+// environ un tiers de trous.
+void TestHalfQuarterStepResamplesWithoutHoles()
+{
+    // Bloc plein 5x1x5 : apres rotation, tout trou se verrait immediatement.
+    std::vector<StampVoxel> voxels;
+    for (std::int32_t z = 0; z < 5; ++z)
+        for (std::int32_t x = 0; x < 5; ++x)
+            voxels.push_back({{x, 0, z}, 0U});
+
+    StampValidationResult validation{};
+    constexpr std::int32_t unit = StampFixedPoint::UnitsPerVoxel;
+    const auto block = VoxelStamp::TryCreate(
+        {Core::UUID{0x5354414d503235ULL}, "stamp-25-half-step"},
+        {{0, 0, 0}, {4, 0, 4}, {5U, 1U, 5U}},
+        {.RequestedMode = StampPivotMode::Center,
+         .ResolvedMode = StampPivotMode::Center,
+         .LocalPosition = {2 * unit, 0, 2 * unit}},
+        {},
+        {{0U, {10U, 20U, 30U, 255U}}},
+        std::move(voxels), DefaultStampResourceLimits(), &validation);
+    Require(block && validation.IsValid(),
+        "Half-step Stamp fixture must be valid.");
+
+    Asset::Vox::VoxModel source{};
+    source.Version = 150U;
+    source.Palette = Asset::Vox::DefaultVoxPalette();
+    source.Models.push_back({.Dimensions = {32U, 4U, 32U}, .Voxels = {}});
+    const auto loaded =
+        Asset::Voxel::VoxDocumentLoader{}.Build(source, "half-step.vox");
+    Require(loaded.Succeeded() && loaded.Document,
+        "Half-step document fixture must build.");
+    const auto& document = *loaded.Document;
+
+    const StampFixedPoint target{16 * unit, unit, 16 * unit};
+    const auto exact = StampPlacementPlanner::Build({
+        .Stamp = &*block, .Document = &document, .DocumentGeneration = 25U,
+        .Transform = {.TargetPivot = target}});
+    Require(exact.CanCommit && exact.Statistics.PlannedVoxelCount == 25U &&
+            !exact.Statistics.ApproximateRotation,
+        "The unrotated block must stay exact with all 25 cells.");
+
+    const auto diagonal = StampPlacementPlanner::Build({
+        .Stamp = &*block, .Document = &document, .DocumentGeneration = 25U,
+        .Transform = {.TargetPivot = target, .HalfQuarterStep = true}});
+
+    Require(diagonal.Statistics.ApproximateRotation &&
+            HasDiagnostic(diagonal,
+                StampPlacementDiagnosticCode::ApproximateRotation),
+        "A 45 degree rotation must declare itself approximate.");
+    Require(diagonal.CanCommit,
+        "An approximate rotation stays placeable: we inform, we do not forbid.");
+    Require(diagonal.Statistics.OutOfBoundsCount == 0U,
+        "The rotated block must stay inside the document.");
+
+    // Aucune cellule dupliquee : l'echantillonnage inverse visite chaque
+    // cellule d'arrivee une seule fois.
+    std::vector<Position> placed;
+    placed.reserve(diagonal.Voxels.size());
+    for (const auto& voxel : diagonal.Voxels)
+        placed.push_back(voxel.WorldPosition);
+    const auto lessThan = [](const Position& a, const Position& b)
+    {
+        return std::tie(a.X, a.Y, a.Z) < std::tie(b.X, b.Y, b.Z);
+    };
+    std::sort(placed.begin(), placed.end(), lessThan);
+    Require(std::adjacent_find(placed.begin(), placed.end()) == placed.end(),
+        "Inverse resampling must never plan the same cell twice.");
+
+    // Pas de trou : la surface obtenue est un bloc diagonal d'un seul tenant.
+    // On verifie que chaque cellule a au moins un voisin sur le plan XZ, et
+    // que le compte reste proche de la surface source.
+    Require(diagonal.Voxels.size() >= 20U && diagonal.Voxels.size() <= 40U,
+        "A 45 degree rotation must keep a comparable amount of matter.");
+    std::size_t isolated = 0U;
+    for (const auto& voxel : diagonal.Voxels)
+    {
+        bool hasNeighbour = false;
+        for (const auto& other : diagonal.Voxels)
+        {
+            if (other.WorldPosition == voxel.WorldPosition) continue;
+            const int dx = other.WorldPosition.X - voxel.WorldPosition.X;
+            const int dz = other.WorldPosition.Z - voxel.WorldPosition.Z;
+            if (std::abs(dx) <= 1 && std::abs(dz) <= 1)
+            {
+                hasNeighbour = true;
+                break;
+            }
+        }
+        if (!hasNeighbour) ++isolated;
+    }
+    Require(isolated == 0U,
+        "Inverse resampling must not leave isolated cells (no holes).");
+
+    // Le demi-cran participe a l'identite du plan.
+    Require(exact.CacheKey != diagonal.CacheKey,
+        "The 45 degree step must participate in plan cache identity.");
+}
+
 // STAMP-24 : un seul axe actif a la fois. Changer d'axe repart de zero pour
 // que l'angle courant ne soit jamais reinterprete sur le nouvel axe.
 void TestSessionAxisSwitchResetsRotation()
@@ -379,6 +495,7 @@ int main()
         TestQuarterTurnsAroundEachAxis();
         TestPreviewPlacementPaletteAndOverlapSharePlan();
         TestRotationDiagnosticsAndCacheKey();
+        TestHalfQuarterStepResamplesWithoutHoles();
         TestSessionAxisSwitchResetsRotation();
         TestSessionRotationLifecycle();
     }
