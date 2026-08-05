@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -71,6 +72,13 @@ public:
     // extrusion whose latest depth is the only pending result.
     [[nodiscard]] bool ReplaceWithPlan(const SmartToolPlan& plan);
     [[nodiscard]] std::vector<Asset::Voxel::VoxelDocumentChange> Changes() const;
+    // LOT 4b : vue sans copie sur la meme liste triee que Changes(). Le trait
+    // est reconstruit et retrie a chaque frame par le compositeur de preview,
+    // alors qu'il ne change qu'a l'ajout d'une cellule ; cette vue est
+    // memoisee sur revision_. Le contenu est identique a Changes(), a la
+    // copie pres. La reference reste valide jusqu'a la prochaine mutation.
+    [[nodiscard]] std::span<const Asset::Voxel::VoxelDocumentChange>
+        ChangesView() const;
     [[nodiscard]] std::vector<Asset::Voxel::VoxelDocumentChange> PreviewChanges(
         const SmartToolPlan& nextPlan) const;
     [[nodiscard]] bool HasChanges() const noexcept;
@@ -112,5 +120,10 @@ private:
     std::unordered_map<Asset::Voxel::VoxelPosition, AccumulatedCell, PositionHash>
         cells_;
     std::uint64_t revision_ = 0U;
+    // LOT 4b : memoisation de la liste triee. Mutable parce que Changes() est
+    // et doit rester const : c'est un cache, pas un etat observable.
+    mutable std::vector<Asset::Voxel::VoxelDocumentChange> changesCache_;
+    mutable std::uint64_t changesCacheRevision_ = 0U;
+    mutable bool changesCacheValid_ = false;
 };
 } // namespace VoxelForge::Editor

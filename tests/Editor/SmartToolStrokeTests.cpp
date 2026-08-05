@@ -13,6 +13,8 @@
 #include "VoxelForge/Voxel/VoxelModel.h"
 
 #include <algorithm>
+#include <span>
+#include <vector>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -203,6 +205,65 @@ std::vector<Asset::Voxel::VoxelDocumentChange> AccumulatePath(
                 "Unable to plan an interpolated path sample.");
     }
     return stroke.Changes();
+}
+
+// LOT 4b : ChangesView() memoise la liste triee que le compositeur de preview
+// reconstruisait a chaque frame. Le contrat verrouille ici a trois volets :
+//   1. le contenu est STRICTEMENT identique a Changes(), toujours ;
+//   2. deux lectures consecutives sans mutation renvoient la MEME memoire
+//      (preuve que la memoisation opere reellement, pas seulement qu'elle est
+//      correcte) ;
+//   3. toute mutation du trait invalide la vue, y compris Cancel().
+// Le volet 2 est le seul qui echouerait si la memoisation etait desactivee ;
+// sans lui, ce test passerait meme avec un cache mort.
+void TestChangesViewMemoisationAndInvalidation()
+{
+    const States empty;
+    SmartToolStroke stroke = Begin(empty, SmartAction::Add, {2, 2, 2});
+    Require(PlanAndAccumulate(stroke, SmartAction::Add, {2, 2, 2}),
+        "Unable to prepare the memoisation stroke.");
+
+    // VoxelDocumentChange a un operator== par defaut : on compare la vue et la
+    // copie champ par champ sans reecrire le predicat.
+    const auto sameContent = [](
+        const std::span<const Asset::Voxel::VoxelDocumentChange> view,
+        const std::vector<Asset::Voxel::VoxelDocumentChange>& copy)
+    {
+        return view.size() == copy.size() &&
+            std::equal(view.begin(), view.end(), copy.begin());
+    };
+
+    Require(sameContent(stroke.ChangesView(), stroke.Changes()),
+        "ChangesView() disagreed with Changes() on a single-cell stroke.");
+    const auto* const firstData = stroke.ChangesView().data();
+    const std::size_t firstSize = stroke.ChangesView().size();
+    Require(firstData != nullptr && firstSize == 1U,
+        "The memoised view of a single-cell stroke was empty.");
+    Require(stroke.ChangesView().data() == firstData,
+        "A second read without mutation recomposed the view: the cache is dead.");
+
+    // Une cellule de plus : la vue doit changer de contenu.
+    for (const Position sample : stroke.Advance({5, 2, 2}, {0, 1, 0}))
+        Require(PlanAndAccumulate(stroke, SmartAction::Add, sample),
+            "Unable to extend the memoisation stroke.");
+    const auto grown = stroke.ChangesView();
+    Require(grown.size() > firstSize && sameContent(grown, stroke.Changes()),
+        "Extending the stroke did not invalidate the memoised view.");
+    Require(std::is_sorted(grown.begin(), grown.end(),
+            [](const Asset::Voxel::VoxelDocumentChange& left,
+                const Asset::Voxel::VoxelDocumentChange& right)
+            {
+                if (left.Position.X != right.Position.X)
+                    return left.Position.X < right.Position.X;
+                if (left.Position.Y != right.Position.Y)
+                    return left.Position.Y < right.Position.Y;
+                return left.Position.Z < right.Position.Z;
+            }),
+        "The memoised view lost the deterministic ordering Changes() guarantees.");
+
+    stroke.Cancel();
+    Require(stroke.ChangesView().empty() && stroke.Changes().empty(),
+        "Cancel() left a stale memoised view behind.");
 }
 
 void TestDeterministicInterpolation()
@@ -777,6 +838,7 @@ int main()
 {
     try
     {
+        TestChangesViewMemoisationAndInvalidation();
         TestDeterministicInterpolation();
         TestStationarySampleAndPreviewCommitAgreement();
         TestAtomicCommitUndoRedoAndExactAggregatePreview();

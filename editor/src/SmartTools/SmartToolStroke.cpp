@@ -94,6 +94,7 @@ void SmartToolStroke::Cancel() noexcept
 {
     context_ = {};
     cells_.clear();
+    changesCacheValid_ = false;
     lastTarget_.reset();
     lastNormal_.reset();
     pencilSurfaceNormal_.reset();
@@ -171,12 +172,21 @@ SmartToolVoxelState SmartToolStroke::ReadVoxel(const Position position) const
 bool SmartToolStroke::Accumulate(const SmartToolPlan& plan)
 {
     if (!active_ || !MatchesContext(plan) || plan.Action() != action_) return false;
+    changesCacheValid_ = false;
     bool changed = false;
     for (const SmartToolPlanCell& cell : plan.Cells())
     {
         if (!cell.HasChange()) continue;
         const SmartToolVoxelState expectedBefore = ReadVoxel(cell.WorldPosition);
-        if (expectedBefore != cell.Before) return false;
+        if (expectedBefore != cell.Before)
+        {
+            // LOT 4b : sortie sur desaccord APRES avoir deja fusionne des
+            // cellules. Sans ce bump, revision_ mentirait sur un trait
+            // reellement modifie, et les caches indexes sur Revision()
+            // (dont la preview exacte) afficheraient un etat perime.
+            if (changed) ++revision_;
+            return false;
+        }
 
         MergeChange(cells_, {context_.SubModelIndex, cell.WorldPosition,
             cell.Before.Exists, cell.Before.PaletteIndex,
@@ -203,20 +213,24 @@ bool SmartToolStroke::ReplaceWithPlan(const SmartToolPlan& plan)
             cell.After.Exists, cell.After.PaletteIndex});
     }
     cells_ = std::move(replacement);
+    changesCacheValid_ = false;
     ++revision_;
     return true;
 }
 
-std::vector<Asset::Voxel::VoxelDocumentChange> SmartToolStroke::Changes() const
+std::span<const Asset::Voxel::VoxelDocumentChange>
+    SmartToolStroke::ChangesView() const
 {
-    std::vector<Asset::Voxel::VoxelDocumentChange> changes;
-    changes.reserve(cells_.size());
+    if (changesCacheValid_ && changesCacheRevision_ == revision_)
+        return changesCache_;
+    changesCache_.clear();
+    changesCache_.reserve(cells_.size());
     for (const auto& [position, cell] : cells_)
     {
         static_cast<void>(position);
-        changes.push_back(cell.Change);
+        changesCache_.push_back(cell.Change);
     }
-    std::sort(changes.begin(), changes.end(),
+    std::sort(changesCache_.begin(), changesCache_.end(),
         [](const Asset::Voxel::VoxelDocumentChange& left,
             const Asset::Voxel::VoxelDocumentChange& right)
         {
@@ -224,7 +238,15 @@ std::vector<Asset::Voxel::VoxelDocumentChange> SmartToolStroke::Changes() const
             if (left.Position.Y != right.Position.Y) return left.Position.Y < right.Position.Y;
             return left.Position.Z < right.Position.Z;
         });
-    return changes;
+    changesCacheRevision_ = revision_;
+    changesCacheValid_ = true;
+    return changesCache_;
+}
+
+std::vector<Asset::Voxel::VoxelDocumentChange> SmartToolStroke::Changes() const
+{
+    const std::span<const Asset::Voxel::VoxelDocumentChange> view = ChangesView();
+    return {view.begin(), view.end()};
 }
 
 std::vector<Asset::Voxel::VoxelDocumentChange> SmartToolStroke::PreviewChanges(
