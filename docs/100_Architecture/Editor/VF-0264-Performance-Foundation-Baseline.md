@@ -93,10 +93,28 @@ autres scènes creuses. Deux exécutions sur vingt et une dépassent le budget.
 | 1 000 000 | 1 075,6 ms | 28,41 ms | **37,9×** |
 
 Le gain de VF-0262 est confirmé et s'amplifie avec la taille. Mais **28 ms par
-édition à 512 k et au-delà, c'est encore 1,7 frame** : le coût ne vient plus du
-remaillage des chunks touchés (constant, il ne dépend pas de la taille) mais de
-l'assemblage du mesh unique remis au renderer, qui reste O(document). C'est un
-poste à traiter, probablement avec le LOT 4.
+édition à 512 k et au-delà, c'est encore 1,7 frame.**
+
+**Correction du 05/08 (première rédaction erronée).** J'avais attribué ces 28 ms
+à l'assemblage du mesh unique remis au renderer. C'est faux, et les mesures
+elles-mêmes le démontrent : `VoxelDocumentMeshCache::Mesh()` est **paresseux**
+et le banc ne l'appelle jamais — il n'appelle que `Synchronize`. Surtout, le
+temps est **rigoureusement stable quand le document double** (28,36 ms à 512 k,
+28,41 ms à 1 M), ce qu'un assemblage O(document) ne pourrait pas faire.
+
+Ces 28 ms sont donc le **remaillage d'un seul chunk 32³** : 32 768 sondages de
+cellule, puis la visibilité des faces à six recherches par voxel occupé, soit de
+l'ordre de 400 000 recherches dans une table de hachage d'un million d'entrées.
+
+La conséquence est structurante : **reconstruire ne serait-ce qu'un chunk
+dépasse déjà le budget d'une frame.** Toute conception qui recomposerait « les
+chunks touchés » serait condamnée d'avance ; il faut recomposer une région
+proportionnelle au **pinceau** (VF-0265).
+
+Mesure complémentaire du 05/08 : l'assemblage, isolé cette fois, coûte environ
+**8 Mo d'allocations par édition** à un million de voxels, pour quelques
+millisecondes. C'est ce qui justifie de garder la preview en rendu par chunks
+plutôt qu'en mesh assemblé.
 
 ## 5. Priorités révisées par les chiffres
 
@@ -107,8 +125,19 @@ poste à traiter, probablement avec le LOT 4.
 3. **LOT 3 — probeRegion : mesurer d'abord.** Le risque n'est pas visible sur le
    chemin complet. Produire la mesure régionale avant toute modification, et
    expliquer la queue de `sparse10k` en 128³.
-4. **Nouveau — assemblage du mesh.** L'édition incrémentale plafonne à 28 ms au
-   delà de 512 k à cause de l'assemblage final. À rattacher au LOT 4.
+4. **Nouveau — granularité du remaillage.** Un chunk 32³ coûte 28 ms à
+   remailler sur document dense : déjà 1,7 frame pour un seul chunk. Cette
+   contrainte commande l'architecture de VF-0265 (recomposer à la taille du
+   pinceau, pas du chunk).
+
+**Mise à jour du 05/08 — le chemin régional est mesuré, et il est plat.** Une
+région de 11³ coûte 0,318 ms sur 15 625 voxels et 0,391 ms sur un million ; en
+5³, 0,019 → 0,021 ms ; en 21³, 2,35 → 3,32 ms. Le coût suit le volume de la
+région, à environ **0,25 µs par cellule**, jamais la taille du document. Sur
+documents creux il est dix à cent fois moindre (0,005 ms pour 11³ dans une boîte
+128³ peu peuplée). Le risque `probeRegion` est donc **non confirmé sur les deux
+chemins**, et l'architecture de VF-0265 est validée par la mesure : un pinceau
+9³ donnera environ 0,32 ms, contre 1 354 ms aujourd'hui.
 
 ## 6. Ce que ce banc ne mesure pas
 

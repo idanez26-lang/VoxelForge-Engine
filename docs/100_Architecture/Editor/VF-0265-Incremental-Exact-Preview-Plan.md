@@ -239,9 +239,18 @@ différer.
 
 Ces points doivent être levés par la mesure, pas par l'hypothèse.
 
-1. **Le coût du chemin régional sur documents creux.** Toute l'architecture en
-   dépend. Le calcul dit que l'heuristique choisira le sondage, la mesure doit
-   le confirmer — avant le lot 2, pas après.
+1. ~~**Le coût du chemin régional sur documents creux.**~~ **Levé le 05/08 —
+   l'architecture est validée par la mesure.** Une région de 11³ coûte 0,318 ms
+   sur 15 625 voxels et 0,391 ms sur un million : **plat**. Même constat en 5³
+   (0,019 → 0,021 ms) et en 21³ (2,35 → 3,32 ms). Le coût suit le volume de la
+   région, à environ **0,25 µs par cellule**. Sur documents creux, dix à cent
+   fois moins (0,005 ms pour 11³ dans une boîte 128³ peu peuplée) :
+   l'heuristique de sondage ne dégénère pas, y compris sur le chemin régional
+   que VF-0264 §3 n'avait pas pu couvrir.
+
+   Conséquence chiffrée : un pinceau 9³ donne une zone sale de 11³, donc
+   **environ 0,32 ms** — quatre fois mieux que l'estimation du plan, contre
+   1 354 ms aujourd'hui.
 2. **La cause exacte des ratés de cache.** Quatre mécanismes nommés, aucun
    prouvé comme celui qui domine. Le correctif est robuste aux quatre, mais la
    mesure doit nommer le vrai.

@@ -354,6 +354,54 @@ void MeasureScene(
                 }));
     }
 
+    // 2b. Meme scenario, mais on reclame le mesh unique assemble. L'ecart avec
+    //     mesh_sync_edit isole le cout de l'assemblage, que le chemin de frame
+    //     paie quand le renderer n'est pas alimente par chunks.
+    {
+        VoxelDocumentMeshCache cache;
+        if (!cache.Synchronize(document, 1U).Succeeded) std::exit(4);
+        bool toggle = false;
+        Report(name, shape, voxels, edge, "mesh_sync_edit_assembled",
+            Measure(runs,
+                [&document, &cache, &toggle, centre]
+                {
+                    toggle = !toggle;
+                    if (!document.SetVoxel({centre, centre, centre},
+                            toggle ? 9U : 10U).Succeeded)
+                        std::exit(5);
+                    if (!cache.Synchronize(document, 1U).Succeeded)
+                        std::exit(6);
+                    if (cache.Mesh() == nullptr) std::exit(7);
+                }));
+    }
+
+    // 2c. Chemin REGIONAL. C'est la mesure qui manquait a VF-0264 et dont
+    //     depend toute l'architecture de VF-0265 : mailler une petite region
+    //     doit couter proportionnellement a la region, jamais au document.
+    //     La region est centree sur le document, comme un pinceau sous le
+    //     curseur ; sur les scenes creuses elle tombe souvent dans le vide,
+    //     ce qui est precisement le cas realiste.
+    for (const std::int32_t half : {2, 5, 10})
+    {
+        const std::int32_t minimum = std::max<std::int32_t>(0, centre - half);
+        const std::int32_t maximum = std::min<std::int32_t>(
+            static_cast<std::int32_t>(edge) - 1, centre + half);
+        if (maximum < minimum) continue;
+        const std::int64_t span =
+            static_cast<std::int64_t>(maximum - minimum) + 1;
+        const std::string phase =
+            "mesh_region_" + std::to_string(span) + "cube";
+        Report(name, shape, voxels, edge, phase.c_str(),
+            Measure(runs,
+                [&document, minimum, maximum]
+                {
+                    const auto built = VoxelMeshBuilder::Build(document,
+                        {minimum, minimum, minimum},
+                        {maximum, maximum, maximum});
+                    if (!built.Succeeded) std::exit(8);
+                }));
+    }
+
     // 3. Compositeur de preview exacte. Il copie tout le document puis remaille
     //    tout : le cout doit donc suivre la TAILLE DU DOCUMENT et non celle du
     //    pinceau. Les deux tailles d'empreinte le prouvent ou l'infirment.
@@ -391,7 +439,7 @@ void MeasureScene(
                         centre * Stamps::StampFixedPoint::UnitsPerVoxel,
                         centre * Stamps::StampFixedPoint::UnitsPerVoxel}},
                     .CollisionPolicy = Stamps::StampCollisionPolicy::Overwrite});
-                if (plan.Voxels.empty()) std::exit(8);
+                if (plan.Voxels.empty()) std::exit(9);
             }));
 
     // 5. Meme mesure, avec le cache du lot 2. Le premier appel paie encore le
@@ -414,7 +462,7 @@ void MeasureScene(
                         .CollisionPolicy =
                             Stamps::StampCollisionPolicy::Overwrite,
                         .OccupiedPaletteCache = &paletteCache});
-                    if (plan.Voxels.empty()) std::exit(9);
+                    if (plan.Voxels.empty()) std::exit(10);
                 }));
     }
 }
