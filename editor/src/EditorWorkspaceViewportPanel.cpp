@@ -991,13 +991,20 @@ void EditorWorkspace::DrawScenePanel()
                 "Stamp - Rotation " +
                 std::string(Stamps::StampRotationAxisLabel(
                     stampPlacementSession_.RotationAxis())) + ": " +
-                std::to_string(
-                    static_cast<unsigned int>(
-                        stampPlacementSession_.QuarterRotation()) * 90U) +
+                std::to_string(stampPlacementSession_.RotationDegrees()) +
+                " deg" +
+                (stampPlacementSession_.HalfQuarterStep()
+                        ? " (approximate)"
+                        : "") +
+                " - Step: " +
+                (stampPlacementSession_.RotationStep() ==
+                            Stamps::StampRotationStep::Eighth45
+                        ? "45"
+                        : "90") +
                 " deg - Mirror: " +
                 StampMirrorLabel(stampPlacementSession_.Mirror()) +
-                " - Q/Shift+Q rotate - X/Z toggle - M cycle - "
-                "Shift+M reset - Esc cancel";
+                " - Q/Shift+Q rotate - Shift+E step 90/45 - X/Z toggle - "
+                "M cycle - Shift+M reset - Esc cancel";
             viewportHelp = stampViewportHelp.c_str();
         }
         else if (voxelToolState_.IsSelectionActive())

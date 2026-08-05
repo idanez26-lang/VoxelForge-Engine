@@ -281,6 +281,90 @@ StampPlacementSessionResult StampPlacementSession::RotateCounterClockwise(
         document, documentGeneration, false);
 }
 
+StampPlacementSessionResult StampPlacementSession::RotateStep(
+    const StampPlacementRotationAxis axis,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration,
+    const bool clockwise)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+    if (axis != StampPlacementRotationAxis::VerticalY &&
+        axis != StampPlacementRotationAxis::LateralX &&
+        axis != StampPlacementRotationAxis::DepthZ)
+    {
+        return {
+            .Code = StampPlacementSessionResultCode::InvalidPlan,
+            .Diagnostic = StampPlacementDiagnosticCode::UnsupportedRotation};
+    }
+    if (rotationStep_ == StampRotationStep::Quarter90)
+    {
+        return Rotate90(axis, document, documentGeneration, clockwise);
+    }
+
+    // STAMP-25 : a 45 degres l'orientation compte huit positions. On les
+    // numerote pour que la rotation fasse le tour complet ; les positions
+    // paires retombent exactement sur la grille, les impaires sont
+    // reechantillonnees.
+    if (axis != transform_.RotationAxis)
+    {
+        transform_.RotationAxis = axis;
+        transform_.QuarterTurns = 0U;
+        transform_.HalfQuarterStep = false;
+    }
+    const std::uint8_t current = static_cast<std::uint8_t>(
+        transform_.QuarterTurns * 2U + (transform_.HalfQuarterStep ? 1U : 0U));
+    const std::uint8_t next = static_cast<std::uint8_t>(
+        (current + (clockwise ? 1U : 7U)) % 8U);
+    transform_.QuarterTurns = static_cast<std::uint8_t>(next / 2U);
+    transform_.HalfQuarterStep = (next % 2U) != 0U;
+    smartPlacementOrientationLocked_ = true;
+    return BuildCurrent(document, documentGeneration);
+}
+
+void StampPlacementSession::SetRotationStep(
+    const StampRotationStep step) noexcept
+{
+    rotationStep_ = step;
+}
+
+void StampPlacementSession::ToggleRotationStep() noexcept
+{
+    rotationStep_ = rotationStep_ == StampRotationStep::Quarter90
+        ? StampRotationStep::Eighth45
+        : StampRotationStep::Quarter90;
+}
+
+StampPlacementSessionResult StampPlacementSession::SetHalfQuarterStep(
+    const bool enabled,
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+    transform_.HalfQuarterStep = enabled;
+    // Comme un quart de tour, un demi-cran est une decision d'orientation de
+    // l'utilisateur : le placement assiste ne doit plus la remplacer.
+    smartPlacementOrientationLocked_ = true;
+    return BuildCurrent(document, documentGeneration);
+}
+
+StampPlacementSessionResult StampPlacementSession::ToggleHalfQuarterStep(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::uint64_t documentGeneration)
+{
+    if (!IsActive())
+    {
+        return {};
+    }
+    return SetHalfQuarterStep(
+        !transform_.HalfQuarterStep, document, documentGeneration);
+}
+
 StampPlacementSessionResult StampPlacementSession::SetMirror(
     const StampPlacementMirrorMode mirror,
     const Asset::Voxel::VoxelDocument& document,
@@ -646,6 +730,22 @@ StampPlacementRotationAxis StampPlacementSession::RotationAxis() const noexcept
 std::uint8_t StampPlacementSession::QuarterRotation() const noexcept
 {
     return transform_.QuarterTurns;
+}
+
+bool StampPlacementSession::HalfQuarterStep() const noexcept
+{
+    return transform_.HalfQuarterStep;
+}
+
+StampRotationStep StampPlacementSession::RotationStep() const noexcept
+{
+    return rotationStep_;
+}
+
+std::uint32_t StampPlacementSession::RotationDegrees() const noexcept
+{
+    return static_cast<std::uint32_t>(transform_.QuarterTurns) * 90U +
+        (transform_.HalfQuarterStep ? 45U : 0U);
 }
 
 StampPlacementMirrorMode StampPlacementSession::Mirror() const noexcept

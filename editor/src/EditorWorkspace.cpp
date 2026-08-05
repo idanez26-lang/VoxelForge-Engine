@@ -899,6 +899,16 @@ void EditorWorkspace::DrawMainMenuBar()
         }
 
         if (ImGui::MenuItem(
+                "Stamp Rotation Step 45 Degrees",
+                shortcut(EditorInputCommand::StampToggleRotationStep),
+                stampPlacementSession_.RotationStep() ==
+                    Stamps::StampRotationStep::Eighth45,
+                liveStampPreviewActive))
+        {
+            ToggleLatestStampRotationStep();
+        }
+
+        if (ImGui::MenuItem(
                 "Toggle Stamp Mirror X",
                 shortcut(EditorInputCommand::MirrorX), false,
                 liveStampPreviewActive))
@@ -1531,6 +1541,9 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
     case EditorInputCommand::StampResetTransform:
         ResetLatestStampTransform();
         break;
+    case EditorInputCommand::StampToggleRotationStep:
+        ToggleLatestStampRotationStep();
+        break;
     case EditorInputCommand::FileSave:
         if (voxelDocumentSession_.HasActiveDocument())
             static_cast<void>(SaveVoxelModel());
@@ -1950,13 +1963,38 @@ void EditorWorkspace::DrawStampPlacementToolOptions()
     axisRadio("Y", Stamps::StampPlacementRotationAxis::VerticalY);
     ImGui::SameLine();
     axisRadio("Z", Stamps::StampPlacementRotationAxis::DepthZ);
+    // STAMP-25 : le pas n'est qu'un increment. Dans les deux cas la rotation
+    // fait le tour complet : quatre crans a 90 degres, huit a 45. Les
+    // positions impaires (45, 135, 225, 315) ne sont pas des symetries de la
+    // grille : le Stamp y est reechantillonne, ce que la section PLACEMENT
+    // annonce en permanence (pas de boite de confirmation).
+    ImGui::TextDisabled("Rotation step");
+    const auto stepRadio = [this](
+        const char* const label, const Stamps::StampRotationStep step)
+    {
+        if (ImGui::RadioButton(
+                label, stampPlacementSession_.RotationStep() == step) &&
+            stampPlacementSession_.RotationStep() != step)
+        {
+            ToggleLatestStampRotationStep();
+        }
+    };
+    stepRadio("90 deg", Stamps::StampRotationStep::Quarter90);
+    ImGui::SameLine();
+    stepRadio("45 deg  [Shift+E]", Stamps::StampRotationStep::Eighth45);
+
     ImGui::TextDisabled(
         "Rotation %s: %u degrees",
         Stamps::StampRotationAxisLabel(
             stampPlacementSession_.RotationAxis()).data(),
-        static_cast<unsigned int>(
-            stampPlacementSession_.QuarterRotation()) * 90U);
-    if (ImGui::Button("Rotate left 90  [Q]", ImVec2(-1.0F, 0.0F)))
+        stampPlacementSession_.RotationDegrees());
+    if (stampPlacementSession_.HalfQuarterStep())
+    {
+        ImGui::TextColored(
+            ImVec4(1.0F, 0.78F, 0.32F, 1.0F),
+            "Approximate: the Stamp is resampled.");
+    }
+    if (ImGui::Button("Rotate left  [Q]", ImVec2(-1.0F, 0.0F)))
     {
         stampGizmoTool_ = ActiveVoxelTool::Rotate;
         static_cast<void>(transformGizmoManager_.OnToolChanged(
@@ -1964,7 +2002,7 @@ void EditorWorkspace::DrawStampPlacementToolOptions()
         RotateLatestStampPreview(false);
     }
     if (ImGui::Button(
-            "Rotate right 90  [Shift+Q]", ImVec2(-1.0F, 0.0F)))
+            "Rotate right  [Shift+Q]", ImVec2(-1.0F, 0.0F)))
     {
         stampGizmoTool_ = ActiveVoxelTool::Rotate;
         static_cast<void>(transformGizmoManager_.OnToolChanged(
@@ -1981,6 +2019,24 @@ void EditorWorkspace::DrawStampPlacementToolOptions()
     if (plan != nullptr)
     {
         ImGui::Text("%zu voxels", plan->Statistics.TotalVoxelCount);
+        // STAMP-25 : affichage permanent de l'ecart source -> cellules. Il est
+        // neutre en rotation exacte (les deux nombres sont egaux) et devient la
+        // seule alerte necessaire quand le cran de 45 degres est actif.
+        if (plan->Statistics.ApproximateRotation)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0F, 0.78F, 0.32F, 1.0F),
+                "%zu source voxels -> %zu cells",
+                plan->Statistics.TotalVoxelCount,
+                plan->Statistics.PlannedVoxelCount);
+        }
+        else
+        {
+            ImGui::TextDisabled(
+                "%zu source voxels -> %zu cells",
+                plan->Statistics.TotalVoxelCount,
+                plan->Statistics.PlannedVoxelCount);
+        }
         ImGui::TextDisabled(
             "%zu cells changed", plan->Statistics.ChangedVoxelCount);
         ImGui::TextDisabled(
@@ -3086,6 +3142,11 @@ void EditorWorkspace::MoveLatestStampPreview(
 void EditorWorkspace::RotateLatestStampPreview(const bool clockwise)
 {
     stampPreview_.Rotate(clockwise, stampRotationAxis_);
+}
+
+void EditorWorkspace::ToggleLatestStampRotationStep()
+{
+    stampPreview_.ToggleRotationStep();
 }
 
 void EditorWorkspace::MirrorLatestStampPreview(

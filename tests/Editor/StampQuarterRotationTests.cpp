@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -441,6 +442,124 @@ void TestSessionAxisSwitchResetsRotation()
         "An unknown axis must be rejected without touching the session.");
 }
 
+// STAMP-25 lot 25-2 : le pas de rotation n'est qu'un increment. A 45 degres,
+// huit crans ramenent exactement a l'orientation de depart, et une position
+// sur deux est une permutation exacte de la grille.
+void TestSessionRotationStepMakesFullTurn()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    StampPlacementSession session;
+    Require(session.Begin(
+                stamp, document, 15U, 0U,
+                {5 * StampFixedPoint::UnitsPerVoxel,
+                 StampFixedPoint::UnitsPerVoxel,
+                 5 * StampFixedPoint::UnitsPerVoxel}).Succeeded,
+        "Rotation step session must begin.");
+    Require(session.RotationStep() == StampRotationStep::Quarter90 &&
+            session.RotationDegrees() == 0U,
+        "A placement session must start at 0 degrees with the 90 degree step.");
+
+    // Pas de 90 : quatre crans font le tour, comme avant STAMP-25.
+    for (int turn = 0; turn < 4; ++turn)
+    {
+        Require(session.RotateStep(
+                    StampPlacementRotationAxis::VerticalY, document, 15U)
+                    .Succeeded,
+            "Every 90 degree step must rebuild a plan.");
+        Require(!session.HalfQuarterStep(),
+            "The 90 degree step must never introduce a half quarter turn.");
+    }
+    Require(session.RotationDegrees() == 0U,
+        "Four 90 degree steps must return to the starting orientation.");
+
+    // Pas de 45 : huit crans font le tour, une position sur deux est exacte.
+    session.SetRotationStep(StampRotationStep::Eighth45);
+    const std::array<std::uint32_t, 8U> expected{
+        45U, 90U, 135U, 180U, 225U, 270U, 315U, 0U};
+    for (std::size_t step = 0U; step < expected.size(); ++step)
+    {
+        Require(session.RotateStep(
+                    StampPlacementRotationAxis::VerticalY, document, 15U)
+                    .Succeeded,
+            "Every 45 degree step must rebuild a plan.");
+        Require(session.RotationDegrees() == expected[step],
+            "The 45 degree step must walk the eight orientations in order.");
+        const auto* const plan = session.CurrentPlan();
+        Require(plan != nullptr &&
+                plan->Statistics.ApproximateRotation ==
+                    session.HalfQuarterStep(),
+            "Only the odd orientations may be flagged approximate.");
+    }
+    Require(session.RotationDegrees() == 0U && !session.HalfQuarterStep(),
+        "Eight 45 degree steps must return to the exact starting orientation.");
+
+    // Sens inverse : un cran en arriere depuis zero arrive a 315 degres.
+    Require(session.RotateStep(
+                StampPlacementRotationAxis::VerticalY, document, 15U, false)
+                .Succeeded &&
+            session.RotationDegrees() == 315U,
+        "A counter-clockwise 45 degree step must wrap around to 315 degrees.");
+
+    // Changer d'axe repart de zero, demi-cran compris.
+    Require(session.RotateStep(
+                StampPlacementRotationAxis::LateralX, document, 15U)
+                .Succeeded &&
+            session.RotationAxis() == StampPlacementRotationAxis::LateralX &&
+            session.RotationDegrees() == 45U,
+        "Switching axis must restart the walk at a single step.");
+
+    Require(session.ResetTransform(document, 15U).Succeeded &&
+            session.RotationDegrees() == 0U &&
+            !session.HalfQuarterStep() &&
+            session.RotationStep() == StampRotationStep::Eighth45,
+        "Reset clears the orientation but keeps the chosen step.");
+}
+
+// Le demi-cran reste une bascule de bas niveau : il entre dans l'identite du
+// plan et disparait avec le reset.
+void TestSessionHalfQuarterStepToggle()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    StampPlacementSession session;
+    Require(session.Begin(
+                stamp, document, 15U, 0U,
+                {5 * StampFixedPoint::UnitsPerVoxel,
+                 StampFixedPoint::UnitsPerVoxel,
+                 5 * StampFixedPoint::UnitsPerVoxel}).Succeeded,
+        "Half quarter step session must begin.");
+    Require(!session.HalfQuarterStep(),
+        "A new placement session must start on the exact grid.");
+    const auto exactKey = *session.CacheKey();
+
+    Require(session.ToggleHalfQuarterStep(document, 15U).Succeeded &&
+            session.HalfQuarterStep() &&
+            session.CurrentPlan() != nullptr &&
+            session.CurrentPlan()->Transform.HalfQuarterStep &&
+            session.CurrentPlan()->Statistics.ApproximateRotation &&
+            *session.CacheKey() != exactKey,
+        "Enabling the 45 degree step must rebuild an approximate plan.");
+
+    // L'ecart source -> cellules est ce que l'interface affiche en permanence.
+    Require(session.CurrentPlan()->Statistics.TotalVoxelCount ==
+                stamp.Voxels().size() &&
+            session.CurrentPlan()->Statistics.PlannedVoxelCount != 0U,
+        "The resampled plan must expose both the source and cell counts.");
+
+    Require(session.ToggleHalfQuarterStep(document, 15U).Succeeded &&
+            !session.HalfQuarterStep() &&
+            !session.CurrentPlan()->Statistics.ApproximateRotation &&
+            *session.CacheKey() == exactKey,
+        "Disabling the 45 degree step must return to the exact cached plan.");
+
+    Require(session.SetHalfQuarterStep(true, document, 15U).Succeeded &&
+            session.HalfQuarterStep() &&
+            session.ResetTransform(document, 15U).Succeeded &&
+            !session.HalfQuarterStep(),
+        "Reset transform must clear the 45 degree step.");
+}
+
 void TestSessionRotationLifecycle()
 {
     const VoxelStamp stamp = MakeStamp();
@@ -497,6 +616,8 @@ int main()
         TestRotationDiagnosticsAndCacheKey();
         TestHalfQuarterStepResamplesWithoutHoles();
         TestSessionAxisSwitchResetsRotation();
+        TestSessionRotationStepMakesFullTurn();
+        TestSessionHalfQuarterStepToggle();
         TestSessionRotationLifecycle();
     }
     catch (const std::exception& error)

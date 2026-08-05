@@ -44,6 +44,9 @@ public:
         bool clockwise,
         Stamps::StampPlacementRotationAxis axis =
             Stamps::StampPlacementRotationAxis::VerticalY);
+    // STAMP-25 : bascule le pas de rotation entre 90 et 45 degres. Le pas ne
+    // change pas le plan courant, seulement l'increment de Rotate().
+    void ToggleRotationStep();
     void Mirror(Stamps::StampPlacementMirrorMode mirror);
     void ToggleMirror(Stamps::StampPlacementMirrorMode axis);
     void CycleMirror();

@@ -121,7 +121,8 @@ bool EditorInputService::IsAvailable(
     if (command == EditorInputCommand::TransformApply)
         return availability.CanApplyTransform;
     if (command == EditorInputCommand::StampCycleMirror ||
-        command == EditorInputCommand::StampResetTransform)
+        command == EditorInputCommand::StampResetTransform ||
+        command == EditorInputCommand::StampToggleRotationStep)
         return availability.CanAdjustStampTransform;
     if (IsToolCommand(command)) return availability.HasDocument;
     switch (command)
@@ -184,6 +185,8 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::TransformApply: return "Transform.Apply";
     case EditorInputCommand::StampCycleMirror: return "Stamp.CycleMirror";
     case EditorInputCommand::StampResetTransform: return "Stamp.ResetTransform";
+    case EditorInputCommand::StampToggleRotationStep:
+        return "Stamp.ToggleRotationStep";
     case EditorInputCommand::FileSave: return "File.Save";
     case EditorInputCommand::EditUndo: return "Edit.Undo";
     case EditorInputCommand::EditRedo: return "Edit.Redo";

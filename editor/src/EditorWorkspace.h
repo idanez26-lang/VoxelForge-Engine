@@ -310,6 +310,7 @@ private:
     void BeginSaveSelectionAsStamp();
     void MoveLatestStampPreview(std::int32_t x, std::int32_t y, std::int32_t z);
     void RotateLatestStampPreview(bool clockwise);
+    void ToggleLatestStampRotationStep();
     void MirrorLatestStampPreview(Stamps::StampPlacementMirrorMode mirror);
     void ToggleLatestStampPreview(Stamps::StampPlacementMirrorMode axis);
     void CycleLatestStampPreview();

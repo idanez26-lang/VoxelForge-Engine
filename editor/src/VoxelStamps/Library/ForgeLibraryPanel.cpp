@@ -178,10 +178,12 @@ ForgeLibraryPanelResult ForgeLibraryPanel::Draw(
         ImGui::SetTooltip(
             "Select or double-click a creation to start its exact preview.\n"
             "Stamp Placement commands are shown in Tool Options. Drag the "
-            "Move gizmo axes, or choose Rotate Y and drag its ring. Enter or "
-            "PLACE FULL STAMP confirms the complete preview.\n"
-            "Q/Shift+Q rotate, X/Z mirror, "
-            "M cycles mirrors, Shift+M resets, Esc cancels.\n"
+            "Move gizmo axes, or choose the Rotation gizmo and drag its X, Y "
+            "or Z ring. Enter or PLACE FULL STAMP confirms the complete "
+            "preview.\n"
+            "Q/Shift+Q rotate by one step, Shift+E switches that step between "
+            "90 and 45 degrees, X/Z mirror, M cycles mirrors, Shift+M resets, "
+            "Esc cancels.\n"
             "Refresh rebuilds the derived catalogue; source .vfstamp assets "
             "remain authoritative.");
     }

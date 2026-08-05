@@ -59,6 +59,16 @@ enum class StampPlacementSessionState : std::uint8_t
     Cancelled
 };
 
+/// STAMP-25 : pas de rotation choisi par l'artiste. Il ne decrit qu'un
+/// increment : dans les deux cas la rotation fait le tour complet, en quatre
+/// crans (90) ou en huit (45). Les positions paires restent des permutations
+/// exactes de la grille ; les impaires sont reechantillonnees.
+enum class StampRotationStep : std::uint8_t
+{
+    Quarter90,
+    Eighth45
+};
+
 struct StampPlacementSessionResult final
 {
     StampPlacementSessionResultCode Code =
@@ -183,6 +193,28 @@ public:
     [[nodiscard]] StampPlacementSessionResult RotateCounterClockwise(
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    // STAMP-25 : avance d'un cran dans le sens demande. Le cran vaut 90 ou 45
+    // degres selon RotationStep ; a 45 degres la rotation parcourt les huit
+    // positions avant de revenir a zero.
+    [[nodiscard]] StampPlacementSessionResult RotateStep(
+        StampPlacementRotationAxis axis,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration,
+        bool clockwise = true);
+    // Le pas est un reglage d'outil : il ne change pas le plan courant, donc
+    // aucune reconstruction n'est necessaire.
+    void SetRotationStep(StampRotationStep step) noexcept;
+    void ToggleRotationStep() noexcept;
+    // Demi-cran de 45 degres cumule avec les quarts de tour. Le Stamp est
+    // alors reechantillonne : le plan devient approximatif et le nombre de
+    // cellules differe du nombre de voxels source.
+    [[nodiscard]] StampPlacementSessionResult SetHalfQuarterStep(
+        bool enabled,
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
+    [[nodiscard]] StampPlacementSessionResult ToggleHalfQuarterStep(
+        const Asset::Voxel::VoxelDocument& document,
+        std::uint64_t documentGeneration);
     [[nodiscard]] StampPlacementSessionResult SetMirror(
         StampPlacementMirrorMode mirror,
         const Asset::Voxel::VoxelDocument& document,
@@ -236,6 +268,10 @@ public:
     [[nodiscard]] StampFixedPoint Target() const noexcept;
     [[nodiscard]] StampPlacementRotationAxis RotationAxis() const noexcept;
     [[nodiscard]] std::uint8_t QuarterRotation() const noexcept;
+    [[nodiscard]] bool HalfQuarterStep() const noexcept;
+    [[nodiscard]] StampRotationStep RotationStep() const noexcept;
+    /// Angle courant en degres, tours entiers exclus (0, 45, 90 ... 315).
+    [[nodiscard]] std::uint32_t RotationDegrees() const noexcept;
     [[nodiscard]] StampPlacementMirrorMode Mirror() const noexcept;
     [[nodiscard]] std::size_t TargetSubModel() const noexcept;
     [[nodiscard]] std::uint64_t PlacementOrdinal() const noexcept;
@@ -276,6 +312,7 @@ private:
     std::optional<StampPlacementPlan> plan_;
     VoxelPreviewSession preview_;
     StampPlacementTransform transform_{};
+    StampRotationStep rotationStep_ = StampRotationStep::Quarter90;
     StampSmartPlacementTargetContext smartPlacementTarget_{};
     std::optional<StampSmartPlacementSuggestion> smartPlacementSuggestion_;
     StampSmartPlacementMode smartPlacementMode_ =

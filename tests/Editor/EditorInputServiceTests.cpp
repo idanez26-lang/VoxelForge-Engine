@@ -33,7 +33,7 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 28U,
+    Require(service.Bindings().size() == 29U,
         "The expected command bindings are incomplete.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
@@ -43,6 +43,9 @@ void TestCommandsAndBindings()
             "Stamp.CycleMirror" &&
         service.CommandName(EditorInputCommand::StampResetTransform) ==
             "Stamp.ResetTransform" &&
+        service.CommandName(
+            EditorInputCommand::StampToggleRotationStep) ==
+            "Stamp.ToggleRotationStep" &&
         service.CommandName(static_cast<EditorInputCommand>(255)).empty(),
         "Command names or unknown-command handling are invalid.");
     Require(service.ShortcutLabel(EditorInputCommand::ToolFill) == "Shift+F" &&
@@ -68,6 +71,8 @@ void TestCommandsAndBindings()
         service.ShortcutLabel(EditorInputCommand::StampCycleMirror) == "M" &&
         service.ShortcutLabel(EditorInputCommand::StampResetTransform) ==
             "Shift+M" &&
+        service.ShortcutLabel(
+            EditorInputCommand::StampToggleRotationStep) == "Shift+E" &&
         service.ShortcutLabel(EditorInputCommand::FileSave) == "Ctrl+S",
         "Shortcut labels do not reflect the real bindings.");
 }
@@ -292,11 +297,19 @@ void TestActiveStampTransformContext()
                 EditorInputCommand::StampCycleMirror &&
             Resolve(service, EditorInputKey::M, stamp, false, true) ==
                 EditorInputCommand::StampResetTransform &&
+            Resolve(service, EditorInputKey::E, stamp, false, true) ==
+                EditorInputCommand::StampToggleRotationStep &&
             Resolve(service, EditorInputKey::Enter, stamp) ==
                 EditorInputCommand::TransformApply &&
             Resolve(service, EditorInputKey::Escape, stamp) ==
                 EditorInputCommand::InteractionCancel,
         "Active Stamp placement shortcuts do not own their transform commands.");
+    EditorCommandAvailability noStamp;
+    noStamp.HasDocument = true;
+    Require(
+        Resolve(service, EditorInputKey::E, noStamp, false, true) ==
+            EditorInputCommand::None,
+        "The rotation step switch must stay inert outside a Stamp placement.");
     Require(
         Resolve(service, EditorInputKey::P, stamp) ==
                 EditorInputCommand::None &&

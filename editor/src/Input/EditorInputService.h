@@ -41,6 +41,7 @@ enum class EditorInputCommand : std::uint8_t
     TransformApply,
     StampCycleMirror,
     StampResetTransform,
+    StampToggleRotationStep,
     FileSave,
     EditUndo,
     EditRedo,
@@ -147,7 +148,7 @@ struct SmartBrushSizeInputResult final
 class EditorInputService final
 {
 public:
-    static constexpr std::size_t BindingCount = 28U;
+    static constexpr std::size_t BindingCount = 29U;
 
     [[nodiscard]] EditorInputCommand Resolve(
         const EditorInputFrame& frame,
@@ -222,7 +223,11 @@ private:
         {EditorInputCommand::StampCycleMirror, EditorInputKey::M,
          false, false, false, "M"},
         {EditorInputCommand::StampResetTransform, EditorInputKey::M,
-         false, true, false, "Shift+M"}
+         false, true, false, "Shift+M"},
+        // STAMP-25 : Shift+E est libre dans tout l'editeur, donc aucun
+        // conflit de memoire musculaire avec les touches d'outil.
+        {EditorInputCommand::StampToggleRotationStep, EditorInputKey::E,
+         false, true, false, "Shift+E"}
     }};
 };
 

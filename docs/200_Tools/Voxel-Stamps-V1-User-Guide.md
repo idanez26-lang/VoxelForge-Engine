@@ -39,9 +39,11 @@ qu’un index dérivé : il peut être reconstruit avec **Refresh**.
 | Action | Contrôle |
 |---|---|
 | Déplacer la preview | glisser les axes X, Y ou Z du gizmo **Move** |
-| Tourner avec le gizmo | choisir **Rotate Y**, puis glisser l’anneau |
+| Tourner avec le gizmo | choisir **Rotation gizmo**, puis glisser l’anneau X, Y ou Z |
+| Choisir l’axe de rotation | radios **X / Y / Z** dans Tool Options (un seul axe actif) |
 | Placer une copie | `Enter` ou bouton **PLACE FULL STAMP** dans Tool Options |
-| Rotation 90° | `Q` / `Shift+Q` |
+| Tourner d'un cran | `Q` / `Shift+Q` |
+| Choisir le pas (90° ou 45°) | radios **Rotation step** dans Tool Options, ou `Shift+E` |
 | Miroir X ou Z | `X` / `Z` |
 | Parcourir les miroirs | `M` |
 | Réinitialiser rotation et miroir | `Shift+M` |
@@ -60,6 +62,28 @@ identique pour toutes les cellules du Stamp, la forme n’est jamais déformée 
 Stamp atterrit simplement un demi-voxel plus loin sur l’axe concerné. Les
 rotations de 0° et 180° restent exactes, et une cible sous-voxel demeure une
 erreur explicite.
+
+**Pas de rotation : 90° ou 45°.** Le pas n’est qu’un incrément — dans les deux
+cas `Q` et `Shift+Q` font le tour complet, en quatre crans (0, 90, 180, 270) ou
+en huit (0, 45, 90 … 315). Le pas se change à tout moment sans perdre
+l’orientation courante.
+
+Les positions multiples de 90° sont des permutations exactes de la grille :
+aucune matière n’est perdue. Les positions impaires (45, 135, 225, 315) ne sont
+pas des symétries du réseau cubique — la diagonale mesure √2 fois le côté. Le
+placement rééchantillonne alors le Stamp : il parcourt les cellules d’arrivée et
+va chercher, pour chacune, le voxel source dont elle provient. Ce sens de
+parcours garantit l’absence de trous, mais le nombre de cellules obtenues
+diffère du nombre de voxels source et les arêtes sont redessinées en escalier.
+
+L’écart est annoncé en permanence plutôt que confirmé par une boîte de dialogue :
+Tool Options affiche `N source voxels -> M cells` en orange dès que la rotation
+est approximative, et la console rappelle l’écart à chaque cran. Le placement
+reste autorisé — VoxelForge informe, il n’interdit pas. Un cran de plus retombe
+sur une position exacte, et `Shift+M` (reset transform) revient à 0°.
+
+L’anneau du gizmo de rotation reste aimanté aux quarts de tour, quel que soit le
+pas choisi : les crans de 45° passent par `Q` / `Shift+Q`.
 
 ## Smart Placement et Smart Variants
 
@@ -129,6 +153,9 @@ Placement soit immédiatement identifiable.
 - le catalogue et les miniatures sont dérivés, jamais la source de vérité ;
 - le placement garde la fidélité exacte plutôt que de simplifier silencieusement
   un Stamp pour respecter un budget ;
-- **rotation autour de l’axe Y uniquement** : `StampPlacementRotationAxis` ne
-  déclare que `VerticalY`. Les rotations autour de X et Z sont un chantier
-  ultérieur (le point d’extension existe déjà dans le modèle de données).
+- **un seul axe de rotation actif à la fois** : X, Y et Z sont disponibles
+  (STAMP-24) mais ne se composent pas. Changer d’axe remet l’angle à zéro plutôt
+  que de réinterpréter l’angle courant sur le nouvel axe ;
+- **rotation libre non disponible** : seuls les pas de 90° et de 45° (STAMP-25)
+  existent. Une rotation d’angle quelconque suppose des instances de scène à la
+  VoxEdit, chantier ultérieur.

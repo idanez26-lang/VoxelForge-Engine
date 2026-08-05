@@ -2,6 +2,7 @@
 
 #include "VoxelStamps/Placement/StampPlacementPlan.h"
 
+#include <cstddef>
 #include <limits>
 #include <string>
 #include <utility>
@@ -144,7 +145,8 @@ void StampPreviewController::Rotate(
         return;
     }
 
-    const Stamps::StampPlacementSessionResult result = placement_.Rotate90(
+    // STAMP-25 : le cran vaut 90 ou 45 degres selon le reglage de la session.
+    const Stamps::StampPlacementSessionResult result = placement_.RotateStep(
         axis, *document, editSession_.VoxelModelGeneration(), clockwise);
     if (result.PreviewChanged)
     {
@@ -158,13 +160,34 @@ void StampPreviewController::Rotate(
         return;
     }
 
-    console_.AddMessage(
-        "Live Stamp Preview: rotation " +
+    std::string message = "Live Stamp Preview: rotation " +
         std::string(Stamps::StampRotationAxisLabel(
             placement_.RotationAxis())) + " " +
-        std::to_string(
-            static_cast<unsigned int>(placement_.QuarterRotation()) * 90U) +
-        " degrees.");
+        std::to_string(placement_.RotationDegrees()) + " degrees.";
+    // Une position impaire (45, 135, 225, 315) n'est pas une symetrie de la
+    // grille : on annonce l'ecart source -> cellules a chaque cran.
+    const Stamps::StampPlacementPlan* const plan = placement_.CurrentPlan();
+    if (plan != nullptr && plan->Statistics.ApproximateRotation)
+    {
+        message += " Approximate: " +
+            std::to_string(plan->Statistics.TotalVoxelCount) +
+            " source voxels resampled into " +
+            std::to_string(plan->Statistics.PlannedVoxelCount) + " cells.";
+    }
+    console_.AddMessage(message);
+}
+
+void StampPreviewController::ToggleRotationStep()
+{
+    if (!placement_.IsActive())
+    {
+        return;
+    }
+    placement_.ToggleRotationStep();
+    console_.AddMessage(
+        placement_.RotationStep() == Stamps::StampRotationStep::Eighth45
+            ? "Live Stamp Preview: rotation step 45 degrees (8 positions)."
+            : "Live Stamp Preview: rotation step 90 degrees (exact grid).");
 }
 
 void StampPreviewController::Mirror(
