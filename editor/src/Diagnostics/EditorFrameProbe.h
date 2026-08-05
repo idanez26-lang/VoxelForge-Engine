@@ -28,10 +28,17 @@ enum class EditorFrameProbeSlot : std::uint8_t
     PencilTick,      // Pencil V2: SubmitInput + Tick
     PencilCommit,    // Pencil V2: CommitPencilViewportInteractionV2
     SpSetup,         // DrawScenePanel: header/toolbar/camera/gizmo, pre-render
-    SpPointer        // DrawScenePanel: render+image+pointer interaction block
+    SpPointer,       // DrawScenePanel: render+image+pointer interaction block
+    // LOT 4a : decoupage fin de HighlightsHandoff. Les quatre appels que la
+    // sonde englobe sont tous du bookkeeping CPU a court-circuit ; aucun ne
+    // devrait couter 20 ms. Ces sous-sondes disent lequel ment.
+    HoConfigure,     // Handoff: ViewportRenderer::ConfigureHighlights
+    HoExact,         // Handoff: branche preview exacte (chunks ou monolithe)
+    HoVoxel,         // Handoff: ConfigureVoxelPreview
+    HoTransform      // Handoff: validation + ConfigureTransformPreview
 };
 
-inline constexpr std::size_t EditorFrameProbeSlotCount = 17U;
+inline constexpr std::size_t EditorFrameProbeSlotCount = 21U;
 
 [[nodiscard]] const char* EditorFrameProbeSlotName(
     EditorFrameProbeSlot slot) noexcept;
@@ -59,6 +66,35 @@ public:
     static constexpr double DefaultSlowFrameThresholdMilliseconds = 20.0;
     static constexpr double SummaryIntervalMilliseconds = 500.0;
 
+    // LOT 5 : gate 60 FPS. Jusqu'ici la sonde ne journalisait QUE les frames
+    // au-dela de 20 ms : on voyait les pics et rien d'autre — ni la mediane, ni
+    // la proportion de frames hors budget. Impossible de dire si une session
+    // etait fluide, seulement qu'elle avait eu des accidents.
+    //
+    // L'histogramme ci-dessous est a pas fixe : borne memoire connue, aucune
+    // allocation, aucun tri, cout constant par frame. La contrepartie est
+    // assumee et documentee dans BudgetReport : un percentile est renvoye comme
+    // la BORNE SUPERIEURE de son intervalle, donc legerement pessimiste, a
+    // BucketMilliseconds pres.
+    static constexpr double TargetFrameMilliseconds = 1000.0 / 60.0;
+    static constexpr double BucketMilliseconds = 0.25;
+    static constexpr std::size_t BucketCount = 257U; // 256 x 0,25 ms = 64 ms, + debordement
+
+    struct FrameBudgetReport final
+    {
+        std::uint64_t FrameCount = 0U;
+        std::uint64_t OverBudgetCount = 0U;
+        double OverBudgetRatio = 0.0; // 0..1
+        double BudgetMilliseconds = TargetFrameMilliseconds;
+        double P50 = 0.0;
+        double P95 = 0.0;
+        double P99 = 0.0;
+        double Worst = 0.0;
+        // Vrai si au moins une frame a depasse la portee de l'histogramme : les
+        // percentiles restent valides, mais P99 peut etre sature a Worst.
+        bool Saturated = false;
+    };
+
     void Add(EditorFrameProbeSlot slot, double milliseconds) noexcept;
 
     // Closes the frame started at the previous boundary and starts the next
@@ -74,8 +110,15 @@ public:
     [[nodiscard]] double SlowFrameThreshold() const noexcept;
     void ResetWorstFrame() noexcept;
 
+    // LOT 5 : etat du budget depuis le dernier ResetBudget(). Pur calcul, sans
+    // effet de bord : peut etre appele a tout moment.
+    [[nodiscard]] FrameBudgetReport BudgetReport() const noexcept;
+    [[nodiscard]] std::string BuildBudgetSummary() const;
+    void ResetBudget() noexcept;
+
 private:
     [[nodiscard]] std::string BuildSummary(const FrameReport& frame) const;
+    [[nodiscard]] double Percentile(double fraction) const noexcept;
 
     std::array<SlotStats, EditorFrameProbeSlotCount> accumulating_{};
     FrameReport lastFrame_{};
@@ -86,6 +129,12 @@ private:
     double lastSummaryAt_ = 0.0;
     bool frameOpen_ = false;
     bool summaryEmitted_ = false;
+    // LOT 5 : histogramme du budget.
+    std::array<std::uint32_t, BucketCount> buckets_{};
+    std::uint64_t budgetFrameCount_ = 0U;
+    std::uint64_t overBudgetCount_ = 0U;
+    double budgetWorst_ = 0.0;
+    bool budgetSaturated_ = false;
 };
 
 // RAII helper measuring a scope with the steady clock and feeding the probe.

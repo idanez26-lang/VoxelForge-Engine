@@ -308,7 +308,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                         smartToolStrokePreviewMesh_ =
                             SmartToolExactPreviewComposer::Compose(
                                 ExactPreviewSource(*document),
-                                activeStroke->Changes());
+                                activeStroke->ChangesView());
                         ++exactPreviewCompositionOrdinal_;
                         smartToolStrokePreviewPlanId_ = plan->PlanId();
                         smartToolStrokePreviewPlanRevision_ = plan->Revision();
@@ -362,7 +362,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                     smartToolStrokePreviewMesh_ =
                         SmartToolExactPreviewComposer::Compose(
                             ExactPreviewSource(*document),
-                            activeStroke->Changes());
+                            activeStroke->ChangesView());
                     ++exactPreviewCompositionOrdinal_;
                     smartToolStrokePreviewStrokeRevision_ =
                         activeStroke->Revision();
@@ -755,6 +755,12 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     hlMarkSection(EditorFrameProbeSlot::HlCursor);
     const EditorFrameProbeScope handoffProbe(
         frameProbe_, EditorFrameProbeSlot::HighlightsHandoff);
+    // LOT 4a : sous-sondes du handoff. Aucun de ces appels ne touche le GPU,
+    // et pourtant le handoff mesure 20-25 ms au survol rapide. On mesure au
+    // lieu de supposer.
+    {
+    const EditorFrameProbeScope configureProbe(
+        frameProbe_, EditorFrameProbeSlot::HoConfigure);
     viewportRenderer_.ConfigureHighlights(
         hoveredCoordinates,
         selectedCoordinates,
@@ -783,8 +789,12 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             ? SmartBrushGhostGeometryStyle::ExposedFaceSurface
             : SmartBrushGhostGeometryStyle::VoxelBoxes,
         voxelModelCenter_);
+    }
     const Asset::Voxel::VoxelDocument* const activeDocument =
         voxelDocumentSession_.ActiveDocument();
+    {
+    const EditorFrameProbeScope exactProbe(
+        frameProbe_, EditorFrameProbeSlot::HoExact);
     if (ShouldRenderExactPreviewGeometry(
             previewSubject, smartToolStroke_.IsActive()) &&
         exactSmartToolPreview != nullptr && exactSmartToolPlan != nullptr &&
@@ -832,8 +842,15 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
             nullptr, nullptr, {}, false, 0U, 0U, 0U, 0U));
     }
+    }
+    {
+    const EditorFrameProbeScope voxelProbe(
+        frameProbe_, EditorFrameProbeSlot::HoVoxel);
     viewportRenderer_.ConfigureVoxelPreview(
         stampPlacementSession_.CurrentPreview());
+    }
+    const EditorFrameProbeScope transformProbe(
+        frameProbe_, EditorFrameProbeSlot::HoTransform);
     if (activeDocument && transformPreviewModel_.IsValidFor(
             *activeDocument, selectionService_, voxelDocumentSession_.Generation()))
     {
