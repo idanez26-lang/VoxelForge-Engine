@@ -4,6 +4,7 @@
 #include "VoxelForge/Mesh/VoxelMeshBuilder.h"
 
 #include <algorithm>
+#include <deque>
 #include <exception>
 #include <utility>
 #include <vector>
@@ -161,12 +162,27 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
         }
 
         const Asset::Voxel::VoxelBounds& dirty = overlay->DirtyBounds();
-        Mesh::MeshData mesh;
+
+        // Deux passes, comme l'assemblage du cache de chunks du document. La
+        // première collecte les morceaux sans rien concaténer, la seconde
+        // réserve une fois puis concatène. Concaténer au fil de l'eau
+        // réallouerait le tampon à CHAQUE morceau — MeshData::Append réserve à
+        // la taille exacte — soit des centaines de réallocations sur un document
+        // creux étalé sur des centaines de chunks : 398 Mo alloués et 55 ms
+        // mesurés avant cette correction.
+        std::vector<const Mesh::MeshData*> pieces;
+        std::deque<Mesh::MeshData> rebuilt;
+        pieces.reserve(source.DocumentChunks->size() + 8U);
         std::size_t faceCount = 0U;
         const auto accumulate = [&](const Mesh::MeshData& piece)
         {
             faceCount += piece.FaceCount();
-            mesh.Append(piece);
+            pieces.push_back(&piece);
+        };
+        const auto accumulateOwned = [&](Mesh::MeshData&& piece)
+        {
+            rebuilt.push_back(std::move(piece));
+            accumulate(rebuilt.back());
         };
 
         for (const auto& [key, chunkMesh] : *source.DocumentChunks)
@@ -178,7 +194,7 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
                 accumulate(chunkMesh);
                 continue;
             }
-            accumulate(chunkMesh.FacesOutsideBox(minimum.X, minimum.Y,
+            accumulateOwned(chunkMesh.FacesOutsideBox(minimum.X, minimum.Y,
                 minimum.Z, maximum.X, maximum.Y, maximum.Z));
             Mesh::MeshBuildResult built =
                 Mesh::VoxelMeshBuilder::Build(*overlay, minimum, maximum);
@@ -188,7 +204,7 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
                     built.Message;
                 return result;
             }
-            accumulate(*built.Mesh);
+            accumulateOwned(std::move(*built.Mesh));
         }
 
         // Chunks que la zone sale atteint mais que le document ne connaît pas :
@@ -225,7 +241,7 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
                                 "mesh: " + built.Message;
                             return result;
                         }
-                        accumulate(*built.Mesh);
+                        accumulateOwned(std::move(*built.Mesh));
                     }
         }
 
@@ -236,6 +252,21 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
             result.Error = "Smart Tool final preview mesh exceeds the v1 "
                            "face limit.";
             return result;
+        }
+
+        // Seconde passe : une seule réservation, puis concaténation.
+        Mesh::MeshData mesh;
+        std::size_t vertexCount = 0U;
+        std::size_t indexCount = 0U;
+        for (const Mesh::MeshData* const piece : pieces)
+        {
+            vertexCount += piece->VertexCount();
+            indexCount += piece->IndexCount();
+        }
+        mesh.Reserve(vertexCount, indexCount);
+        for (const Mesh::MeshData* const piece : pieces)
+        {
+            mesh.Append(*piece);
         }
 
         result.Mesh = std::move(mesh);

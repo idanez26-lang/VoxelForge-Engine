@@ -422,6 +422,36 @@ void MeasureScene(
                 }));
     }
 
+    // 3b. VF-0265 : le MEME compositeur, mais alimenté par les chunks du
+    //     document. Le coût doit désormais suivre la zone modifiée et non plus
+    //     la taille du document. Le cache de chunks est synchronisé une fois,
+    //     hors mesure : en usage réel il l'est déjà, en tête de frame.
+    {
+        VoxelDocumentMeshCache chunks;
+        if (!chunks.Synchronize(document, 1U).Succeeded) std::exit(11);
+        const VoxelForge::Editor::SmartToolExactPreviewComposer::Source source{
+            .Document = &document,
+            .DocumentChunks = &chunks.Chunks(),
+            .ModelIndex = 0U};
+        for (const std::int32_t radius : {1, 4})
+        {
+            const auto changes = BrushChanges(document, centre, radius);
+            const std::string phase =
+                "preview_incremental_r" + std::to_string(radius);
+            Report(name, shape, voxels, edge, phase.c_str(),
+                Measure(runs,
+                    [&source, &changes]
+                    {
+                        const auto composed =
+                            VoxelForge::Editor::
+                                SmartToolExactPreviewComposer::Compose(source,
+                                    std::span<const VoxelDocumentChange>{
+                                        changes});
+                        if (!composed.Succeeded()) std::exit(12);
+                    }));
+        }
+    }
+
     // 4. Planification d'un placement de Stamp. Build parcourt tout le document
     //    pour relever les indices de palette occupes : le cout doit lui aussi
     //    suivre la taille du document, pour un Stamp constant.
