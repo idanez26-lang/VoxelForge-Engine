@@ -183,6 +183,121 @@ void CheckTripleOracle(
         std::string("Incrémental != référence : ") + std::string(scenario));
     Require(referenceKeys == committedKeys,
         std::string("Référence != commit réel : ") + std::string(scenario));
+
+    // VF-0265 lot 3e : le contrat que le renderer appliquera. Il dessinera les
+    // chunks du document, en substituant ceux qui figurent dans Overrides.
+    // Reconstituer cette scène doit redonner exactement le maillage du commit.
+    MeshData substituted;
+    std::size_t vertexCount = 0U;
+    std::size_t indexCount = 0U;
+    const auto isOverridden = [&](const Mesh::VoxelChunkKey key)
+    {
+        return std::any_of(incremental.Overrides.begin(),
+            incremental.Overrides.end(),
+            [key](const SmartToolExactPreviewChunk& chunk)
+            { return chunk.Key == key; });
+    };
+    for (const auto& [key, chunkMesh] : DocumentChunks().Chunks())
+    {
+        if (isOverridden(key)) continue;
+        vertexCount += chunkMesh.VertexCount();
+        indexCount += chunkMesh.IndexCount();
+    }
+    for (const SmartToolExactPreviewChunk& chunk : incremental.Overrides)
+    {
+        vertexCount += chunk.Mesh.VertexCount();
+        indexCount += chunk.Mesh.IndexCount();
+    }
+    substituted.Reserve(vertexCount, indexCount);
+    for (const auto& [key, chunkMesh] : DocumentChunks().Chunks())
+    {
+        if (isOverridden(key)) continue;
+        substituted.Append(chunkMesh);
+    }
+    for (const SmartToolExactPreviewChunk& chunk : incremental.Overrides)
+    {
+        substituted.Append(chunk.Mesh);
+    }
+    Require(FaceKeys(substituted) == committedKeys,
+        std::string("Substitution par chunks != commit réel : ") +
+            std::string(scenario));
+
+    // Invariant qui compte, et qui interdit toute dérive : un chunk hors de la
+    // zone sale ne doit JAMAIS produire d'override — c'est ce qui évitera un
+    // envoi GPU inutile. On recalcule la zone sale indépendamment du
+    // compositeur : boîte des positions changées, dilatée d'un voxel.
+    if (changes.empty())
+    {
+        Require(incremental.Overrides.empty(),
+            "Sans changement, aucun chunk ne doit être recomposé.");
+        return;
+    }
+    std::int32_t minimumX = changes.front().Position.X;
+    std::int32_t minimumY = changes.front().Position.Y;
+    std::int32_t minimumZ = changes.front().Position.Z;
+    std::int32_t maximumX = minimumX;
+    std::int32_t maximumY = minimumY;
+    std::int32_t maximumZ = minimumZ;
+    for (const VoxelDocumentChange& change : changes)
+    {
+        minimumX = std::min(minimumX, change.Position.X);
+        minimumY = std::min(minimumY, change.Position.Y);
+        minimumZ = std::min(minimumZ, change.Position.Z);
+        maximumX = std::max(maximumX, change.Position.X);
+        maximumY = std::max(maximumY, change.Position.Y);
+        maximumZ = std::max(maximumZ, change.Position.Z);
+    }
+    const Mesh::VoxelChunkKey firstKey = Mesh::VoxelChunkKeyForPosition(
+        {minimumX - 1, minimumY - 1, minimumZ - 1});
+    const Mesh::VoxelChunkKey lastKey = Mesh::VoxelChunkKeyForPosition(
+        {maximumX + 1, maximumY + 1, maximumZ + 1});
+
+    for (const SmartToolExactPreviewChunk& chunk : incremental.Overrides)
+    {
+        Require(chunk.Key.X >= firstKey.X && chunk.Key.X <= lastKey.X &&
+                chunk.Key.Y >= firstKey.Y && chunk.Key.Y <= lastKey.Y &&
+                chunk.Key.Z >= firstKey.Z && chunk.Key.Z <= lastKey.Z,
+            std::string("Un chunk hors de la zone sale a été recomposé : ") +
+                std::string(scenario));
+    }
+
+    // Et pas plus d'overrides que de chunks que la zone sale traverse.
+    const std::size_t spanned =
+        static_cast<std::size_t>(lastKey.X - firstKey.X + 1) *
+        static_cast<std::size_t>(lastKey.Y - firstKey.Y + 1) *
+        static_cast<std::size_t>(lastKey.Z - firstKey.Z + 1);
+    Require(incremental.Overrides.size() <= spanned,
+        std::string("Plus d'overrides que de chunks traversés : ") +
+            std::string(scenario));
+}
+
+// Sans assemblage demandé, le mesh unique doit rester vide : le consommateur
+// chunké ne doit pas payer ce que le plan appelle le dernier poste O(document).
+void TestOverridesWithoutAssembly()
+{
+    const std::vector<VoxelDocumentChange> changes{
+        Remove({20, 20, 20}, ColourAt({20, 20, 20}))};
+    SmartToolExactPreviewComposer::Source source{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U,
+        .AssembleMesh = false};
+    const auto composed =
+        SmartToolExactPreviewComposer::Compose(source, changes);
+    Require(composed.Succeeded(), "La composition sans assemblage doit réussir.");
+    Require(composed.Mesh.Empty(),
+        "Sans assemblage, le mesh unique doit rester vide.");
+    Require(!composed.Overrides.empty(),
+        "Sans assemblage, les overrides doivent quand même être produits.");
+
+    source.AssembleMesh = true;
+    const auto assembled =
+        SmartToolExactPreviewComposer::Compose(source, changes);
+    Require(assembled.Overrides.size() == composed.Overrides.size(),
+        "Les overrides ne doivent pas dépendre de l'assemblage.");
+    Require(FaceKeys(assembled.Overrides.front().Mesh) ==
+            FaceKeys(composed.Overrides.front().Mesh),
+        "Les overrides doivent être identiques avec et sans assemblage.");
 }
 
 void TestTripleOracleAcrossScenarios()
@@ -306,6 +421,7 @@ int main()
     try
     {
         TestTripleOracleAcrossScenarios();
+        TestOverridesWithoutAssembly();
         TestEmptyPlanReusesEveryChunk();
         TestIncrementalPathNeverMutates();
         TestFallbackWithoutChunksMatchesReference();

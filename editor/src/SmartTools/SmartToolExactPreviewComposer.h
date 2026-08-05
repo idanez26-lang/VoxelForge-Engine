@@ -19,10 +19,25 @@ namespace VoxelForge::Editor
 // an already resolved immutable plan to a private document copy, then using the
 // same VoxelMeshBuilder path as a committed document.  No planner work happens
 // here: positions, colours and Before/After values come exclusively from Plan.
+// VF-0265 (lot 3e): one chunk of the preview that DIFFERS from the document's
+// own chunk. An empty mesh means "this chunk shows nothing while the preview is
+// active" — the case of erasing a chunk's last voxel.
+struct SmartToolExactPreviewChunk final
+{
+    Mesh::VoxelChunkKey Key{};
+    Mesh::MeshData Mesh;
+};
+
 struct SmartToolExactPreviewMesh final
 {
     bool Active = false;
     Mesh::MeshData Mesh;
+    // VF-0265 (lot 3e): the chunks that differ from the document, and only
+    // those. Every chunk absent from this list is displayed exactly as the
+    // document's chunk cache describes it — no copy, no upload, no draw change.
+    // Populated only on the incremental path; the reference path leaves it
+    // empty and fills Mesh alone.
+    std::vector<SmartToolExactPreviewChunk> Overrides;
     Voxel::VoxelPalette Palette;
     std::string Error;
 
@@ -46,6 +61,11 @@ public:
         const std::map<Mesh::VoxelChunkKey, Mesh::MeshData>* DocumentChunks =
             nullptr;
         std::size_t ModelIndex = 0U;
+        // VF-0265 (lot 3e): assembling the single mesh is the last cost that
+        // still follows the document size — 8 Mo of buffers at a million
+        // voxels. A consumer that draws the overrides chunk by chunk sets this
+        // to false and pays nothing.
+        bool AssembleMesh = true;
     };
 
     [[nodiscard]] static SmartToolExactPreviewMesh Compose(
