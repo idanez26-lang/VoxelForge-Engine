@@ -5,6 +5,8 @@ Règle : aucune décision n'est effective sans validation explicite de Tony.
 
 | Date | Décision | Source |
 |---|---|---|
+| 2026-08-05 | **Modèle de rotation des Stamps, à la manière de VoxEdit — trois contrats distincts** : (1) quarts de tour autour d'un **seul axe actif** (X, Y ou Z), permutation exacte de la grille, aucune perte — changer d'axe remet l'angle à zéro ; (2) rotations à **45°** dans le modeleur : opération **approximative assumée** par rééchantillonnage, annoncée chiffres à l'appui à l'artiste (STAMP-25, à faire) ; (3) **rotation libre sans déformation** réservée à la **scène** : le Stamp reste une instance avec sa matrice, jamais gravée dans la grille — chantier d'architecture séparé, à étudier avant toute ligne de code (format de sauvegarde, rendu d'instances, undo/redo, export `.vox`) | Tony, session Cowork 05/08 (STAMP-24) |
+| 2026-08-05 | Le Smart Placement **respecte l'axe choisi par l'utilisateur** : il cherche l'orientation autour de cet axe uniquement, et ne suggère rien plutôt que de basculer sur un autre axe | Tony, session Cowork 05/08 (24-3) |
 | 2026-08-02 | Préview « état final exact » plafonnée par la taille du document (option A : au-delà de 50k voxels, pas de mesh exact — constante `MaximumExactPreviewDocumentVoxelCount`) ; l'exactitude sans plafond sera restaurée par le compositeur incrémental (option B, VF-0262) | Tony, session Cowork 02/08 (VF-0261) |
 | 2026-08-02 | VF-0262 validé : rebuild mesh incrémental par chunks 32³, sans anticipation multi-modèles ; ordre 262-0/262-1 → lot 7 VF-0260 → 262-2/4 | Tony, session Cowork 02/08 |
 | 2026-08-02 | `feature/common-foundation` supprimée (ancêtre strict confirmé de `feature/imgui`, aucun contenu unique) | Tony, session Cowork 02/08 |

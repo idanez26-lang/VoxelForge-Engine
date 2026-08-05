@@ -43,39 +43,53 @@ namespace
     return normal;
 }
 
+// STAMP-24 (24-3) : la normale tourne autour de l'axe ACTIF, avec les memes
+// permutations que le planificateur (cf. MakeTransformedGridPosition) :
+//   X : (y, z) -> (-z,  y)
+//   Y : (x, z) -> ( z, -x)
+//   Z : (x, y) -> (-y,  x)
 [[nodiscard]] StampNormal RotateNormal(
     const StampNormal normal,
+    const StampPlacementRotationAxis axis,
     const std::uint8_t quarterTurns) noexcept
 {
-    switch (quarterTurns)
+    if (quarterTurns > 3U) return {};
+    StampNormal rotated = normal;
+    for (std::uint8_t turn = 0U; turn < quarterTurns; ++turn)
     {
-    case 0U:
-        return normal;
-    case 1U:
-        return {.X = normal.Z, .Y = normal.Y,
-            .Z = static_cast<std::int8_t>(-normal.X)};
-    case 2U:
-        return {.X = static_cast<std::int8_t>(-normal.X), .Y = normal.Y,
-            .Z = static_cast<std::int8_t>(-normal.Z)};
-    case 3U:
-        return {.X = static_cast<std::int8_t>(-normal.Z), .Y = normal.Y,
-            .Z = normal.X};
-    default:
-        return {};
+        const StampNormal previous = rotated;
+        switch (axis)
+        {
+        case StampPlacementRotationAxis::LateralX:
+            rotated.Y = static_cast<std::int8_t>(-previous.Z);
+            rotated.Z = previous.Y;
+            break;
+        case StampPlacementRotationAxis::VerticalY:
+            rotated.X = previous.Z;
+            rotated.Z = static_cast<std::int8_t>(-previous.X);
+            break;
+        case StampPlacementRotationAxis::DepthZ:
+            rotated.X = static_cast<std::int8_t>(-previous.Y);
+            rotated.Y = previous.X;
+            break;
+        default:
+            return {};
+        }
     }
+    return rotated;
 }
 
+// La suggestion respecte l'axe choisi par l'utilisateur : si aucune des
+// quatre orientations autour de CET axe n'aligne le Stamp sur la surface,
+// on ne suggere rien plutot que de basculer sur un autre axe dans son dos.
 [[nodiscard]] std::optional<std::uint8_t> FindQuarterTurns(
     const StampNormal localNormal,
-    const StampNormal targetNormal) noexcept
+    const StampNormal targetNormal,
+    const StampPlacementRotationAxis axis) noexcept
 {
-    if (localNormal.Y != targetNormal.Y)
-    {
-        return std::nullopt;
-    }
     for (std::uint8_t quarterTurns = 0U; quarterTurns < 4U; ++quarterTurns)
     {
-        if (RotateNormal(localNormal, quarterTurns) == targetNormal)
+        if (RotateNormal(localNormal, axis, quarterTurns) == targetNormal)
         {
             return quarterTurns;
         }
@@ -144,7 +158,7 @@ StampSmartPlacementSuggestion SuggestPlacement(
         {
             const auto quarterTurns = FindQuarterTurns(
                 MirrorNormal(localNormal, context.UserTransform.Mirror),
-                targetNormal);
+                targetNormal, context.UserTransform.RotationAxis);
             if (quarterTurns)
             {
                 suggestion.Transform.QuarterTurns = *quarterTurns;

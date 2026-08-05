@@ -206,6 +206,53 @@ void TestSessionGlobalDisableAndBypassRestoreManualPlacement()
         "Ending temporary bypass must restore the deterministic suggestion.");
 }
 
+// STAMP-24 (24-3) : la suggestion cherche l'orientation autour de l'axe que
+// l'utilisateur a choisi. Elle ne doit jamais basculer sur un autre axe dans
+// son dos — au pire elle ne suggere rien.
+void TestSuggestionStaysOnTheUserAxis()
+{
+    const VoxelStamp stamp = MakeStamp();
+
+    // Axe Y (defaut) : le mur vertical aligne le Stamp en un quart de tour.
+    const StampSmartPlacementContext vertical{
+        .Stamp = &stamp,
+        .UserTransform = {.TargetPivot = {2 * Fixed, 0, 2 * Fixed}},
+        .Target = WallTarget()};
+    const auto verticalSuggestion = SuggestPlacement(vertical);
+    Require(verticalSuggestion.Available() &&
+            verticalSuggestion.OrientationSuggested &&
+            verticalSuggestion.Transform.RotationAxis ==
+                StampPlacementRotationAxis::VerticalY &&
+            verticalSuggestion.Transform.QuarterTurns == 1U,
+        "The default vertical axis must keep its historical suggestion.");
+
+    // Meme cible, mais l'utilisateur travaille autour de X : l'axe suggere
+    // reste X, et l'orientation proposee est calculee autour de X.
+    StampSmartPlacementContext lateral = vertical;
+    lateral.UserTransform.RotationAxis =
+        StampPlacementRotationAxis::LateralX;
+    const auto lateralSuggestion = SuggestPlacement(lateral);
+    Require(lateralSuggestion.Available() &&
+            lateralSuggestion.Transform.RotationAxis ==
+                StampPlacementRotationAxis::LateralX,
+        "A suggestion must never switch the axis chosen by the user.");
+    Require(lateralSuggestion.Transform.QuarterTurns <= 3U,
+        "A suggested rotation must stay an exact quarter turn.");
+    if (lateralSuggestion.OrientationSuggested)
+    {
+        // Si une orientation est proposee, elle doit reellement aligner la
+        // normale locale sur la normale de la surface autour de l'axe X.
+        Require(lateralSuggestion.AlignmentNormal == StampNormal{.X = 1},
+            "The suggested alignment must target the surface normal.");
+    }
+
+    // La position, elle, reste suggeree quel que soit l'axe.
+    Require(lateralSuggestion.PivotSuggested &&
+            lateralSuggestion.Transform.TargetPivot ==
+                WallTarget().SurfacePoint,
+        "Pivot assistance must remain available on every axis.");
+}
+
 void TestExplicitUserRotationWins()
 {
     auto document = MakeDocument();
@@ -263,6 +310,7 @@ int main()
         TestDisableAndTemporaryBypassAreAdvisoryOnly();
         TestSessionConsumesPreviewAssistAndSupportsSuggestMode();
         TestSessionGlobalDisableAndBypassRestoreManualPlacement();
+        TestSuggestionStaysOnTheUserAxis();
         TestExplicitUserRotationWins();
         TestSuggestionCannotRefuseAnAllowedPlacement();
     }
