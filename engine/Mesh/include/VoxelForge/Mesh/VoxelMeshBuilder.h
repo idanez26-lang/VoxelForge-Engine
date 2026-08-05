@@ -12,6 +12,8 @@
 namespace VoxelForge::Mesh
 {
 
+class VoxelChangeOverlay;
+
 enum class MeshBuildError
 {
     None,
@@ -51,12 +53,30 @@ public:
         const Asset::Voxel::VoxelPosition& regionMinimum,
         const Asset::Voxel::VoxelPosition& regionMaximum,
         std::size_t modelIndex = 0U);
+    // VF-0265 (lot 2): same regional contract, but the occupancy read is the
+    // document's once the overlay's pending changes are applied. Nothing is
+    // mutated and no document copy is made: the cost follows the region, not
+    // the document. Visibility consults the whole overlay, including outside
+    // the region, so region unions stay seamless on the final state too.
+    [[nodiscard]] static MeshBuildResult Build(
+        const VoxelChangeOverlay& overlay,
+        const Asset::Voxel::VoxelPosition& regionMinimum,
+        const Asset::Voxel::VoxelPosition& regionMaximum);
 
 private:
     // Shared document construction; a null region builds the whole sub-model.
     [[nodiscard]] static MeshBuildResult BuildDocumentMesh(
         const Asset::Voxel::VoxelDocument& document,
         std::size_t modelIndex,
+        const Asset::Voxel::VoxelPosition* regionMinimum,
+        const Asset::Voxel::VoxelPosition* regionMaximum);
+
+    // VF-0265 (lot 2): the single generation body. `Source` supplies Bounds,
+    // VoxelCount, HasVoxel, GetVoxel and ForEachVoxel; both the sub-model and
+    // the overlay adapters satisfy it. Defined and instantiated in the .cpp.
+    template <typename Source>
+    [[nodiscard]] static MeshBuildResult BuildSourceMesh(
+        const Source& source,
         const Asset::Voxel::VoxelPosition* regionMinimum,
         const Asset::Voxel::VoxelPosition* regionMaximum);
 };

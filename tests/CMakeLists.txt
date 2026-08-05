@@ -1581,6 +1581,23 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeMeshDocumentSyncTests>
 )
 
+# VF-0265 lot 2: the golden test of the "document + pending changes" view.
+# Meshing the final state region by region must yield exactly the faces of a
+# full build of a really mutated document — Preview == Commit, proven.
+add_executable(
+    VoxelForgeMeshVoxelChangeOverlayTests
+    Mesh/VoxelChangeOverlayTests.cpp
+)
+target_link_libraries(
+    VoxelForgeMeshVoxelChangeOverlayTests
+    PRIVATE VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeMeshVoxelChangeOverlayTests)
+add_test(
+    NAME VoxelForge.Mesh.VoxelChangeOverlay
+    COMMAND $<TARGET_FILE:VoxelForgeMeshVoxelChangeOverlayTests>
+)
+
 set_tests_properties(
     VoxelForge.Core.Events
     VoxelForge.Core.Layers

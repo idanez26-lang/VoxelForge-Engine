@@ -112,7 +112,10 @@ enum class VoxelDocumentError
     TooManyVoxels,
     InvalidPalette,
     StateMismatch,
-    InvalidTransaction
+    InvalidTransaction,
+    // VF-0265 (lot 2): appended, never inserted — existing values keep their
+    // ordinal so no serialized or logged code changes meaning.
+    AllocationFailure
 };
 
 struct VoxelDocumentOperationResult final

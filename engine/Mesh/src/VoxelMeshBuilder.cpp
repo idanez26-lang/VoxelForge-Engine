@@ -1,11 +1,14 @@
 #include "VoxelForge/Mesh/VoxelMeshBuilder.h"
 
+#include "VoxelForge/Mesh/VoxelChangeOverlay.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -245,28 +248,80 @@ MeshBuildResult VoxelMeshBuilder::Build(const Voxel::VoxelGrid& grid)
 // builds the whole sub-model; otherwise only voxels inside the inclusive
 // region emit faces. Visibility always consults the whole sub-model, so
 // meshes built over a partition of space assemble seamlessly.
-MeshBuildResult VoxelMeshBuilder::BuildDocumentMesh(
-    const Asset::Voxel::VoxelDocument& document,
-    const std::size_t modelIndex,
+namespace
+{
+// VF-0265 (lot 2) : le maillage ne dépend de sa source que par cinq
+// primitives. Les deux adaptateurs ci-dessous les fournissent, et le corps de
+// génération est écrit UNE fois, en template, dans BuildSourceMesh. Il n'existe
+// donc qu'une seule implémentation de l'émission des faces : le chemin document
+// et le chemin « document + changements » ne peuvent pas diverger.
+
+struct SubModelSource final
+{
+    const Asset::Voxel::VoxelSubModel* Model = nullptr;
+
+    [[nodiscard]] const Asset::Voxel::VoxelBounds& Bounds() const noexcept
+    {
+        return Model->Bounds();
+    }
+    [[nodiscard]] std::uint64_t VoxelCount() const noexcept
+    {
+        return Model->VoxelCount();
+    }
+    [[nodiscard]] bool HasVoxel(
+        const Asset::Voxel::VoxelPosition& position) const noexcept
+    {
+        return Model->HasVoxel(position);
+    }
+    [[nodiscard]] std::optional<Asset::Voxel::Voxel> GetVoxel(
+        const Asset::Voxel::VoxelPosition& position) const noexcept
+    {
+        return Model->GetVoxel(position);
+    }
+    template <typename Visitor>
+    void ForEachVoxel(Visitor&& visitor) const
+    {
+        Model->ForEachVoxel(std::forward<Visitor>(visitor));
+    }
+};
+
+struct OverlaySource final
+{
+    const VoxelChangeOverlay* Overlay = nullptr;
+
+    [[nodiscard]] const Asset::Voxel::VoxelBounds& Bounds() const noexcept
+    {
+        return Overlay->Bounds();
+    }
+    [[nodiscard]] std::uint64_t VoxelCount() const noexcept
+    {
+        return Overlay->VoxelCount();
+    }
+    [[nodiscard]] bool HasVoxel(
+        const Asset::Voxel::VoxelPosition& position) const noexcept
+    {
+        return Overlay->HasVoxel(position);
+    }
+    [[nodiscard]] std::optional<Asset::Voxel::Voxel> GetVoxel(
+        const Asset::Voxel::VoxelPosition& position) const noexcept
+    {
+        return Overlay->GetVoxel(position);
+    }
+    template <typename Visitor>
+    void ForEachVoxel(Visitor&& visitor) const
+    {
+        Overlay->ForEachVoxel(visitor);
+    }
+};
+} // namespace
+
+template <typename Source>
+MeshBuildResult VoxelMeshBuilder::BuildSourceMesh(
+    const Source& source,
     const Asset::Voxel::VoxelPosition* const regionMinimum,
     const Asset::Voxel::VoxelPosition* const regionMaximum)
 {
-    if (document.GetModelCount() == 0U && modelIndex == 0U)
-    {
-        return {
-            true,
-            MeshBuildError::None,
-            "Empty voxel document mesh generation succeeded.",
-            MeshData{}};
-    }
-
-    const Asset::Voxel::VoxelSubModel* model = document.GetModel(modelIndex);
-    if (model == nullptr)
-    {
-        return Failure(
-            MeshBuildError::InvalidSource,
-            "Voxel document sub-model index is invalid.");
-    }
+    const Source* const model = &source;
 
     struct DocumentVoxel final
     {
@@ -476,11 +531,59 @@ MeshBuildResult VoxelMeshBuilder::BuildDocumentMesh(
         std::move(mesh)};
 }
 
+MeshBuildResult VoxelMeshBuilder::BuildDocumentMesh(
+    const Asset::Voxel::VoxelDocument& document,
+    const std::size_t modelIndex,
+    const Asset::Voxel::VoxelPosition* const regionMinimum,
+    const Asset::Voxel::VoxelPosition* const regionMaximum)
+{
+    if (document.GetModelCount() == 0U && modelIndex == 0U)
+    {
+        return {
+            true,
+            MeshBuildError::None,
+            "Empty voxel document mesh generation succeeded.",
+            MeshData{}};
+    }
+
+    const Asset::Voxel::VoxelSubModel* const model =
+        document.GetModel(modelIndex);
+    if (model == nullptr)
+    {
+        return Failure(
+            MeshBuildError::InvalidSource,
+            "Voxel document sub-model index is invalid.");
+    }
+    return BuildSourceMesh(
+        SubModelSource{model}, regionMinimum, regionMaximum);
+}
+
 MeshBuildResult VoxelMeshBuilder::Build(
     const Asset::Voxel::VoxelDocument& document,
     const std::size_t modelIndex)
 {
     return BuildDocumentMesh(document, modelIndex, nullptr, nullptr);
+}
+
+// VF-0265 (lot 2) : même génération, mais l'occupation lue est celle du
+// document une fois les changements appliqués. La visibilité consulte la vue
+// entière, y compris hors région : l'union de régions partitionnant l'espace
+// porte donc exactement les faces du maillage complet de l'état final.
+MeshBuildResult VoxelMeshBuilder::Build(
+    const VoxelChangeOverlay& overlay,
+    const Asset::Voxel::VoxelPosition& regionMinimum,
+    const Asset::Voxel::VoxelPosition& regionMaximum)
+{
+    if (regionMinimum.X > regionMaximum.X ||
+        regionMinimum.Y > regionMaximum.Y ||
+        regionMinimum.Z > regionMaximum.Z)
+    {
+        return Failure(
+            MeshBuildError::InvalidSource,
+            "Voxel mesh region bounds are inverted.");
+    }
+    return BuildSourceMesh(
+        OverlaySource{&overlay}, &regionMinimum, &regionMaximum);
 }
 
 MeshBuildResult VoxelMeshBuilder::Build(

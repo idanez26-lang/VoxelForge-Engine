@@ -3,6 +3,7 @@ add_library(VoxelForgeMesh STATIC)
 target_sources(
     VoxelForgeMesh
     PRIVATE
+        src/VoxelChangeOverlay.cpp
         src/VoxelDocumentMeshCache.cpp
         src/VoxelMeshBuilder.cpp
 )
