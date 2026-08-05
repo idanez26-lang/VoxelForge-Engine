@@ -1,0 +1,321 @@
+// VF-0265 lot 3b : le compositeur incrémental doit être RIGOUREUSEMENT égal au
+// compositeur de référence, lui-même égal au maillage du document réellement
+// commité. Triple oracle : si l'un des trois diverge, le test le dit.
+//
+// L'égalité porte sur l'ensemble des faces, pas sur leur ordre — le chemin
+// incrémental émet chunk par chunk. C'est le contrat déjà acté par VF-0262 pour
+// le mesh assemblé.
+
+#include "SmartTools/SmartToolExactPreviewComposer.h"
+
+#include "VoxelForge/Asset/Vox/VoxFormat.h"
+#include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
+#include "VoxelForge/Mesh/VoxelDocumentMeshCache.h"
+#include "VoxelForge/Mesh/VoxelMeshBuilder.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace
+{
+using namespace VoxelForge;
+using namespace VoxelForge::Editor;
+using Asset::Voxel::VoxelDocument;
+using Asset::Voxel::VoxelDocumentChange;
+using Asset::Voxel::VoxelPosition;
+using Mesh::MeshData;
+
+constexpr std::int32_t Edge = 40;
+constexpr std::int32_t Filled = 36;
+
+void Require(const bool condition, const std::string_view message)
+{
+    if (!condition) throw std::runtime_error(std::string(message));
+}
+
+VoxelDocument MakeDocument()
+{
+    std::vector<Asset::Vox::VoxVoxel> voxels;
+    voxels.reserve(static_cast<std::size_t>(Filled) * Filled * Filled);
+    for (std::int32_t z = 0; z < Filled; ++z)
+        for (std::int32_t y = 0; y < Filled; ++y)
+            for (std::int32_t x = 0; x < Filled; ++x)
+                voxels.push_back({static_cast<std::uint8_t>(x),
+                    static_cast<std::uint8_t>(y),
+                    static_cast<std::uint8_t>(z),
+                    static_cast<std::uint8_t>(1U + ((x + y + z) % 6U))});
+    Asset::Vox::VoxModel source{};
+    source.Version = 150U;
+    source.Palette = Asset::Vox::DefaultVoxPalette();
+    source.Models.push_back({
+        .Dimensions = {static_cast<std::uint32_t>(Edge),
+            static_cast<std::uint32_t>(Edge),
+            static_cast<std::uint32_t>(Edge)},
+        .Voxels = std::move(voxels)});
+    auto loaded =
+        Asset::Voxel::VoxDocumentLoader{}.Build(source, "incremental.vox");
+    Require(loaded.Succeeded() && loaded.Document,
+        "Incremental preview fixture must build.");
+    return std::move(*loaded.Document);
+}
+
+const VoxelDocument& BaseDocument()
+{
+    static const VoxelDocument document = MakeDocument();
+    return document;
+}
+
+using FaceKey = std::array<std::int32_t, 7U>;
+
+std::vector<FaceKey> FaceKeys(const MeshData& mesh)
+{
+    const auto toInteger = [](const float value) noexcept
+    {
+        return static_cast<std::int32_t>(
+            value < 0.0F ? value - 0.5F : value + 0.5F);
+    };
+    std::vector<FaceKey> keys;
+    keys.reserve(mesh.FaceCount());
+    const auto& vertices = mesh.Vertices();
+    for (std::size_t face = 0U; face < mesh.FaceCount(); ++face)
+    {
+        const Mesh::MeshVertex& first = vertices[face * 4U];
+        std::array<float, 3U> lowest{
+            first.Position[0], first.Position[1], first.Position[2]};
+        for (std::size_t corner = 1U; corner < 4U; ++corner)
+        {
+            const Mesh::MeshVertex& vertex = vertices[face * 4U + corner];
+            for (std::size_t axis = 0U; axis < 3U; ++axis)
+                lowest[axis] = std::min(lowest[axis], vertex.Position[axis]);
+        }
+        keys.push_back({toInteger(lowest[0]), toInteger(lowest[1]),
+            toInteger(lowest[2]), toInteger(first.Normal[0]),
+            toInteger(first.Normal[1]), toInteger(first.Normal[2]),
+            static_cast<std::int32_t>(first.ColorIndex)});
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+
+const Mesh::VoxelDocumentMeshCache& DocumentChunks()
+{
+    static const Mesh::VoxelDocumentMeshCache cache = []
+    {
+        Mesh::VoxelDocumentMeshCache built;
+        Require(built.Synchronize(BaseDocument(), 1U).Succeeded,
+            "The document chunk cache must synchronize.");
+        return built;
+    }();
+    return cache;
+}
+
+VoxelDocumentChange Add(const VoxelPosition position, const std::uint8_t colour)
+{
+    return {.SubModelIndex = 0U, .Position = position, .ExistedBefore = false,
+        .PaletteIndexBefore = 0U, .ExistsAfter = true,
+        .PaletteIndexAfter = colour};
+}
+
+VoxelDocumentChange Remove(
+    const VoxelPosition position, const std::uint8_t before)
+{
+    return {.SubModelIndex = 0U, .Position = position, .ExistedBefore = true,
+        .PaletteIndexBefore = before, .ExistsAfter = false,
+        .PaletteIndexAfter = 0U};
+}
+
+VoxelDocumentChange Paint(
+    const VoxelPosition position,
+    const std::uint8_t before,
+    const std::uint8_t after)
+{
+    return {.SubModelIndex = 0U, .Position = position, .ExistedBefore = true,
+        .PaletteIndexBefore = before, .ExistsAfter = true,
+        .PaletteIndexAfter = after};
+}
+
+std::uint8_t ColourAt(const VoxelPosition position)
+{
+    const auto voxel = BaseDocument().GetVoxel(position);
+    Require(voxel.has_value(), "Fixture voxel must exist.");
+    return voxel->PaletteIndex;
+}
+
+void CheckTripleOracle(
+    const std::string_view scenario,
+    const std::vector<VoxelDocumentChange>& changes)
+{
+    const SmartToolExactPreviewComposer::Source source{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U};
+
+    const auto incremental =
+        SmartToolExactPreviewComposer::Compose(source, changes);
+    Require(incremental.Succeeded(),
+        std::string("Le compositeur incrémental doit réussir : ") +
+            std::string(scenario) + " — " + incremental.Error);
+
+    const auto reference =
+        SmartToolExactPreviewComposer::Compose(BaseDocument(), changes);
+    Require(reference.Succeeded(),
+        std::string("Le compositeur de référence doit réussir : ") +
+            std::string(scenario));
+
+    VoxelDocument committed = BaseDocument();
+    Require(committed.ApplyVoxelChanges(changes).Succeeded,
+        std::string("Le commit réel doit réussir : ") +
+            std::string(scenario));
+    const auto full = Mesh::VoxelMeshBuilder::Build(committed);
+    Require(full.Succeeded && full.Mesh, "Le maillage du commit doit réussir.");
+
+    const auto incrementalKeys = FaceKeys(incremental.Mesh);
+    const auto referenceKeys = FaceKeys(reference.Mesh);
+    const auto committedKeys = FaceKeys(*full.Mesh);
+
+    Require(incrementalKeys == referenceKeys,
+        std::string("Incrémental != référence : ") + std::string(scenario));
+    Require(referenceKeys == committedKeys,
+        std::string("Référence != commit réel : ") + std::string(scenario));
+}
+
+void TestTripleOracleAcrossScenarios()
+{
+    constexpr VoxelPosition interior{20, 20, 20};
+    constexpr VoxelPosition onBorder{31, 20, 20};
+    constexpr VoxelPosition onThreeBorders{31, 31, 31};
+    constexpr VoxelPosition surface{Filled - 1, 20, 20};
+
+    CheckTripleOracle("aucun changement", {});
+    CheckTripleOracle("suppression au coeur",
+        {Remove(interior, ColourAt(interior))});
+    CheckTripleOracle("recoloration au coeur",
+        {Paint(interior, ColourAt(interior), 9U)});
+    CheckTripleOracle("suppression sur une frontière de chunk",
+        {Remove(onBorder, ColourAt(onBorder))});
+    CheckTripleOracle("suppression sur trois frontières à la fois",
+        {Remove(onThreeBorders, ColourAt(onThreeBorders))});
+    CheckTripleOracle("ajout dans le vide, hors des bornes occupées",
+        {Add({Filled + 2, 20, 20}, 4U)});
+    CheckTripleOracle("ajout collé à la surface",
+        {Add({Filled, 21, 21}, 4U), Paint(surface, ColourAt(surface), 7U)});
+
+    // Un pinceau : un bloc 5³ effacé au coeur, le cas d'usage réel.
+    std::vector<VoxelDocumentChange> brush;
+    for (std::int32_t z = 18; z <= 22; ++z)
+        for (std::int32_t y = 18; y <= 22; ++y)
+            for (std::int32_t x = 18; x <= 22; ++x)
+                brush.push_back(Remove({x, y, z}, ColourAt({x, y, z})));
+    CheckTripleOracle("pinceau 5 cube au coeur", brush);
+}
+
+// Sans changement, la preview est exactement le maillage du document : c'est le
+// cas où l'on ne doit toucher à rien du tout.
+void TestEmptyPlanReusesEveryChunk()
+{
+    const SmartToolExactPreviewComposer::Source source{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U};
+    const auto composed = SmartToolExactPreviewComposer::Compose(source, {});
+    Require(composed.Succeeded(), "La composition vide doit réussir.");
+
+    const MeshData* const documentMesh = DocumentChunks().Mesh();
+    Require(documentMesh != nullptr, "Le mesh assemblé du document doit exister.");
+    Require(FaceKeys(composed.Mesh) == FaceKeys(*documentMesh),
+        "Sans changement, la preview doit être le maillage du document.");
+}
+
+// Le document ne doit pas bouger d'un iota, journal compris.
+void TestIncrementalPathNeverMutates()
+{
+    VoxelDocument document = MakeDocument();
+    Mesh::VoxelDocumentMeshCache cache;
+    Require(cache.Synchronize(document, 1U).Succeeded, "Synchronisation.");
+
+    const std::uint64_t revisionBefore = document.GetRevision();
+    const std::uint64_t countBefore = document.GetVoxelCount();
+    const SmartToolExactPreviewComposer::Source source{
+        .Document = &document,
+        .DocumentChunks = &cache.Chunks(),
+        .ModelIndex = 0U};
+    const std::vector<VoxelDocumentChange> changes{
+        Remove({20, 20, 20}, ColourAt({20, 20, 20})),
+        Add({Filled + 1, 3, 3}, 5U)};
+
+    for (int repeat = 0; repeat < 3; ++repeat)
+    {
+        const auto composed =
+            SmartToolExactPreviewComposer::Compose(source, changes);
+        Require(composed.Succeeded(), "Chaque composition doit réussir.");
+    }
+
+    Require(document.GetRevision() == revisionBefore &&
+            document.GetVoxelCount() == countBefore,
+        "La composition ne doit ni consommer de révision ni changer le contenu.");
+    const auto journal = document.ChangesSince(revisionBefore);
+    Require(journal.has_value() && journal->empty(),
+        "La composition ne doit rien inscrire au journal des révisions.");
+}
+
+// Sans jeu de chunks, on doit retomber exactement sur le compositeur de
+// référence : c'est le repli des appelants ponctuels.
+void TestFallbackWithoutChunksMatchesReference()
+{
+    const std::vector<VoxelDocumentChange> changes{
+        Remove({20, 20, 20}, ColourAt({20, 20, 20}))};
+    const SmartToolExactPreviewComposer::Source source{
+        .Document = &BaseDocument(), .DocumentChunks = nullptr,
+        .ModelIndex = 0U};
+    const auto fallback =
+        SmartToolExactPreviewComposer::Compose(source, changes);
+    const auto reference =
+        SmartToolExactPreviewComposer::Compose(BaseDocument(), changes);
+    Require(fallback.Succeeded() && reference.Succeeded(),
+        "Le repli et la référence doivent réussir.");
+    Require(FaceKeys(fallback.Mesh) == FaceKeys(reference.Mesh),
+        "Le repli doit être le compositeur de référence.");
+}
+
+// Un jeu de changements refusé doit l'être avec le même message des deux côtés.
+void TestRejectionMatchesReference()
+{
+    const std::vector<VoxelDocumentChange> refused{Add({20, 20, 20}, 3U)};
+    const SmartToolExactPreviewComposer::Source source{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U};
+    const auto incremental =
+        SmartToolExactPreviewComposer::Compose(source, refused);
+    const auto reference =
+        SmartToolExactPreviewComposer::Compose(BaseDocument(), refused);
+    Require(!incremental.Succeeded() && !reference.Succeeded(),
+        "Un jeu invalide doit être refusé des deux côtés.");
+}
+
+} // namespace
+
+int main()
+{
+    try
+    {
+        TestTripleOracleAcrossScenarios();
+        TestEmptyPlanReusesEveryChunk();
+        TestIncrementalPathNeverMutates();
+        TestFallbackWithoutChunksMatchesReference();
+        TestRejectionMatchesReference();
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << error.what() << '\n';
+        return EXIT_FAILURE;
+    }
+    std::cout << "Smart Tool incremental preview tests passed.\n";
+    return EXIT_SUCCESS;
+}

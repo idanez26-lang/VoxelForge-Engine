@@ -557,6 +557,23 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolExactPreviewComposerTests>
 )
 
+# VF-0265 lot 3b: triple oracle for the incremental composer — incremental path,
+# reference composer, and the mesh of a really committed document must all carry
+# the same faces.
+add_executable(
+    VoxelForgeEditorSmartToolIncrementalPreviewTests
+    Editor/SmartToolIncrementalPreviewTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolIncrementalPreviewTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorSmartToolIncrementalPreviewTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolIncrementalPreview
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolIncrementalPreviewTests>
+)
+
 add_executable(
     VoxelForgeEditorSmartToolStrokeTests
     Editor/SmartToolStrokeTests.cpp

@@ -3,10 +3,12 @@
 #include "SmartTools/SmartToolPlan.h"
 
 #include "VoxelForge/Mesh/MeshData.h"
+#include "VoxelForge/Mesh/VoxelChunkGrid.h"
 #include "VoxelForge/Voxel/VoxelPalette.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -31,12 +33,33 @@ struct SmartToolExactPreviewMesh final
 class SmartToolExactPreviewComposer final
 {
 public:
+    // VF-0265 (lot 3b): incremental source. When DocumentChunks is supplied,
+    // composition reuses every chunk the plan does not touch, and for the few
+    // it does touch it drops the dirty faces and rebuilds only the dirty box —
+    // never the whole 32^3 chunk, which costs 28 ms on a dense document.
+    // Left null, composition falls back to the reference path below, so
+    // occasional callers (tests, benchmarks) need no change.
+    struct Source final
+    {
+        const Asset::Voxel::VoxelDocument* Document = nullptr;
+        // Chunks of the document WITHOUT the plan, at the same revision.
+        const std::map<Mesh::VoxelChunkKey, Mesh::MeshData>* DocumentChunks =
+            nullptr;
+        std::size_t ModelIndex = 0U;
+    };
+
     [[nodiscard]] static SmartToolExactPreviewMesh Compose(
         const Asset::Voxel::VoxelDocument& document, const SmartToolPlan& plan);
     // Continuous strokes supply a de-duplicated sequence of planner-produced
     // Before -> After changes. This overload never resolves geometry itself.
     [[nodiscard]] static SmartToolExactPreviewMesh Compose(
         const Asset::Voxel::VoxelDocument& document,
+        std::span<const Asset::Voxel::VoxelDocumentChange> changes);
+
+    [[nodiscard]] static SmartToolExactPreviewMesh Compose(
+        const Source& source, const SmartToolPlan& plan);
+    [[nodiscard]] static SmartToolExactPreviewMesh Compose(
+        const Source& source,
         std::span<const Asset::Voxel::VoxelDocumentChange> changes);
 };
 
