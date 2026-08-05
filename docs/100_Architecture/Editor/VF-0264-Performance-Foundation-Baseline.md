@@ -187,3 +187,47 @@ toutes les 5 secondes, sur TOUTES les frames et non plus seulement les lentes.
 La cadence est un membre de `EditorWorkspace` et non une statique locale : les
 smokes instancient plusieurs workspaces et un état partagé mélangerait leurs
 mesures.
+
+## LOT 4a — verdict de la session de sondes (06/08/2026)
+
+Session Release, modèle 80³ rempli, crayon 1 voxel, survol rapide prolongé.
+4 620 frames, dont 133 au-delà de 20 ms journalisées en détail.
+
+| poste | médiane | p90 | max | nature |
+|---|---|---|---|---|
+| `hl-plan` | **13,8 ms** | 15,1 | 17,2 | **composition** de la preview exacte |
+| `ho-exact` | **10,1 ms** | 13,5 | 41,3 | **envoi GPU** de cette preview |
+| `ho-configure` | 0,0 | 0,0 | 0,0 | — |
+| `ho-voxel` | 0,0 | 0,0 | 0,0 | — |
+| `ho-transform` | 0,0 | 0,0 | 0,0 | — |
+| `vp-render` | 0,5 | 0,6 | 1,9 | rendu réel |
+
+**`ho-exact` est rigoureusement égal à `hl-handoff`** : la totalité du coût du
+handoff est la branche de preview exacte. L'affirmation précédente selon laquelle
+« aucun des quatre appels du handoff ne touche le GPU » était **fausse** :
+`ConfigureExactPreviewChunks` appelle `UploadMesh`, donc `UploadBufferPair`, qui
+crée trois objets GPU par chunk et par frame. La vérification n'avait porté que
+sur `ConfigureHighlights`, et la conclusion avait été généralisée à tort.
+
+Les deux moitiés de la preview exacte coûtent, à parts comparables, et totalisent
+les ~24 ms de `highlights`. LOT 4c doit donc corriger les deux : ne recomposer
+que les chunks réellement touchés, et n'en réenvoyer que ceux-là.
+
+## LOT 5 — correctif de la métrique : tolérance de vsync
+
+La première session a annoncé **65 % de frames hors budget** sur un geste dont la
+médiane au repos était de 16,75 ms, soit 59,7 FPS. Autrement dit : le seuil
+strict à 16,67 ms comptait la **gigue du vsync** comme un dépassement. La
+présentation étant synchronisée sur l'écran, une frame au repos dure 16,7 ms
+*par construction* ; mesurer un dépassement à cette valeur mesure l'écran, pas
+notre travail.
+
+Correctif : `BudgetToleranceMilliseconds = 1,5`. `OverBudgetCount` ne compte
+que ce qui dépasse réellement, et `MissedVsyncCount` compte les intervalles de
+vsync entièrement ratés — le symptôme que l'utilisateur ressent. Vérifié :
+au repos 0 % au lieu de 65 %, et 50 % d'intervalles ratés sur un profil qui
+alterne 16,7 et 33,3 ms. Un test échoue si quelqu'un remet un seuil strict.
+
+**Chiffre utile de la session, relu avec la métrique corrigée** : la médiane
+passe de 16,75 ms au repos à 24,5 ms pendant le survol rapide, soit **41 FPS**.
+Le décrochage ressenti est donc bien réel, et vaut à peu près une frame sur deux.

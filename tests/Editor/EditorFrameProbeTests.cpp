@@ -148,6 +148,40 @@ void TestBudgetPercentilesAndOverBudgetRatio()
         "ResetBudget() should clear the histogram entirely.");
 }
 
+
+// LOT 5 (correctif mesure) : la tolerance de vsync. Sans elle, une session au
+// repos parfaitement fluide etait annoncee a 65 % hors budget, parce que la
+// presentation synchronisee fait durer chaque frame 16,7 ms par construction.
+// Ce test echoue si quelqu'un remet un seuil strict.
+void TestVsyncToleranceDoesNotFlagAHealthySession()
+{
+    EditorFrameProbe probe;
+    double now = 0.0;
+    static_cast<void>(probe.FrameBoundary(now));
+    // 300 frames de vsync 60 Hz avec la gigue reellement observee.
+    for (int frame = 0; frame < 300; ++frame)
+    {
+        now += frame % 3 == 0 ? 16.9 : 16.6;
+        static_cast<void>(probe.FrameBoundary(now));
+    }
+    const auto healthy = probe.BudgetReport();
+    Require(healthy.OverBudgetCount == 0U && healthy.MissedVsyncCount == 0U,
+        "A vsync-locked session at 60 Hz must not be reported as over budget.");
+
+    // Une frame sur deux qui rate son intervalle : la, c'est un vrai decrochage.
+    probe.ResetBudget();
+    for (int frame = 0; frame < 300; ++frame)
+    {
+        now += frame % 2 == 0 ? 33.3 : 16.7;
+        static_cast<void>(probe.FrameBoundary(now));
+    }
+    const auto dropped = probe.BudgetReport();
+    Require(dropped.MissedVsyncCount == 150U,
+        "Every doubled frame interval should count as a missed vsync.");
+    Require(dropped.MissedVsyncRatio > 0.49 && dropped.MissedVsyncRatio < 0.51,
+        "Half the frames missed their interval: the ratio should say so.");
+}
+
 } // namespace
 
 int main()
@@ -155,6 +189,7 @@ int main()
     try
     {
         TestBudgetPercentilesAndOverBudgetRatio();
+        TestVsyncToleranceDoesNotFlagAHealthySession();
         TestFastFramesProduceNoSummary();
         TestSlowFrameEmitsSummaryWithBreakdown();
         TestSummaryRateLimiting();

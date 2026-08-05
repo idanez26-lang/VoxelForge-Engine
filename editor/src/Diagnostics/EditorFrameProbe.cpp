@@ -63,7 +63,8 @@ std::optional<std::string> EditorFrameProbe::FrameBoundary(
             const double elapsed = lastFrame_.FrameMilliseconds;
             ++budgetFrameCount_;
             if (elapsed > budgetWorst_) budgetWorst_ = elapsed;
-            if (elapsed > TargetFrameMilliseconds) ++overBudgetCount_;
+            if (elapsed > OverBudgetThresholdMilliseconds) ++overBudgetCount_;
+            if (elapsed > MissedVsyncThresholdMilliseconds) ++missedVsyncCount_;
             const double scaled = elapsed <= 0.0
                 ? 0.0 : elapsed / BucketMilliseconds;
             const std::size_t bucket =
@@ -125,12 +126,15 @@ EditorFrameProbe::FrameBudgetReport EditorFrameProbe::BudgetReport()
     FrameBudgetReport report;
     report.FrameCount = budgetFrameCount_;
     report.OverBudgetCount = overBudgetCount_;
+    report.MissedVsyncCount = missedVsyncCount_;
     report.BudgetMilliseconds = TargetFrameMilliseconds;
     report.Worst = budgetWorst_;
     report.Saturated = budgetSaturated_;
     if (budgetFrameCount_ != 0U)
     {
         report.OverBudgetRatio = static_cast<double>(overBudgetCount_) /
+            static_cast<double>(budgetFrameCount_);
+        report.MissedVsyncRatio = static_cast<double>(missedVsyncCount_) /
             static_cast<double>(budgetFrameCount_);
         report.P50 = Percentile(0.50);
         report.P95 = Percentile(0.95);
@@ -152,7 +156,9 @@ std::string EditorFrameProbe::BuildBudgetSummary() const
          << " | p99 " << report.P99 << " ms"
          << " | pire " << report.Worst << " ms"
          << " | hors budget " << report.OverBudgetCount << " ("
-         << std::setprecision(1) << report.OverBudgetRatio * 100.0 << " %)";
+         << std::setprecision(1) << report.OverBudgetRatio * 100.0 << " %)"
+         << " | vsync rate " << report.MissedVsyncCount << " ("
+         << report.MissedVsyncRatio * 100.0 << " %)";
     if (report.Saturated) line << " | p99 sature (frames > 64 ms)";
     return line.str();
 }
@@ -162,6 +168,7 @@ void EditorFrameProbe::ResetBudget() noexcept
     buckets_ = {};
     budgetFrameCount_ = 0U;
     overBudgetCount_ = 0U;
+    missedVsyncCount_ = 0U;
     budgetWorst_ = 0.0;
     budgetSaturated_ = false;
 }

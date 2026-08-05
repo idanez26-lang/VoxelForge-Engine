@@ -77,6 +77,18 @@ public:
     // la BORNE SUPERIEURE de son intervalle, donc legerement pessimiste, a
     // BucketMilliseconds pres.
     static constexpr double TargetFrameMilliseconds = 1000.0 / 60.0;
+    // La presentation est synchronisee sur l'ecran : au repos une frame dure
+    // 16,7 ms par CONSTRUCTION, avec une gigue de quelques dixiemes. Un seuil
+    // strict a 16,67 ms compte donc cette gigue comme un depassement et rend le
+    // taux inexploitable — mesure faite, il annoncait 65 % de frames hors
+    // budget sur une session dont la mediane au repos etait exactement le
+    // vsync. La tolerance ne compte que ce qui depasse VRAIMENT le budget.
+    static constexpr double BudgetToleranceMilliseconds = 1.5;
+    static constexpr double OverBudgetThresholdMilliseconds =
+        TargetFrameMilliseconds + BudgetToleranceMilliseconds;
+    // Un intervalle de vsync entierement rate, sans ambiguite possible.
+    static constexpr double MissedVsyncThresholdMilliseconds =
+        2.0 * TargetFrameMilliseconds - BudgetToleranceMilliseconds;
     static constexpr double BucketMilliseconds = 0.25;
     static constexpr std::size_t BucketCount = 257U; // 256 x 0,25 ms = 64 ms, + debordement
 
@@ -85,6 +97,10 @@ public:
         std::uint64_t FrameCount = 0U;
         std::uint64_t OverBudgetCount = 0U;
         double OverBudgetRatio = 0.0; // 0..1
+        // Frames ayant rate un intervalle de vsync entier : le symptome que
+        // l'utilisateur ressent comme un decrochage.
+        std::uint64_t MissedVsyncCount = 0U;
+        double MissedVsyncRatio = 0.0;
         double BudgetMilliseconds = TargetFrameMilliseconds;
         double P50 = 0.0;
         double P95 = 0.0;
@@ -133,6 +149,7 @@ private:
     std::array<std::uint32_t, BucketCount> buckets_{};
     std::uint64_t budgetFrameCount_ = 0U;
     std::uint64_t overBudgetCount_ = 0U;
+    std::uint64_t missedVsyncCount_ = 0U;
     double budgetWorst_ = 0.0;
     bool budgetSaturated_ = false;
 };
