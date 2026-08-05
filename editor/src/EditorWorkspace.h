@@ -379,6 +379,12 @@ private:
         SelectionNavigationBounds() const noexcept;
     [[nodiscard]] ViewportNavigationBounds SceneNavigationBounds() const noexcept;
     void UpdateVoxelHighlights() noexcept;
+    // VF-0265 (lot 3c) : source de composition de la preview exacte. Les chunks
+    // du modèle n'y sont fournis que s'ils décrivent exactement ce document à
+    // cette révision ; sinon le compositeur retombe sur son chemin de référence
+    // plutôt que de réutiliser des chunks périmés.
+    [[nodiscard]] SmartToolExactPreviewComposer::Source ExactPreviewSource(
+        const Asset::Voxel::VoxelDocument& document) const noexcept;
     void UpdateTransformGizmo(float viewportHeightPixels) noexcept;
     void DrawTransformGizmoVisibilityAnchor() const noexcept;
     void DrawUniversalPreviewCursor2D() const noexcept;

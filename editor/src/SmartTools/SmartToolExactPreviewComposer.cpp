@@ -258,16 +258,39 @@ const SmartToolExactPreviewMesh& SmartToolExactPreviewCache::Resolve(
     const std::uint64_t documentIdentity,
     SmartToolPlanPtr plan)
 {
-    const std::uint64_t revision = document.GetRevision();
-    if (document_ != &document || documentIdentity_ != documentIdentity ||
-        documentRevision_ != revision || plan_ != plan)
+    // Sans jeu de chunks : chemin de référence, comportement inchangé.
+    return Resolve(
+        SmartToolExactPreviewComposer::Source{&document, nullptr, 0U},
+        documentIdentity, std::move(plan));
+}
+
+const SmartToolExactPreviewMesh& SmartToolExactPreviewCache::Resolve(
+    const SmartToolExactPreviewComposer::Source& source,
+    const std::uint64_t documentIdentity,
+    SmartToolPlanPtr plan)
+{
+    if (source.Document == nullptr)
     {
-        document_ = &document;
+        Clear();
+        return mesh_;
+    }
+    const std::uint64_t revision = source.Document->GetRevision();
+    // VF-0265 (lot 3c) : le jeu de chunks entre dans la clé. Changer de source
+    // de chunks — modèle rechargé, cache vidé — doit recomposer, sinon la
+    // preview réutiliserait des chunks qui ne décrivent plus ce document.
+    if (document_ != source.Document || documentIdentity_ != documentIdentity ||
+        documentRevision_ != revision || documentChunks_ != source.DocumentChunks ||
+        modelIndex_ != source.ModelIndex || plan_ != plan)
+    {
+        document_ = source.Document;
         documentIdentity_ = documentIdentity;
         documentRevision_ = revision;
+        documentChunks_ = source.DocumentChunks;
+        modelIndex_ = source.ModelIndex;
         plan_ = std::move(plan);
-        mesh_ = plan_ ? SmartToolExactPreviewComposer::Compose(document, *plan_)
-                      : SmartToolExactPreviewMesh{};
+        mesh_ = plan_
+            ? SmartToolExactPreviewComposer::Compose(source, *plan_)
+            : SmartToolExactPreviewMesh{};
         ++buildCount_;
     }
     return mesh_;
@@ -278,6 +301,8 @@ void SmartToolExactPreviewCache::Clear() noexcept
     document_ = nullptr;
     documentIdentity_ = 0U;
     documentRevision_ = 0U;
+    documentChunks_ = nullptr;
+    modelIndex_ = 0U;
     plan_.reset();
     mesh_ = {};
 }

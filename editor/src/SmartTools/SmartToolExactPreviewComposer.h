@@ -73,6 +73,14 @@ public:
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentIdentity,
         SmartToolPlanPtr plan);
+    // VF-0265 (lot 3c): same cache, incremental source. The chunk set takes
+    // part in the key: swapping it — model reloaded, cache cleared — must
+    // recompose, otherwise the preview would reuse chunks that no longer
+    // describe this document.
+    [[nodiscard]] const SmartToolExactPreviewMesh& Resolve(
+        const SmartToolExactPreviewComposer::Source& source,
+        std::uint64_t documentIdentity,
+        SmartToolPlanPtr plan);
     void Clear() noexcept;
     [[nodiscard]] std::size_t BuildCount() const noexcept;
 
@@ -80,6 +88,9 @@ private:
     const Asset::Voxel::VoxelDocument* document_ = nullptr;
     std::uint64_t documentIdentity_ = 0U;
     std::uint64_t documentRevision_ = 0U;
+    const std::map<Mesh::VoxelChunkKey, Mesh::MeshData>* documentChunks_ =
+        nullptr;
+    std::size_t modelIndex_ = 0U;
     SmartToolPlanPtr plan_;
     SmartToolExactPreviewMesh mesh_{};
     std::size_t buildCount_ = 0U;

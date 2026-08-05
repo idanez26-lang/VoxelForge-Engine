@@ -54,6 +54,32 @@ namespace
 constexpr std::uint64_t MaximumExactPreviewDocumentVoxelCount = 50'000U;
 }
 
+SmartToolExactPreviewComposer::Source EditorWorkspace::ExactPreviewSource(
+    const Asset::Voxel::VoxelDocument& document) const noexcept
+{
+    SmartToolExactPreviewComposer::Source source;
+    source.Document = &document;
+    source.ModelIndex = 0U;
+    // Le cache de chunks décrit le document SANS le plan. Il n'est exploitable
+    // que s'il décrit bien CE document, à CETTE révision, pour CE sous-modèle.
+    // SynchronizeVoxelDocumentRendering tourne en tête de frame, donc le cas
+    // normal est satisfait ; les exceptions sont le chargement (upload
+    // monolithique, cache encore vide) et un cache invalidé. Dans ces cas on
+    // laisse DocumentChunks à nullptr et le compositeur reprend son chemin de
+    // référence : plus lent, mais jamais faux.
+    const auto identity = voxelDocumentMeshCache_.DocumentIdentity();
+    const auto revision = voxelDocumentMeshCache_.DocumentRevision();
+    if (identity && revision &&
+        *identity == voxelDocumentSession_.Generation() &&
+        *revision == document.GetRevision() &&
+        voxelDocumentMeshCache_.ModelIndex() == 0U &&
+        !voxelDocumentMeshCache_.Chunks().empty())
+    {
+        source.DocumentChunks = &voxelDocumentMeshCache_.Chunks();
+    }
+    return source;
+}
+
 void EditorWorkspace::ForceVoxelHighlightsResolve() noexcept
 {
     highlightsResolvedFrame_ = std::numeric_limits<std::uint64_t>::max();
@@ -253,7 +279,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                     if (rebuild)
                     {
                         smartToolStrokePreviewMesh_ =
-                            SmartToolExactPreviewComposer::Compose(*document,
+                            SmartToolExactPreviewComposer::Compose(
+                                ExactPreviewSource(*document),
                                 activeStroke->Changes());
                         smartToolStrokePreviewPlanId_ = plan->PlanId();
                         smartToolStrokePreviewPlanRevision_ = plan->Revision();
@@ -265,7 +292,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 else
                 {
                     exactSmartToolPreview = &smartToolExactPreviewCache_.Resolve(
-                        *document, voxelDocumentSession_.Generation(), plan);
+                        ExactPreviewSource(*document),
+                        voxelDocumentSession_.Generation(), plan);
                 }
             }
         }
@@ -298,7 +326,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                     activeStroke->Revision())
                 {
                     smartToolStrokePreviewMesh_ =
-                        SmartToolExactPreviewComposer::Compose(*document,
+                        SmartToolExactPreviewComposer::Compose(
+                            ExactPreviewSource(*document),
                             activeStroke->Changes());
                     smartToolStrokePreviewStrokeRevision_ =
                         activeStroke->Revision();
