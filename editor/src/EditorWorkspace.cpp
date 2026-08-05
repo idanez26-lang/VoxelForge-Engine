@@ -633,12 +633,13 @@ void EditorWorkspace::DrawMainMenuBar()
 
         const bool hasActiveProject = projectManager_.HasActiveProject();
         if (ImGui::MenuItem(
-                "New Model", "Ctrl+Shift+N", false,
+                "New Model...", "Ctrl+Shift+N", false,
                 hasActiveProject))
         {
-            RequestInstantNewVoxelModel();
+            RequestNewVoxelModelDialog();
         }
-        DrawTooltip("Create and open a new voxel model instantly");
+        DrawTooltip(
+            "Create a voxel model: choose its name and editable volume");
 
         if (ImGui::MenuItem(
                 "Import Model...", "Ctrl+I", false, hasActiveProject))
@@ -1316,7 +1317,7 @@ void EditorWorkspace::HandleCommandShortcuts()
     // the modifiers explicitly so New Model can never become New Project.
     if (newModelShortcut && context.HasProject)
     {
-        RequestInstantNewVoxelModel();
+        RequestNewVoxelModelDialog();
     }
     else if (!io.KeyShift &&
         ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, shortcutFlags) &&
@@ -3645,7 +3646,9 @@ void EditorWorkspace::DrawVoxelModelCreationDialogs()
         ImGui::TextDisabled("Model name");
         EditorDialogStyle::FullWidthField();
         ImGui::InputInt3("Dimensions", newVoxelModelDimensions_.data());
-        ImGui::TextDisabled("Valid range: 1..256. Default: 64 x 64 x 64.");
+        ImGui::TextDisabled(
+            "Editable volume in voxels, 1..256 per axis. The last volume you "
+            "entered is kept for the next model.");
         EditorDialogStyle::DrawMessage(
             voxelModelCreationError_, EditorDialogIntent::Destructive);
         const EditorDialogShortcut shortcut = EditorDialogStyle::Shortcuts();
@@ -4008,7 +4011,12 @@ void EditorWorkspace::RequestNewVoxelModelDialog()
     constexpr std::string_view defaultName = "MyModel";
     std::copy(defaultName.begin(), defaultName.end(),
         newVoxelModelName_.begin());
-    newVoxelModelDimensions_ = {64, 64, 64};
+    // MODEL-01 : les dimensions ne sont PAS remises a 64 cube. Un artiste qui
+    // travaille en 128 x 32 x 128 enchaine plusieurs modeles a la meme taille ;
+    // le champ conserve donc le dernier volume saisi. On le ramene simplement
+    // dans les bornes valides, pour ne jamais rouvrir sur une saisie absurde.
+    for (int& axis : newVoxelModelDimensions_)
+        axis = std::clamp(axis, 1, 256);
     voxelModelCreationError_.clear();
     showNewVoxelModelPopup_ = true;
 }
