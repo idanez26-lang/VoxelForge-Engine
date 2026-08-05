@@ -113,7 +113,7 @@ unrelated to Voxel Stamps and does not block the build.
 | G2 — Capture and durable Project Library | workflow, real filesystem source/catalogue and relocation smoke | Pass |
 | G3 — Placement foundations | bounded cache, palette/history atomicity, pure planner tests | Pass |
 | G4 — MVP technical complete | exact preview, continuous placement, Esc, transforms, Forge Library and smokes | Pass |
-| G5 — MVP product validation | automated relocation/performance pass; real UI/visual checklist requires Tony | Pending manual validation |
+| G5 — MVP product validation | automated relocation/performance pass; real UI/visual checklist requires Tony | **Pass — signed off by Tony on 04-05/08/2026** (see section 7) |
 | G6 — Smart Variants | deterministic resolver and exact source-independent Redo smoke | Pass |
 | G7 — Smart Placement | default advisory behavior, override, bypass and disable smoke | Pass |
 | G8 — Release hardening | VF-0252 benchmark, corruption record, complete smoke suite, docs and clean runtime scope | Technical pass |
@@ -134,6 +134,33 @@ the Section 6.5 workflow from the user guide and confirm:
 
 Until this sign-off, the correct statement is **“Voxel Stamps V1 technically
 ready for product validation”**, not “product release approved.”
+
+### 7.1 Sign-off record — 04-05/08/2026
+
+Tony ran the workflow on the real `totototo` project with the `mur` creation
+(18 x 24 x 49, 4 633 voxels) and confirmed placement, preview quality and
+rotation in the running Release build. Two defects were found during this
+session and fixed before sign-off:
+
+- **placement refused at the last moment** — the placement plan was built with
+  `VoxelDocumentSession::Generation()` but re-validated at commit time with
+  `VoxelEditSession::VoxelModelGeneration()`; the two counters diverge as soon
+  as a project is created or opened, so every commit was rejected while every
+  visible guard said yes. Both sides now use the session's model generation;
+- **rotation refused on odd-sized Stamps** — a centred pivot on an odd width or
+  depth sits on a half voxel (here Z = 24,5); a quarter turn moved that half
+  voxel to another axis and the planner required an exact multiple of
+  `UnitsPerVoxel`, so the whole plan was rejected and the preview vanished.
+  Quarter turns that swap axes now round to the nearest voxel — the offset is
+  identical for every cell, so the Stamp is never deformed.
+
+Neither defect was visible in CI: both test fixtures align what production
+misaligns (same document generation on both sides, grid-aligned pivots).
+Regression tests were added for both.
+
+**Result: G5 Pass.** Voxel Stamps V1 is product-approved for the editor-first
+v1 scope. Rotation around the three grid axes was delivered afterwards
+(STAMP-24) and also validated on screen.
 
 ## 8. Reproduction
 

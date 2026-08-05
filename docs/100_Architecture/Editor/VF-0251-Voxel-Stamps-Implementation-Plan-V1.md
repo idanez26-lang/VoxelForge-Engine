@@ -6,7 +6,10 @@
 - **Plan version:** V1
 - **Architecture source:** `VF-0250-Voxel-Stamps-Architecture-V2.md`
 - **Architecture status:** Approved
-- **Implementation status:** Not Started
+- **Implementation status:** Complete — STAMP-01 to STAMP-23 delivered
+  (see VF-0252 for the performance baseline and VF-0253 for the release gate).
+  Follow-up outside this plan: STAMP-24 (rotation around the three grid axes,
+  delivered 05/08/2026) and STAMP-25 (45-degree resampled rotation, planned).
 - **Target branch:** `feature/imgui`
 - **Primary platform:** Windows, MSVC, Ninja, Direct3D 12
 - **Product principle:** *Créer plus vite. Rester l’artisan.*

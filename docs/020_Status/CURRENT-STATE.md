@@ -2,9 +2,10 @@
 
 | Champ | Valeur |
 |---|---|
-| Date de vérification | 2026-08-01 |
-| Méthode | Vérifications locales (git, build, ctest) + CI GitHub Actions |
+| Date de vérification | 2026-08-05 |
+| Méthode | Vérifications locales (git, build, ctest), validation visuelle sur poste, CI GitHub Actions |
 | Version | 0.1.2 (tag `369277b`) — C++20, CMake ≥ 3.24, MSVC + Ninja, SDL3 + Dear ImGui (docking) |
+| Sommet | `feature/imgui` @ `3a59e9e` — arbre propre, poussé (0/0) |
 
 À mettre à jour à chaque jalon. Discipline : distinguer
 imaginé / validé / documenté / codé / compilé / testé / commité / poussé.
@@ -14,105 +15,89 @@ imaginé / validé / documenté / codé / compilé / testé / commité / poussé
 | Branche | État |
 |---|---|
 | `main` | Starter kit v0.0.1, aucun code moteur |
-| `feature/imgui` | **Branche de travail unique** — chantiers PERF-02 (VF-0261) livrés : préview agrégée, rebuild différé pendant le trait, préview exacte plafonnée à 50k voxels (option A) ; VF-0262 lancé (262-1 : builder par région commité) ; `feature/common-foundation` supprimée |
-| `experiment/viewport-interaction-v2` | Fusionnée en avance rapide dans `feature/imgui`, supprimée (locale + distante) |
-| `feature/common-foundation` | Ancêtre strict de `feature/imgui` — archivage/suppression : décision Tony en attente |
+| `feature/imgui` | **Branche de travail unique** |
+| `experiment/viewport-interaction-v2` | Fusionnée en avance rapide, supprimée |
+| `feature/common-foundation` | Supprimée (ancêtre strict confirmé) |
 
-## Chantier VF-0260 — dégraissage EditorWorkspace.cpp
+## Chantiers clos
 
-`EditorWorkspace.cpp` : 17 398 lignes (31/07) → **7 086 lignes (02/08, −59,3 %)**.
+**VF-0260 — dégraissage `EditorWorkspace.cpp`** : 17 398 → **7 199 lignes (−58,6 %)**.
+Lots 0 à 7d commités ; nettoyage final (assistants ImGui mutualisés dans
+`EditorWorkspaceUiHelpers.h`, noms de panneaux sourcés depuis
+`Layout/EditorPanelNames.h`) fait le 03/08.
+Reste optionnel : sortir l'état des smokes de la classe (cf. KNOWN-RISKS).
 
-| Lot | Contenu | État |
-|---|---|---|
-| 0 | Harnais smoke → `EditorWorkspaceSmoke.cpp` | ✅ Commité, CI verte |
-| 1 | Console → `EditorConsoleService` (+ test) | ✅ Commité, CI verte |
-| 2 | Layout dock → `EditorDockLayout` + `EditorPanelNames.h` | ✅ Commité, CI verte |
-| 3 | Stamps → `StampPreviewController` (drapeau `voxelEditInProgress_` partagé par référence) | ✅ Commité, CI verte |
-| 4a | Mapping pur session↔outils → `ProjectSession/ProjectSessionMapping.{h,cpp}` + test riche ; règle legacy Cube/Sphère→Pencil préservée | ✅ Commité `d383023`, CI #11 verte |
-| 4b | `ProtectedProjectDeletionRoots` → `ProjectDeletionService::DefaultProtectedRoots()` (statique) + test de garde | ✅ Commité `d383023`, CI #11 verte |
-| 4c | `SynchronizeProjectAssets` (~80 l., orchestration de ~15 services) | ✅ Clos par décision : **statu quo assumé** (Tony, 01/08) — orchestration légitime, un contrôleur à 15 références serait pire |
-| 5 | Import : machine à états `ModelImport/ModelImportBatch` (file, compteurs, collisions, décisions de fin) + test dédié ; fermeture examinée → déjà factorisée (`dirtyActionConfirmation_`/`closeRequest_`), rien d'extractible | ✅ Commité `0afa2cf`, CI verte (8/8 ctest ciblés en local) |
-| 6 | Adaptateurs transforms (23 méthodes : appliers panneau, ponts contraintes, Begin/Apply/Cancel Move/Duplicate/Rotate/Mirror/Scale/Align, annulation gizmo) déplacés en TU dédiée `EditorWorkspaceTransforms.cpp` — pur déplacement, comportement inchangé | ✅ Commité `43f99a1` (128/128 ctest bloquants en local) |
-| 7 | 7a sondes `sp-*` ✅ ; 7b coalescence highlights (1 résolution/frame) ✅ ; 7c `UpdateVoxelHighlights`+`ForceVoxelHighlightsResolve` → `EditorWorkspaceHighlights.cpp` ✅ ; 7d `DrawScenePanel` (1 576 l.) → `EditorWorkspaceViewportPanel.cpp` ✅ (`71cfabc`). Reste optionnel : stroke Smart Tool en TU, extractions de services | 🟢 Quasi clos |
+**VF-0261 / PERF-02 — performance de la préview outils** : frames de dessin
+258 → ~20-35 ms. Préview agrégée au-delà de 256 cellules, rebuild différé
+pendant le trait, préview exacte plafonnée à 50 000 voxels (option A),
+coalescence des highlights (1 résolution/frame), sondes `EditorFrameProbe`
+(17 postes) + journal `voxelforge-perf.log`.
+
+**VF-0262 — rebuild incrémental du mesh par chunks 32³** : clos le 03/08.
+Journal d'invalidation `ChangesSince` dans `VoxelDocument`, cache par chunks,
+itération régionale du builder, upload GPU partiel, assemblage paresseux.
+Résultat : **édit ~4-22 ms de 15k à 1M voxels** (vs 836 ms de rebuild complet
+à 1M, ×38). Session sonde réelle : 2 frames lentes sur toute une session
+d'édition, mesh-sync 1,5-5,3 ms ×1, gpu-upload 5-9,5 ms ×1.
+
+**Voxel Stamps V1 (STAMP-01 → STAMP-23)** : workflow complet — capture,
+bibliothèque projet et My Library, catalogue, cache borné, planificateur de
+placement, preview exacte, placement atomique, session continue,
+transformations rapides, Forge Library, Smart Variants, Smart Placement,
+durcissement perf (VF-0252), portes de sortie et guide utilisateur (VF-0253).
+Deux bugs de terrain corrigés le 04/08 avant validation :
+génération de document unifiée (le placement était refusé in extremis) et
+arrondi demi-voxel des rotations (tout Stamp de dimension impaire était
+irrotable).
+
+**STAMP-24 — rotation des Stamps sur les trois axes** : clos le 05/08.
+24-1 moteur (`StampPlacementRotationAxis` : `VerticalY`, `LateralX`, `DepthZ` ;
+permutations exactes ; arrondi demi-voxel généralisé), 24-2 session + UI
+(sélecteur d'axe, trois anneaux du gizmo déverrouillés, l'anneau saisi décide
+de l'axe), 24-3 Smart Placement aligné sur l'axe choisi.
 
 ## Tests et build
 
-- Build Debug complet vert (01/08, poste local, x64) ; suite bloquante 128/128 (lot 6) ;
-- Nouveaux tests : `VoxelForge.Editor.ProjectSessionMapping` (lot 4),
-  `VoxelForge.Editor.ModelImportBatch` (lot 5) ;
-- CI : verte jusqu'à `0afa2cf` inclus (lot 6 `43f99a1` : run en cours au moment de cette note) ;
-  l'étape `EditorApp` (GPU requis) échoue sur runner comme attendu (non bloquante) ;
-- ⚠️ Suites locales : lancer ctest avec `TMP`/`TEMP` redirigés vers
-  `E:\VoxelForge-Engine\build\tmp` — le `%TEMP%` de C: provoque des `Access is denied`
-  (ACL/Defender), vu sur VoxelForge.Editor.StampCatalog ;
-- `tests/CMakeLists.proposed.txt` : obsolète depuis les lots (à régénérer avant adoption).
+- Suite bloquante locale : **144/144** ; smokes GUI `EditorApp` : **51/51**,
+  **bloquants en CI** depuis `5650127` ;
+- CI verte ; les smokes GUI tournent réellement sur le runner (D3D12 WARP)
+  depuis la correction des noms courts 8.3 du `%TEMP%` (`379cb5a`) ;
+- `Application` retourne **77** si l'init vidéo/GPU échoue → `SKIP_RETURN_CODE`
+  sur la suite EditorApp (postes sans GPU) ;
+- ⚠️ Suites locales : `TMP`/`TEMP` redirigés vers `E:\VoxelForge-Engine\build\tmp` ;
+- ⚠️ **Visual Studio fermé** pendant tout configure/build en ligne de commande ;
+- `tests/CMakeLists.proposed.txt` : obsolète, à régénérer avant adoption.
 
-## Environnement de build local (leçons du 01/08)
+## Validations produit
 
-- **Visual Studio fermé pendant tout configure/build en ligne de commande** : `devenv` en
-  arrière-plan entre en concurrence sur le `binaryDir` (index `.vs`) et provoque un
-  `rules.ninja` jamais écrit, sans aucune erreur CMake. Un seul propriétaire du répertoire
-  de build à la fois.
-- CMake **4.4.1 standalone** (`C:\Program Files\CMake\bin\`) en service ; environnement x64
-  via `"E:\visual studio\Common7\Tools\VsDevCmd.bat" -arch=x64` (la Developer PowerShell
-  par défaut initialise x86).
-- Workflow de collaboration : Claude (Cowork) = code et fichiers ; Codex = exécution
-  console (builds, git) sur prompts validés par Tony. Aucun commit/push sans validation.
+| Gate | État |
+|---|---|
+| Voxel Stamps V1 — technique (VF-0253, G0-G4, G6-G8) | ✅ Pass |
+| Voxel Stamps V1 — produit (G5) | ✅ **Validé par Tony le 04-05/08** : placement complet en un clic (4 346 cellules, Undo/Redo atomiques), aperçu sans côtés manquants, rotation sur les trois axes |
 
-## À faire (hors lots)
+## À faire
 
-1. **PERF-02 livré (VF-0261)** : frames de dessin 258 → ~35 ms mesurés. Restes
-   documentés : sections `sp-*` de DrawScenePanel (~17-29 ms fantômes), matérialisation
-   paresseuse du planner, coalescence (secondaire). **VF-0262 en cours** : 262-0 ✅
-   (benchmark, baseline `688cea6`), 262-1 ✅ (builder par région + équivalence),
-   262-2 ✅ (`6956f75`, journal d'invalidation `ChangesSince` dans VoxelDocument),
-   262-3 ✅ (`b387230`, cache incrémental chunks 32³ + itération régionale :
-   région 32³ plate à ~8,8 ms, édit 823→21 ms @1M, ctest 129/129),
-   262-3bis ✅ (`831a9c0`, drapeau d'occupation : recoloration sans invalidation
-   des voisins — pire cas 88→19,9 ms, édit borné ~4-25 ms toutes tailles) ;
-   262-4a/4b ✅ (`a8c4036`, renderer par chunks : upload partiel des seuls
-   chunks touchés, patch gardé par identité/centre/palette ; 129/129 +
-   smokes 51/51 ; vérification visuelle Claude OK — frontières continues,
-   3 poses + undo/redo corrects), 262-4c ✅ (`660f527`, assemblage `Mesh()`
-   paresseux + statistiques par totaux de chunks ; 129/129 + smokes 51/51).
-   **VF-0262 clos (verdict 03/08)** : édit ~4-22 ms toutes tailles au
-   benchmark (vs 836 ms @1M, ×38) ; session sonde réelle (Claude au poste,
-   `8011677`, modèle 16k) : 2 frames lentes sur toute la session, mesh-sync
-   1,5-5,3 ms ×1, gpu-upload 5-9,5 ms ×1 (avant : 258 ms, mesh-sync ~90 ms).
-   Re-test 500k en réel quand les dimensions de la box de création seront
-   configurables — **besoin produit noté** (backlog) ;
-2. Vérifications de poste : smoke GUI, bug grille §10.2 (candidat : depth bias) ;
-3. Mini-lot `SKIP_RETURN_CODE` ✅ (`230b1b4`) : l'application retourne 77
-   quand l'init vidéo/GPU échoue ; `SKIP_RETURN_CODE 77` sur la suite
-   EditorApp. **Diagnostic run CI #53** : le runner crée un device D3D12
-   (WARP) + fenêtre + ImGui — le 77 ne se déclenche pas ; **28/51 smokes
-   passent réellement**, 23 échouent (motif apparent : tous les tests à
-   fixture `CreateEmptyProject` — FirstCreation/DirectCreation/InstantNew,
-   PaletteUi, Fill/Box/Line/Sphere, ModernToolbar, KeyboardShortcuts,
-   transforms/gizmos, SaveOnExit « did not complete »). **Cause racine
-   trouvée (03/08, diagnostics instrumentés + logs bruts run #56)** : le
-   `%TEMP%` du runner est un nom court 8.3 (`C:\Users\RUNNER~1\...`) alors
-   que les services canonicalisent en forme longue (`runneradmin`) →
-   `lexically_relative` casse le reveal AssetBrowser (gate frame 0 de tous
-   les smokes à création de modèle). Corrigé dans la fixture
-   (`weakly_canonical` du dossier temp dans `ViewportTestFixture::Prepare`).
-   Notes : l'expérience ×5 du budget de frames a réfuté l'hypothèse « rendu
-   lent » (mêmes échecs) — `VOXELFORGE_SMOKE_FRAME_SCALE` conservé comme
-   marge sur WARP ; le mécanisme 77/SKIP_RETURN_CODE reste pour les vrais
-   postes sans GPU. **Si le prochain run passe 51/51 : rendre l'étape
-   EditorApp bloquante** (retirer `continue-on-error`). Durcissement prod à
-   considérer ensuite : normaliser la racine projet dans ProjectManager ;
-4. Nettoyage différé : ~~copies de noms de panneaux + 5 symboles dupliqués au
-   lot 7d~~ ✅ fait le 03/08 : assistants ImGui mutualisés dans
-   `EditorWorkspaceUiHelpers.h` (3 copies supprimées, dont du code mort dans
-   Smoke) et noms de panneaux sourcés depuis `Layout/EditorPanelNames.h` dans
-   les 3 TU. Reste : régénérer `tests/CMakeLists.proposed.txt`,
-   lot 3-bis (`BeginSaveSelectionAsStamp` + dialogue stamps), presenter des dialogues projet
-   (facultatif, post-4a/4b) ;
-5. Phase D ensuite : Smart Tools — gate SMART-02.5 avant SMART-03 (AR-0104).
+1. **STAMP-25 — rotation à 45°** dans le modeleur : rééchantillonnage assumé,
+   annoncé chiffres à l'appui (« N cellules, M perdues »), diagnostic
+   d'avertissement non bloquant ;
+2. **Étude d'architecture — rotation libre par instances de scène** (modèle
+   VoxEdit) : un Stamp posé devient une instance avec sa matrice, jamais
+   gravée dans la grille. Touche le format de sauvegarde, le rendu, l'undo/redo
+   et l'export `.vox` → **document à valider avant toute ligne de code** ;
+3. Mini-lot perf : cache des index de palette occupés dans
+   `StampPlacementPlanner` (supprime un parcours O(document) par frame de
+   placement) ;
+4. Compositeur incrémental de préview exacte (« option B » de VF-0261) — lève
+   le plafond de 50 000 voxels ;
+5. Dimensions de la box de création configurables (**prérequis** au re-test
+   500k en conditions réelles ; vérifier d'abord l'heuristique `probeRegion`) ;
+6. Vérification de poste : bug grille §10.2 (candidat depth bias) ;
+7. Phase D : Smart Tools — statut du gate SMART-02.5 à trancher (AR-0101 §15 le
+   déclare implémenté, la roadmap le déclare requis).
 
 ## Dette principale
 
-`EditorWorkspace.cpp` ≈ 9 180 lignes (God Object en résorption, −47,2 % depuis le 31/07) —
-reste le lot 7 de VF-0260 (DrawScenePanel, UpdateVoxelHighlights, stroke Smart Tool),
-à coupler avec le verdict PERF-01.
+`EditorWorkspace` n'est plus un God Object de logique mais un **harnais de
+test** : 649 variables membres et 86 des 98 méthodes publiques sont des smokes.
+`EditorWorkspaceSmoke.cpp` (7 346 l.) est désormais le plus gros fichier du
+projet. Zéro TODO/FIXME dans tout `editor/src` et `engine`.
