@@ -132,6 +132,23 @@ enum class StampPlacementDiagnosticCode : std::uint8_t
     AllocationFailure
 };
 
+// STAMP-24 : libelle court de l'axe actif, partage par la console, les Tool
+// Options et l'aide du viewport (une seule source de verite).
+[[nodiscard]] constexpr std::string_view StampRotationAxisLabel(
+    const StampPlacementRotationAxis axis) noexcept
+{
+    switch (axis)
+    {
+    case StampPlacementRotationAxis::LateralX:
+        return "X";
+    case StampPlacementRotationAxis::DepthZ:
+        return "Z";
+    case StampPlacementRotationAxis::VerticalY:
+    default:
+        return "Y";
+    }
+}
+
 [[nodiscard]] constexpr std::string_view StampPlacementDiagnosticMessage(
     const StampPlacementDiagnosticCode code) noexcept
 {

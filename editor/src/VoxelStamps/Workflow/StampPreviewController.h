@@ -31,12 +31,19 @@ public:
         HighlightsChangedCallback onHighlightsChanged);
 
     void Move(std::int32_t x, std::int32_t y, std::int32_t z);
+    // STAMP-24 : l'axe accompagne le delta, sinon l'anneau X ou Z du gizmo
+    // serait applique comme une rotation Y.
     bool ApplyGizmoDelta(
         Stamps::StampFixedPoint baseTarget,
         std::uint8_t baseQuarterTurns,
         Asset::Voxel::VoxelPosition translation,
-        std::int32_t quarterTurnDelta);
-    void Rotate(bool clockwise);
+        std::int32_t quarterTurnDelta,
+        Stamps::StampPlacementRotationAxis axis =
+            Stamps::StampPlacementRotationAxis::VerticalY);
+    void Rotate(
+        bool clockwise,
+        Stamps::StampPlacementRotationAxis axis =
+            Stamps::StampPlacementRotationAxis::VerticalY);
     void Mirror(Stamps::StampPlacementMirrorMode mirror);
     void ToggleMirror(Stamps::StampPlacementMirrorMode axis);
     void CycleMirror();

@@ -210,14 +210,23 @@ StampPlacementSessionResult StampPlacementSession::SetGizmoTransform(
     const StampFixedPoint targetPivot,
     const std::uint8_t quarterTurns,
     const Asset::Voxel::VoxelDocument& document,
-    const std::uint64_t documentGeneration)
+    const std::uint64_t documentGeneration,
+    const StampPlacementRotationAxis axis)
 {
     if (!IsActive())
     {
         return {};
     }
+    if (axis != StampPlacementRotationAxis::VerticalY &&
+        axis != StampPlacementRotationAxis::LateralX &&
+        axis != StampPlacementRotationAxis::DepthZ)
+    {
+        return {
+            .Code = StampPlacementSessionResultCode::InvalidPlan,
+            .Diagnostic = StampPlacementDiagnosticCode::UnsupportedRotation};
+    }
     transform_.TargetPivot = targetPivot;
-    transform_.RotationAxis = StampPlacementRotationAxis::VerticalY;
+    transform_.RotationAxis = axis;
     transform_.QuarterTurns = static_cast<std::uint8_t>(quarterTurns % 4U);
     smartPlacementOrientationLocked_ = true;
     return BuildCurrent(document, documentGeneration);
@@ -233,13 +242,22 @@ StampPlacementSessionResult StampPlacementSession::Rotate90(
     {
         return {};
     }
-    if (axis != StampPlacementRotationAxis::VerticalY)
+    if (axis != StampPlacementRotationAxis::VerticalY &&
+        axis != StampPlacementRotationAxis::LateralX &&
+        axis != StampPlacementRotationAxis::DepthZ)
     {
         return {
             .Code = StampPlacementSessionResultCode::InvalidPlan,
             .Diagnostic = StampPlacementDiagnosticCode::UnsupportedRotation};
     }
-    transform_.RotationAxis = axis;
+    // STAMP-24 : un seul axe actif a la fois. Changer d'axe repart de zero,
+    // sinon l'angle courant serait reinterprete sur le nouvel axe et le Stamp
+    // sauterait sans que l'utilisateur ait demande cette rotation.
+    if (axis != transform_.RotationAxis)
+    {
+        transform_.RotationAxis = axis;
+        transform_.QuarterTurns = 0U;
+    }
     const std::uint8_t delta = clockwise ? 1U : 3U;
     transform_.QuarterTurns = static_cast<std::uint8_t>(
         (transform_.QuarterTurns + delta) % 4U);

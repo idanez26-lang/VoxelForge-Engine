@@ -264,6 +264,67 @@ void TestRotationDiagnosticsAndCacheKey()
         "Rotated out-of-bounds cells must block commit.");
 }
 
+// STAMP-24 : un seul axe actif a la fois. Changer d'axe repart de zero pour
+// que l'angle courant ne soit jamais reinterprete sur le nouvel axe.
+void TestSessionAxisSwitchResetsRotation()
+{
+    const VoxelStamp stamp = MakeStamp();
+    const auto document = MakeDocument();
+    StampPlacementSession session;
+    Require(session.Begin(
+                stamp, document, 15U, 0U,
+                {5 * StampFixedPoint::UnitsPerVoxel,
+                 StampFixedPoint::UnitsPerVoxel,
+                 5 * StampFixedPoint::UnitsPerVoxel}).Succeeded,
+        "Axis switch session must begin.");
+
+    Require(session.Rotate90(
+                StampPlacementRotationAxis::VerticalY, document, 15U)
+                .Succeeded &&
+            session.Rotate90(
+                StampPlacementRotationAxis::VerticalY, document, 15U)
+                .Succeeded &&
+            session.QuarterRotation() == 2U,
+        "Two quarter turns around Y must accumulate.");
+
+    Require(session.Rotate90(
+                StampPlacementRotationAxis::LateralX, document, 15U)
+                .Succeeded &&
+            session.RotationAxis() ==
+                StampPlacementRotationAxis::LateralX &&
+            session.QuarterRotation() == 1U,
+        "Switching to X must restart from a single quarter turn.");
+
+    Require(session.Rotate90(
+                StampPlacementRotationAxis::DepthZ, document, 15U,
+                false).Succeeded &&
+            session.RotationAxis() == StampPlacementRotationAxis::DepthZ &&
+            session.QuarterRotation() == 3U,
+        "Switching to Z counter-clockwise must restart at 270 degrees.");
+
+    const auto plan = session.CurrentPlan();
+    Require(plan != nullptr &&
+            plan->Transform.RotationAxis ==
+                StampPlacementRotationAxis::DepthZ &&
+            plan->Transform.QuarterTurns == 3U,
+        "The shared plan must carry the active axis and rotation.");
+
+    Require(session.ResetTransform(document, 15U).Succeeded &&
+            session.RotationAxis() ==
+                StampPlacementRotationAxis::VerticalY &&
+            session.QuarterRotation() == 0U,
+        "Reset must return to the default vertical axis.");
+
+    const auto unknown = session.Rotate90(
+        static_cast<StampPlacementRotationAxis>(9U), document, 15U);
+    Require(!unknown.Succeeded &&
+            unknown.Diagnostic ==
+                StampPlacementDiagnosticCode::UnsupportedRotation &&
+            session.RotationAxis() ==
+                StampPlacementRotationAxis::VerticalY,
+        "An unknown axis must be rejected without touching the session.");
+}
+
 void TestSessionRotationLifecycle()
 {
     const VoxelStamp stamp = MakeStamp();
@@ -318,6 +379,7 @@ int main()
         TestQuarterTurnsAroundEachAxis();
         TestPreviewPlacementPaletteAndOverlapSharePlan();
         TestRotationDiagnosticsAndCacheKey();
+        TestSessionAxisSwitchResetsRotation();
         TestSessionRotationLifecycle();
     }
     catch (const std::exception& error)

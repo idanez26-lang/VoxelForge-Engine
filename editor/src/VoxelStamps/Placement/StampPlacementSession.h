@@ -163,11 +163,15 @@ public:
         std::uint8_t quarterTurns,
         const Asset::Voxel::VoxelDocument& document,
         std::uint64_t documentGeneration);
+    // STAMP-24 : l'axe reste optionnel pour les appelants historiques (gizmo
+    // vertical) mais devient explicite des que l'utilisateur choisit X ou Z.
     [[nodiscard]] StampPlacementSessionResult SetGizmoTransform(
         StampFixedPoint targetPivot,
         std::uint8_t quarterTurns,
         const Asset::Voxel::VoxelDocument& document,
-        std::uint64_t documentGeneration);
+        std::uint64_t documentGeneration,
+        StampPlacementRotationAxis axis =
+            StampPlacementRotationAxis::VerticalY);
     [[nodiscard]] StampPlacementSessionResult Rotate90(
         StampPlacementRotationAxis axis,
         const Asset::Voxel::VoxelDocument& document,

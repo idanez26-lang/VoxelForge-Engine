@@ -1927,15 +1927,33 @@ void EditorWorkspace::DrawStampPlacementToolOptions()
             stampGizmoTool_));
     }
     if (ImGui::RadioButton(
-            "Rotation gizmo (Y)",
+            "Rotation gizmo",
             stampGizmoTool_ == ActiveVoxelTool::Rotate))
     {
         stampGizmoTool_ = ActiveVoxelTool::Rotate;
         static_cast<void>(transformGizmoManager_.OnToolChanged(
             stampGizmoTool_));
     }
+
+    // STAMP-24 : axe de rotation actif. Un seul axe a la fois ; changer d'axe
+    // remet l'angle a zero (cf. StampPlacementSession::Rotate90).
+    ImGui::TextDisabled("Rotation axis");
+    const auto axisRadio = [this](
+        const char* const label,
+        const Stamps::StampPlacementRotationAxis axis)
+    {
+        if (ImGui::RadioButton(label, stampRotationAxis_ == axis))
+            stampRotationAxis_ = axis;
+    };
+    axisRadio("X", Stamps::StampPlacementRotationAxis::LateralX);
+    ImGui::SameLine();
+    axisRadio("Y", Stamps::StampPlacementRotationAxis::VerticalY);
+    ImGui::SameLine();
+    axisRadio("Z", Stamps::StampPlacementRotationAxis::DepthZ);
     ImGui::TextDisabled(
-        "Rotation Y: %u degrees",
+        "Rotation %s: %u degrees",
+        Stamps::StampRotationAxisLabel(
+            stampPlacementSession_.RotationAxis()).data(),
         static_cast<unsigned int>(
             stampPlacementSession_.QuarterRotation()) * 90U);
     if (ImGui::Button("Rotate left 90  [Q]", ImVec2(-1.0F, 0.0F)))
@@ -3067,7 +3085,7 @@ void EditorWorkspace::MoveLatestStampPreview(
 
 void EditorWorkspace::RotateLatestStampPreview(const bool clockwise)
 {
-    stampPreview_.Rotate(clockwise);
+    stampPreview_.Rotate(clockwise, stampRotationAxis_);
 }
 
 void EditorWorkspace::MirrorLatestStampPreview(
@@ -6921,8 +6939,10 @@ void EditorWorkspace::UpdateTransformGizmo(
     context.Bounds = gizmoBounds;
     context.ActiveTool = stampGizmo
         ? stampGizmoTool_ : voxelToolState_.ActiveTool();
+    // STAMP-24 : les trois anneaux sont utilisables ; l'anneau saisi decide de
+    // l'axe (cf. la branche stamp du drag dans EditorWorkspaceViewportPanel).
     if (stampGizmo && stampGizmoTool_ == ActiveVoxelTool::Rotate)
-        context.AxisEnabled = {{false, true, false}};
+        context.AxisEnabled = {{true, true, true}};
     context.CameraPosition = viewportCamera_.GetPosition();
     context.CameraForward = viewportCamera_.GetForward();
     context.VerticalFieldOfViewDegrees =

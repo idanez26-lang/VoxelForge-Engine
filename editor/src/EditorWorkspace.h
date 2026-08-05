@@ -500,9 +500,14 @@ private:
     ActiveVoxelTool stampGizmoTool_ = ActiveVoxelTool::Move;
     bool stampPlacementRequested_ = false;
     std::string stampPlacementUiMessage_;
+    // STAMP-24 : axe de rotation choisi par l'utilisateur pour le Stamp actif.
+    Stamps::StampPlacementRotationAxis stampRotationAxis_ =
+        Stamps::StampPlacementRotationAxis::VerticalY;
     bool stampGizmoDragActive_ = false;
     Stamps::StampFixedPoint stampGizmoDragStartTarget_{};
     std::uint8_t stampGizmoDragStartQuarterTurns_ = 0U;
+    Stamps::StampPlacementRotationAxis stampGizmoDragStartAxis_ =
+        Stamps::StampPlacementRotationAxis::VerticalY;
     SelectionBounds stampGizmoDragStartBounds_{};
     Stamps::ForgeLibraryViewModel forgeLibraryViewModel_{
         stampCatalogService_, stampUserCatalogService_, stampAssetCache_,

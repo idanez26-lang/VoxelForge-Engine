@@ -86,7 +86,8 @@ bool StampPreviewController::ApplyGizmoDelta(
     const Stamps::StampFixedPoint baseTarget,
     const std::uint8_t baseQuarterTurns,
     const Asset::Voxel::VoxelPosition translation,
-    const std::int32_t quarterTurnDelta)
+    const std::int32_t quarterTurnDelta,
+    const Stamps::StampPlacementRotationAxis axis)
 {
     Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
     if (!placement_.IsActive() || document == nullptr)
@@ -125,7 +126,7 @@ bool StampPreviewController::ApplyGizmoDelta(
     const Stamps::StampPlacementSessionResult result =
         placement_.SetGizmoTransform(
             target, normalizedTurns, *document,
-            editSession_.VoxelModelGeneration());
+            editSession_.VoxelModelGeneration(), axis);
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();
@@ -133,7 +134,9 @@ bool StampPreviewController::ApplyGizmoDelta(
     return result.Succeeded;
 }
 
-void StampPreviewController::Rotate(const bool clockwise)
+void StampPreviewController::Rotate(
+    const bool clockwise,
+    const Stamps::StampPlacementRotationAxis axis)
 {
     Asset::Voxel::VoxelDocument* const document = documents_.ActiveDocument();
     if (!placement_.IsActive() || document == nullptr)
@@ -142,8 +145,7 @@ void StampPreviewController::Rotate(const bool clockwise)
     }
 
     const Stamps::StampPlacementSessionResult result = placement_.Rotate90(
-        Stamps::StampPlacementRotationAxis::VerticalY,
-        *document, editSession_.VoxelModelGeneration(), clockwise);
+        axis, *document, editSession_.VoxelModelGeneration(), clockwise);
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();
@@ -158,6 +160,8 @@ void StampPreviewController::Rotate(const bool clockwise)
 
     console_.AddMessage(
         "Live Stamp Preview: rotation " +
+        std::string(Stamps::StampRotationAxisLabel(
+            placement_.RotationAxis())) + " " +
         std::to_string(
             static_cast<unsigned int>(placement_.QuarterRotation()) * 90U) +
         " degrees.");

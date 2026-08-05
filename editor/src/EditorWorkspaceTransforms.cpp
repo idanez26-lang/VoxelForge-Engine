@@ -808,7 +808,8 @@ void EditorWorkspace::CancelTransformGizmoInteraction() noexcept
         stampRestored = stampPreview_.ApplyGizmoDelta(
             stampGizmoDragStartTarget_,
             stampGizmoDragStartQuarterTurns_,
-            {}, 0);
+            {}, 0, stampGizmoDragStartAxis_);
+        stampRotationAxis_ = stampGizmoDragStartAxis_;
     }
     stampGizmoDragActive_ = false;
     stampGizmoDragStartBounds_ = {};

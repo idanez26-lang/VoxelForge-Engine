@@ -688,6 +688,8 @@ void EditorWorkspace::DrawScenePanel()
                     stampPlacementSession_.Target();
                 stampGizmoDragStartQuarterTurns_ =
                     stampPlacementSession_.QuarterRotation();
+                stampGizmoDragStartAxis_ =
+                    stampPlacementSession_.RotationAxis();
                 stampGizmoDragStartBounds_ = *stampBounds;
             }
             else if (gizmoCaptured &&
@@ -712,14 +714,42 @@ void EditorWorkspace::DrawScenePanel()
         {
             if (stampGizmoDragActive_)
             {
+                // STAMP-24 : l'anneau saisi decide de l'axe. Tant qu'aucun
+                // anneau n'est saisi (mode Move), on conserve l'axe de depart.
+                const bool rotating =
+                    transformGizmoManager_.Mode() == TransformGizmoMode::Rotate;
+                Stamps::StampPlacementRotationAxis dragAxis =
+                    stampGizmoDragStartAxis_;
+                if (rotating)
+                {
+                    switch (transformGizmoManager_.ActiveAxis())
+                    {
+                    case TransformGizmoAxis::X:
+                        dragAxis =
+                            Stamps::StampPlacementRotationAxis::LateralX;
+                        break;
+                    case TransformGizmoAxis::Z:
+                        dragAxis =
+                            Stamps::StampPlacementRotationAxis::DepthZ;
+                        break;
+                    default:
+                        dragAxis =
+                            Stamps::StampPlacementRotationAxis::VerticalY;
+                        break;
+                    }
+                    stampRotationAxis_ = dragAxis;
+                }
+                const std::uint8_t baseTurns =
+                    rotating && dragAxis != stampGizmoDragStartAxis_
+                        ? 0U : stampGizmoDragStartQuarterTurns_;
                 const bool moved = stampPreview_.ApplyGizmoDelta(
                     stampGizmoDragStartTarget_,
-                    stampGizmoDragStartQuarterTurns_,
+                    baseTurns,
                     transformGizmoManager_.Mode() == TransformGizmoMode::Move
                         ? transformGizmoManager_.Delta()
                         : Asset::Voxel::VoxelPosition{},
-                    transformGizmoManager_.Mode() == TransformGizmoMode::Rotate
-                        ? transformGizmoManager_.QuarterTurns() : 0);
+                    rotating ? transformGizmoManager_.QuarterTurns() : 0,
+                    dragAxis);
                 if (!moved) CancelTransformGizmoInteraction();
             }
             else if (transformGizmoManager_.Mode() == TransformGizmoMode::Move)
@@ -956,8 +986,11 @@ void EditorWorkspace::DrawScenePanel()
         if (stampPlacementSession_.IsActive())
         {
             stampViewportHelp =
-                "Stamp placement - Drag gizmo axes to move - Select Rotate Y "
-                "for the ring - Enter places the full Stamp - Rotation Y: " +
+                "Stamp placement - Drag gizmo axes to move - Select Rotation "
+                "gizmo then drag the X, Y or Z ring - Enter places the full "
+                "Stamp - Rotation " +
+                std::string(Stamps::StampRotationAxisLabel(
+                    stampPlacementSession_.RotationAxis())) + ": " +
                 std::to_string(
                     static_cast<unsigned int>(
                         stampPlacementSession_.QuarterRotation()) * 90U) +
