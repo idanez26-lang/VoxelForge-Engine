@@ -762,25 +762,14 @@ StampPlacementPlan StampPlacementPlanner::Build(
             .ReservedDocumentPaletteIndex =
                 request.ReservedDocumentPaletteIndex,
             .RequiredLocalColorIds = requiredSelection};
-        for (std::size_t modelIndex = 0U;
-             modelIndex < request.Document->GetModelCount(); ++modelIndex)
-        {
-            const Asset::Voxel::VoxelSubModel* const model =
-                request.Document->GetModel(modelIndex);
-            if (model == nullptr)
-            {
-                continue;
-            }
-            model->ForEachVoxel(
-                [&paletteRequest](
-                    const Asset::Voxel::VoxelPosition,
-                    const Asset::Voxel::Voxel voxel)
-                {
-                    paletteRequest
-                        .OccupiedDocumentPaletteIndices[voxel.PaletteIndex] =
-                        true;
-                });
-        }
+        // PERF-FOUNDATION lot 2 : ce relevé ne dépend que de la révision du
+        // document, jamais du Stamp ni du pointeur. Avec un cache fourni, il
+        // n'est refait qu'après une vraie modification ; sans cache, on
+        // retombe sur le parcours de référence — même fonction, même résultat.
+        paletteRequest.OccupiedDocumentPaletteIndices =
+            request.OccupiedPaletteCache != nullptr
+                ? request.OccupiedPaletteCache->Resolve(*request.Document)
+                : StampDocumentPaletteCache::Scan(*request.Document);
         PaletteMappingResult paletteMapping =
             PaletteMappingEngine::Plan(paletteRequest);
         const bool paletteMappingSucceeded = paletteMapping.IsSuccess();

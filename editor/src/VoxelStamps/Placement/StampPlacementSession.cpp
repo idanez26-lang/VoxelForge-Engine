@@ -1020,7 +1020,11 @@ StampPlacementSessionResult StampPlacementSession::BuildCurrent(
             .DocumentGeneration = documentGeneration,
             .TargetSubModel = targetSubModel_,
             .Transform = transform,
-            .CollisionPolicy = collisionPolicy_});
+            .CollisionPolicy = collisionPolicy_,
+            // PERF-FOUNDATION lot 2 : le relevé des index de palette occupés
+            // survit aux déplacements du pointeur, aux rotations et au
+            // Preview Assist — seule une révision du document l'invalide.
+            .OccupiedPaletteCache = &occupiedPaletteCache_});
     };
 
     StampPlacementPlan next = buildPlan(transform_);

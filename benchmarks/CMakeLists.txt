@@ -66,6 +66,39 @@ endif()
 # This target is deliberately absent from add_test(). Its workloads are
 # profiling fixtures, not pass/fail regression tests.
 
+# PERF-FOUNDATION lot 0: CPU-only baseline with percentiles, sparse scenes and
+# the exact preview composer. No renderer, no ImGui: every measured entry point
+# is a static function.
+add_executable(
+    VoxelForgePerformanceFoundationBaseline
+    PerformanceFoundationBaseline.cpp
+    StampPlacementBenchmarkMetrics.cpp
+)
+target_include_directories(
+    VoxelForgePerformanceFoundationBaseline
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/editor/src
+)
+target_link_libraries(
+    VoxelForgePerformanceFoundationBaseline
+    PRIVATE
+        VoxelForgeEditorCommands
+        VoxelForgeEditorVoxelStamps
+        VoxelForgeAsset
+        VoxelForgeMesh
+)
+target_compile_features(
+    VoxelForgePerformanceFoundationBaseline PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(
+        VoxelForgePerformanceFoundationBaseline PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(
+        VoxelForgePerformanceFoundationBaseline
+        PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 # VF-0262 lot 262-0: CPU-only baseline for the incremental mesh rebuild.
 add_executable(
     VoxelForgeIncrementalEditBenchmark

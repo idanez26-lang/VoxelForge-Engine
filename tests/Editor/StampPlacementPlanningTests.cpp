@@ -435,7 +435,8 @@ void TestHalfVoxelPivotRotatesWithoutLosingVoxels()
             unrotated.Statistics.PlannedVoxelCount == 3U,
         "The unrotated half-voxel pivot Stamp must plan every voxel.");
 
-    for (const std::uint8_t quarterTurns : {1U, 3U})
+    for (const std::uint8_t quarterTurns :
+         {std::uint8_t{1U}, std::uint8_t{3U}})
     {
         const auto rotated = StampPlacementPlanner::Build({
             .Stamp = &*halfPivotStamp,

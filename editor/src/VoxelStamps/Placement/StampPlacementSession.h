@@ -312,6 +312,10 @@ private:
     std::optional<StampPlacementPlan> plan_;
     VoxelPreviewSession preview_;
     StampPlacementTransform transform_{};
+    // PERF-FOUNDATION lot 2 : relevé des index de palette occupés du document.
+    // Détenu par la session pour que sa durée de vie soit explicite ; il ne
+    // porte aucune décision, seulement le résultat du parcours de référence.
+    StampDocumentPaletteCache occupiedPaletteCache_{};
     StampRotationStep rotationStep_ = StampRotationStep::Quarter90;
     StampSmartPlacementTargetContext smartPlacementTarget_{};
     std::optional<StampSmartPlacementSuggestion> smartPlacementSuggestion_;

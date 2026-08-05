@@ -2070,6 +2070,22 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorStampLivePreviewSmokeTests>
 )
 
+# PERF-FOUNDATION lot 2: the memoized occupied-palette survey must equal the
+# reference scan and only recompute on a real document revision.
+add_executable(
+    VoxelForgeEditorStampDocumentPaletteCacheTests
+    Editor/StampDocumentPaletteCacheTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorStampDocumentPaletteCacheTests
+    PRIVATE VoxelForgeEditorVoxelStamps
+)
+vf_configure_test(VoxelForgeEditorStampDocumentPaletteCacheTests)
+add_test(
+    NAME VoxelForge.Editor.StampDocumentPaletteCache
+    COMMAND $<TARGET_FILE:VoxelForgeEditorStampDocumentPaletteCacheTests>
+)
+
 # STAMP-12: pure deterministic palette planning tests.
 add_executable(
     VoxelForgeEditorPaletteMappingEngineTests

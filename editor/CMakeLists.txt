@@ -356,6 +356,9 @@ target_sources(
         src/VoxelStamps/Validation/StampValidationService.cpp
         # STAMP-12: pure deterministic palette planning; no document mutation.
         src/VoxelStamps/Palette/PaletteMappingEngine.cpp
+        # PERF-FOUNDATION lot 2: memoized occupied-palette survey, keyed by
+        # document identity and revision.
+        src/VoxelStamps/Palette/StampDocumentPaletteCache.cpp
         # STAMP-14: one immutable plan drives preview and transaction adapters.
         src/VoxelStamps/Placement/StampPlacementPlan.cpp
         src/VoxelStamps/Placement/StampPlacementPlanner.cpp

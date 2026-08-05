@@ -1,5 +1,6 @@
 #pragma once
 
+#include "VoxelStamps/Palette/StampDocumentPaletteCache.h"
 #include "VoxelStamps/Placement/StampPlacementPlan.h"
 #include "VoxelStamps/VoxelStamp.h"
 
@@ -24,6 +25,11 @@ struct StampPlacementPlannerRequest final
     std::size_t PaletteCapacity = 256U;
     std::uint8_t ReservedDocumentPaletteIndex = 0U;
     StampResourceLimits ResourceLimits{};
+    // PERF-FOUNDATION lot 2 : cache facultatif des indices de palette occupés,
+    // détenu par l'appelant (la session de placement). Laissé à nullptr, le
+    // planner refait le parcours complet du document, comme avant — les
+    // appelants ponctuels (tests, bancs) n'ont donc rien à changer.
+    StampDocumentPaletteCache* OccupiedPaletteCache = nullptr;
 };
 
 /// Pure placement planner. This is the only component allowed to resolve
