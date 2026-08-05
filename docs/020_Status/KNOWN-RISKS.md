@@ -23,3 +23,27 @@ Mis à jour le 05/08/2026 (après PERF-FOUNDATION lot 2 — cache de palette du 
 | ~~Performance sur grands modèles non mesurée~~ | ✅ | Résolu — VF-0262 : édit ~4-22 ms de 15k à 1M voxels (vs 836 ms de rebuild complet) ; benchmark `VoxelForgeIncrementalEditBenchmark` |
 | ~~Documentation utilisateur inexistante~~ | ✅ | Résolu — `docs/200_Tools/Voxel-Stamps-V1-User-Guide.md` |
 | ~~Gestionnaire d'identifiants Windows en erreur au push~~ | ✅ | Résolu — stockage DPAPI |
+
+## ROUGE — Chemin de chaîne de compilation codé en dur (06/08/2026)
+
+**Symptôme observé.** `cmake --build` échoue sur
+`no such file or directory` suivi de
+`CMake Error: Generator: build tool execution failed, command was:
+E:/VISUAL~1/.../CMake/Ninja/ninja.exe`. Le message accuse ninja et ne dit rien
+de la vraie cause.
+
+**Cause.** Visual Studio avait été désinstallé. Les trois `CMakeCache.txt`
+(`windows-debug`, `windows-release`, `perf-release`) gardent un
+`CMAKE_MAKE_PROGRAM` absolu vers l'installation disparue, et tous nos scripts
+appelaient `E:\visual studio\VC\Auxiliary\Build\vcvars64.bat` en dur.
+
+**Correctif appliqué.** `build\vf-env.bat` interroge `vswhere` — l'annuaire
+officiel des installations, qui survit aux désinstallations et couvre les Build
+Tools seuls via `-products *` — puis replie sur l'ancien chemin. Tous les
+scripts l'appellent par `call "%~dp0vf-env.bat"` et s'arrêtent avec un message
+explicite si rien n'est trouvé, au lieu d'échouer plus loin sur un symptôme
+trompeur.
+
+**Règle.** Après tout changement d'installation de la chaîne, `cmake --fresh`
+est obligatoire sur CHAQUE dossier de build : le cache retient un chemin absolu
+que la reconfiguration ordinaire ne réécrit pas.

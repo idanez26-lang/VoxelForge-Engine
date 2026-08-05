@@ -161,3 +161,29 @@ main doit l'activer explicitement.
 Le disque système `C:` n'a que **2,6 Go libres sur 232**. À surveiller : une
 chaîne MSVC écrit des fichiers temporaires système même quand le projet est sur
 un autre volume.
+
+## LOT 5 — gate 60 FPS (06/08/2026)
+
+**Défaut de l'instrumentation précédente.** La sonde ne journalisait que les
+frames au-delà de 20 ms. Une session pouvait donc paraître catastrophique alors
+que 99 % des frames tenaient le budget, ou sembler correcte parce que le seuil
+n'était jamais franchi. Aucune médiane, aucune queue, aucune proportion : rien
+qui permette de dire « c'est fluide » autrement qu'au ressenti.
+
+**Ajout.** Histogramme à pas fixe de 0,25 ms sur 0-64 ms, plus un bucket de
+débordement. Borne mémoire connue (257 entiers), aucune allocation, aucun tri,
+coût constant par frame. `BudgetReport()` rend `FrameCount`,
+`OverBudgetCount`, `OverBudgetRatio`, `P50`, `P95`, `P99`, `Worst` et
+`Saturated`. Budget = `1000/60 = 16,67 ms`.
+
+**Limites assumées.** Un percentile est rendu comme la **borne supérieure** de
+son intervalle : il est donc pessimiste d'au plus 0,25 ms. Le rang est arrondi
+vers le haut (rang le plus proche), sinon un échantillon court sous-estimerait
+la queue. Au-delà de 64 ms, `Saturated` est vrai et `P99` est plafonné à
+`Worst` — la seule réponse honnête quand la valeur exacte n'est pas conservée.
+
+**Émission.** Verdict écrit dans la console et dans `voxelforge-perf.log`
+toutes les 5 secondes, sur TOUTES les frames et non plus seulement les lentes.
+La cadence est un membre de `EditorWorkspace` et non une statique locale : les
+smokes instancient plusieurs workspaces et un état partagé mélangerait leurs
+mesures.

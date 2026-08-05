@@ -479,6 +479,24 @@ void EditorWorkspace::Draw()
         std::ofstream perfLog("voxelforge-perf.log", std::ios::app);
         if (perfLog) perfLog << *slowFrameSummary << '\n';
     }
+    // LOT 5 : gate 60 FPS. Le journal ne contenait que les frames au-dela de
+    // 20 ms, donc une session pouvait paraitre catastrophique alors que 99 %
+    // des frames tenaient le budget — ou l'inverse. On emet un verdict
+    // periodique sur TOUTES les frames : mediane, queue, et proportion hors
+    // budget. C'est la seule facon de dire « c'est fluide » ou « ca ne l'est
+    // pas » sans se fier au ressenti.
+    if (probeNowMilliseconds - lastBudgetLogMilliseconds_ >=
+        BudgetLogIntervalMilliseconds)
+    {
+        lastBudgetLogMilliseconds_ = probeNowMilliseconds;
+        if (frameProbe_.BudgetReport().FrameCount != 0U)
+        {
+            const std::string budget = frameProbe_.BuildBudgetSummary();
+            AddConsoleMessage(budget);
+            std::ofstream perfLog("voxelforge-perf.log", std::ios::app);
+            if (perfLog) perfLog << budget << '\n';
+        }
+    }
 
     if (closeRequest_.IsClosing())
     {

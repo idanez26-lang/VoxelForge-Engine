@@ -634,6 +634,11 @@ private:
     // géométrie, donc rien à réenvoyer. Un identifiant de plan ne suffirait
     // pas — le trait recompose sans que le plan change.
     std::uint64_t exactPreviewCompositionOrdinal_ = 0U;
+    // LOT 5 : cadence d'emission du verdict de budget 60 FPS. Membre et non
+    // statique locale : les smokes instancient plusieurs workspaces, un etat
+    // partage melangerait leurs mesures.
+    static constexpr double BudgetLogIntervalMilliseconds = 5000.0;
+    double lastBudgetLogMilliseconds_ = 0.0;
     const SmartPreviewData* smartBrushGhostPreview_ = nullptr;
     VoxelPaintBrushEvaluation paintPreviewEvaluation_;
     const Asset::Voxel::VoxelDocument* paintPreviewDocument_ = nullptr;

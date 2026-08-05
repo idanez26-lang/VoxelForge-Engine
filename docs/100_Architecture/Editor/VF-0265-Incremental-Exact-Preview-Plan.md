@@ -260,3 +260,74 @@ Ces points doivent être levés par la mesure, pas par l'hypothèse.
    40,6 ms). Si elle vient du chemin régional, elle nous concerne directement.
 5. **Tester le renderer sans GPU.** À vérifier avant de promettre les tests du
    lot 5 ; à défaut ils passeront par les smokes, plus lents et moins précis.
+
+## LOT 4 — attribution du coût résiduel (05/08/2026)
+
+### Ce qui a été réfuté
+
+L'hypothèse « les 20-25 ms de `hl-handoff` sont l'envoi GPU » est **fausse**. Les
+quatre appels que la sonde englobe — `ConfigureHighlights`,
+la branche preview exacte, `ConfigureVoxelPreview`, `ConfigureTransformPreview` —
+sont tous du bookkeeping CPU à court-circuit ; aucun n'émet de commande GPU.
+L'envoi réel a lieu dans `EnsureHighlights` pendant le rendu, et `vp-render`
+mesure 0,2 à 0,7 ms. Quatre sous-sondes (`ho-configure`, `ho-exact`, `ho-voxel`,
+`ho-transform`) ont été posées pour attribuer ce coût par la mesure.
+
+### Ce qui a été établi
+
+`hl-plan` n'est pas la planification : le planner coûte 1,8 ms et **n'est pas
+appelé** pendant un trait (`ShouldResolvePreviewForPresentation` retourne
+`!strokeActive`). Le journal montre un coût **croissant au fil du trait** —
+8,7 → 10,2 → 12,6 → 13,7 → 14,0 ms sur une même séquence. La cause est
+structurelle : plusieurs postes suivent le **trait accumulé** au lieu du geste
+courant.
+
+1. `SmartToolStroke::Changes()` reconstruisait et **retriait** la liste complète
+   du trait à chaque frame — O(S log S) pour un geste d'un voxel.
+2. `ValidateVoxelChanges` construit un `unordered_set` de taille S par frame.
+3. `VoxelChangeOverlay::overrides_` : `unordered_map` de taille S par frame.
+4. `VoxelChangeOverlay::DirtyBounds()` est la boîte de **tous** les changements
+   accumulés, dilatée de 1 : le nombre de chunks recomposés croît avec le trait.
+
+### LOT 4b — livré
+
+`ChangesView()` : vue `std::span` mémoïsée sur `revision_`, invalidée à chaque
+mutation du trait. Supprime le poste 1 aux deux sites chauds
+(`EditorWorkspaceHighlights.cpp:311` et `:365`). `Changes()` est conservé à
+l'identique pour les 30 appelants existants et délègue à la vue.
+
+**Correction de justesse trouvée au passage** : `Accumulate` pouvait fusionner
+des cellules puis sortir en `return false` sur désaccord `Before`, **sans
+incrémenter `revision_`**. Les caches indexés sur `Revision()` — dont la preview
+exacte — pouvaient donc présenter un état périmé. Le bump manquant est ajouté.
+
+### LOT 4c — conçu, non commencé, et volontairement séquencé après la mesure
+
+**Théorème de réutilisation.** L'override d'un chunk vaut
+`Mesh(document ⊕ tous les changements) ∩ chunk`. Le document n'est **pas** muté
+pendant un trait : les changements restent en attente jusqu'au commit. Et la
+visibilité d'une face ne consulte que les 6 voisins. Donc si aucun changement
+nouveau ne tombe dans `chunk` dilaté de 1, son override est **inchangé** et peut
+être réutilisé tel quel — y compris son tampon GPU.
+
+**Piège écarté.** On ne peut PAS identifier les changements nouveaux par
+comparaison de préfixe : `ChangesView()` est triée **par position**, pas par
+ordre d'accumulation, donc une cellule ajoutée s'insère à un rang arbitraire.
+Toute conception fondée sur « les N premiers sont déjà composés » est fausse.
+
+**Conception retenue.** L'état incrémental garde, par clé de chunk, le nombre de
+changements tombant dans ce chunk dilaté de 1, plus l'override déjà calculé.
+À chaque composition on reparcourt les changements une fois pour recompter — du
+travail entier, sans hachage, sans tri, sans maillage — et on ne recompose que
+les chunks dont le compte a bougé. Le poste passe de « recomposer toute la boîte
+sale cumulée » à « recomposer les chunks réellement touchés ».
+
+Invalidation totale requise sur : identité du document, révision du document,
+`ModelIndex`, et changement du jeu de chunks (modèle rechargé, cache vidé).
+
+**Pourquoi ce lot attend la session de sondes.** `hl-plan` vaut 8-16 ms et
+`hl-handoff` 20-25 ms. Les sous-sondes `ho-*` ne sont pas encore relevées : si
+elles attribuent les 20 ms à `ho-configure`, le défaut dominant est dans la
+comparaison des highlights et n'a rien à voir avec le compositeur. Construire un
+compositeur à état avant de savoir cela optimiserait le poste le plus petit en
+laissant le plus gros intact. La mesure d'abord.

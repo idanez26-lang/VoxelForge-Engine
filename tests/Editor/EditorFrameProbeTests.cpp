@@ -95,12 +95,66 @@ void TestSlotAccumulationPerFrame()
         "Slots should reset at each boundary.");
 }
 
+// LOT 5 : le gate 60 FPS. On verifie sur un echantillon dont la reponse est
+// calculable a la main, sinon le test ne prouve rien.
+void TestBudgetPercentilesAndOverBudgetRatio()
+{
+    EditorFrameProbe probe;
+    Require(probe.BudgetReport().FrameCount == 0U &&
+            probe.BudgetReport().P50 == 0.0,
+        "An untouched probe should report an empty budget.");
+
+    // 100 frames : 90 a 10 ms (dans le budget), 10 a 30 ms (hors budget).
+    // Attendu : p50 dans le premier groupe, p95 et p99 dans le second,
+    // 10 % hors budget. Les percentiles sont rendus comme la borne superieure
+    // de leur intervalle de 0,25 ms, donc 10 ms tombe dans ]9,75 ; 10,00].
+    double now = 0.0;
+    static_cast<void>(probe.FrameBoundary(now));
+    for (int frame = 0; frame < 100; ++frame)
+    {
+        now += frame < 90 ? 10.0 : 30.0;
+        static_cast<void>(probe.FrameBoundary(now));
+    }
+    const auto report = probe.BudgetReport();
+    Require(report.FrameCount == 100U,
+        "The budget histogram lost frames.");
+    Require(report.OverBudgetCount == 10U,
+        "Exactly the ten 30 ms frames should count as over budget.");
+    Require(report.OverBudgetRatio > 0.099 && report.OverBudgetRatio < 0.101,
+        "The over-budget ratio should be 10 %.");
+    Require(report.P50 > 9.7 && report.P50 <= 10.25,
+        "p50 should land in the 10 ms group.");
+    Require(report.P95 > 29.7 && report.P95 <= 30.25,
+        "p95 should land in the 30 ms group.");
+    Require(report.P99 > 29.7 && report.P99 <= 30.25,
+        "p99 should land in the 30 ms group.");
+    Require(report.Worst > 29.9 && report.Worst < 30.1,
+        "The worst frame should be the exact measured value, not a bucket.");
+    Require(!report.Saturated,
+        "Thirty milliseconds is well inside the histogram range.");
+
+    // Une frame enorme sature le dernier bucket : les percentiles restent
+    // valides et le drapeau doit le dire au lieu de mentir sur une valeur.
+    now += 500.0;
+    static_cast<void>(probe.FrameBoundary(now));
+    const auto saturated = probe.BudgetReport();
+    Require(saturated.Saturated && saturated.Worst > 499.0,
+        "A frame beyond the histogram range should raise the saturation flag.");
+
+    probe.ResetBudget();
+    Require(probe.BudgetReport().FrameCount == 0U &&
+            probe.BudgetReport().Worst == 0.0 &&
+            !probe.BudgetReport().Saturated,
+        "ResetBudget() should clear the histogram entirely.");
+}
+
 } // namespace
 
 int main()
 {
     try
     {
+        TestBudgetPercentilesAndOverBudgetRatio();
         TestFastFramesProduceNoSummary();
         TestSlowFrameEmitsSummaryWithBreakdown();
         TestSummaryRateLimiting();
