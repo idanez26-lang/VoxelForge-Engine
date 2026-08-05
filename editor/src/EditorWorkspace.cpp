@@ -4921,7 +4921,30 @@ bool EditorWorkspace::OpenVoxInViewportNow(
         modelCenter = CalculateVoxelGridCenter(*grid);
     }
 
-    if (!viewportRenderer_.Upload(*renderMesh, renderPalette, modelCenter))
+    // VF-0265 (lot 3h) : un document est envoyé PAR CHUNKS dès le chargement.
+    // Sans cela l'invariant « modèle actif implique modèle chunké » serait faux
+    // jusqu'à la première édition, et le rendu chunké de la preview refuserait
+    // de s'activer d'ici là. Le chemin monolithique reste celui des grilles
+    // héritées, qui n'ont pas de chunks.
+    const bool uploadedModel = [&]
+    {
+        if (!voxelDocumentMeshCache_.Chunks().empty())
+        {
+            std::vector<ViewportRenderer::ModelChunkUpdate> updates;
+            updates.reserve(voxelDocumentMeshCache_.Chunks().size());
+            for (const auto& [key, chunkMesh] :
+                 voxelDocumentMeshCache_.Chunks())
+            {
+                updates.push_back({
+                    ViewportRenderer::ModelChunkId{key.X, key.Y, key.Z},
+                    &chunkMesh});
+            }
+            return viewportRenderer_.UploadModelChunks(
+                updates, renderPalette, modelCenter, true);
+        }
+        return viewportRenderer_.Upload(*renderMesh, renderPalette, modelCenter);
+    }();
+    if (!uploadedModel)
     {
         const std::string error = viewportRenderer_.LastError();
         ClearVoxelViewport();

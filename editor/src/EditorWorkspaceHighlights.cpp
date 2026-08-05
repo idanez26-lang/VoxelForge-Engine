@@ -77,6 +77,14 @@ SmartToolExactPreviewComposer::Source EditorWorkspace::ExactPreviewSource(
     {
         source.DocumentChunks = &voxelDocumentMeshCache_.Chunks();
     }
+    // VF-0265 (lot 3h) : l'assemblage du mesh unique est le dernier poste qui
+    // suit la taille du document — 8 Mo de tampons à un million de voxels. On ne
+    // le paie que si le renderer ne peut PAS consommer les chunks : sinon le
+    // repli monolithique présenterait un mesh vide, et la preview disparaîtrait
+    // au lieu d'être seulement plus lente.
+    source.AssembleMesh =
+        source.DocumentChunks == nullptr ||
+        viewportRenderer_.ModelChunkCount() == 0U;
     return source;
 }
 
