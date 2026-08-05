@@ -1598,6 +1598,23 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeMeshVoxelChangeOverlayTests>
 )
 
+# VF-0265 lot 3: the face filter lets a preview reuse a chunk that merely
+# intersects the dirty region instead of rebuilding it (28 ms on a dense
+# document). Filter + regional build must recompose the chunk exactly.
+add_executable(
+    VoxelForgeMeshDataFaceFilterTests
+    Mesh/MeshDataFaceFilterTests.cpp
+)
+target_link_libraries(
+    VoxelForgeMeshDataFaceFilterTests
+    PRIVATE VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeMeshDataFaceFilterTests)
+add_test(
+    NAME VoxelForge.Mesh.MeshDataFaceFilter
+    COMMAND $<TARGET_FILE:VoxelForgeMeshDataFaceFilterTests>
+)
+
 set_tests_properties(
     VoxelForge.Core.Events
     VoxelForge.Core.Layers

@@ -74,29 +74,37 @@ VoxelDocument MakeDocument()
     return std::move(*loaded.Document);
 }
 
-// Identité d'une face, indépendante de l'ordre d'émission : les quatre coins
-// triés, la normale et la couleur.
-std::vector<std::string> FaceKeys(const MeshData& mesh)
+// Identité d'une face, indépendante de l'ordre d'émission : le coin minimal, la
+// normale et la couleur. Numérique et non textuelle — sur des dizaines de
+// milliers de faces et une dizaine de scénarios, des clés en chaînes de
+// caractères font passer ce test de la fraction de seconde à la demi-minute.
+using FaceKey = std::array<std::int32_t, 7U>;
+
+std::vector<FaceKey> FaceKeys(const MeshData& mesh)
 {
-    std::vector<std::string> keys;
+    const auto toInteger = [](const float value) noexcept
+    {
+        return static_cast<std::int32_t>(
+            value < 0.0F ? value - 0.5F : value + 0.5F);
+    };
+    std::vector<FaceKey> keys;
     keys.reserve(mesh.FaceCount());
     const auto& vertices = mesh.Vertices();
     for (std::size_t face = 0U; face < mesh.FaceCount(); ++face)
     {
-        std::array<std::string, 4U> corners;
-        for (std::size_t corner = 0U; corner < 4U; ++corner)
+        const MeshVertex& first = vertices[face * 4U];
+        std::array<float, 3U> lowest{
+            first.Position[0], first.Position[1], first.Position[2]};
+        for (std::size_t corner = 1U; corner < 4U; ++corner)
         {
-            const auto& vertex = vertices[face * 4U + corner];
-            corners[corner] = std::to_string(vertex.Position[0]) + ',' +
-                std::to_string(vertex.Position[1]) + ',' +
-                std::to_string(vertex.Position[2]);
+            const MeshVertex& vertex = vertices[face * 4U + corner];
+            for (std::size_t axis = 0U; axis < 3U; ++axis)
+                lowest[axis] = std::min(lowest[axis], vertex.Position[axis]);
         }
-        std::sort(corners.begin(), corners.end());
-        const auto& normal = vertices[face * 4U].Normal;
-        keys.push_back(corners[0] + '|' + corners[1] + '|' + corners[2] + '|' +
-            corners[3] + '|' + std::to_string(normal[0]) + ',' +
-            std::to_string(normal[1]) + ',' + std::to_string(normal[2]) + '|' +
-            std::to_string(vertices[face * 4U].ColorIndex));
+        keys.push_back({toInteger(lowest[0]), toInteger(lowest[1]),
+            toInteger(lowest[2]), toInteger(first.Normal[0]),
+            toInteger(first.Normal[1]), toInteger(first.Normal[2]),
+            static_cast<std::int32_t>(first.ColorIndex)});
     }
     std::sort(keys.begin(), keys.end());
     return keys;
@@ -151,16 +159,14 @@ void CheckGoldenEquality(
         std::string("La vue doit accepter ce scénario : ") +
             std::string(scenario));
 
-    // Union des maillages régionaux, sur une partition large du volume (les
-    // ajouts peuvent sortir des bornes initiales, d'où la marge).
-    std::vector<std::string> assembled;
-    const std::int32_t span = Edge + 4;
-    for (std::int32_t z = -VoxelChunkEdgeLength; z < span;
-         z += VoxelChunkEdgeLength)
-        for (std::int32_t y = -VoxelChunkEdgeLength; y < span;
-             y += VoxelChunkEdgeLength)
-            for (std::int32_t x = -VoxelChunkEdgeLength; x < span;
-                 x += VoxelChunkEdgeLength)
+    // Union des maillages régionaux sur une partition qui couvre tout le volume
+    // éditable. Elle part de zéro : une position de voxel est toujours positive
+    // ou nulle, donc les chunks négatifs sont vides par construction — les
+    // parcourir ne prouvait rien et triplait la durée du test.
+    std::vector<FaceKey> assembled;
+    for (std::int32_t z = 0; z < Edge; z += VoxelChunkEdgeLength)
+        for (std::int32_t y = 0; y < Edge; y += VoxelChunkEdgeLength)
+            for (std::int32_t x = 0; x < Edge; x += VoxelChunkEdgeLength)
             {
                 const auto region = VoxelMeshBuilder::Build(*overlay,
                     {x, y, z},
