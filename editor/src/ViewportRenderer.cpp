@@ -764,6 +764,88 @@ bool ViewportRenderer::ConfigureExactPreviewMesh(
     return true;
 }
 
+bool ViewportRenderer::ConfigureExactPreviewChunks(
+    const std::span<const ExactPreviewChunkUpdate> overrides,
+    const Voxel::VoxelPalette& palette,
+    const Vec3 modelCenter,
+    const bool active,
+    const std::uint64_t documentIdentity,
+    const std::uint64_t documentRevision,
+    const std::uint64_t compositionId)
+{
+    if (!active)
+    {
+        ReleaseExactPreviewChunks();
+        return true;
+    }
+    if (!EnsurePipeline()) return false;
+    if (modelChunks_.empty())
+    {
+        // Rien à surimprimer : le modèle n'est pas chunké (chargement, ou
+        // chemin monolithique). Refuser est la seule réponse honnête — une
+        // preview posée sur un modèle qui n'est pas là serait visiblement
+        // fausse. L'appelant retombe sur la preview monolithique.
+        SetError("Chunked exact preview requires a chunked model.");
+        return false;
+    }
+    // Même géométrie qu'à l'appel précédent : aucun envoi. C'est ce
+    // court-circuit qui rend un mouvement de souris gratuit quand le plan n'a
+    // pas réellement changé.
+    if (exactPreviewChunksActive_ &&
+        exactPreviewDocumentIdentity_ == documentIdentity &&
+        exactPreviewDocumentRevision_ == documentRevision &&
+        exactPreviewChunksCompositionId_ == compositionId)
+    {
+        return true;
+    }
+
+    // La preview chunkée et la preview monolithique s'excluent, comme les deux
+    // chemins du modèle. ClearExactPreviewMesh relâche aussi les overrides.
+    ClearExactPreviewMesh();
+    for (const ExactPreviewChunkUpdate& update : overrides)
+    {
+        ModelChunkBuffers& slot = exactPreviewChunks_[update.Id];
+        if (update.Mesh == nullptr || update.Mesh->Empty())
+        {
+            // Entrée vide DÉLIBÉRÉE : elle masque le chunk du modèle.
+            slot = {};
+            continue;
+        }
+        if (!UploadMesh(*update.Mesh, palette, modelCenter, slot.VertexBuffer,
+                slot.IndexBuffer, slot.IndexCount,
+                "exact Smart Tool preview chunk"))
+        {
+            // Ne jamais laisser une preview partielle à l'écran : elle
+            // mélangerait deux états du document.
+            ReleaseExactPreviewChunks();
+            return false;
+        }
+    }
+    exactPreviewChunksActive_ = true;
+    exactPreviewDocumentIdentity_ = documentIdentity;
+    exactPreviewDocumentRevision_ = documentRevision;
+    exactPreviewChunksCompositionId_ = compositionId;
+    lastError_.clear();
+    return true;
+}
+
+void ViewportRenderer::ReleaseExactPreviewChunks() noexcept
+{
+    if (device_ != nullptr)
+    {
+        for (auto& entry : exactPreviewChunks_)
+        {
+            if (entry.second.VertexBuffer != nullptr)
+                SDL_ReleaseGPUBuffer(device_, entry.second.VertexBuffer);
+            if (entry.second.IndexBuffer != nullptr)
+                SDL_ReleaseGPUBuffer(device_, entry.second.IndexBuffer);
+        }
+    }
+    exactPreviewChunks_.clear();
+    exactPreviewChunksActive_ = false;
+    exactPreviewChunksCompositionId_ = 0U;
+}
+
 bool ViewportRenderer::UploadMesh(
     const Mesh::MeshData& mesh,
     const Voxel::VoxelPalette& palette,
@@ -2165,7 +2247,43 @@ bool ViewportRenderer::Render(
                 pass, axesIndexCount_, 1U, gridIndexCount_, 0, 0U);
         }
     }
-    if (exactPreviewActive_ || indexCount_ > 0U)
+    if (exactPreviewChunksActive_ && !modelChunks_.empty())
+    {
+        // VF-0265 (lot 3f) : surimpression. On dessine les chunks du modèle en
+        // substituant ceux que la preview remplace ; les buffers du modèle ne
+        // sont ni relâchés ni réécrits, donc sortir de la preview est gratuit.
+        bool drewChunk = false;
+        const auto drawChunk = [&](const ModelChunkBuffers& chunk)
+        {
+            if (chunk.IndexCount == 0U || chunk.VertexBuffer == nullptr ||
+                chunk.IndexBuffer == nullptr)
+                return;
+            const SDL_GPUBufferBinding vertexBinding{chunk.VertexBuffer, 0U};
+            const SDL_GPUBufferBinding indexBinding{chunk.IndexBuffer, 0U};
+            SDL_BindGPUVertexBuffers(pass, 0U, &vertexBinding, 1U);
+            SDL_BindGPUIndexBuffer(
+                pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+            SDL_DrawGPUIndexedPrimitives(
+                pass, chunk.IndexCount, 1U, 0U, 0, 0U);
+            drewChunk = true;
+        };
+        for (const auto& entry : modelChunks_)
+        {
+            const auto override = exactPreviewChunks_.find(entry.first);
+            // Un override présent mais vide masque volontairement ce chunk.
+            drawChunk(override != exactPreviewChunks_.end()
+                    ? override->second
+                    : entry.second);
+        }
+        for (const auto& entry : exactPreviewChunks_)
+        {
+            // Chunks que la preview crée là où le modèle n'en a pas.
+            if (modelChunks_.find(entry.first) == modelChunks_.end())
+                drawChunk(entry.second);
+        }
+        if (drewChunk) ++modelRenderCount_;
+    }
+    else if (exactPreviewActive_ || indexCount_ > 0U)
     {
         SDL_GPUBuffer* const visibleVertexBuffer = exactPreviewActive_
             ? exactPreviewVertexBuffer_ : vertexBuffer_;
@@ -2301,6 +2419,9 @@ bool ViewportRenderer::Render(
 void ViewportRenderer::ClearModel() noexcept
 {
     ReleaseWholeModelBuffers();
+    // VF-0265 (lot 3f) : les overrides décrivent les chunks de CE modèle. Sans
+    // modèle, ils n'ont plus de sens et laisseraient des buffers orphelins.
+    ReleaseExactPreviewChunks();
     ReleaseModelChunks();
     ClearExactPreviewMesh();
     ConfigureVoxelPreview(nullptr);
@@ -2338,6 +2459,10 @@ void ViewportRenderer::ClearExactPreviewMesh() noexcept
     exactPreviewDocumentRevision_ = 0U;
     exactPreviewPlanId_ = 0U;
     exactPreviewPlanRevision_ = 0U;
+    // VF-0265 (lot 3f) : « plus de preview » doit vouloir dire plus de preview,
+    // quel que soit le chemin utilisé. Sans cela, désactiver la preview
+    // monolithique laisserait les overrides chunkés à l'écran.
+    ReleaseExactPreviewChunks();
 }
 
 void ViewportRenderer::ReleaseInteractionV2MoveSource() noexcept

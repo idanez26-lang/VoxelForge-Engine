@@ -106,6 +106,16 @@ public:
         const Mesh::MeshData* Mesh = nullptr;
     };
 
+    // VF-0265 (lot 3f): preview overrides drawn in SUPERIMPOSITION over the
+    // chunked model. A null or empty mesh hides the model's chunk — the case of
+    // erasing a chunk's last voxel. The model's own buffers are never released
+    // nor rewritten, so leaving the preview costs nothing at all.
+    struct ExactPreviewChunkUpdate final
+    {
+        ModelChunkId Id{};
+        const Mesh::MeshData* Mesh = nullptr;
+    };
+
     [[nodiscard]] bool Upload(
         const Mesh::MeshData& mesh,
         const Voxel::VoxelPalette& palette,
@@ -128,6 +138,19 @@ public:
         std::uint64_t documentRevision,
         std::uint64_t planId,
         std::uint64_t planRevision);
+    // VF-0265 (lot 3f): chunked preview. Refuses when the model is not chunked
+    // — there would be nothing to superimpose on, and a preview over a stale
+    // monolithic model would be visibly wrong. `compositionId` is a monotonic
+    // ordinal of real recompositions: identical id means identical geometry, so
+    // nothing is re-uploaded. Exclusive with ConfigureExactPreviewMesh.
+    [[nodiscard]] bool ConfigureExactPreviewChunks(
+        std::span<const ExactPreviewChunkUpdate> overrides,
+        const Voxel::VoxelPalette& palette,
+        Vec3 modelCenter,
+        bool active,
+        std::uint64_t documentIdentity,
+        std::uint64_t documentRevision,
+        std::uint64_t compositionId);
     void ConfigureGuides(float width, float height, float depth) noexcept;
     void ConfigureHighlights(
         std::optional<VoxelCoordinates> hovered,
@@ -245,6 +268,7 @@ private:
         std::uint32_t& indexCount,
         std::string_view label);
     void ClearExactPreviewMesh() noexcept;
+    void ReleaseExactPreviewChunks() noexcept;
     void ReleaseModelChunks() noexcept;
     void ReleaseWholeModelBuffers() noexcept;
     void ReleaseInteractionV2MoveSource() noexcept;
@@ -309,6 +333,12 @@ private:
     std::uint64_t exactPreviewDocumentRevision_ = 0U;
     std::uint64_t exactPreviewPlanId_ = 0U;
     std::uint64_t exactPreviewPlanRevision_ = 0U;
+    // VF-0265 (lot 3f) : overrides de preview par chunk. Une entrée à
+    // IndexCount nul est délibérée : elle MASQUE le chunk du modèle, elle ne
+    // l'oublie pas.
+    std::map<ModelChunkId, ModelChunkBuffers> exactPreviewChunks_;
+    bool exactPreviewChunksActive_ = false;
+    std::uint64_t exactPreviewChunksCompositionId_ = 0U;
     bool highlightsDirty_ = false;
     std::optional<VoxelCoordinates> hoveredHighlight_;
     std::vector<Asset::Voxel::VoxelPosition> selectedHighlights_;
