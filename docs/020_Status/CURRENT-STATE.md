@@ -56,6 +56,16 @@ permutations exactes ; arrondi demi-voxel généralisé), 24-2 session + UI
 (sélecteur d'axe, trois anneaux du gizmo déverrouillés, l'anneau saisi décide
 de l'axe), 24-3 Smart Placement aligné sur l'axe choisi.
 
+**STAMP-25 — pas de rotation 90° / 45°** : clos le 05/08. 25-1 moteur
+(rééchantillonnage par mapping inverse destination → source, donc sans trou ;
+`HalfQuarterStep` dans le transform, `Statistics.ApproximateRotation` et
+diagnostic `ApproximateRotation` non bloquant ; garde-fou à 8 M cellules).
+25-2 interface : `Q` / `Shift+Q` avancent d'un cran et font le tour complet —
+quatre positions au pas de 90°, huit au pas de 45° ; le pas se choisit dans Tool
+Options ou par `Shift+E` et ne modifie jamais l'orientation courante. L'écart
+`N source voxels -> M cells` est affiché en permanence, sans boîte de
+confirmation. L'anneau du gizmo reste aimanté aux quarts de tour.
+
 ## Tests et build
 
 - Suite bloquante locale : **144/144** ; smokes GUI `EditorApp` : **51/51**,
@@ -77,9 +87,11 @@ de l'axe), 24-3 Smart Placement aligné sur l'axe choisi.
 
 ## À faire
 
-1. **STAMP-25 — rotation à 45°** dans le modeleur : rééchantillonnage assumé,
-   annoncé chiffres à l'appui (« N cellules, M perdues »), diagnostic
-   d'avertissement non bloquant ;
+1. **Dimensions de la box à la création** (en cours) : le dialogue nom +
+   dimensions existe déjà et valide 1..256, mais `RequestNewVoxelModelDialog()`
+   est du code mort — *New Model* et `Ctrl+Shift+N` passent par la création
+   instantanée figée à 64³. Décision Tony du 05/08 : le dialogue s'ouvre à
+   chaque création. Le redimensionnement d'un modèle existant est un lot séparé ;
 2. **Étude d'architecture — rotation libre par instances de scène** (modèle
    VoxEdit) : un Stamp posé devient une instance avec sa matrice, jamais
    gravée dans la grille. Touche le format de sauvegarde, le rendu, l'undo/redo
@@ -89,8 +101,9 @@ de l'axe), 24-3 Smart Placement aligné sur l'axe choisi.
    placement) ;
 4. Compositeur incrémental de préview exacte (« option B » de VF-0261) — lève
    le plafond de 50 000 voxels ;
-5. Dimensions de la box de création configurables (**prérequis** au re-test
-   500k en conditions réelles ; vérifier d'abord l'heuristique `probeRegion`) ;
+5. Gizmo aimanté aux huitièmes de tour (l'anneau ne connaît que les quarts,
+   alors que le clavier fait des crans de 45°) — le gizmo est partagé avec les
+   outils de sélection, d'où un lot dédié ;
 6. Vérification de poste : bug grille §10.2 (candidat depth bias) ;
 7. Phase D : Smart Tools — statut du gate SMART-02.5 à trancher (AR-0101 §15 le
    déclare implémenté, la roadmap le déclare requis).
