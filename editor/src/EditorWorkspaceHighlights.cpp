@@ -282,6 +282,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                             SmartToolExactPreviewComposer::Compose(
                                 ExactPreviewSource(*document),
                                 activeStroke->Changes());
+                        ++exactPreviewCompositionOrdinal_;
                         smartToolStrokePreviewPlanId_ = plan->PlanId();
                         smartToolStrokePreviewPlanRevision_ = plan->Revision();
                         smartToolStrokePreviewStrokeRevision_ =
@@ -291,9 +292,15 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 }
                 else
                 {
+                    const std::size_t buildsBefore =
+                        smartToolExactPreviewCache_.BuildCount();
                     exactSmartToolPreview = &smartToolExactPreviewCache_.Resolve(
                         ExactPreviewSource(*document),
                         voxelDocumentSession_.Generation(), plan);
+                    // Le cache a-t-il réellement recomposé ? Sinon la géométrie
+                    // est inchangée et le renderer ne doit rien réenvoyer.
+                    if (smartToolExactPreviewCache_.BuildCount() != buildsBefore)
+                        ++exactPreviewCompositionOrdinal_;
                 }
             }
         }
@@ -329,6 +336,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                         SmartToolExactPreviewComposer::Compose(
                             ExactPreviewSource(*document),
                             activeStroke->Changes());
+                    ++exactPreviewCompositionOrdinal_;
                     smartToolStrokePreviewStrokeRevision_ =
                         activeStroke->Revision();
                 }
@@ -755,13 +763,41 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         exactSmartToolPreview != nullptr && exactSmartToolPlan != nullptr &&
         exactSmartToolPreview->Succeeded())
     {
-        static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
-            &exactSmartToolPreview->Mesh, &exactSmartToolPreview->Palette,
-            voxelModelCenter_, exactSmartToolPreview->Active,
-            voxelDocumentSession_.Generation(), activeDocument
-                ? activeDocument->GetRevision() : 0U,
-            exactSmartToolPlan->PlanId(), smartToolStroke_.IsActive()
-                ? smartToolStroke_.Revision() : exactSmartToolPlan->Revision()));
+        // VF-0265 (lot 3g) : chemin chunké quand le compositeur a produit des
+        // overrides. Le renderer refuse si le modèle n'est pas chunké — au
+        // chargement, l'envoi est monolithique — et on retombe alors sur le
+        // mesh assemblé. Jamais faux, seulement plus lent.
+        bool presented = false;
+        if (!exactSmartToolPreview->Overrides.empty())
+        {
+            std::vector<ViewportRenderer::ExactPreviewChunkUpdate> overrides;
+            overrides.reserve(exactSmartToolPreview->Overrides.size());
+            for (const SmartToolExactPreviewChunk& chunk :
+                 exactSmartToolPreview->Overrides)
+            {
+                overrides.push_back({
+                    ViewportRenderer::ModelChunkId{
+                        chunk.Key.X, chunk.Key.Y, chunk.Key.Z},
+                    &chunk.Mesh});
+            }
+            presented = viewportRenderer_.ConfigureExactPreviewChunks(
+                overrides, exactSmartToolPreview->Palette, voxelModelCenter_,
+                exactSmartToolPreview->Active,
+                voxelDocumentSession_.Generation(),
+                activeDocument ? activeDocument->GetRevision() : 0U,
+                exactPreviewCompositionOrdinal_);
+        }
+        if (!presented)
+        {
+            static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
+                &exactSmartToolPreview->Mesh, &exactSmartToolPreview->Palette,
+                voxelModelCenter_, exactSmartToolPreview->Active,
+                voxelDocumentSession_.Generation(), activeDocument
+                    ? activeDocument->GetRevision() : 0U,
+                exactSmartToolPlan->PlanId(), smartToolStroke_.IsActive()
+                    ? smartToolStroke_.Revision()
+                    : exactSmartToolPlan->Revision()));
+        }
     }
     else if (!ShouldRetainExactPreviewOnMissingFrame(
                  previewSubject, smartToolStroke_.IsActive()))

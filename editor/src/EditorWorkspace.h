@@ -629,6 +629,11 @@ private:
     bool pencilPreviewCacheValid_ = false;
     SmartPreviewCache smartPreviewCache_{};
     SmartToolExactPreviewCache smartToolExactPreviewCache_{};
+    // VF-0265 (lot 3g) : ordinal monotone des recompositions RÉELLES. Il
+    // alimente le court-circuit d'envoi GPU du renderer : même ordinal, même
+    // géométrie, donc rien à réenvoyer. Un identifiant de plan ne suffirait
+    // pas — le trait recompose sans que le plan change.
+    std::uint64_t exactPreviewCompositionOrdinal_ = 0U;
     const SmartPreviewData* smartBrushGhostPreview_ = nullptr;
     VoxelPaintBrushEvaluation paintPreviewEvaluation_;
     const Asset::Voxel::VoxelDocument* paintPreviewDocument_ = nullptr;
