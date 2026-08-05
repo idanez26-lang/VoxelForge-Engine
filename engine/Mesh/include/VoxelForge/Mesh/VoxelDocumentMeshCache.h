@@ -1,5 +1,6 @@
 #pragma once
 
+#include "VoxelChunkGrid.h"
 #include "VoxelMeshBuilder.h"
 
 #include <cstddef>
@@ -7,7 +8,6 @@
 #include <map>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <vector>
 
 namespace VoxelForge::Mesh
@@ -45,25 +45,15 @@ struct VoxelDocumentMeshSyncResult final
 class VoxelDocumentMeshCache final
 {
 public:
-    static constexpr std::int32_t ChunkEdgeLength = 32;
+    // VF-0265 (lot 1): the chunk partition now lives in VoxelChunkGrid.h so the
+    // incremental preview composer derives exactly the same chunks. These
+    // aliases keep every existing caller compiling unchanged.
+    static constexpr std::int32_t ChunkEdgeLength = VoxelChunkEdgeLength;
     static constexpr std::size_t MaximumIncrementalChunkRebuilds = 64U;
 
     // VF-0262 (lot 262-4a): chunk identity, public so renderers can maintain
     // per-chunk GPU buffers keyed on it.
-    struct ChunkKey final
-    {
-        std::int32_t X = 0;
-        std::int32_t Y = 0;
-        std::int32_t Z = 0;
-
-        [[nodiscard]] bool operator==(const ChunkKey&) const noexcept = default;
-
-        [[nodiscard]] bool operator<(const ChunkKey& other) const noexcept
-        {
-            return std::tie(X, Y, Z) <
-                std::tie(other.X, other.Y, other.Z);
-        }
-    };
+    using ChunkKey = VoxelChunkKey;
 
     [[nodiscard]] VoxelDocumentMeshSyncResult Synchronize(
         const Asset::Voxel::VoxelDocument& document,

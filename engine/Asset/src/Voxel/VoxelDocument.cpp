@@ -376,34 +376,12 @@ VoxelDocumentOperationResult VoxelDocument::ApplyVoxelChanges(
     return ApplyCompositeChanges(changes, nullptr);
 }
 
-VoxelDocumentOperationResult VoxelDocument::ApplyCompositeChanges(
-    const std::span<const VoxelDocumentChange> voxelChanges,
-    const VoxelDocumentPaletteChange* paletteChange,
-    const VoxelDocumentCompositeOrder order)
+// VF-0265 (lot 1) : extrait verbatim d'ApplyCompositeChanges. Constant, sans
+// mutation ni journalisation : la preview peut donc l'appeler sans toucher au
+// document. Il n'existe plus qu'une seule implémentation des règles de rejet.
+VoxelDocumentOperationResult VoxelDocument::ValidateVoxelChanges(
+    const std::span<const VoxelDocumentChange> changes) const
 {
-    if (voxelChanges.empty() && paletteChange == nullptr)
-        return Success(false, "Composite change set is empty.");
-
-    if (paletteChange != nullptr)
-    {
-        if (paletteChange->Before == paletteChange->After)
-        {
-            return Failure(VoxelDocumentError::InvalidTransaction,
-                "Palette change has identical before and after states.");
-        }
-        const VoxelDocumentOperationResult beforeValidation =
-            ValidatePaletteSnapshot(paletteChange->Before);
-        if (!beforeValidation) return beforeValidation;
-        const VoxelDocumentOperationResult afterValidation =
-            ValidatePaletteSnapshot(paletteChange->After);
-        if (!afterValidation) return afterValidation;
-        if (GetPaletteSnapshot() != paletteChange->Before)
-        {
-            return Failure(VoxelDocumentError::StateMismatch,
-                "Voxel document palette no longer matches the expected before state.");
-        }
-    }
-
     struct ChangeKey final
     {
         std::size_t ModelIndex = 0U;
@@ -425,8 +403,8 @@ VoxelDocumentOperationResult VoxelDocument::ApplyCompositeChanges(
     };
 
     std::unordered_set<ChangeKey, ChangeKeyHash> uniqueChanges;
-    uniqueChanges.reserve(voxelChanges.size());
-    for (const VoxelDocumentChange& change : voxelChanges)
+    uniqueChanges.reserve(changes.size());
+    for (const VoxelDocumentChange& change : changes)
     {
         if (change.SubModelIndex >= models_.size())
             return Failure(VoxelDocumentError::InvalidModelIndex,
@@ -461,6 +439,47 @@ VoxelDocumentOperationResult VoxelDocument::ApplyCompositeChanges(
         if (!matchesBefore)
             return Failure(VoxelDocumentError::DuplicateVoxel,
                 "Voxel document no longer matches the expected before state.");
+    }
+    return Success(false, "Voxel changes are applicable.");
+}
+
+VoxelDocumentOperationResult VoxelDocument::ApplyCompositeChanges(
+    const std::span<const VoxelDocumentChange> voxelChanges,
+    const VoxelDocumentPaletteChange* paletteChange,
+    const VoxelDocumentCompositeOrder order)
+{
+    if (voxelChanges.empty() && paletteChange == nullptr)
+        return Success(false, "Composite change set is empty.");
+
+    if (paletteChange != nullptr)
+    {
+        if (paletteChange->Before == paletteChange->After)
+        {
+            return Failure(VoxelDocumentError::InvalidTransaction,
+                "Palette change has identical before and after states.");
+        }
+        const VoxelDocumentOperationResult beforeValidation =
+            ValidatePaletteSnapshot(paletteChange->Before);
+        if (!beforeValidation) return beforeValidation;
+        const VoxelDocumentOperationResult afterValidation =
+            ValidatePaletteSnapshot(paletteChange->After);
+        if (!afterValidation) return afterValidation;
+        if (GetPaletteSnapshot() != paletteChange->Before)
+        {
+            return Failure(VoxelDocumentError::StateMismatch,
+                "Voxel document palette no longer matches the expected before state.");
+        }
+    }
+
+    // VF-0265 (lot 1) : les règles de rejet vivent désormais dans
+    // ValidateVoxelChanges, seule implémentation. La preview incrémentale
+    // l'appellera aussi, ce qui étend « Preview == Commit » jusqu'aux cas
+    // d'échec : un refus en preview est un refus au commit, même message.
+    if (const VoxelDocumentOperationResult validation =
+            ValidateVoxelChanges(voxelChanges);
+        !validation.Succeeded)
+    {
+        return validation;
     }
 
     std::vector<bool> recalculateBounds(models_.size(), false);

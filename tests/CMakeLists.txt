@@ -1492,6 +1492,22 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeAssetVoxelDocumentTests>
 )
 
+# VF-0265 lot 1: ValidateVoxelChanges is the single implementation of the voxel
+# change rejection rules, and it must mutate nothing.
+add_executable(
+    VoxelForgeAssetVoxelDocumentValidationTests
+    Asset/VoxelDocumentValidationTests.cpp
+)
+target_link_libraries(
+    VoxelForgeAssetVoxelDocumentValidationTests
+    PRIVATE VoxelForgeEditorVoxelDocument
+)
+vf_configure_test(VoxelForgeAssetVoxelDocumentValidationTests)
+add_test(
+    NAME VoxelForge.Asset.VoxelDocumentValidation
+    COMMAND $<TARGET_FILE:VoxelForgeAssetVoxelDocumentValidationTests>
+)
+
 add_executable(
     VoxelForgeAssetVoxDocumentWriterTests
     Asset/VoxDocumentWriterTests.cpp

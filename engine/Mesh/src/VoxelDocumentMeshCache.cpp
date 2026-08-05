@@ -8,18 +8,12 @@
 namespace VoxelForge::Mesh
 {
 
+// VF-0265 (lot 1) : délégation à la définition partagée. Il ne doit exister
+// qu'une seule arithmétique de chunk dans le moteur.
 VoxelDocumentMeshCache::ChunkKey VoxelDocumentMeshCache::KeyForPosition(
     const Asset::Voxel::VoxelPosition& position) noexcept
 {
-    const auto floorDivide = [](const std::int32_t value) noexcept
-    {
-        const std::int32_t quotient = value / ChunkEdgeLength;
-        return (value % ChunkEdgeLength < 0) ? quotient - 1 : quotient;
-    };
-    return {
-        floorDivide(position.X),
-        floorDivide(position.Y),
-        floorDivide(position.Z)};
+    return VoxelChunkKeyForPosition(position);
 }
 
 VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::Synchronize(
@@ -142,14 +136,8 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::RebuildChunks(
     }
     for (const ChunkKey& key : keys)
     {
-        const Asset::Voxel::VoxelPosition minimum{
-            key.X * ChunkEdgeLength,
-            key.Y * ChunkEdgeLength,
-            key.Z * ChunkEdgeLength};
-        const Asset::Voxel::VoxelPosition maximum{
-            minimum.X + ChunkEdgeLength - 1,
-            minimum.Y + ChunkEdgeLength - 1,
-            minimum.Z + ChunkEdgeLength - 1};
+        const Asset::Voxel::VoxelPosition minimum = VoxelChunkMinimum(key);
+        const Asset::Voxel::VoxelPosition maximum = VoxelChunkMaximum(key);
         MeshBuildResult built =
             VoxelMeshBuilder::Build(document, minimum, maximum, modelIndex);
         if (!built.Succeeded || !built.Mesh)
@@ -253,14 +241,11 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::RebuildAllChunks(
             {
                 for (std::int32_t x = minimumKey.X; x <= maximumKey.X; ++x)
                 {
-                    const Asset::Voxel::VoxelPosition minimum{
-                        x * ChunkEdgeLength,
-                        y * ChunkEdgeLength,
-                        z * ChunkEdgeLength};
-                    const Asset::Voxel::VoxelPosition maximum{
-                        minimum.X + ChunkEdgeLength - 1,
-                        minimum.Y + ChunkEdgeLength - 1,
-                        minimum.Z + ChunkEdgeLength - 1};
+                    const ChunkKey key{x, y, z};
+                    const Asset::Voxel::VoxelPosition minimum =
+                        VoxelChunkMinimum(key);
+                    const Asset::Voxel::VoxelPosition maximum =
+                        VoxelChunkMaximum(key);
                     MeshBuildResult built = VoxelMeshBuilder::Build(
                         document, minimum, maximum, modelIndex);
                     if (!built.Succeeded || !built.Mesh)
@@ -284,8 +269,7 @@ VoxelDocumentMeshSyncResult VoxelDocumentMeshCache::RebuildAllChunks(
                     }
                     try
                     {
-                        chunks.emplace(
-                            ChunkKey{x, y, z}, std::move(*built.Mesh));
+                        chunks.emplace(key, std::move(*built.Mesh));
                     }
                     catch (const std::bad_alloc&)
                     {

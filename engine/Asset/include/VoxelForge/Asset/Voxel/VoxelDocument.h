@@ -236,6 +236,14 @@ public:
     [[nodiscard]] std::optional<std::vector<TouchedPosition>> ChangesSince(
         std::uint64_t sinceRevision) const;
 
+    // VF-0265 (lot 1): the rejection rules of ApplyCompositeChanges, extracted
+    // verbatim as a const predicate. It mutates nothing and journals nothing,
+    // so a preview can ask "would this commit succeed?" without touching the
+    // document. Single implementation: a preview refused here is a commit
+    // refused there, with the same message.
+    [[nodiscard]] VoxelDocumentOperationResult ValidateVoxelChanges(
+        std::span<const VoxelDocumentChange> changes) const;
+
     [[nodiscard]] VoxelDocumentOperationResult SetVoxel(
         const VoxelPosition& position,
         std::size_t paletteIndex,
