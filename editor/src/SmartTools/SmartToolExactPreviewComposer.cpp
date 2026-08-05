@@ -170,19 +170,38 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
         // la taille exacte — soit des centaines de réallocations sur un document
         // creux étalé sur des centaines de chunks : 398 Mo alloués et 55 ms
         // mesurés avant cette correction.
-        std::vector<const Mesh::MeshData*> pieces;
-        std::deque<Mesh::MeshData> rebuilt;
-        pieces.reserve(source.DocumentChunks->size() + 8U);
+        std::vector<const Mesh::MeshData*> reused;
+        reused.reserve(source.DocumentChunks->size());
         std::size_t faceCount = 0U;
-        const auto accumulate = [&](const Mesh::MeshData& piece)
+
+        // Fabrique l'override d'un chunk : les faces propres qu'on garde, plus
+        // le maillage de l'état final de la seule boîte sale. Une réservation,
+        // deux concaténations.
+        const auto makeOverride = [&](const Mesh::MeshData* const chunkMesh,
+                                      const Asset::Voxel::VoxelPosition minimum,
+                                      const Asset::Voxel::VoxelPosition maximum,
+                                      Mesh::MeshData& out) -> bool
         {
-            faceCount += piece.FaceCount();
-            pieces.push_back(&piece);
-        };
-        const auto accumulateOwned = [&](Mesh::MeshData&& piece)
-        {
-            rebuilt.push_back(std::move(piece));
-            accumulate(rebuilt.back());
+            Mesh::MeshData kept;
+            if (chunkMesh != nullptr)
+            {
+                kept = chunkMesh->FacesOutsideBox(minimum.X, minimum.Y,
+                    minimum.Z, maximum.X, maximum.Y, maximum.Z);
+            }
+            Mesh::MeshBuildResult built =
+                Mesh::VoxelMeshBuilder::Build(*overlay, minimum, maximum);
+            if (!built.Succeeded || !built.Mesh)
+            {
+                result.Error = "Unable to build Smart Tool final preview mesh: " +
+                    built.Message;
+                return false;
+            }
+            out.Reserve(kept.VertexCount() + built.Mesh->VertexCount(),
+                kept.IndexCount() + built.Mesh->IndexCount());
+            out.Append(kept);
+            out.Append(*built.Mesh);
+            faceCount += out.FaceCount();
+            return true;
         };
 
         for (const auto& [key, chunkMesh] : *source.DocumentChunks)
@@ -191,20 +210,19 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
             Asset::Voxel::VoxelPosition maximum{};
             if (!IntersectChunk(key, dirty, minimum, maximum))
             {
-                accumulate(chunkMesh);
+                // Chunk intact : il reste celui du document. Aucun override,
+                // donc aucun envoi GPU et aucun changement de dessin.
+                faceCount += chunkMesh.FaceCount();
+                reused.push_back(&chunkMesh);
                 continue;
             }
-            accumulateOwned(chunkMesh.FacesOutsideBox(minimum.X, minimum.Y,
-                minimum.Z, maximum.X, maximum.Y, maximum.Z));
-            Mesh::MeshBuildResult built =
-                Mesh::VoxelMeshBuilder::Build(*overlay, minimum, maximum);
-            if (!built.Succeeded || !built.Mesh)
+            SmartToolExactPreviewChunk override{};
+            override.Key = key;
+            if (!makeOverride(&chunkMesh, minimum, maximum, override.Mesh))
             {
-                result.Error = "Unable to build Smart Tool final preview mesh: " +
-                    built.Message;
                 return result;
             }
-            accumulateOwned(std::move(*built.Mesh));
+            result.Overrides.push_back(std::move(override));
         }
 
         // Chunks que la zone sale atteint mais que le document ne connaît pas :
@@ -231,17 +249,14 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
                         {
                             continue;
                         }
-                        Mesh::MeshBuildResult built =
-                            Mesh::VoxelMeshBuilder::Build(
-                                *overlay, minimum, maximum);
-                        if (!built.Succeeded || !built.Mesh)
+                        SmartToolExactPreviewChunk override{};
+                        override.Key = key;
+                        if (!makeOverride(
+                                nullptr, minimum, maximum, override.Mesh))
                         {
-                            result.Error =
-                                "Unable to build Smart Tool final preview "
-                                "mesh: " + built.Message;
                             return result;
                         }
-                        accumulateOwned(std::move(*built.Mesh));
+                        result.Overrides.push_back(std::move(override));
                     }
         }
 
@@ -254,22 +269,35 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
             return result;
         }
 
-        // Seconde passe : une seule réservation, puis concaténation.
-        Mesh::MeshData mesh;
-        std::size_t vertexCount = 0U;
-        std::size_t indexCount = 0U;
-        for (const Mesh::MeshData* const piece : pieces)
+        // Assemblage du mesh unique : c'est le dernier poste qui suit encore la
+        // taille du document. Un consommateur qui dessine les overrides chunk
+        // par chunk le désactive et ne paie rien.
+        if (source.AssembleMesh)
         {
-            vertexCount += piece->VertexCount();
-            indexCount += piece->IndexCount();
+            std::size_t vertexCount = 0U;
+            std::size_t indexCount = 0U;
+            for (const Mesh::MeshData* const piece : reused)
+            {
+                vertexCount += piece->VertexCount();
+                indexCount += piece->IndexCount();
+            }
+            for (const SmartToolExactPreviewChunk& override : result.Overrides)
+            {
+                vertexCount += override.Mesh.VertexCount();
+                indexCount += override.Mesh.IndexCount();
+            }
+            Mesh::MeshData mesh;
+            mesh.Reserve(vertexCount, indexCount);
+            for (const Mesh::MeshData* const piece : reused)
+            {
+                mesh.Append(*piece);
+            }
+            for (const SmartToolExactPreviewChunk& override : result.Overrides)
+            {
+                mesh.Append(override.Mesh);
+            }
+            result.Mesh = std::move(mesh);
         }
-        mesh.Reserve(vertexCount, indexCount);
-        for (const Mesh::MeshData* const piece : pieces)
-        {
-            mesh.Append(*piece);
-        }
-
-        result.Mesh = std::move(mesh);
         result.Palette = BuildRenderPalette(*source.Document);
     }
     catch (const std::exception& exception)
