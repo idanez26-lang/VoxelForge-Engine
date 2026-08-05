@@ -49,6 +49,91 @@ namespace
 }
 }
 
+bool SmartToolExactPreviewChunkCache::ChunkSignature::operator==(
+    const ChunkSignature& other) const noexcept
+{
+    return Count == other.Count && Checksum == other.Checksum &&
+        Bounds == other.Bounds;
+}
+
+std::size_t SmartToolExactPreviewChunkCache::KeyHash::operator()(
+    const Mesh::VoxelChunkKey key) const noexcept
+{
+    // Melange simple mais disperse : les cles voisines ne doivent pas se
+    // retrouver dans le meme seau, sinon un trait rectiligne degenere la table.
+    std::uint64_t hash = 0x9E3779B97F4A7C15ULL;
+    const auto mix = [&hash](const std::int32_t value) noexcept
+    {
+        hash ^= static_cast<std::uint64_t>(static_cast<std::uint32_t>(value));
+        hash *= 0xFF51AFD7ED558CCDULL;
+        hash ^= hash >> 29;
+    };
+    mix(key.X); mix(key.Y); mix(key.Z);
+    return static_cast<std::size_t>(hash);
+}
+
+bool SmartToolExactPreviewChunkCache::Retarget(const void* const document,
+    const std::uint64_t revision, const std::size_t modelIndex,
+    const void* const chunkSet) noexcept
+{
+    if (document_ == document && documentRevision_ == revision &&
+        modelIndex_ == modelIndex && chunkSet_ == chunkSet)
+    {
+        return true;
+    }
+    // Le document a bouge sous nos pieds : tout override en cache decrit un
+    // etat qui n'existe plus. Le garder afficherait une preview fausse.
+    entries_.clear();
+    document_ = document;
+    documentRevision_ = revision;
+    modelIndex_ = modelIndex;
+    chunkSet_ = chunkSet;
+    return false;
+}
+
+const SmartToolExactPreviewChunk* SmartToolExactPreviewChunkCache::Find(
+    const Mesh::VoxelChunkKey key,
+    const ChunkSignature& signature) const noexcept
+{
+    const auto found = entries_.find(key);
+    if (found == entries_.end()) return nullptr;
+    if (!(found->second.Signature == signature)) return nullptr;
+    ++hits_;
+    return &found->second.Chunk;
+}
+
+void SmartToolExactPreviewChunkCache::Store(
+    SmartToolExactPreviewChunk chunk, const ChunkSignature& signature)
+{
+    const Mesh::VoxelChunkKey key = chunk.Key;
+    entries_[key] = Entry{std::move(chunk), signature};
+}
+
+void SmartToolExactPreviewChunkCache::RetainOnly(
+    const std::vector<Mesh::VoxelChunkKey>& keys)
+{
+    if (entries_.size() == keys.size()) return;
+    std::unordered_map<Mesh::VoxelChunkKey, Entry, KeyHash> kept;
+    kept.reserve(keys.size());
+    for (const Mesh::VoxelChunkKey key : keys)
+    {
+        const auto found = entries_.find(key);
+        if (found != entries_.end()) kept.emplace(key, std::move(found->second));
+    }
+    entries_ = std::move(kept);
+}
+
+void SmartToolExactPreviewChunkCache::Clear() noexcept
+{
+    entries_.clear();
+    document_ = nullptr;
+    documentRevision_ = 0U;
+    modelIndex_ = 0U;
+    chunkSet_ = nullptr;
+    hits_ = 0U;
+    rebuilds_ = 0U;
+}
+
 SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
     const Asset::Voxel::VoxelDocument& document, const SmartToolPlan& plan)
 {
@@ -161,7 +246,72 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
             return result;
         }
 
-        const Asset::Voxel::VoxelBounds& dirty = overlay->DirtyBounds();
+        // LOT 4c : signature par chunk. Un changement en p concerne tout chunk
+        // dont la dilatation de 1 contient p — donc son propre chunk, et les
+        // voisins quand p est sur une frontiere. On parcourt les changements UNE
+        // fois, en travail entier, sans hachage de position ni tri.
+        using Signature = SmartToolExactPreviewChunkCache::ChunkSignature;
+        std::map<Mesh::VoxelChunkKey, Signature> signatures;
+        for (const Asset::Voxel::VoxelDocumentChange& change : changes)
+        {
+            const Asset::Voxel::VoxelPosition p = change.Position;
+            // Somme de controle du CONTENU : repeindre un voxel deja touche
+            // d'une autre couleur doit invalider le chunk, alors que ni le
+            // compte ni la boite englobante ne bougeraient.
+            std::uint64_t hash = 0x9E3779B97F4A7C15ULL;
+            const auto mix = [&hash](const std::uint64_t value) noexcept
+            {
+                hash ^= value;
+                hash *= 0xFF51AFD7ED558CCDULL;
+                hash ^= hash >> 29;
+            };
+            mix(static_cast<std::uint64_t>(static_cast<std::uint32_t>(p.X)));
+            mix(static_cast<std::uint64_t>(static_cast<std::uint32_t>(p.Y)));
+            mix(static_cast<std::uint64_t>(static_cast<std::uint32_t>(p.Z)));
+            mix(change.ExistsAfter ? 0x1ULL : 0x2ULL);
+            mix(static_cast<std::uint64_t>(change.PaletteIndexAfter));
+            mix(change.ExistedBefore ? 0x4ULL : 0x8ULL);
+            mix(static_cast<std::uint64_t>(change.PaletteIndexBefore));
+
+            const Mesh::VoxelChunkKey low = Mesh::VoxelChunkKeyForPosition(
+                {p.X - 1, p.Y - 1, p.Z - 1});
+            const Mesh::VoxelChunkKey high = Mesh::VoxelChunkKeyForPosition(
+                {p.X + 1, p.Y + 1, p.Z + 1});
+            for (std::int32_t z = low.Z; z <= high.Z; ++z)
+                for (std::int32_t y = low.Y; y <= high.Y; ++y)
+                    for (std::int32_t x = low.X; x <= high.X; ++x)
+                    {
+                        Signature& signature =
+                            signatures[Mesh::VoxelChunkKey{x, y, z}];
+                        ++signature.Count;
+                        signature.Checksum += hash;
+                        if (!signature.Bounds.HasValue)
+                        {
+                            signature.Bounds.HasValue = true;
+                            signature.Bounds.Minimum = p;
+                            signature.Bounds.Maximum = p;
+                        }
+                        else
+                        {
+                            signature.Bounds.Minimum = {
+                                std::min(signature.Bounds.Minimum.X, p.X),
+                                std::min(signature.Bounds.Minimum.Y, p.Y),
+                                std::min(signature.Bounds.Minimum.Z, p.Z)};
+                            signature.Bounds.Maximum = {
+                                std::max(signature.Bounds.Maximum.X, p.X),
+                                std::max(signature.Bounds.Maximum.Y, p.Y),
+                                std::max(signature.Bounds.Maximum.Z, p.Z)};
+                        }
+                    }
+        }
+
+        SmartToolExactPreviewChunkCache* const cache = source.ChunkCache;
+        if (cache != nullptr)
+        {
+            static_cast<void>(cache->Retarget(source.Document,
+                source.Document->GetRevision(), source.ModelIndex,
+                source.DocumentChunks));
+        }
 
         // Deux passes, comme l'assemblage du cache de chunks du document. La
         // première collecte les morceaux sans rien concaténer, la seconde
@@ -172,6 +322,7 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
         // mesurés avant cette correction.
         std::vector<const Mesh::MeshData*> reused;
         reused.reserve(source.DocumentChunks->size());
+        std::vector<Mesh::VoxelChunkKey> overrideKeys;
         std::size_t faceCount = 0U;
 
         // Fabrique l'override d'un chunk : les faces propres qu'on garde, plus
@@ -200,15 +351,69 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
                 kept.IndexCount() + built.Mesh->IndexCount());
             out.Append(kept);
             out.Append(*built.Mesh);
-            faceCount += out.FaceCount();
+            return true;
+        };
+
+        // Produit l'override d'un chunk, depuis le cache si sa signature est
+        // inchangee. LOT 4c : c'est ici que le cout cesse de suivre le trait
+        // accumule pour ne suivre que ce qui bouge.
+        const auto resolveOverride = [&](const Mesh::VoxelChunkKey key,
+                                         const Mesh::MeshData* const chunkMesh,
+                                         const Signature& signature) -> bool
+        {
+            if (cache != nullptr)
+            {
+                if (const SmartToolExactPreviewChunk* const hit =
+                        cache->Find(key, signature))
+                {
+                    faceCount += hit->Mesh.FaceCount();
+                    result.Overrides.push_back(*hit);
+                    overrideKeys.push_back(key);
+                    return true;
+                }
+            }
+            // Region localisee : seules les faces a moins d'un voxel d'un
+            // changement CONCERNANT CE CHUNK peuvent avoir change. Utiliser la
+            // boite globale du trait, comme avant, reconstruisait bien plus que
+            // necessaire.
+            Asset::Voxel::VoxelBounds local = signature.Bounds;
+            local.Minimum = {local.Minimum.X - 1, local.Minimum.Y - 1,
+                local.Minimum.Z - 1};
+            local.Maximum = {local.Maximum.X + 1, local.Maximum.Y + 1,
+                local.Maximum.Z + 1};
+            Asset::Voxel::VoxelPosition minimum{};
+            Asset::Voxel::VoxelPosition maximum{};
+            if (!IntersectChunk(key, local, minimum, maximum))
+            {
+                // La dilatation atteint le chunk mais pas son volume propre :
+                // rien a surimprimer ici.
+                if (chunkMesh != nullptr)
+                {
+                    faceCount += chunkMesh->FaceCount();
+                    reused.push_back(chunkMesh);
+                }
+                return true;
+            }
+            SmartToolExactPreviewChunk override{};
+            override.Key = key;
+            if (!makeOverride(chunkMesh, minimum, maximum, override.Mesh))
+                return false;
+            faceCount += override.Mesh.FaceCount();
+            if (cache != nullptr)
+            {
+                override.Revision = cache->NextRevision();
+                cache->NoteRebuild();
+                cache->Store(override, signature);
+            }
+            result.Overrides.push_back(std::move(override));
+            overrideKeys.push_back(key);
             return true;
         };
 
         for (const auto& [key, chunkMesh] : *source.DocumentChunks)
         {
-            Asset::Voxel::VoxelPosition minimum{};
-            Asset::Voxel::VoxelPosition maximum{};
-            if (!IntersectChunk(key, dirty, minimum, maximum))
+            const auto signature = signatures.find(key);
+            if (signature == signatures.end())
             {
                 // Chunk intact : il reste celui du document. Aucun override,
                 // donc aucun envoi GPU et aucun changement de dessin.
@@ -216,49 +421,20 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
                 reused.push_back(&chunkMesh);
                 continue;
             }
-            SmartToolExactPreviewChunk override{};
-            override.Key = key;
-            if (!makeOverride(&chunkMesh, minimum, maximum, override.Mesh))
-            {
+            if (!resolveOverride(key, &chunkMesh, signature->second))
                 return result;
-            }
-            result.Overrides.push_back(std::move(override));
         }
 
         // Chunks que la zone sale atteint mais que le document ne connaît pas :
         // un ajout dans le vide crée de la matière là où aucun chunk n'existait.
-        if (dirty.HasValue)
+        for (const auto& [key, signature] : signatures)
         {
-            const Mesh::VoxelChunkKey first =
-                Mesh::VoxelChunkKeyForPosition(dirty.Minimum);
-            const Mesh::VoxelChunkKey last =
-                Mesh::VoxelChunkKeyForPosition(dirty.Maximum);
-            for (std::int32_t z = first.Z; z <= last.Z; ++z)
-                for (std::int32_t y = first.Y; y <= last.Y; ++y)
-                    for (std::int32_t x = first.X; x <= last.X; ++x)
-                    {
-                        const Mesh::VoxelChunkKey key{x, y, z};
-                        if (source.DocumentChunks->find(key) !=
-                            source.DocumentChunks->end())
-                        {
-                            continue;
-                        }
-                        Asset::Voxel::VoxelPosition minimum{};
-                        Asset::Voxel::VoxelPosition maximum{};
-                        if (!IntersectChunk(key, dirty, minimum, maximum))
-                        {
-                            continue;
-                        }
-                        SmartToolExactPreviewChunk override{};
-                        override.Key = key;
-                        if (!makeOverride(
-                                nullptr, minimum, maximum, override.Mesh))
-                        {
-                            return result;
-                        }
-                        result.Overrides.push_back(std::move(override));
-                    }
+            if (source.DocumentChunks->find(key) != source.DocumentChunks->end())
+                continue;
+            if (!resolveOverride(key, nullptr, signature)) return result;
         }
+
+        if (cache != nullptr) cache->RetainOnly(overrideKeys);
 
         // Même plafond global que le cache de chunks du document : on refuse
         // plutôt que de publier un maillage tronqué.

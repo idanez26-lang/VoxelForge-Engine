@@ -12,6 +12,8 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace VoxelForge::Editor
 {
@@ -26,6 +28,76 @@ struct SmartToolExactPreviewChunk final
 {
     Mesh::VoxelChunkKey Key{};
     Mesh::MeshData Mesh;
+    // LOT 4c : identite du CONTENU de cet override. Incrementee a chaque
+    // reconstruction reelle, conservee quand le chunk est reutilise depuis le
+    // cache. Le renderer s'en sert pour ne reenvoyer au GPU que ce qui a
+    // vraiment change : sans elle il ne peut pas distinguer « meme chunk, meme
+    // geometrie » de « meme chunk, nouvelle geometrie ».
+    std::uint64_t Revision = 0U;
+};
+
+// LOT 4c : etat incremental de la composition, porte par l'appelant.
+//
+// Theoreme de reutilisation. L'override d'un chunk vaut
+// Mesh(document + tous les changements) restreint a ce chunk. Pendant un trait
+// le document n'est PAS mute — les changements restent en attente jusqu'au
+// commit — et la visibilite d'une face ne consulte que les 6 voisins. Donc si
+// aucun changement nouveau ne tombe dans le chunk dilate de 1, son override est
+// inchange, geometrie et tampon GPU compris.
+//
+// La signature par chunk n'est PAS un simple compteur : repeindre un voxel deja
+// touche d'une autre couleur ne change ni le compte ni la boite englobante, et
+// un cache fonde sur eux afficherait un etat perime. On accumule donc une somme
+// de controle du contenu, insensible a l'ordre.
+class SmartToolExactPreviewChunkCache final
+{
+public:
+    struct ChunkSignature final
+    {
+        std::uint32_t Count = 0U;
+        std::uint64_t Checksum = 0U;
+        Asset::Voxel::VoxelBounds Bounds{};
+
+        [[nodiscard]] bool operator==(const ChunkSignature&) const noexcept;
+    };
+
+    // Vide le cache si la source ne decrit plus le meme document, la meme
+    // revision, le meme sous-modele ou le meme jeu de chunks. Renvoie true si
+    // le cache est reutilisable.
+    [[nodiscard]] bool Retarget(const void* document, std::uint64_t revision,
+        std::size_t modelIndex, const void* chunkSet) noexcept;
+    [[nodiscard]] const SmartToolExactPreviewChunk* Find(
+        Mesh::VoxelChunkKey key, const ChunkSignature& signature) const noexcept;
+    void Store(SmartToolExactPreviewChunk chunk, const ChunkSignature& signature);
+    // Retire du cache les chunks absents de la composition courante : sans cela
+    // un trait annule laisserait grossir le cache indefiniment.
+    void RetainOnly(const std::vector<Mesh::VoxelChunkKey>& keys);
+    void Clear() noexcept;
+    [[nodiscard]] std::uint64_t NextRevision() noexcept { return ++revision_; }
+    [[nodiscard]] std::size_t HitCount() const noexcept { return hits_; }
+    [[nodiscard]] std::size_t RebuildCount() const noexcept { return rebuilds_; }
+    void NoteRebuild() noexcept { ++rebuilds_; }
+
+private:
+    struct Entry final
+    {
+        SmartToolExactPreviewChunk Chunk;
+        ChunkSignature Signature;
+    };
+    struct KeyHash final
+    {
+        [[nodiscard]] std::size_t operator()(
+            Mesh::VoxelChunkKey key) const noexcept;
+    };
+
+    std::unordered_map<Mesh::VoxelChunkKey, Entry, KeyHash> entries_;
+    const void* document_ = nullptr;
+    std::uint64_t documentRevision_ = 0U;
+    std::size_t modelIndex_ = 0U;
+    const void* chunkSet_ = nullptr;
+    std::uint64_t revision_ = 0U;
+    mutable std::size_t hits_ = 0U;
+    std::size_t rebuilds_ = 0U;
 };
 
 struct SmartToolExactPreviewMesh final
@@ -66,6 +138,12 @@ public:
         // voxels. A consumer that draws the overrides chunk by chunk sets this
         // to false and pays nothing.
         bool AssembleMesh = true;
+        // LOT 4c : etat incremental optionnel. Fourni, la composition ne
+        // reconstruit que les chunks dont les changements ont reellement change,
+        // et reutilise les overrides deja calcules pour les autres. Laisse nul,
+        // le comportement est exactement celui d'avant — c'est ainsi que les
+        // tests conservent un oracle independant.
+        SmartToolExactPreviewChunkCache* ChunkCache = nullptr;
     };
 
     [[nodiscard]] static SmartToolExactPreviewMesh Compose(

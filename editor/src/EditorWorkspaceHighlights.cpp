@@ -104,6 +104,10 @@ SmartToolExactPreviewComposer::Source EditorWorkspace::ExactPreviewSource(
     source.AssembleMesh =
         source.DocumentChunks == nullptr ||
         viewportRenderer_.ModelChunkCount() == 0U;
+    // LOT 4c : cache d'overrides par chunk. Seul le chemin chunke en profite ;
+    // le chemin de reference reste sans etat, donc utilisable comme oracle.
+    if (source.DocumentChunks != nullptr)
+        source.ChunkCache = &exactPreviewChunkCache_;
     return source;
 }
 

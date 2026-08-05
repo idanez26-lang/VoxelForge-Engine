@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -414,6 +415,116 @@ void TestRejectionMatchesReference()
         "Un jeu invalide doit être refusé des deux côtés.");
 }
 
+
+// LOT 4c : le cache d'overrides par chunk doit etre STRICTEMENT INVISIBLE dans
+// le resultat. On rejoue un trait pas a pas : a chaque etape on compose avec le
+// cache, et on compose la meme chose sans cache — le chemin sans etat sert
+// d'oracle, c'est exactement pour ca qu'il reste sans etat.
+//
+// Le trait est choisi pour pieger un cache naif :
+//   - il traverse plusieurs chunks (l'arete de chunk est 32) ;
+//   - il REVISITE un voxel deja touche pour le repeindre d'une AUTRE couleur,
+//     ce qui ne change ni le nombre de changements du chunk ni leur boite
+//     englobante. Un cache indexe sur un compteur afficherait un etat perime :
+//     c'est cette etape qui justifie la somme de controle du contenu ;
+//   - il efface, donc il retire des faces au lieu d'en ajouter.
+void TestChunkCacheIsInvisibleStrokeByStroke()
+{
+    SmartToolExactPreviewChunkCache cache;
+    std::vector<VoxelDocumentChange> changes;
+
+    const auto upsert = [&changes](const VoxelDocumentChange& change)
+    {
+        // ValidateVoxelChanges refuse deux changements sur la meme position :
+        // un trait fusionne, il n'empile pas. On reproduit ce contrat.
+        for (VoxelDocumentChange& existing : changes)
+        {
+            if (existing.Position == change.Position)
+            {
+                existing.ExistsAfter = change.ExistsAfter;
+                existing.PaletteIndexAfter = change.PaletteIndexAfter;
+                return;
+            }
+        }
+        changes.push_back(change);
+    };
+
+    const auto compareWithOracle = [&](const std::string_view step)
+    {
+        SmartToolExactPreviewComposer::Source cached{
+            .Document = &BaseDocument(),
+            .DocumentChunks = &DocumentChunks().Chunks(),
+            .ModelIndex = 0U};
+        cached.ChunkCache = &cache;
+        const auto withCache =
+            SmartToolExactPreviewComposer::Compose(cached, changes);
+
+        const SmartToolExactPreviewComposer::Source stateless{
+            .Document = &BaseDocument(),
+            .DocumentChunks = &DocumentChunks().Chunks(),
+            .ModelIndex = 0U};
+        const auto oracle =
+            SmartToolExactPreviewComposer::Compose(stateless, changes);
+
+        const std::string where = " — étape « " + std::string(step) + " »";
+        Require(withCache.Succeeded() && oracle.Succeeded(),
+            "Les deux compositions doivent réussir" + where + " : " +
+                withCache.Error + oracle.Error);
+        Require(withCache.Overrides.size() == oracle.Overrides.size(),
+            "Le cache a change le NOMBRE d'overrides" + where);
+
+        std::map<Mesh::VoxelChunkKey, std::vector<FaceKey>> expected;
+        for (const auto& override : oracle.Overrides)
+            expected.emplace(override.Key, FaceKeys(override.Mesh));
+        for (const auto& override : withCache.Overrides)
+        {
+            const auto found = expected.find(override.Key);
+            Require(found != expected.end(),
+                "Le cache a produit un override sur un chunk que le chemin sans "
+                "état ne touche pas" + where);
+            Require(FaceKeys(override.Mesh) == found->second,
+                "La géométrie d'un override diffère de l'oracle" + where);
+        }
+        Require(FaceKeys(withCache.Mesh) == FaceKeys(oracle.Mesh),
+            "Le mesh assemblé diffère de l'oracle" + where);
+    };
+
+    // Le document est PLEIN sur 36 cubes dans un volume de 40 : une position
+    // n'est libre que si l'un de ses axes atteint 36. Et l'arete de chunk vaut
+    // 32, donc z=37 place le voxel dans le chunk 1 en z, tandis que x=10 et
+    // x=37 le placent dans deux chunks differents en x. On obtient ainsi deux
+    // chunks distincts avec des positions reellement vides.
+    upsert(Add({10, 10, 37}, 3U));
+    compareWithOracle("premier voxel");
+    upsert(Add({11, 10, 37}, 3U));
+    compareWithOracle("voxel voisin, meme chunk");
+    upsert(Add({37, 10, 37}, 4U));
+    compareWithOracle("voxel dans un autre chunk");
+
+    const std::size_t hitsBeforeRevisit = cache.HitCount();
+    Require(hitsBeforeRevisit > 0U,
+        "Apres trois etapes, le cache doit avoir servi au moins une fois : "
+        "sinon il est mort et ce test ne prouverait rien.");
+
+    // L'etape qui piege un cache par compteur : meme position, meme nombre de
+    // changements, meme boite englobante — mais une AUTRE couleur.
+    upsert(Add({11, 10, 37}, 7U));
+    compareWithOracle("recoloration d'un voxel deja touche");
+
+    // Un effacement, qui retire des faces au lieu d'en ajouter. On vise un
+    // voxel du document, dans un troisieme chunk encore intact.
+    upsert(Remove({20, 20, 20}, ColourAt({20, 20, 20})));
+    compareWithOracle("effacement dans un chunk encore intact");
+
+    // Le cache doit se vider de lui-meme si la cible change : sinon il
+    // afficherait la geometrie d'un document qui n'est plus celui-la.
+    Require(!cache.Retarget(nullptr, 0U, 0U, nullptr),
+        "Changer de cible doit invalider le cache.");
+    Require(cache.HitCount() >= hitsBeforeRevisit,
+        "Le compteur de hits ne doit pas regresser.");
+    compareWithOracle("apres invalidation totale");
+}
+
 } // namespace
 
 int main()
@@ -426,6 +537,7 @@ int main()
         TestIncrementalPathNeverMutates();
         TestFallbackWithoutChunksMatchesReference();
         TestRejectionMatchesReference();
+        TestChunkCacheIsInvisibleStrokeByStroke();
     }
     catch (const std::exception& error)
     {

@@ -634,6 +634,13 @@ private:
     // géométrie, donc rien à réenvoyer. Un identifiant de plan ne suffirait
     // pas — le trait recompose sans que le plan change.
     std::uint64_t exactPreviewCompositionOrdinal_ = 0U;
+    // LOT 4c : etat incremental de la composition de preview exacte. Membre du
+    // workspace parce que sa duree de vie est celle du document affiche : il se
+    // vide de lui-meme des que le document, sa revision ou le jeu de chunks
+    // change.
+    // Mutable : ExactPreviewSource est const, et ce cache ne fait pas partie
+    // de l'etat observable du workspace.
+    mutable SmartToolExactPreviewChunkCache exactPreviewChunkCache_;
     // LOT 5 : cadence d'emission du verdict de budget 60 FPS. Membre et non
     // statique locale : les smokes instancient plusieurs workspaces, un etat
     // partage melangerait leurs mesures.
