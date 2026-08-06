@@ -641,6 +641,17 @@ private:
     // Mutable : ExactPreviewSource est const, et ce cache ne fait pas partie
     // de l'etat observable du workspace.
     mutable SmartToolExactPreviewChunkCache exactPreviewChunkCache_;
+    // ERGO-01 LOT 2 : preview exacte des outils GEOMETRIQUES (ligne, sphere,
+    // boite). Ils n'ont pas de SmartToolPlan, alors que la presentation exigeait
+    // jusqu'ici un plan pour son identite. Sans cette generalisation, AUCUN
+    // d'eux ne pouvait presenter la preview exacte, quel que soit le service
+    // qui sait deja calculer leur resultat.
+    SmartToolExactPreviewMesh geometricToolPreviewMesh_;
+    // Cle de contenu : outil, extremites, palette, revision du document. Tant
+    // qu'elle ne bouge pas, la composition est reutilisee — un survol immobile
+    // ne recompose rien.
+    std::uint64_t geometricToolPreviewKey_ = 0U;
+    std::uint64_t geometricToolPreviewRevision_ = 0U;
     // LATENCE-01 : frame de la premiere demande de resolution differee.
     std::uint64_t highlightsDeferredAtFrame_ = 0U;
     // LOT 5 : cadence d'emission du verdict de budget 60 FPS. Membre et non

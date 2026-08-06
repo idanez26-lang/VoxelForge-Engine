@@ -607,6 +607,70 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             {
                 linePreview.clear();
             }
+            // ERGO-01 LOT 2 : la ligne presente desormais l'ETAT FINAL EXACT,
+            // opaque, comme le crayon et comme MagicaVoxel — au lieu du seul
+            // contour filaire.
+            //
+            // La semantique du service est recopiee a l'identique : Apply SAUTE
+            // les voxels deja occupes (VoxelLineService.cpp:147). Sans ce
+            // filtre la preview annoncerait des poses qui n'auront pas lieu, ce
+            // qui serait pire que l'ancien contour.
+            // Meme source de couleur que l'Apply reel (EditorWorkspace.cpp:6483
+            // et :6490) : sinon la preview annoncerait une autre couleur que
+            // celle qui sera posee.
+            const auto lineActiveColor = paletteService_.ActiveColor();
+            const std::uint8_t linePalette = static_cast<std::uint8_t>(
+                lineActiveColor ? lineActiveColor->Index : 0U);
+            std::uint64_t lineKey = 0x9E3779B97F4A7C15ULL;
+            const auto mixLine = [&lineKey](const std::uint64_t value) noexcept
+            {
+                lineKey ^= value;
+                lineKey *= 0xFF51AFD7ED558CCDULL;
+                lineKey ^= lineKey >> 29;
+            };
+            mixLine(1U); // discriminant d'outil : ligne
+            mixLine(document->GetRevision());
+            mixLine(linePalette);
+            for (const Asset::Voxel::VoxelPosition& position : linePreview)
+            {
+                mixLine(static_cast<std::uint64_t>(
+                    static_cast<std::uint32_t>(position.X)));
+                mixLine(static_cast<std::uint64_t>(
+                    static_cast<std::uint32_t>(position.Y)));
+                mixLine(static_cast<std::uint64_t>(
+                    static_cast<std::uint32_t>(position.Z)));
+            }
+            if (!linePreview.empty() &&
+                linePreview.size() <= MaximumExactPreviewDeltaVoxelCount)
+            {
+                // Cle de contenu inchangee : on reutilise. Un survol immobile
+                // ne recompose donc rien, comme pour le crayon.
+                if (lineKey != geometricToolPreviewKey_)
+                {
+                    std::vector<Asset::Voxel::VoxelDocumentChange> changes;
+                    changes.reserve(linePreview.size());
+                    for (const Asset::Voxel::VoxelPosition& position :
+                         linePreview)
+                    {
+                        if (document->HasVoxel(position, 0U)) continue;
+                        changes.push_back({0U, position, false, 0U, true,
+                            linePalette});
+                    }
+                    geometricToolPreviewMesh_ =
+                        SmartToolExactPreviewComposer::Compose(
+                            ExactPreviewSource(*document), changes);
+                    ++exactPreviewCompositionOrdinal_;
+                    geometricToolPreviewKey_ = lineKey;
+                    ++geometricToolPreviewRevision_;
+                }
+                if (geometricToolPreviewMesh_.Succeeded())
+                {
+                    exactSmartToolPreview = &geometricToolPreviewMesh_;
+                    // Le contour filaire ferait doublon avec l'etat final : la
+                    // regle interdit la double presentation.
+                    linePreview = {};
+                }
+            }
         }
     }
     else if (voxelToolState_.IsSphereActive())
@@ -880,9 +944,23 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     {
     const EditorFrameProbeScope exactProbe(
         frameProbe_, EditorFrameProbeSlot::HoExact);
+    // ERGO-01 LOT 2 : l'identite de presentation est generalisee. Elle venait
+    // du SmartToolPlan, ce qui interdisait structurellement la preview exacte
+    // aux outils geometriques — ils n'ont pas de plan. Elle vient desormais du
+    // plan quand il existe, et de la cle de contenu de l'outil geometrique
+    // sinon. Le predicat de rendu, lui, est inchange : pour ces outils
+    // previewSubject vaut Geometric, et ShouldRenderExactPreviewGeometry
+    // renvoie deja true.
+    const std::uint64_t exactPreviewPlanId = exactSmartToolPlan != nullptr
+        ? exactSmartToolPlan->PlanId()
+        : geometricToolPreviewKey_;
+    const std::uint64_t exactPreviewPlanRevision = exactSmartToolPlan != nullptr
+        ? (smartToolStroke_.IsActive() ? smartToolStroke_.Revision()
+                                       : exactSmartToolPlan->Revision())
+        : geometricToolPreviewRevision_;
     if (ShouldRenderExactPreviewGeometry(
             previewSubject, smartToolStroke_.IsActive()) &&
-        exactSmartToolPreview != nullptr && exactSmartToolPlan != nullptr &&
+        exactSmartToolPreview != nullptr &&
         exactSmartToolPreview->Succeeded())
     {
         // VF-0265 (lot 3g) : chemin chunké quand le compositeur a produit des
@@ -921,9 +999,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 voxelModelCenter_, exactSmartToolPreview->Active,
                 voxelDocumentSession_.Generation(), activeDocument
                     ? activeDocument->GetRevision() : 0U,
-                exactSmartToolPlan->PlanId(), smartToolStroke_.IsActive()
-                    ? smartToolStroke_.Revision()
-                    : exactSmartToolPlan->Revision()));
+                exactPreviewPlanId, exactPreviewPlanRevision));
         }
     }
     else if (!ShouldRetainExactPreviewOnMissingFrame(
