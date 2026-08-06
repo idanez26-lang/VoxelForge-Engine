@@ -29,13 +29,49 @@ L'ordre suit le critère retenu : **pénibilité du geste multipliée par sa
 fréquence**, pas l'ampleur du symptôme. Le crayon et le survol passent donc
 devant la rotation, qu'on utilise cent fois moins souvent.
 
-### LOT 0 — Lever le plafond de 50 000 voxels
+### LOT 0 — Lever le plafond de 50 000 voxels — **FAIT, mesuré**
 
-Remplacer le plafond sur la taille du **document** par une garde sur le **volume
-du delta** : nombre de voxels affectés par l'opération, et nombre de chunks
-touchés. Mesurer avant de choisir le seuil, ne pas l'inventer.
-Prérequis : la session LATENCE-01 déjà prête (`build\latence01`), qui dira si un
-autre coût se cache derrière.
+Mesure du 06/08/2026, `build\ergo01-lot0.csv`, phases `preview_cached_cold/warm`
+avec le cache d'overrides du LOT 4c et **sans** assemblage monolithique, comme
+l'éditeur réel.
+
+**Deux hypothèses de départ ont été réfutées par la mesure.**
+
+*Réfutation 1 — le plancher ne grimpe pas avec le document, il descend.* Pour un
+delta de 27 voxels : un million de voxels denses coûte **0,053 ms** à froid, un
+25³ en coûte **0,484**, et dix mille voxels épars en 64³ **2,283**. Le document
+le plus gros est le moins cher.
+
+*Raison, qui n'avait pas été anticipée* : le coût est dominé par le nombre de
+**faces du chunk touché**, borné par le chunk (32³), et non par la taille du
+document. Un chunk au cœur d'un modèle dense n'a presque aucune face — tout est
+masqué par les voisins ; des voxels épars en exposent le maximum. L'anomalie
+`sparse10k`, jusqu'ici différée, est donc le cas dimensionnant.
+
+*Réfutation 2 — le plafond ne mesurait pas seulement mal, il mesurait à
+l'envers.* À 50 000 voxels de document, il **laissait passer** dix mille voxels
+épars (2,3 ms) et **bloquait** un million de voxels denses (0,05 ms).
+
+**Courbe retenue** — p95 du pire scénario, à froid :
+
+| delta | froid | chaud |
+|---|---|---|
+| 27 | 4,00 ms | 0,59 ms |
+| 729 | 4,67 | 0,96 |
+| 4 913 | 6,69 | 2,22 |
+| 35 937 | **31,92** | **18,91** |
+
+Basculement entre 5 000 et 36 000 voxels de delta.
+
+**Décision** : `MaximumExactPreviewDeltaVoxelCount = 8'192`, appliqué au nombre
+de changements accumulés pendant un trait et au nombre de cellules du plan au
+survol. Le pire cas mesuré reste alors autour de 10 ms, ce qui laisse la marge du
+reste de la frame. Les gros pinceaux sont de toute façon déjà exclus en amont par
+`aggregateSmartPreview`.
+
+**Conséquence à surveiller** : la preview exacte va désormais tourner sur des
+documents où elle ne tournait **jamais** — c'est tout l'objet du lot, mais cela
+signifie que les 51 smokes exercent des chemins neufs.
 
 ### LOT 1 — Rendre la preview opaque et identique au résultat (R1)
 

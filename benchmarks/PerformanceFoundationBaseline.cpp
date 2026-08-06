@@ -452,6 +452,103 @@ void MeasureScene(
         }
     }
 
+    // 3c. ERGO-01 LOT 0 : cout de la composition AVEC le cache d'overrides par
+    //     chunk (LOT 4c), en fondu DELTA et non du document. C'est cette courbe
+    //     qui doit fixer le nouveau garde-fou : le plafond actuel porte sur la
+    //     taille du DOCUMENT (50 000 voxels), alors que le cout ne depend plus
+    //     que du volume reellement modifie.
+    //
+    //     Deux regimes sont mesures separement, et la distinction est la raison
+    //     d'etre de ce bloc :
+    //       - « froid » : cache vide, donc tous les chunks touches sont
+    //         reconstruits. C'est le premier survol d'une zone.
+    //       - « chaud » : cache deja peuple par une composition identique, donc
+    //         aucune reconstruction. C'est le cas de LOIN le plus frequent en
+    //         usage reel, un mouvement de souris qui ne change rien.
+    //     Un garde-fou choisi sur le seul regime froid serait inutilement
+    //     severe ; choisi sur le seul regime chaud, il serait dangereux.
+    {
+        VoxelDocumentMeshCache chunks;
+        if (!chunks.Synchronize(document, 1U).Succeeded) std::exit(13);
+        for (const std::int32_t radius : {1, 2, 4, 8, 16})
+        {
+            // Le pinceau est un cube plein centre : un rayon qui sort du volume
+            // produit des changements hors bornes, que ValidateVoxelChanges
+            // refuse a juste titre. On saute donc les rayons trop grands pour
+            // la scene, au lieu de tronquer le cube — un cube tronque ne
+            // representerait plus le delta qu'on veut mesurer, et faussererait
+            // la correspondance entre le rayon et le nombre de voxels.
+            if (centre - radius < 0 ||
+                centre + radius > static_cast<std::int32_t>(edge) - 1)
+            {
+                continue;
+            }
+            const auto changes = BrushChanges(document, centre, radius);
+            const std::string suffix =
+                "_r" + std::to_string(radius) +
+                "_n" + std::to_string(changes.size());
+
+            // Froid : un cache neuf par execution, remis a zero DANS la mesure
+            // car c'est bien ce cout-la que paie le premier survol.
+            Report(name, shape, voxels, edge,
+                ("preview_cached_cold" + suffix).c_str(),
+                Measure(runs,
+                    [&document, &chunks, &changes]
+                    {
+                        VoxelForge::Editor::SmartToolExactPreviewChunkCache cache;
+                        VoxelForge::Editor::SmartToolExactPreviewComposer::Source
+                            source{
+                                .Document = &document,
+                                .DocumentChunks = &chunks.Chunks(),
+                                .ModelIndex = 0U,
+                                // L'editeur reel ne fait PAS l'assemblage
+                                // monolithique quand le renderer consomme les
+                                // chunks. Le mesurer a vrai ajouterait un cout
+                                // en O(document) que le produit ne paie pas, et
+                                // rendrait le plancher faussement pessimiste.
+                                .AssembleMesh = false};
+                        source.ChunkCache = &cache;
+                        const auto composed =
+                            VoxelForge::Editor::
+                                SmartToolExactPreviewComposer::Compose(source,
+                                    std::span<const VoxelDocumentChange>{
+                                        changes});
+                        if (!composed.Succeeded()) std::exit(14);
+                    }));
+
+            // Chaud : le cache est prechauffe hors mesure, puis chaque execution
+            // recompose le MEME delta. Toutes les signatures concordent, donc
+            // aucun chunk n'est reconstruit : on mesure le plancher irreductible
+            // — parcours des changements, signatures, et copie des overrides.
+            {
+                VoxelForge::Editor::SmartToolExactPreviewChunkCache warm;
+                VoxelForge::Editor::SmartToolExactPreviewComposer::Source source{
+                    .Document = &document,
+                    .DocumentChunks = &chunks.Chunks(),
+                    .ModelIndex = 0U,
+                    .AssembleMesh = false};
+                source.ChunkCache = &warm;
+                const auto primed =
+                    VoxelForge::Editor::SmartToolExactPreviewComposer::Compose(
+                        source, std::span<const VoxelDocumentChange>{changes});
+                if (!primed.Succeeded()) std::exit(15);
+                Report(name, shape, voxels, edge,
+                    ("preview_cached_warm" + suffix).c_str(),
+                    Measure(runs,
+                        [&source, &changes]
+                        {
+                            const auto composed =
+                                VoxelForge::Editor::
+                                    SmartToolExactPreviewComposer::Compose(
+                                        source,
+                                        std::span<const VoxelDocumentChange>{
+                                            changes});
+                            if (!composed.Succeeded()) std::exit(16);
+                        }));
+            }
+        }
+    }
+
     // 4. Planification d'un placement de Stamp. Build parcourt tout le document
     //    pour relever les indices de palette occupes : le cout doit lui aussi
     //    suivre la taille du document, pour un Stamp constant.

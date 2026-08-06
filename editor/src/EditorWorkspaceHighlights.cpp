@@ -48,11 +48,35 @@ namespace VoxelForge::Editor
 
 namespace
 {
-// PERF-02e (option A, arbitrage Tony 02/08) : au-delà de ce nombre de voxels
-// dans le document, la préview « état final exact » n'est plus composée — son
-// coût est O(document) par cellule survolée. L'option B (compositeur
-// incrémental, VF-0262) restaurera l'exactitude sans plafond.
-constexpr std::uint64_t MaximumExactPreviewDocumentVoxelCount = 50'000U;
+// ERGO-01 LOT 0 (06/08/2026) : le plafond portait sur la taille du DOCUMENT
+// (50 000 voxels), parce que la composition etait alors en O(document). Depuis
+// VF-0265 et le LOT 4c elle ne l'est plus, et la mesure montre que ce plafond
+// est non seulement inutile mais CONTRE-PRODUCTIF : il compte une quantite sans
+// rapport avec le cout.
+//
+// Mesure du 06/08/2026 (build\ergo01-lot0.csv, sans assemblage monolithique,
+// comme l'editeur reel). Cout de composition pour un delta de 27 voxels :
+//   dense 1 000 000 voxels ......... 0,053 ms a froid, 0,007 ms a chaud
+//   dense    15 625 voxels ......... 0,484 ms a froid, 0,121 ms a chaud
+//   sparse10k 10 000 voxels en 64 .. 2,283 ms a froid, 0,453 ms a chaud
+// Un million de voxels denses coute donc DIX FOIS MOINS que quinze mille, et
+// quarante fois moins que dix mille epars. Le plafond a 50 000 laissait passer
+// le cas lent et bloquait le cas rapide.
+//
+// Raison : le cout est domine par le nombre de FACES du chunk touche, borne par
+// le chunk lui-meme (32 cube), et non par la taille du document. Un chunk au
+// coeur d'un modele dense n'a presque aucune face, tout etant masque par ses
+// voisins ; des voxels epars en exposent au maximum.
+//
+// La seule quantite qui gouverne le cout est donc le VOLUME DU DELTA. Courbe
+// mesuree, p95 du pire scenario, a froid :
+//     27 voxels ->  4,00 ms      729 ->  4,67 ms
+//  4 913 voxels ->  6,69 ms   35 937 -> 31,92 ms   (hors budget)
+// Le basculement est entre 5 000 et 36 000. Le seuil est pose a 8 192, ce qui
+// maintient le pire cas mesure autour de 10 ms et laisse la marge du reste de
+// la frame. Les gros pinceaux sont de toute facon deja exclus en amont par
+// aggregateSmartPreview : ce plafond ne protege que les traits qui accumulent.
+constexpr std::size_t MaximumExactPreviewDeltaVoxelCount = 8'192U;
 }
 
 SmartToolExactPreviewComposer::Source EditorWorkspace::ExactPreviewSource(
@@ -297,9 +321,14 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 SmartBrushRenderMode::DetailedCells;
             const Asset::Voxel::VoxelDocument* const document =
                 voxelDocumentSession_.ActiveDocument();
+            // ERGO-01 LOT 0 : la garde porte sur le DELTA, pas sur le
+            // document. En cours de trait c'est le nombre de changements
+            // accumules ; au survol, le nombre de cellules du plan.
+            const std::size_t exactPreviewDeltaVoxels = activeStroke != nullptr
+                ? activeStroke->ChangesView().size()
+                : plan->Cells().size();
             const bool exactPreviewAffordable = document != nullptr &&
-                document->GetVoxelCount() <=
-                    MaximumExactPreviewDocumentVoxelCount;
+                exactPreviewDeltaVoxels <= MaximumExactPreviewDeltaVoxelCount;
             if (document != nullptr)
             {
                 exactSmartToolPlan = plan;
@@ -372,8 +401,9 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             // suspended-target moments of large drags); their presentation
             // stays the aggregate outline, matching the primary stroke path.
             if (!invalidReplacementEndpoint && activeStroke != nullptr && document != nullptr &&
-                document->GetVoxelCount() <=
-                    MaximumExactPreviewDocumentVoxelCount &&
+                // ERGO-01 LOT 0 : meme garde, sur le delta accumule du trait.
+                activeStroke->ChangesView().size() <=
+                    MaximumExactPreviewDeltaVoxelCount &&
                 smartToolStrokePreviewPlan_ != nullptr &&
                 smartToolStrokePreviewPlan_->BrushResult().RenderPlan.Mode ==
                     SmartBrushRenderMode::DetailedCells)
