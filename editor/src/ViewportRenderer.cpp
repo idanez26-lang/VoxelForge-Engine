@@ -800,15 +800,51 @@ bool ViewportRenderer::ConfigureExactPreviewChunks(
     }
 
     // La preview chunkée et la preview monolithique s'excluent, comme les deux
-    // chemins du modèle. ClearExactPreviewMesh relâche aussi les overrides.
-    ClearExactPreviewMesh();
+    // chemins du modèle. On relâche donc la monolithique — mais PAS nos propres
+    // overrides : les relâcher pour les recréer aussitôt était le second poste
+    // mesuré du décrochage, 10,1 ms de médiane sur ho-exact.
+    ReleaseExactPreviewMonolithic();
+
+    // LOT 4c : on patche la table en place. Les slots dont la révision est
+    // inchangée gardent leurs tampons GPU et ne sont pas réenvoyés ; seuls les
+    // chunks que le compositeur a réellement reconstruits paient un envoi.
+    std::map<ModelChunkId, ModelChunkBuffers> retired = std::move(
+        exactPreviewChunks_);
+    exactPreviewChunks_.clear();
+    const auto releaseSlot = [this](ModelChunkBuffers& slot) noexcept
+    {
+        if (device_ != nullptr)
+        {
+            if (slot.VertexBuffer != nullptr)
+                SDL_ReleaseGPUBuffer(device_, slot.VertexBuffer);
+            if (slot.IndexBuffer != nullptr)
+                SDL_ReleaseGPUBuffer(device_, slot.IndexBuffer);
+        }
+        slot = {};
+    };
     for (const ExactPreviewChunkUpdate& update : overrides)
     {
-        ModelChunkBuffers& slot = exactPreviewChunks_[update.Id];
+        const auto previous = retired.find(update.Id);
+        ModelChunkBuffers slot{};
+        if (previous != retired.end())
+        {
+            slot = previous->second;
+            retired.erase(previous);
+        }
         if (update.Mesh == nullptr || update.Mesh->Empty())
         {
-            // Entrée vide DÉLIBÉRÉE : elle masque le chunk du modèle.
-            slot = {};
+            // Entrée vide DÉLIBÉRÉE : elle masque le chunk du modèle. Les
+            // tampons éventuellement présents n'ont plus rien à décrire.
+            releaseSlot(slot);
+            exactPreviewChunks_[update.Id] = slot;
+            continue;
+        }
+        // Même contenu qu'à l'envoi précédent : rien à faire. C'est ce test qui
+        // rend un mouvement de souris gratuit pour les chunks intacts.
+        if (update.Revision != 0U && slot.Revision == update.Revision &&
+            slot.VertexBuffer != nullptr && slot.IndexBuffer != nullptr)
+        {
+            exactPreviewChunks_[update.Id] = slot;
             continue;
         }
         if (!UploadMesh(*update.Mesh, palette, modelCenter, slot.VertexBuffer,
@@ -816,17 +852,41 @@ bool ViewportRenderer::ConfigureExactPreviewChunks(
                 "exact Smart Tool preview chunk"))
         {
             // Ne jamais laisser une preview partielle à l'écran : elle
-            // mélangerait deux états du document.
+            // mélangerait deux états du document. Les slots encore en attente
+            // de recyclage doivent aussi partir, sinon ils fuiraient.
+            releaseSlot(slot);
+            for (auto& entry : retired) releaseSlot(entry.second);
             ReleaseExactPreviewChunks();
             return false;
         }
+        slot.Revision = update.Revision;
+        exactPreviewChunks_[update.Id] = slot;
     }
+    // Chunks qui ne sont plus surimprimés : leurs tampons n'ont plus d'objet.
+    for (auto& entry : retired) releaseSlot(entry.second);
     exactPreviewChunksActive_ = true;
     exactPreviewDocumentIdentity_ = documentIdentity;
     exactPreviewDocumentRevision_ = documentRevision;
     exactPreviewChunksCompositionId_ = compositionId;
     lastError_.clear();
     return true;
+}
+
+void ViewportRenderer::ReleaseExactPreviewMonolithic() noexcept
+{
+    if (device_ != nullptr)
+    {
+        if (exactPreviewVertexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, exactPreviewVertexBuffer_);
+        if (exactPreviewIndexBuffer_ != nullptr)
+            SDL_ReleaseGPUBuffer(device_, exactPreviewIndexBuffer_);
+    }
+    exactPreviewVertexBuffer_ = nullptr;
+    exactPreviewIndexBuffer_ = nullptr;
+    exactPreviewIndexCount_ = 0U;
+    exactPreviewActive_ = false;
+    exactPreviewPlanId_ = 0U;
+    exactPreviewPlanRevision_ = 0U;
 }
 
 void ViewportRenderer::ReleaseExactPreviewChunks() noexcept

@@ -114,6 +114,11 @@ public:
     {
         ModelChunkId Id{};
         const Mesh::MeshData* Mesh = nullptr;
+        // LOT 4c : revision fournie par le compositeur. Egale a celle deja
+        // presente dans le slot, l'envoi GPU est saute — c'est tout l'objet du
+        // lot. Zero force l'envoi : un appelant qui ne renseigne pas ce champ
+        // garde donc l'ancien comportement.
+        std::uint64_t Revision = 0U;
     };
 
     [[nodiscard]] bool Upload(
@@ -269,6 +274,10 @@ private:
         std::string_view label);
     void ClearExactPreviewMesh() noexcept;
     void ReleaseExactPreviewChunks() noexcept;
+    // LOT 4c : relache les tampons de la preview MONOLITHIQUE seulement. La
+    // preview chunkee doit pouvoir prendre la main sans detruire ses propres
+    // overrides, ce que ClearExactPreviewMesh faisait indistinctement.
+    void ReleaseExactPreviewMonolithic() noexcept;
     void ReleaseModelChunks() noexcept;
     void ReleaseWholeModelBuffers() noexcept;
     void ReleaseInteractionV2MoveSource() noexcept;
@@ -288,6 +297,9 @@ private:
         SDL_GPUBuffer* VertexBuffer = nullptr;
         SDL_GPUBuffer* IndexBuffer = nullptr;
         std::uint32_t IndexCount = 0U;
+        // LOT 4c : revision du CONTENU envoye dans ce slot. Zero signifie
+        // « jamais envoye ». Sert uniquement aux overrides de preview.
+        std::uint64_t Revision = 0U;
     };
 
     SDL_GPUBuffer* vertexBuffer_ = nullptr;

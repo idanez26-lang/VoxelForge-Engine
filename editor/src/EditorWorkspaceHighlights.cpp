@@ -819,7 +819,12 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 overrides.push_back({
                     ViewportRenderer::ModelChunkId{
                         chunk.Key.X, chunk.Key.Y, chunk.Key.Z},
-                    &chunk.Mesh});
+                    &chunk.Mesh,
+                    // LOT 4c : revision du contenu. Le renderer saute l'envoi
+                    // GPU des chunks dont elle n'a pas bouge. Vaut zero quand le
+                    // compositeur tourne sans cache, ce qui force l'envoi et
+                    // preserve donc l'ancien comportement.
+                    chunk.Revision});
             }
             presented = viewportRenderer_.ConfigureExactPreviewChunks(
                 overrides, exactSmartToolPreview->Palette, voxelModelCenter_,
