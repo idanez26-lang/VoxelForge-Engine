@@ -793,9 +793,41 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             else if (renderPlan.Mode == SmartBrushRenderMode::AggregateBox)
                 brushAggregatePreview = VoxelBoxBounds{
                     renderPlan.Bounds.Minimum, renderPlan.Bounds.Maximum};
+            // ERGO-01 LOT 1b : combler le TROU DE PRESENTATION. En mode
+            // DetailedCells, si le delta accumule depasse
+            // MaximumExactPreviewDeltaVoxelCount, la preview exacte est
+            // renoncee — et rien ne la remplacait : ni maillage exact, ni
+            // fantomes (vides plus haut), ni agregat (pose seulement pour les
+            // modes agreges). L'utilisateur dessinait donc a l'aveugle sur les
+            // traits longs. On presente au moins l'enveloppe du plan, ce qui
+            // respecte la regle « montrer ce qui va changer » a la precision
+            // pres, au lieu de ne rien montrer du tout.
+            else if (exactSmartToolPreview == nullptr &&
+                // Face + Add pendant un trait presente DEJA des fantomes par
+                // cellule (faceAddPlanGhostPresentation) : y ajouter l'enveloppe
+                // agregee serait la double presentation que la regle interdit.
+                !faceAddPlanGhostPresentation &&
+                renderPlan.Bounds.Minimum.X <= renderPlan.Bounds.Maximum.X &&
+                renderPlan.Bounds.Minimum.Y <= renderPlan.Bounds.Maximum.Y &&
+                renderPlan.Bounds.Minimum.Z <= renderPlan.Bounds.Maximum.Z)
+            {
+                // SmartBrushBounds ne porte pas de drapeau de validite : on
+                // verifie donc que la boite n'est pas vide composante par
+                // composante, plutot que de supposer.
+                brushAggregatePreview = VoxelBoxBounds{
+                    renderPlan.Bounds.Minimum, renderPlan.Bounds.Maximum};
+            }
         }
     }
-    if (exactSmartToolPreview != nullptr && exactSmartToolPreview->Succeeded())
+    // ERGO-01 LOT 1a : cette suppression doit etre conditionnee au RENDU de la
+    // preview exacte, pas seulement a son CALCUL. Sans le predicat
+    // ShouldRenderExactPreviewGeometry, le cas « crayon un voxel hors trait »
+    // calculait la preview, ne la rendait pas, et supprimait quand meme le
+    // surlignage de survol : l'utilisateur perdait son repere sans rien gagner.
+    // La condition est desormais exactement celle du bloc de presentation.
+    if (ShouldRenderExactPreviewGeometry(
+            previewSubject, smartToolStroke_.IsActive()) &&
+        exactSmartToolPreview != nullptr && exactSmartToolPreview->Succeeded())
     {
         // The exact final-state mesh replaces the base model for this frame;
         // legacy hover/selection highlights would otherwise falsely describe

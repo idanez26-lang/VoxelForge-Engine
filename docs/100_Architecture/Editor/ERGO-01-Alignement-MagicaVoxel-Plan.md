@@ -73,17 +73,86 @@ reste de la frame. Les gros pinceaux sont de toute façon déjà exclus en amont
 documents où elle ne tournait **jamais** — c'est tout l'objet du lot, mais cela
 signifie que les 51 smokes exercent des chemins neufs.
 
-### LOT 1 — Rendre la preview opaque et identique au résultat (R1)
+**VALIDÉ visuellement par Tony le 06/08/2026**, binaire `build\ergo01`. Et le lot
+a corrigé un **second défaut, non anticipé**, que Tony a signalé juste avant de
+tester : sur un 64³, les voxels posés en maintenant le clic n'apparaissaient
+**qu'au relâchement**.
 
-Aujourd'hui deux mécanismes coexistent : les `GhostVoxel` **translucides** avec
-alpha (`SmartPreviewEngine`, `smartBrushGhostPreview_`) et la **preview exacte**
-en surimpression de chunks. R1 dit qu'il n'en faut qu'un, opaque.
+Mécanisme : pendant un trait, les voxels ne sont pas écrits dans le document — ils
+s'accumulent en attente dans `SmartToolStroke`, et c'est la **preview exacte** qui
+les affiche ; le document n'est muté qu'au commit. L'ancien plafond rendait
+`exactPreviewAffordable` toujours faux sur un 64³, la branche appelait
+`smartToolExactPreviewCache_.Clear()`, et il n'y avait donc **rien à voir** avant
+le relâchement. La garde sur le delta rétablit l'affichage en direct.
 
-- Faire de la preview exacte la source unique de « ce qui va changer ».
-- Retirer le chemin translucide quand la preview exacte est disponible.
-- Vérifier l'égalité preview / résultat commité, comme MagicaVoxel : c'est
-  testable automatiquement, et le test d'équivalence du LOT 4c fournit déjà le
-  patron.
+**Leçon de méthode, à retenir pour toute la mission.** Nos 149 tests vérifient
+l'état du document après commit ; les 51 smokes vérifient que l'éditeur ne casse
+pas. **Aucun ne vérifie qu'on voit quelque chose pendant le geste.** Ce défaut
+était donc invisible à toute la suite de tests, et seule la main de Tony pouvait
+le trouver. Les lots suivants portent tous sur ce qui est *affiché* : leur
+validation sera visuelle par construction, et il ne faut pas s'attendre à ce que
+les tests la remplacent.
+
+### LOT 1 — **prémisse réfutée**, remplacé par deux correctifs réels
+
+Le lot était écrit ainsi : « deux mécanismes coexistent, les `GhostVoxel`
+translucides et la preview exacte ; il n'en faut qu'un, opaque ». **La lecture du
+code réfute cette prémisse sur trois points.**
+
+1. Les canaux `brushPreview`, `brushOccupiedPreview`, `brushAggregatePreview` et
+   `brushAggregateSpherePreview` **ne sont pas translucides**. Ce sont des
+   contours filaires en alpha 1,0 (`ViewportRenderer.cpp:378-385`), tirés avec
+   `pipeline_`, dont le blending n'est **jamais** activé.
+2. `smartBrushPreview` reçoit un alpha de **1,0**, pas 0,5
+   (`SmartPreviewEngine.cpp:100-104`, verrouillé par
+   `SmartPreviewEngineTests.cpp:85`). Les valeurs 0,5 vivent dans
+   `SmartBrushPreviewResolver` et `LegacySmartBrushPreview`, qu'**aucun chemin
+   d'exécution n'appelle** — seulement des tests.
+3. Les cinq canaux sont **déjà mutuellement exclusifs** avec la preview exacte :
+   `aggregateSmartPreview` et `faceAddPlanGhostPresentation` laissent tous deux
+   `exactSmartToolPreview` à `nullptr`. **Aucune double présentation n'existe.**
+
+La seule translucidité réelle restante est celle des tampons de stamps
+(α = 0,52, `Preview/VoxelPreview.cpp:75`), qui n'entre pas par
+`ConfigureHighlights` et ne concerne pas le crayon. **Hors périmètre.**
+
+Le lot 1 tel qu'écrit était donc un **no-op**. Il est remplacé par les deux
+défauts réels que la cartographie a mis au jour.
+
+#### LOT 1a — la suppression des surlignages ignorait le prédicat de rendu
+
+Le bloc qui efface `hovered`, `selected` et les deux bornes de sélection était
+conditionné au **calcul** de la preview exacte, pas à son **rendu** : il manquait
+`ShouldRenderExactPreviewGeometry(previewSubject, strokeActive)`. Conséquence
+visible : sur un crayon un voxel **hors trait**, la preview était calculée, non
+rendue, et le surlignage de survol supprimé quand même — l'utilisateur perdait
+son repère sans rien gagner. La condition est désormais exactement celle du bloc
+de présentation.
+
+#### LOT 1b — le trou de présentation au-delà du plafond de delta
+
+En mode `DetailedCells`, si le delta accumulé dépasse
+`MaximumExactPreviewDeltaVoxelCount`, la preview exacte est abandonnée — et
+**rien ne la remplaçait** : ni maillage exact, ni fantômes (vidés en amont), ni
+agrégat (posé uniquement pour les modes agrégés). Sur un trait long,
+l'utilisateur **dessinait à l'aveugle**.
+
+C'est le seul endroit où la règle R1 était violée **par défaut** plutôt que par
+excès. On présente désormais au moins l'enveloppe du plan, ce qui respecte
+« montrer ce qui va changer » à la précision près.
+
+Deux gardes explicites, toutes deux trouvées en relisant le correctif :
+`SmartBrushBounds` ne portant pas de drapeau de validité, la boîte est vérifiée
+composante par composante ; et le cas **Face + Add pendant un trait** est exclu,
+car il présente déjà des fantômes par cellule — y ajouter l'enveloppe serait la
+double présentation que la règle interdit.
+
+#### Ce qu'il reste à faire pour R1, et qui n'est pas dans ce lot
+
+Rien sur la translucidité : il n'y en a pas. La vérification automatique
+« preview identique au résultat commité » reste souhaitable et le test
+d'équivalence du LOT 4c en fournit le patron, mais elle porte sur le
+**compositeur**, déjà couvert, et non sur la présentation.
 
 ### LOT 2 — L'ancre rouge d'un voxel (R4)
 
