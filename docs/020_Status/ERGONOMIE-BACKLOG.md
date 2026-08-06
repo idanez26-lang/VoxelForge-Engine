@@ -92,9 +92,9 @@ outils par région ne montrent **que l'ancre rouge** : rien n'indique quels voxe
 vont disparaître. Lecture cohérente : le moteur ne sait dessiner que de la
 géométrie positive.
 
-À arbitrer par Tony : c'est une limite de MagicaVoxel autant qu'un choix. Copier
-ce comportement est défendable au nom de la cohérence, mais prévisualiser une
-suppression est un vrai progrès d'ergonomie. Ne pas trancher par mimétisme.
+**ARBITRÉ par Tony le 06/08/2026 : on fait comme MagicaVoxel.** La gomme et les
+outils par région n'affichent **aucune preview**, seulement l'ancre. La question
+est close, ne pas la rouvrir sans nouvelle demande de sa part.
 
 ### R4 — Deux surcouches d'interface, couleurs fixes, toujours au-dessus
 

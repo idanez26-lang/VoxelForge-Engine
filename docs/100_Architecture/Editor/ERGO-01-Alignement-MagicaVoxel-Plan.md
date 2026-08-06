@@ -93,13 +93,40 @@ Coordonnées du voxel survolé, offset `x/y/z` pendant un déplacement, `angle:`
 pendant une rotation. Simple, peu coûteux, et ça enlève beaucoup d'incertitude
 au geste.
 
-## Ce qui demande une décision de Tony
+## Arbitrages rendus
 
-**R3 — l'ajout se prévisualise, le retrait non.** MagicaVoxel ne montre rien
-pour la gomme ni pour les outils par région. C'est autant une limite de son
-moteur qu'un choix d'ergonomie. Copier ce comportement est défendable au nom de
-la cohérence ; prévisualiser une suppression serait un progrès réel. **À ne pas
-trancher par mimétisme.**
+**R3 — gomme et outils par région : aucune preview.** Tranché par Tony le
+06/08/2026 : on fait comme MagicaVoxel. Seule l'ancre est affichée. Le lot 3
+inclut donc le **retrait** de toute preview de suppression existante, et non son
+amélioration.
+
+## Ce que la mesure de latence a changé au plan
+
+Session LATENCE-01 du 06/08/2026, 3 879 frames :
+**`retard surlignage 0.00 frames en moyenne, max 0`**.
+
+La coalescence du lot 7b est **innocente** : elle ne diffère jamais rien. Elle ne
+doit pas être retirée. Et la sonde mesurait le report de la *résolution*, alors
+que la latence ressentie est l'**âge de l'échantillon de pointeur** plus la
+latence de **présentation** — deux quantités différentes.
+
+Explication qui reste, et qui colle à tout l'observé : le curseur visible est le
+**curseur matériel du système**, qui n'attend ni notre frame ni le vsync. Notre
+surlignage est dessiné dans une frame présentée à la synchronisation suivante,
+soit deux à trois frames plus tard. Aucun compteur ne le montre parce que rien
+n'est lent : c'est la chaîne d'affichage. Cela explique que le symptôme soit
+**identique en 32³ et en 64³**, qu'il **survive** à la suppression de 24 ms de
+travail, et qu'il se voie surtout au survol **rapide**.
+
+MagicaVoxel subit la même physique. La différence est ce qu'il **affiche** : une
+petite face opaque, discrète, dont le retard se remarque à peine, là où notre gros
+volume fantôme translucide le rend criant.
+
+**Conséquence pour le plan : l'alignement EST probablement le correctif de la
+désynchronisation ressentie**, pas un chantier qui s'ajoute à lui. Le LOT 2
+(ancre d'un voxel) devient donc prioritaire au même titre que le LOT 1, et sa
+validation est visuelle et tactile — c'est Tony qui dira si ça se sent, aucune
+sonde ne le dira.
 
 ## Ce qui reste à observer avant de planifier plus loin
 
