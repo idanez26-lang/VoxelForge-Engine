@@ -588,6 +588,65 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
             boxPreview = VoxelBoxService::CalculateBounds(
                 *document, 0U, *voxelBoxInteraction_.CornerA(),
                 *voxelBoxInteraction_.CornerB());
+            // ERGO-01 LOT 2 : la boite presente l'etat final exact. L'expansion
+            // vient de VoxelBoxService::CalculateChanges, extraite d'Apply pour
+            // que preview et commit partagent une seule source de verite.
+            //
+            // MaximumExtentPerAxis vaut 64, donc une boite peut atteindre
+            // 262 144 voxels, soit trente-deux fois le plafond de composition.
+            // Le contour filaire est donc CONSERVE au-dela : c'est la
+            // presentation de repli, et il ne faut pas repeter le trou du
+            // LOT 1b.
+            if (boxPreview)
+            {
+                const auto boxColor = paletteService_.ActiveColor();
+                const std::uint8_t boxPalette = static_cast<std::uint8_t>(
+                    boxColor ? boxColor->Index : 0U);
+                std::uint64_t boxKey = 0x9E3779B97F4A7C15ULL;
+                const auto mixBox = [&boxKey](const std::uint64_t value) noexcept
+                {
+                    boxKey ^= value;
+                    boxKey *= 0xFF51AFD7ED558CCDULL;
+                    boxKey ^= boxKey >> 29;
+                };
+                mixBox(3U); // discriminant d'outil : boite
+                mixBox(document->GetRevision());
+                mixBox(boxPalette);
+                for (const std::int32_t component : {
+                        boxPreview->Minimum.X, boxPreview->Minimum.Y,
+                        boxPreview->Minimum.Z, boxPreview->Maximum.X,
+                        boxPreview->Maximum.Y, boxPreview->Maximum.Z})
+                {
+                    mixBox(static_cast<std::uint64_t>(
+                        static_cast<std::uint32_t>(component)));
+                }
+                const std::size_t boxVolume =
+                    static_cast<std::size_t>(
+                        boxPreview->Maximum.X - boxPreview->Minimum.X + 1) *
+                    static_cast<std::size_t>(
+                        boxPreview->Maximum.Y - boxPreview->Minimum.Y + 1) *
+                    static_cast<std::size_t>(
+                        boxPreview->Maximum.Z - boxPreview->Minimum.Z + 1);
+                if (boxVolume <= MaximumExactPreviewDeltaVoxelCount)
+                {
+                    if (boxKey != geometricToolPreviewKey_)
+                    {
+                        const auto changes = VoxelBoxService::CalculateChanges(
+                            *document, 0U, *boxPreview, boxPalette);
+                        geometricToolPreviewMesh_ =
+                            SmartToolExactPreviewComposer::Compose(
+                                ExactPreviewSource(*document), changes);
+                        ++exactPreviewCompositionOrdinal_;
+                        geometricToolPreviewKey_ = boxKey;
+                        ++geometricToolPreviewRevision_;
+                    }
+                    if (geometricToolPreviewMesh_.Succeeded())
+                    {
+                        exactSmartToolPreview = &geometricToolPreviewMesh_;
+                        boxPreview.reset();
+                    }
+                }
+            }
         }
     }
     else if (voxelToolState_.IsLineActive())
@@ -684,6 +743,85 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 VoxelSphereService::CalculateRadius(
                     *voxelSphereInteraction_.Center(),
                     *voxelSphereInteraction_.RadiusPoint())};
+            // ERGO-01 LOT 2 : la sphere presente l'etat final exact, comme la
+            // ligne. Difference notable avec elle : le volume est CUBIQUE en
+            // rayon, donc le plafond de delta se declenche pour de vrai — une
+            // sphere de rayon 13 depasse deja 8 192 voxels. Dans ce cas on
+            // CONSERVE le contour filaire des trois cercles : il ne faut pas
+            // repeter le trou de presentation corrige au LOT 1b.
+            const auto* const sphereDocument =
+                voxelDocumentSession_.ActiveDocument();
+            if (sphereDocument != nullptr)
+            {
+                std::vector<Asset::Voxel::VoxelPosition> spherePositions;
+                try
+                {
+                    spherePositions = VoxelSphereService::CalculatePositions(
+                        *sphereDocument, 0U,
+                        *voxelSphereInteraction_.Center(),
+                        *voxelSphereInteraction_.RadiusPoint());
+                }
+                catch (...)
+                {
+                    spherePositions.clear();
+                }
+                // Meme source de couleur que l'Apply reel, et meme filtre : le
+                // service SAUTE les voxels deja occupes.
+                const auto sphereColor = paletteService_.ActiveColor();
+                const std::uint8_t spherePalette = static_cast<std::uint8_t>(
+                    sphereColor ? sphereColor->Index : 0U);
+                std::uint64_t sphereKey = 0x9E3779B97F4A7C15ULL;
+                const auto mixSphere =
+                    [&sphereKey](const std::uint64_t value) noexcept
+                {
+                    sphereKey ^= value;
+                    sphereKey *= 0xFF51AFD7ED558CCDULL;
+                    sphereKey ^= sphereKey >> 29;
+                };
+                mixSphere(2U); // discriminant d'outil : sphere
+                mixSphere(sphereDocument->GetRevision());
+                mixSphere(spherePalette);
+                mixSphere(spherePositions.size());
+                for (const Asset::Voxel::VoxelPosition& position :
+                     spherePositions)
+                {
+                    mixSphere(static_cast<std::uint64_t>(
+                        static_cast<std::uint32_t>(position.X)));
+                    mixSphere(static_cast<std::uint64_t>(
+                        static_cast<std::uint32_t>(position.Y)));
+                    mixSphere(static_cast<std::uint64_t>(
+                        static_cast<std::uint32_t>(position.Z)));
+                }
+                if (!spherePositions.empty() &&
+                    spherePositions.size() <=
+                        MaximumExactPreviewDeltaVoxelCount)
+                {
+                    if (sphereKey != geometricToolPreviewKey_)
+                    {
+                        std::vector<Asset::Voxel::VoxelDocumentChange> changes;
+                        changes.reserve(spherePositions.size());
+                        for (const Asset::Voxel::VoxelPosition& position :
+                             spherePositions)
+                        {
+                            if (sphereDocument->HasVoxel(position, 0U))
+                                continue;
+                            changes.push_back({0U, position, false, 0U, true,
+                                spherePalette});
+                        }
+                        geometricToolPreviewMesh_ =
+                            SmartToolExactPreviewComposer::Compose(
+                                ExactPreviewSource(*sphereDocument), changes);
+                        ++exactPreviewCompositionOrdinal_;
+                        geometricToolPreviewKey_ = sphereKey;
+                        ++geometricToolPreviewRevision_;
+                    }
+                    if (geometricToolPreviewMesh_.Succeeded())
+                    {
+                        exactSmartToolPreview = &geometricToolPreviewMesh_;
+                        spherePreview.reset();
+                    }
+                }
+            }
         }
     }
     else

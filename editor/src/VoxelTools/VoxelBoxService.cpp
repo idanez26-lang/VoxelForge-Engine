@@ -68,6 +68,33 @@ std::optional<VoxelBoxBounds> VoxelBoxService::CalculateBounds(
          std::max(cornerA.Z, cornerB.Z)}};
 }
 
+std::vector<Asset::Voxel::VoxelDocumentChange>
+    VoxelBoxService::CalculateChanges(
+        const Asset::Voxel::VoxelDocument& document,
+        const std::size_t subModelIndex,
+        const VoxelBoxBounds& bounds,
+        const std::uint8_t paletteIndex)
+{
+    std::vector<VoxelChange> changes;
+    const std::size_t width =
+        static_cast<std::size_t>(bounds.Maximum.X - bounds.Minimum.X + 1);
+    const std::size_t height =
+        static_cast<std::size_t>(bounds.Maximum.Y - bounds.Minimum.Y + 1);
+    const std::size_t depth =
+        static_cast<std::size_t>(bounds.Maximum.Z - bounds.Minimum.Z + 1);
+    changes.reserve(width * height * depth);
+    for (std::int32_t z = bounds.Minimum.Z; z <= bounds.Maximum.Z; ++z)
+        for (std::int32_t y = bounds.Minimum.Y; y <= bounds.Maximum.Y; ++y)
+            for (std::int32_t x = bounds.Minimum.X; x <= bounds.Maximum.X; ++x)
+            {
+                const Asset::Voxel::VoxelPosition position{x, y, z};
+                if (!document.HasVoxel(position, subModelIndex))
+                    changes.push_back({subModelIndex, position, false, 0U, true,
+                        paletteIndex});
+            }
+    return changes;
+}
+
 VoxelBoxResult VoxelBoxService::Apply(const VoxelBoxContext& context)
 {
     if (context.Document == nullptr)
@@ -91,24 +118,8 @@ VoxelBoxResult VoxelBoxService::Apply(const VoxelBoxContext& context)
     std::vector<VoxelChange> changes;
     try
     {
-        const std::size_t width = static_cast<std::size_t>(
-            bounds->Maximum.X - bounds->Minimum.X + 1);
-        const std::size_t height = static_cast<std::size_t>(
-            bounds->Maximum.Y - bounds->Minimum.Y + 1);
-        const std::size_t depth = static_cast<std::size_t>(
-            bounds->Maximum.Z - bounds->Minimum.Z + 1);
-        changes.reserve(width * height * depth);
-        const auto paletteIndex = static_cast<std::uint8_t>(context.PaletteIndex);
-        for (std::int32_t z = bounds->Minimum.Z; z <= bounds->Maximum.Z; ++z)
-            for (std::int32_t y = bounds->Minimum.Y; y <= bounds->Maximum.Y; ++y)
-                for (std::int32_t x = bounds->Minimum.X; x <= bounds->Maximum.X; ++x)
-                {
-                    const Asset::Voxel::VoxelPosition position{x, y, z};
-                    if (!document.HasVoxel(position, context.SubModelIndex))
-                        changes.push_back({
-                            context.SubModelIndex, position,
-                            false, 0U, true, paletteIndex});
-                }
+        changes = CalculateChanges(document, context.SubModelIndex, *bounds,
+            static_cast<std::uint8_t>(context.PaletteIndex));
     }
     catch (const std::bad_alloc&)
     {

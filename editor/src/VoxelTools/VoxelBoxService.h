@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace VoxelForge::Editor
 {
@@ -66,6 +67,19 @@ public:
         std::size_t subModelIndex,
         Asset::Voxel::VoxelPosition cornerA,
         Asset::Voxel::VoxelPosition cornerB) noexcept;
+    // ERGO-01 LOT 2 : l'expansion boite -> voxels etait ENFOUIE au milieu
+    // d'Apply, entre les gardes de session et l'appel a l'historique. La preview
+    // exacte de la boite etait donc impossible sans dupliquer cette boucle — et
+    // une duplication aurait derive tot ou tard, faisant mentir la preview.
+    // L'expansion est extraite ici : Apply et la preview partagent desormais
+    // une seule source de verite. Les voxels deja occupes sont SAUTES, comme
+    // avant.
+    [[nodiscard]] static std::vector<Asset::Voxel::VoxelDocumentChange>
+        CalculateChanges(
+            const Asset::Voxel::VoxelDocument& document,
+            std::size_t subModelIndex,
+            const VoxelBoxBounds& bounds,
+            std::uint8_t paletteIndex);
     [[nodiscard]] static VoxelBoxResult Apply(const VoxelBoxContext& context);
 };
 
