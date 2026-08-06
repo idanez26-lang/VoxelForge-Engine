@@ -126,8 +126,27 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     // pour les appels post-rendu d'aujourd'hui.
     if (highlightsResolvedFrame_ == drawFrameIndex_)
     {
+        // LATENCE-01 : on retient la frame de la PREMIERE demande differee.
+        // C'est elle qui mesure le retard reellement subi ; les demandes
+        // suivantes de la meme frame ne l'aggravent pas.
+        if (!highlightsUpdatePending_)
+            highlightsDeferredAtFrame_ = drawFrameIndex_;
         highlightsUpdatePending_ = true;
         return;
+    }
+    // LATENCE-01 : combien de frames se sont ecoulees entre la demande et cette
+    // resolution. Zero est l'objectif ; tout ce qui est au-dessus est du retard
+    // que l'utilisateur voit comme un curseur qui prend de l'avance sur le
+    // surlignage. Le debit ne le montre pas : la session du 06/08 tenait 60 FPS
+    // avec 0,3 % de frames hors budget, et la desynchro ressentie etait la meme.
+    if (highlightsUpdatePending_ && drawFrameIndex_ >= highlightsDeferredAtFrame_)
+    {
+        frameProbe_.NoteHighlightLatency(
+            drawFrameIndex_ - highlightsDeferredAtFrame_);
+    }
+    else
+    {
+        frameProbe_.NoteHighlightLatency(0U);
     }
     highlightsResolvedFrame_ = drawFrameIndex_;
     highlightsUpdatePending_ = false;

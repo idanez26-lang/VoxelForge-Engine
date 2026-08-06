@@ -109,9 +109,23 @@ public:
         // Vrai si au moins une frame a depasse la portee de l'histogramme : les
         // percentiles restent valides, mais P99 peut etre sature a Worst.
         bool Saturated = false;
+        // LATENCE-01 : retard du surlignage sur le pointeur, en FRAMES.
+        // Le debit ne dit rien de ce retard : une session peut tenir 60 FPS et
+        // afficher un surlignage vieux de trois frames, ce que l'utilisateur
+        // ressent comme une desynchronisation du curseur. Mesure faite le
+        // 06/08/2026 : 0,3 % de frames hors budget, et pourtant la desynchro
+        // ressentie est inchangee — d'ou cette sonde.
+        std::uint64_t HighlightLatencySamples = 0U;
+        double HighlightLatencyMeanFrames = 0.0;
+        std::uint64_t HighlightLatencyMaxFrames = 0U;
     };
 
     void Add(EditorFrameProbeSlot slot, double milliseconds) noexcept;
+
+    // LATENCE-01 : nombre de frames ecoulees entre la demande de resolution du
+    // surlignage et sa resolution effective. Zero signifie « resolu dans la
+    // frame meme », ce qui est l'objectif.
+    void NoteHighlightLatency(std::uint64_t frames) noexcept;
 
     // Closes the frame started at the previous boundary and starts the next
     // one. `nowMilliseconds` is a monotonic timestamp supplied by the caller.
@@ -150,6 +164,9 @@ private:
     std::uint64_t budgetFrameCount_ = 0U;
     std::uint64_t overBudgetCount_ = 0U;
     std::uint64_t missedVsyncCount_ = 0U;
+    std::uint64_t highlightLatencySamples_ = 0U;
+    std::uint64_t highlightLatencyTotal_ = 0U;
+    std::uint64_t highlightLatencyMax_ = 0U;
     double budgetWorst_ = 0.0;
     bool budgetSaturated_ = false;
 };

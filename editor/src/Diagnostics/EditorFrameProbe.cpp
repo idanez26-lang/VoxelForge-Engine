@@ -44,6 +44,13 @@ void EditorFrameProbe::Add(
     ++stats.Calls;
 }
 
+void EditorFrameProbe::NoteHighlightLatency(const std::uint64_t frames) noexcept
+{
+    ++highlightLatencySamples_;
+    highlightLatencyTotal_ += frames;
+    if (frames > highlightLatencyMax_) highlightLatencyMax_ = frames;
+}
+
 std::optional<std::string> EditorFrameProbe::FrameBoundary(
     const double nowMilliseconds)
 {
@@ -130,6 +137,14 @@ EditorFrameProbe::FrameBudgetReport EditorFrameProbe::BudgetReport()
     report.BudgetMilliseconds = TargetFrameMilliseconds;
     report.Worst = budgetWorst_;
     report.Saturated = budgetSaturated_;
+    report.HighlightLatencySamples = highlightLatencySamples_;
+    report.HighlightLatencyMaxFrames = highlightLatencyMax_;
+    if (highlightLatencySamples_ != 0U)
+    {
+        report.HighlightLatencyMeanFrames =
+            static_cast<double>(highlightLatencyTotal_) /
+            static_cast<double>(highlightLatencySamples_);
+    }
     if (budgetFrameCount_ != 0U)
     {
         report.OverBudgetRatio = static_cast<double>(overBudgetCount_) /
@@ -159,6 +174,12 @@ std::string EditorFrameProbe::BuildBudgetSummary() const
          << std::setprecision(1) << report.OverBudgetRatio * 100.0 << " %)"
          << " | vsync rate " << report.MissedVsyncCount << " ("
          << report.MissedVsyncRatio * 100.0 << " %)";
+    if (report.HighlightLatencySamples != 0U)
+    {
+        line << " | retard surlignage " << std::setprecision(2)
+             << report.HighlightLatencyMeanFrames << " frames en moyenne, max "
+             << report.HighlightLatencyMaxFrames;
+    }
     if (report.Saturated) line << " | p99 sature (frames > 64 ms)";
     return line.str();
 }
@@ -169,6 +190,9 @@ void EditorFrameProbe::ResetBudget() noexcept
     budgetFrameCount_ = 0U;
     overBudgetCount_ = 0U;
     missedVsyncCount_ = 0U;
+    highlightLatencySamples_ = 0U;
+    highlightLatencyTotal_ = 0U;
+    highlightLatencyMax_ = 0U;
     budgetWorst_ = 0.0;
     budgetSaturated_ = false;
 }

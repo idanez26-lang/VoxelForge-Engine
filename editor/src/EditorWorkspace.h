@@ -641,6 +641,8 @@ private:
     // Mutable : ExactPreviewSource est const, et ce cache ne fait pas partie
     // de l'etat observable du workspace.
     mutable SmartToolExactPreviewChunkCache exactPreviewChunkCache_;
+    // LATENCE-01 : frame de la premiere demande de resolution differee.
+    std::uint64_t highlightsDeferredAtFrame_ = 0U;
     // LOT 5 : cadence d'emission du verdict de budget 60 FPS. Membre et non
     // statique locale : les smokes instancient plusieurs workspaces, un etat
     // partage melangerait leurs mesures.
