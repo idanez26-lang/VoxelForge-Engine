@@ -294,7 +294,7 @@ ScaleVoxelSelectionResult ScaleVoxelSelectionOperation::Build(
             std::to_string(targetDimensions.Y) + "x" +
             std::to_string(targetDimensions.Z),
          {TransformSourcePolicy::RemoveSource,
-          TransformCollisionPolicy::AllowSourceOverlap},
+          TransformCollisionPolicy::MergeOverlap},
          preview.PreviewBounds()});
     if (common.Code != TransformOperationBuildCode::Ready &&
         common.Code != TransformOperationBuildCode::NoChange)

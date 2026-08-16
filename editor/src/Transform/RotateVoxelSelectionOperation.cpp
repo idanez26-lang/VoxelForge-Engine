@@ -278,7 +278,7 @@ RotateVoxelSelectionResult RotateVoxelSelectionOperation::Build(
         document, selection, documentGeneration, preview,
         {"Rotate", "Rotate Voxels",
          {TransformSourcePolicy::RemoveSource,
-          TransformCollisionPolicy::AllowSourceOverlap},
+          TransformCollisionPolicy::MergeOverlap},
          preview.PreviewBounds()});
     if (common.Code != TransformOperationBuildCode::Ready &&
         common.Code != TransformOperationBuildCode::NoChange)

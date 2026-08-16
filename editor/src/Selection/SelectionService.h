@@ -66,6 +66,13 @@ public:
         SelectionBounds bounds,
         SelectionMode mode = SelectionMode::Replace);
     [[nodiscard]] bool Clear() noexcept;
+    // VF-UX-SELECTION-V1 (correctif) : les chemins volume posent les bornes
+    // editables ; le chemin par positions (Region) ne les touchait pas, et
+    // Transform demarrait sur des bornes perimees. Cette methode les aligne
+    // sur la selection FINALE — apres Replace, Add, Subtract ou Intersect.
+    // Retourne true si les bornes editables ont reellement change : un
+    // resserrement sans changement de positions est un changement visible.
+    bool AlignEditableBoundsToSelection() noexcept;
     void SetDocumentGeneration(std::uint64_t generation) noexcept;
     void ClearDocument() noexcept;
 

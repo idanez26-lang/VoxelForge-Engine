@@ -8,6 +8,7 @@
 // dupliqué ici (liaison interne, sans effet de bord).
 // =============================================================================
 #include "EditorWorkspace.h"
+#include "Selection/SelectionHandlePolicy.h"
 #include "EditorWorkspaceUiHelpers.h"
 #include "Layout/EditorPanelNames.h"
 #include "VoxelModelTransform.h"
@@ -1242,6 +1243,235 @@ bool EditorWorkspace::RunVoxelSelectionSmokeStep(const std::size_t frame)
             selectionService_.Count() == 2U &&
             selectionService_.Contains({0, 1, 1}) &&
             selectionService_.Contains({1, 1, 1});
+    }
+    // VF-UX-SELECTION-V1 (correctif) : tests runtime des quatre points valides
+    // par Tony — EditableBounds apres Region, clic vide par operation, drag en
+    // mode Region, contre-epreuve Box volumique.
+    else if (frame == 27U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (!document) return false;
+        bool ok = true;
+
+        // 1. Region -> Transform : EditableBounds suit la selection FINALE,
+        //    pour les quatre operations.
+        toolContext_.Selection.Mode = SelectionFamilyMode::Region;
+        toolContext_.Selection.RegionTarget = SelectionRegionTarget::Volume;
+        toolContext_.Selection.RegionCriterion =
+            SelectionRegionCriterion::Geometry;
+        const Asset::Voxel::VoxelPosition seed{0, 1, 1};
+        if (!document->GetVoxel(seed, 0U)) return false;
+        for (const SelectionMode operation : {SelectionMode::Replace,
+            SelectionMode::Add, SelectionMode::Subtract,
+            SelectionMode::Intersect})
+        {
+            static_cast<void>(ApplyRegionSelection(
+                seed, {0.0F, 1.0F, 0.0F}, operation));
+            const SelectionBounds& editable =
+                selectionService_.EditableBounds();
+            const SelectionBounds& bounds = selectionService_.Bounds();
+            ok = ok && editable == bounds &&
+                (selectionService_.Empty() || editable.Valid);
+        }
+        // Et Transform demarre reellement sur ces bornes.
+        static_cast<void>(ApplyRegionSelection(
+            seed, {0.0F, 1.0F, 0.0F}, SelectionMode::Replace));
+        ok = ok && !selectionService_.Empty() &&
+            selectionService_.EditableBounds().Valid &&
+            transformPreviewModel_.BeginPreview(*document, selectionService_,
+                voxelDocumentSession_.Generation());
+        static_cast<void>(transformPreviewModel_.CancelPreview());
+
+        // 2. Clic vide : l'operation CAPTUREE decide, pour les quatre.
+        const Asset::Voxel::VoxelPosition emptySpot{63, 63, 63};
+        if (document->GetVoxel(emptySpot, 0U)) return false;
+        //    Replace + vide -> selection vide.
+        static_cast<void>(ApplyRegionSelection(
+            seed, {0.0F, 1.0F, 0.0F}, SelectionMode::Replace));
+        static_cast<void>(ApplyRegionSelection(
+            emptySpot, {0.0F, 1.0F, 0.0F}, SelectionMode::Replace));
+        ok = ok && selectionService_.Empty();
+        //    Add + vide -> aucun changement.
+        static_cast<void>(ApplyRegionSelection(
+            seed, {0.0F, 1.0F, 0.0F}, SelectionMode::Replace));
+        const std::size_t before = selectionService_.Count();
+        static_cast<void>(ApplyRegionSelection(
+            emptySpot, {0.0F, 1.0F, 0.0F}, SelectionMode::Add));
+        ok = ok && selectionService_.Count() == before;
+        //    Subtract + vide -> aucun changement.
+        static_cast<void>(ApplyRegionSelection(
+            emptySpot, {0.0F, 1.0F, 0.0F}, SelectionMode::Subtract));
+        ok = ok && selectionService_.Count() == before;
+        //    Intersect + vide -> selection vide.
+        static_cast<void>(ApplyRegionSelection(
+            emptySpot, {0.0F, 1.0F, 0.0F}, SelectionMode::Intersect));
+        ok = ok && selectionService_.Empty();
+
+        selectionRegionSmokeChecks_ = ok;
+    }
+    else if (frame == 28U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (!document) return false;
+        bool ok = selectionRegionSmokeChecks_;
+
+        // 3. Drag en mode Region : le marquee ne demarre pas, et meme un
+        //    marquee demarre par un chemin imprevu ne committerait rien — la
+        //    garde du commit partage le meme predicat que le demarrage.
+        ok = ok && !SelectionModeStartsMarquee(SelectionFamilyMode::Region);
+        static_cast<void>(ApplyRegionSelection(
+            {0, 1, 1}, {0.0F, 1.0F, 0.0F}, SelectionMode::Replace));
+        const std::size_t regionCount = selectionService_.Count();
+        SelectionInteraction strayMarquee;
+        static_cast<void>(strayMarquee.PointerDown(
+            Asset::Voxel::VoxelPosition{0, 1, 1}, 1U,
+            SelectionMode::Replace, 0.0F, 0.0F));
+        static_cast<void>(strayMarquee.PointerMove(64.0F, 64.0F,
+            Asset::Voxel::VoxelPosition{3, 3, 3}));
+        const SelectionPointerRelease strayRelease = strayMarquee.PointerUp();
+        const bool commitAllowed = strayRelease.WasDrag &&
+            strayRelease.Bounds.has_value() &&
+            strayRelease.Mode == SelectionInteractionMode::Creating &&
+            SelectionModeStartsMarquee(SelectionFamilyMode::Region);
+        ok = ok && !commitAllowed &&
+            selectionService_.Count() == regionCount;
+
+        // 4. Contre-epreuve Box : un volume 3D N'EST PAS aplati.
+        // ApplySortedVolume rend false si l'ensemble ne change pas ; la
+        // region precedente peut couvrir exactement les memes voxels. On
+        // repart d'une selection vide pour que le Replace soit un changement.
+        static_cast<void>(selectionService_.Clear());
+        toolContext_.Selection.Mode = SelectionFamilyMode::Box;
+        const SelectionBounds volume =
+            SelectionBounds::FromCorners({0, 0, 0}, {2, 2, 2});
+        ok = ok && ApplySelectionBounds(
+            ResolveSelectionGestureBounds(SelectionFamilyMode::Box, volume,
+                selectionRectAxis_, selectionRectLayer_),
+            SelectionMode::Replace);
+        const SelectionBounds& applied = selectionService_.EditableBounds();
+        ok = ok && applied.Valid &&
+            applied.Maximum.X - applied.Minimum.X == 2 &&
+            applied.Maximum.Y - applied.Minimum.Y == 2 &&
+            applied.Maximum.Z - applied.Minimum.Z == 2;
+
+        selectionSystemSmokePassed_ = selectionSystemSmokePassed_ && ok;
+        static_cast<void>(selectionService_.Clear());
+        ForceVoxelHighlightsResolve();
+    }
+    // Correctif final (arbitrage runtime) : Region gagne sur les poignees et
+    // le deplacement de boite, et un changement de bornes SEUL est signale.
+    else if (frame == 29U)
+    {
+        const Asset::Voxel::VoxelDocument* document =
+            voxelDocumentSession_.ActiveDocument();
+        if (!document) return false;
+        bool ok = true;
+        voxelToolState_.SetActiveTool(ActiveVoxelTool::Selection);
+
+        // 1. Selection existante, puis Region + Subtract : le MEME membre
+        //    d'arbitrage que le viewport doit neutraliser poignee ET interieur.
+        // Le cache de volume refuse une evaluation aux MEMES bornes que la
+        // precedente : chaque setup de cette frame utilise des bornes
+        // distinctes de l'evaluation qui la precede.
+        // Le modele de la fixture fait 3x3x3 : des bornes plus larges sont
+        // CLAMPEES, et le cache a une entree refuse deux evaluations
+        // consecutives identiques. Chaque setup utilise donc une boite
+        // reellement distincte APRES clamp.
+        ok = ok && ApplySelectionBounds(
+            SelectionBounds::FromCorners({0, 0, 0}, {2, 2, 1}),
+            SelectionMode::Replace);
+        const std::size_t beforeSubtract = selectionService_.Count();
+        ok = ok && beforeSubtract > 0U;
+        toolContext_.Selection.Mode = SelectionFamilyMode::Region;
+        toolContext_.Selection.RegionTarget = SelectionRegionTarget::Volume;
+        ok = ok &&
+            ResolveSelectionPointerArbitration(true, true) ==
+                SelectionPointerTarget::Exterior &&
+            ResolveSelectionPointerArbitration(false, true) ==
+                SelectionPointerTarget::Exterior;
+        // Le clic interieur atteint donc le resolveur : Subtract retire la
+        // region cliquee, sans ResizingFace ni MovingBox.
+        const Asset::Voxel::VoxelPosition inside{0, 1, 1};
+        if (!document->GetVoxel(inside, 0U)) return false;
+        ok = ok && ApplyRegionSelection(
+            inside, {0.0F, 1.0F, 0.0F}, SelectionMode::Subtract);
+        ok = ok && selectionService_.Count() < beforeSubtract &&
+            selectionInteraction_.Mode() == SelectionInteractionMode::Idle &&
+            selectionService_.EditableBounds() == selectionService_.Bounds();
+
+        // 1 bis. Intersect cible lui aussi la selection existante.
+        static_cast<void>(ApplySelectionBounds(
+            SelectionBounds::FromCorners({0, 0, 1}, {2, 2, 2}),
+            SelectionMode::Replace));
+        // Le retour peut legitimement etre false : si la selection-boite est
+        // deja un sous-ensemble de la region et que les bornes coincident,
+        // rien ne change. Ce qui est exige : le resolveur s'est execute, la
+        // selection reste coherente, et aucune interaction de boite n'a
+        // demarre.
+        const std::size_t beforeIntersect = selectionService_.Count();
+        static_cast<void>(ApplyRegionSelection(
+            inside, {0.0F, 1.0F, 0.0F}, SelectionMode::Intersect));
+        ok = ok && !selectionService_.Empty() &&
+            selectionService_.Count() <= beforeIntersect &&
+            selectionService_.Contains(inside) &&
+            selectionService_.EditableBounds() == selectionService_.Bounds() &&
+            selectionInteraction_.Mode() == SelectionInteractionMode::Idle;
+
+        // 2. Contre-epreuve Box/Rect : poignees et interieur fonctionnels.
+        toolContext_.Selection.Mode = SelectionFamilyMode::Box;
+        ok = ok &&
+            ResolveSelectionPointerArbitration(true, true) ==
+                SelectionPointerTarget::Handle &&
+            ResolveSelectionPointerArbitration(false, true) ==
+                SelectionPointerTarget::Interior;
+        toolContext_.Selection.Mode = SelectionFamilyMode::Rect;
+        ok = ok && ResolveSelectionPointerArbitration(true, false) ==
+            SelectionPointerTarget::Handle;
+        // Et la capture reelle demarre toujours en Box.
+        toolContext_.Selection.Mode = SelectionFamilyMode::Box;
+        static_cast<void>(ApplySelectionBounds(
+            SelectionBounds::FromCorners({0, 1, 0}, {2, 2, 2}),
+            SelectionMode::Replace));
+        ok = ok && selectionInteraction_.BeginResizingFace(
+            SelectionFace::XMaximum, selectionService_.EditableBounds(),
+            voxelDocumentSession_.Generation(), 0.0F, 0.0F, {1.0F, 0.0F});
+        ok = ok && selectionInteraction_.Mode() ==
+            SelectionInteractionMode::ResizingFace;
+        static_cast<void>(selectionInteraction_.Cancel());
+
+        // 3. Bornes seules : Region Replace des MEMES voxels doit resserrer
+        //    les bornes ET signaler le changement. Montage independant du
+        //    contenu de la fixture : la selection est d'abord la region
+        //    elle-meme, puis ses bornes sont elargies SANS changer les
+        //    positions (ApplySortedVolume pose les bornes meme sans
+        //    changement d'ensemble).
+        toolContext_.Selection.Mode = SelectionFamilyMode::Region;
+        ok = ok && ApplyRegionSelection(
+            inside, {0.0F, 1.0F, 0.0F}, SelectionMode::Replace);
+        const std::vector<Asset::Voxel::VoxelPosition> islandPositions(
+            selectionService_.Voxels().begin(),
+            selectionService_.Voxels().end());
+        const SelectionBounds loose =
+            SelectionBounds::FromCorners({0, 0, 0}, {4, 4, 4});
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            islandPositions, loose, SelectionMode::Replace));
+        ok = ok && selectionService_.EditableBounds() == loose &&
+            selectionService_.Count() == islandPositions.size();
+        // Meme region, memes positions : seul le resserrement des bornes
+        // constitue le changement. Le test echoue si seul Apply comptait.
+        const bool boundsOnlyChanged = ApplyRegionSelection(
+            inside, {0.0F, 1.0F, 0.0F}, SelectionMode::Replace);
+        ok = ok && boundsOnlyChanged &&
+            selectionService_.Count() == islandPositions.size() &&
+            selectionService_.EditableBounds() == selectionService_.Bounds() &&
+            !(selectionService_.EditableBounds() == loose);
+
+        selectionSystemSmokePassed_ = selectionSystemSmokePassed_ && ok;
+        static_cast<void>(selectionService_.Clear());
+        toolContext_.Selection.Mode = SelectionFamilyMode::Box;
+        ForceVoxelHighlightsResolve();
     }
     return true;
 }
@@ -4068,10 +4298,19 @@ bool EditorWorkspace::RunVoxelMoveSmokeStep(const std::size_t frame)
                     voxelDocumentSession_.Generation(), delta))
                 return false;
             static_cast<void>(selectionInteraction_.PointerUp());
-            return !ApplyVoxelMove();
+            return ApplyVoxelMove();
         };
-        const bool collision = rejected({5, 0, 0});
-        const bool outside = rejected({-4, 0, 0});
+        // Overlap/Merge (decision produit) : la destination occupee (obstacle
+        // 9 en {10,2,2}) FUSIONNE — le voxel transforme l'emporte — et Undo
+        // restaure l'obstacle exactement. Le hors-limites reste refuse.
+        const bool merged = rejected({5, 0, 0}) &&
+            document->GetVoxel({10, 2, 2}) &&
+            document->GetVoxel({10, 2, 2})->PaletteIndex != 9U;
+        UndoCommand();
+        const bool collision = merged && document->GetVoxel({10, 2, 2}) &&
+            document->GetVoxel({10, 2, 2})->PaletteIndex == 9U &&
+            selectionService_.EditableBounds() == source;
+        const bool outside = !rejected({-4, 0, 0});
         const bool beganCancel = selectionInteraction_.BeginMovingContent(
                 source, voxelDocumentSession_.Generation(), plane, {}) &&
             transformPreviewModel_.BeginPreview(
@@ -4083,7 +4322,8 @@ bool EditorWorkspace::RunVoxelMoveSmokeStep(const std::size_t frame)
                 voxelDocumentSession_.Generation(), {1, 1, 0});
         if (beganCancel) CancelSelectionInteraction();
         voxelMoveSmokeRejected_ = collision && outside && beganCancel &&
-            document->GetRevision() == revision &&
+            // fusion (+1) puis Undo (+1) : la revision avance, l'undo stack non.
+            document->GetRevision() == revision + 2U &&
             voxelEditHistory_.UndoCount() == undoCount &&
             selectionService_.EditableBounds() == source &&
             !transformPreviewModel_.IsActive() &&
@@ -4906,13 +5146,38 @@ bool EditorWorkspace::RunVoxelScaleSmokeStep(const std::size_t frame)
     else if (frame == 4U)
     {
         if (!document || !voxelScaleSmokeUndoRedo_) return false;
-        const auto collisionVoxel = document->SetVoxel({9, 1, 2}, 19U);
+        // Overlap/Merge (decision produit) : l'obstacle sous une destination
+        // est SIGNALE par la preview, le commit fusionne (voxel transforme
+        // prioritaire), Undo restaure l'obstacle exactement.
+        // L'obstacle passe par l'historique (document ET grille de
+        // compatibilite coherents, comme tout voxel reel).
+        const std::vector<VoxelPosition> keptSelection(
+            selectionService_.Voxels().begin(), selectionService_.Voxels().end());
+        const SelectionBounds keptBounds = selectionService_.EditableBounds();
+        const VoxelEditHistoryResult obstacleSeeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Scale obstacle",
+                {{0U, {9, 1, 2}, false, 0U, true, 19U}}});
+        {
+            selectionService_.SetDocumentGeneration(
+                voxelDocumentSession_.Generation());
+            static_cast<void>(selectionService_.ApplySortedVolume(
+                keptSelection, keptBounds, SelectionMode::Replace));
+        }
         const bool collisionPreview =
             BeginVoxelScalePreview(VoxelScaleMode::X);
-        const bool collisionRejected = collisionVoxel.Changed &&
+        const bool collisionMerged = static_cast<bool>(obstacleSeeded) &&
             collisionPreview && transformPreviewModel_.HasCollisions() &&
-            !ApplyVoxelScale() && document->HasVoxel({9, 1, 2}) &&
-            document->RemoveVoxel({9, 1, 2}).Changed;
+            ApplyVoxelScale() && document->HasVoxel({9, 1, 2}) &&
+            document->GetVoxel({9, 1, 2})->PaletteIndex != 19U &&
+            document->GetVoxelCount() == 32U;
+        UndoCommand();   // defait la fusion : l'obstacle revient exactement
+        const bool obstacleRestored = collisionMerged &&
+            document->GetVoxel({9, 1, 2}) &&
+            document->GetVoxel({9, 1, 2})->PaletteIndex == 19U &&
+            document->GetVoxelCount() == 17U;
+        UndoCommand();   // defait le seed de l'obstacle
+        const bool collisionRejected = obstacleRestored &&
+            !document->HasVoxel({9, 1, 2}) && document->GetVoxelCount() == 16U;
 
         const auto edgeA = document->SetVoxel({62, 1, 1}, 5U);
         const auto edgeB = document->SetVoxel({63, 1, 1}, 7U);
@@ -4982,6 +5247,536 @@ bool EditorWorkspace::VoxelScaleSmokePassed() const noexcept
         voxelScaleSmokeApplied_ && voxelScaleSmokeUndoRedo_ &&
         voxelScaleSmokeRejected_ && voxelScaleSmokeSaved_ &&
         voxelScaleSmokeReopened_ && voxelScaleSmokeCleaned_;
+}
+
+bool EditorWorkspace::RunVoxelWrapSmokeStep(const std::size_t frame)
+{
+    // VF-WRAP-V1 (correctif) : chaque geste est un VRAI drag de poignee —
+    // BeginWrapHandleDrag / UpdateWrapHandleDrag / ReleaseWrapHandleDrag,
+    // le chemin unique du viewport (l'axe ecran vaut un voxel par pixel).
+    //
+    // Les GUIDES (bornes editables configurees au renderer) se lisent au
+    // debut de la frame SUIVANTE : la coalescence des highlights (Lot 7b) ne
+    // resout qu'une fois par frame, au pre-rendu — exactement ce que l'ecran
+    // montre a la frame d'apres.
+    using Asset::Voxel::VoxelPosition;
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    const std::array<VoxelPosition, 2U> source{{{2, 1, 2}, {3, 1, 2}}};
+    const SelectionBounds sourceBounds =
+        SelectionBounds::FromCorners({2, 1, 2}, {3, 1, 2});
+    const std::array<VoxelPosition, 3U> croppedPattern{
+        {{2, 1, 2}, {3, 1, 2}, {4, 1, 2}}};
+    const Vec2 axis{1.0F, 0.0F};
+    const auto boundsX = [](const std::int32_t maximumX)
+    {
+        return SelectionBounds::FromCorners({2, 1, 2}, {maximumX, 1, 2});
+    };
+    // Un drag complet de la face X+ de `delta` voxels, sans relachement.
+    const auto drag = [this, axis](const std::int32_t delta)
+    {
+        return BeginWrapHandleDrag(SelectionFace::XMaximum, 100.0F, 100.0F, axis) &&
+            UpdateWrapHandleDrag(100.0F + static_cast<float>(delta), 100.0F);
+    };
+    // Etat "rien de residuel" apres une annulation ou un commit.
+    const auto clean = [this]
+    {
+        return !transformPreviewModel_.IsActive() &&
+            !selectionInteraction_.IsActive() &&
+            selectionInteraction_.Mode() == SelectionInteractionMode::Idle &&
+            !IsWrapHandleDragActive() && !WrapTargetBounds().Valid &&
+            !wrapSourceBounds_.Valid && !wrapPattern_.Valid() &&
+            wrapDraggedFace_ == SelectionFace::None;
+    };
+    const auto guidesAre = [this](const SelectionBounds& expected)
+    {
+        const auto& guides = viewportRenderer_.EditableSelectionBoundsHighlight();
+        return guides.has_value() && *guides == expected;
+    };
+    const auto snapshot = [this, &document]
+    {
+        std::vector<std::pair<VoxelPosition, std::uint8_t>> voxels;
+        document->GetModel(0U)->ForEachVoxel(
+            [&voxels](const VoxelPosition p, const Asset::Voxel::Voxel v)
+            {
+                voxels.emplace_back(p, v.PaletteIndex);
+            });
+        std::sort(voxels.begin(), voxels.end(),
+            [](const auto& a, const auto& b)
+            {
+                if (a.first.X != b.first.X) return a.first.X < b.first.X;
+                if (a.first.Y != b.first.Y) return a.first.Y < b.first.Y;
+                return a.first.Z < b.first.Z;
+            });
+        return std::make_tuple(voxels,
+            std::vector<VoxelPosition>(selectionService_.Voxels().begin(),
+                selectionService_.Voxels().end()),
+            selectionService_.EditableBounds());
+    };
+
+    if (frame == 0U)
+    {
+        const DirectCreationFlowResult flow = directCreationFlowService_.Create(
+            voxelModelCreationService_, {"WrapSmoke", {64U, 64U, 64U}});
+        voxelWrapSmokePath_ = flow.Creation.ModelPath;
+        document = voxelDocumentSession_.ActiveDocument();
+        if (!flow.Ready() || !document) return false;
+        const VoxelEditHistoryResult seeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Wrap Smoke",
+                {{0U, source[0], false, 0U, true, 3U},
+                 {0U, source[1], false, 0U, true, 11U}}});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const bool selected = selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace);
+        EditorInputFrame shortcut;
+        shortcut.SetPressed(EditorInputKey::W);
+        const bool inputReady = editorInputService_.Resolve(
+            shortcut, CurrentCommandAvailability()) ==
+            EditorInputCommand::ToolWrap;
+        const std::uint64_t revision = document->GetRevision();
+        ExecuteInputCommand(EditorInputCommand::ToolWrap);
+        voxelWrapSmokePrepared_ = seeded && selected && inputReady &&
+            voxelToolState_.IsWrapActive() && clean() &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            document->GetRevision() == revision &&
+            voxelEditHistory_.UndoCount() == 1U;
+    }
+    else if (frame == 1U)
+    {
+        // Vrai drag : preview + interaction ResizingFace ; les bornes cibles
+        // sont celles du geste, la selection n'a pas bouge.
+        if (!document || !voxelWrapSmokePrepared_) return false;
+        voxelWrapSmokeExpandPreviewed_ = drag(4) && IsWrapHandleDragActive() &&
+            selectionInteraction_.Mode() ==
+                SelectionInteractionMode::ResizingFace &&
+            transformPreviewModel_.IsActive() &&
+            transformPreviewModel_.HasExplicitDestinations() &&
+            transformPreviewModel_.VoxelCount() == 6U &&
+            WrapTargetBounds() == boundsX(7) &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            document->GetVoxelCount() == 2U;
+    }
+    else if (frame == 2U)
+    {
+        // Les guides montrent la cible DEMANDEE {2..7}. Puis : vrai drag ->
+        // Escape ; vrai drag -> changement d'outil ; vrai drag -> Undo ;
+        // vrai drag -> Redo. A chaque fois : preview ET interaction tombent,
+        // document, selection et bornes editables intacts, aucun residu.
+        if (!document || !voxelWrapSmokeExpandPreviewed_) return false;
+        const bool guided = guidesAre(boundsX(7)) && IsWrapHandleDragActive();
+        const std::uint64_t revision = document->GetRevision();
+        ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+        const bool escaped = guided && clean() &&
+            voxelToolState_.IsWrapActive() &&     // Escape annule le geste, pas l'outil
+            document->GetRevision() == revision &&
+            document->GetVoxelCount() == 2U &&
+            selectionService_.Count() == 2U &&
+            selectionService_.EditableBounds() == sourceBounds;
+        const bool draggedAgain = escaped && drag(3) && IsWrapHandleDragActive();
+        SelectVoxelTool(ActiveVoxelTool::Selection);
+        const bool switched = draggedAgain && clean() &&
+            voxelToolState_.IsSelectionActive() &&
+            document->GetRevision() == revision &&
+            selectionService_.Count() == 2U &&
+            selectionService_.EditableBounds() == sourceBounds;
+        SelectVoxelTool(ActiveVoxelTool::Wrap);
+        const bool draggedThird = switched && drag(2) && IsWrapHandleDragActive();
+        UndoCommand();   // le drag tombe en entier, puis le seed est defait
+        const bool undoneDuringDrag = draggedThird && clean() &&
+            document->GetVoxelCount() == 0U;
+        RedoCommand();
+        const bool redone = undoneDuringDrag && clean() &&
+            document->GetVoxelCount() == 2U;
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            source, sourceBounds, SelectionMode::Replace));
+        const bool draggedFourth = redone && drag(2) && IsWrapHandleDragActive();
+        RedoCommand();   // rien a rejouer : le drag tombe quand meme en entier
+        voxelWrapSmokeExpandPreviewed_ = draggedFourth && clean() &&
+            document->GetVoxelCount() == 2U &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            voxelToolState_.IsWrapActive();
+    }
+    else if (frame == 3U)
+    {
+        // Les guides sont revenus aux bornes source. Puis vrai drag (le rendu
+        // de la preview se lit a la frame suivante, comme les guides).
+        if (!document || !voxelWrapSmokeExpandPreviewed_) return false;
+        voxelWrapSmokeExpandPreviewed_ = guidesAre(sourceBounds) && drag(4) &&
+            transformPreviewModel_.HasExplicitDestinations() &&
+            transformPreviewModel_.VoxelCount() == 6U &&
+            !transformPreviewModel_.HasCollisions() &&
+            !transformPreviewModel_.HasOutOfBounds() &&
+            document->GetVoxelCount() == 2U;
+    }
+    else if (frame == 4U)
+    {
+        // Relachement : commit ABABAB, PREVIEW == COMMIT voxel par voxel —
+        // les destinations rendues pendant le drag sont exactement le document.
+        if (!document || !voxelWrapSmokeExpandPreviewed_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        const bool dragged = IsWrapHandleDragActive() &&
+            transformPreviewModel_.VoxelCount() == 6U;
+        std::vector<VoxelPosition> shown;
+        std::vector<std::uint8_t> shownValues;
+        for (const TransformPreviewVoxel& voxel : transformPreviewModel_.Voxels())
+        {
+            shown.push_back(voxel.PreviewPosition);
+            shownValues.push_back(voxel.Value.PaletteIndex);
+        }
+        const bool rendered = viewportRenderer_.HasTransformPreview() &&
+            viewportRenderer_.TransformPreviewSourcePrimitiveCount() == 2U &&
+            viewportRenderer_.TransformPreviewDestinationPrimitiveCount() == 6U;
+        bool committed = dragged && rendered && ReleaseWrapHandleDrag() &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 6U && shown.size() == 6U;
+        for (std::size_t index = 0U; index < shown.size() && committed; ++index)
+        {
+            const auto voxel = document->GetVoxel(shown[index]);
+            committed = voxel && voxel->PaletteIndex == shownValues[index];
+        }
+        for (std::int32_t x = 2; x <= 7 && committed; ++x)
+            committed = document->GetVoxel({x, 1, 2})->PaletteIndex ==
+                (x % 2 == 0 ? 3U : 11U);
+        voxelWrapSmokeExpandApplied_ = committed && clean() &&
+            selectionService_.Count() == 6U &&
+            selectionService_.EditableBounds() == boundsX(7) &&
+            voxelToolState_.IsWrapActive() &&
+            voxelEditHistory_.UndoCount() == 2U;
+    }
+    else if (frame == 5U)
+    {
+        // Undo restaure voxels + EditableBounds SOURCE exactes ; Redo restaure
+        // voxels + EditableBounds DEMANDEES exactes.
+        if (!document || !voxelWrapSmokeExpandApplied_) return false;
+        UndoCommand();
+        const bool undone = document->GetVoxelCount() == 2U &&
+            selectionService_.Count() == 2U &&
+            selectionService_.EditableBounds() == sourceBounds &&
+            document->GetVoxel(source[0])->PaletteIndex == 3U &&
+            document->GetVoxel(source[1])->PaletteIndex == 11U;
+        RedoCommand();
+        voxelWrapSmokeUndoRedo_ = undone &&
+            document->GetVoxelCount() == 6U &&
+            selectionService_.Count() == 6U &&
+            selectionService_.EditableBounds() == boundsX(7) &&
+            voxelToolState_.IsWrapActive() && clean();
+    }
+    else if (frame == 6U)
+    {
+        // Crop par un vrai drag vers l'interieur : {2..7} -> {2..4}.
+        if (!document || !voxelWrapSmokeUndoRedo_) return false;
+        voxelWrapSmokeCropped_ = drag(-3) &&
+            transformPreviewModel_.VoxelCount() == 3U &&
+            WrapTargetBounds() == boundsX(4);
+    }
+    else if (frame == 7U)
+    {
+        if (!document || !voxelWrapSmokeCropped_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        voxelWrapSmokeCropped_ = guidesAre(boundsX(4)) &&
+            ReleaseWrapHandleDrag() &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 3U &&
+            document->GetVoxel({2, 1, 2})->PaletteIndex == 3U &&
+            document->GetVoxel({3, 1, 2})->PaletteIndex == 11U &&
+            document->GetVoxel({4, 1, 2})->PaletteIndex == 3U &&
+            !document->HasVoxel({5, 1, 2}) &&
+            selectionService_.Count() == 3U &&
+            selectionService_.EditableBounds() == boundsX(4) &&
+            voxelEditHistory_.UndoCount() == 3U && clean();
+    }
+    else if (frame == 8U)
+    {
+        // Wrap A : spacing 1 + mirror sur un motif rendu asymetrique (3|11|5).
+        // La cible {2..9} finit sur une cellule VIDE (le spacing) : la
+        // preview serree s'arrete a 8, la cible demandee reste 9.
+        if (!document || !voxelWrapSmokeCropped_) return false;
+        const bool retinted = document->SetVoxel({4, 1, 2}, 5U).Changed;
+        toolContext_.Wrap = {};
+        toolContext_.Wrap.X.Spacing = 1;
+        toolContext_.Wrap.X.MirrorRepeat = true;
+        voxelWrapSmokeSpacingMirror_ = retinted && drag(5) &&
+            transformPreviewModel_.VoxelCount() == 6U &&
+            transformPreviewModel_.PreviewBounds() == boundsX(8) &&
+            WrapTargetBounds() == boundsX(9);
+    }
+    else if (frame == 9U)
+    {
+        // Les guides montrent {2..9} — la face en 9 que l'utilisateur tient —
+        // pas la borne serree 8. Le commit garde {2..9} comme bornes editables.
+        if (!document || !voxelWrapSmokeSpacingMirror_) return false;
+        const std::uint64_t revision = document->GetRevision();
+        voxelWrapSmokeSpacingMirror_ = guidesAre(boundsX(9)) &&
+            ReleaseWrapHandleDrag() &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == 6U &&
+            document->GetVoxel({2, 1, 2})->PaletteIndex == 3U &&
+            document->GetVoxel({3, 1, 2})->PaletteIndex == 11U &&
+            document->GetVoxel({4, 1, 2})->PaletteIndex == 5U &&
+            !document->HasVoxel({5, 1, 2}) &&
+            document->GetVoxel({6, 1, 2})->PaletteIndex == 5U &&
+            document->GetVoxel({7, 1, 2})->PaletteIndex == 11U &&
+            document->GetVoxel({8, 1, 2})->PaletteIndex == 3U &&
+            !document->HasVoxel({9, 1, 2}) &&
+            selectionService_.Count() == 6U &&
+            selectionService_.EditableBounds() == boundsX(9) && clean();
+    }
+    else if (frame == 10U)
+    {
+        // Apres commit, les guides sont {2..9} (bornes editables demandees).
+        // Puis Wrap A -> Wrap B (direct) contre Wrap A -> Undo -> Redo ->
+        // Wrap B : resultats strictement identiques (document, selection,
+        // bornes). B = X+ de 4 depuis {2..9} avec les memes options.
+        if (!document || !voxelWrapSmokeSpacingMirror_) return false;
+        const bool guided = guidesAre(boundsX(9));
+        const bool directB = guided && drag(4) && ReleaseWrapHandleDrag() &&
+            selectionService_.EditableBounds() == boundsX(13);
+        const auto direct = snapshot();
+        UndoCommand();   // defait B
+        UndoCommand();   // defait A
+        const bool backToSource = selectionService_.EditableBounds() == boundsX(4) &&
+            document->GetVoxelCount() == 3U;
+        RedoCommand();   // rejoue A
+        const bool aReplayed = selectionService_.EditableBounds() == boundsX(9) &&
+            document->GetVoxelCount() == 6U && voxelEditHistory_.CanRedo();
+        // Redo B reste disponible : on ne le rejoue PAS, on refait B par le
+        // geste, ce qui coupe la branche redo — comme un utilisateur.
+        const bool viaHistoryB = drag(4) && ReleaseWrapHandleDrag() &&
+            selectionService_.EditableBounds() == boundsX(13);
+        const auto viaHistory = snapshot();
+        voxelWrapSmokeGuards_ = directB && backToSource && aReplayed &&
+            viaHistoryB && direct == viaHistory && clean() &&
+            std::get<0>(direct).size() == document->GetVoxelCount() &&
+            !voxelEditHistory_.CanRedo();
+        toolContext_.Wrap = {};
+    }
+    else if (frame == 12U || frame == 13U)
+    {
+        // CORRECTION VISUELLE : les poignees de faces que l'utilisateur VOIT
+        // et SAISIT sont celles du systeme Selection (ProjectSelectionHandles /
+        // PickSelectionHandle, avec la vraie camera et le vrai rectangle du
+        // viewport), et elles pilotent le backend Wrap existant — pas une
+        // seconde interaction. Frame 12 : pick -> vrai drag -> Escape.
+        // Frame 13 : pick -> vrai drag -> relachement -> commit.
+        if (!document || !voxelWrapSmokeChained_) return false;
+        // Tout retour anticipe de cette frame est un ECHEC : le drapeau n'est
+        // reacquis qu'au bout de la preuve complete.
+        voxelWrapSmokeChained_ = false;
+        // Un voxel isole loin de tout : n'importe quelle face tiree de deux
+        // voxels reste libre de collision.
+        const VoxelPosition lone{40, 40, 40};
+        const SelectionBounds loneBounds = SelectionBounds::FromCorners(lone, lone);
+        if (frame == 12U && !document->SetVoxel(lone, 6U).Changed) return false;
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        const std::array<VoxelPosition, 1U> loneSelection{{lone}};
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            loneSelection, loneBounds, SelectionMode::Replace));
+        SelectVoxelTool(ActiveVoxelTool::Wrap);
+        const SelectionBounds original = selectionService_.EditableBounds();
+        const auto dimensions = document->GetDimensions(0U);
+        if (!dimensions || original != loneBounds) return false;
+        // Autorite pure : Wrap montre ET saisit les poignees ; aucun gizmo.
+        const bool policy = ToolShowsSelectionHandles(ActiveVoxelTool::Wrap) &&
+            ToolPicksSelectionHandles(ActiveVoxelTool::Wrap) &&
+            TransformGizmoModel::ModeForTool(ActiveVoxelTool::Wrap) ==
+                TransformGizmoMode::None &&
+            !viewportRenderer_.HasTransformGizmo();
+        // Les SIX poignees, projetees avec la vraie camera.
+        const SelectionHandles handles = ProjectSelectionHandles(
+            original, voxelModelCenter_, currentViewportRectangle_,
+            viewportCamera_.GetViewProjection());
+        auto visible = handles.end();
+        std::int32_t outward = 0;
+        for (auto handle = handles.begin(); handle != handles.end(); ++handle)
+        {
+            if (!handle->Visible) continue;
+            for (const std::int32_t delta : {2, -2})
+            {
+                const SelectionBounds resized = ResizeSelectionBounds(
+                    original, handle->Face, delta, *dimensions);
+                if (resized != original &&
+                    resized.Dimensions().X * resized.Dimensions().Y *
+                        resized.Dimensions().Z > 1U)
+                {
+                    visible = handle;
+                    outward = delta;
+                    break;
+                }
+            }
+            if (visible != handles.end()) break;
+        }
+        if (!policy || handles.size() != 6U || visible == handles.end())
+            return false;
+        // Le pick a la position ecran de la poignee retourne cette poignee.
+        const auto picked = PickSelectionHandle(handles, visible->ScreenPosition);
+        if (!picked || picked->Face != visible->Face) return false;
+        const SelectionBounds expected = ResizeSelectionBounds(
+            original, picked->Face, outward, *dimensions);
+        // Vrai drag par le backend Wrap, avec la geometrie ecran de la poignee.
+        const std::uint64_t revision = document->GetRevision();
+        const std::uint64_t voxelsBefore = document->GetVoxelCount();
+        const bool dragged = BeginWrapHandleDrag(picked->Face,
+                picked->ScreenPosition.X, picked->ScreenPosition.Y,
+                picked->ScreenAxisPerVoxel) &&
+            IsWrapHandleDragActive() &&
+            UpdateWrapHandleDrag(
+                picked->ScreenPosition.X + picked->ScreenAxisPerVoxel.X * outward,
+                picked->ScreenPosition.Y + picked->ScreenAxisPerVoxel.Y * outward) &&
+            WrapTargetBounds() == expected &&
+            transformPreviewModel_.IsActive() &&
+            transformPreviewModel_.VoxelCount() == 3U &&
+            selectionService_.EditableBounds() == original;
+        if (frame == 12U)
+        {
+            ExecuteInputCommand(EditorInputCommand::InteractionCancel);
+            voxelWrapSmokeChained_ = dragged && clean() &&
+                voxelToolState_.IsWrapActive() &&
+                document->GetRevision() == revision &&
+                selectionService_.EditableBounds() == original &&
+                document->GetVoxelCount() == voxelsBefore;
+        }
+        else
+        {
+            voxelWrapSmokeChained_ = dragged && ReleaseWrapHandleDrag() &&
+                clean() && document->GetRevision() == revision + 1U &&
+                document->GetVoxelCount() == voxelsBefore + 2U &&
+                selectionService_.Count() == 3U &&
+                selectionService_.EditableBounds() == expected;
+        }
+    }
+    else if (frame == 11U)
+    {
+        // Collision : un obstacle non selectionne sous une destination refuse
+        // le commit ; le document et la selection restent intacts. Puis
+        // chainage Wrap -> Move -> Rotate -> Scale -> Wrap sans perte de
+        // selection ni de bornes.
+        if (!document || !voxelWrapSmokeGuards_) return false;
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            croppedPattern, boundsX(4), SelectionMode::Replace));
+        const std::uint64_t revision = document->GetRevision();
+        // Overlap/Merge (decision produit) : les voxels de A/B occupent
+        // x = 6..8 (5|11|3). Etendre {2..4} (3|11|5) a {2..9} repete le motif
+        // sur x = 5..9 : les cellules occupees NON selectionnees sont
+        // FUSIONNEES, le voxel transforme est prioritaire (6 -> 11, 7 -> 5,
+        // 8 -> 3), les autres voxels (11..13) restent intacts ; Undo restaure
+        // A/B exactement, Redo restaure la fusion.
+        const std::uint64_t voxelsBeforeMerge = document->GetVoxelCount();
+        const bool merged = drag(5) &&
+            transformPreviewModel_.HasCollisions() &&
+            ReleaseWrapHandleDrag() &&
+            document->GetRevision() == revision + 1U &&
+            document->GetVoxelCount() == voxelsBeforeMerge + 2U &&
+            document->GetVoxel({5, 1, 2})->PaletteIndex == 3U &&
+            document->GetVoxel({6, 1, 2})->PaletteIndex == 11U &&
+            document->GetVoxel({7, 1, 2})->PaletteIndex == 5U &&
+            document->GetVoxel({8, 1, 2})->PaletteIndex == 3U &&
+            document->GetVoxel({9, 1, 2})->PaletteIndex == 11U &&
+            document->GetVoxel({12, 1, 2})->PaletteIndex == 3U &&
+            document->GetVoxel({13, 1, 2})->PaletteIndex == 11U &&
+            selectionService_.Count() == 8U &&
+            selectionService_.EditableBounds() == boundsX(9) && clean();
+        UndoCommand();
+        const bool restored = merged &&
+            document->GetVoxelCount() == voxelsBeforeMerge &&
+            document->GetVoxel({6, 1, 2})->PaletteIndex == 5U &&
+            document->GetVoxel({7, 1, 2})->PaletteIndex == 11U &&
+            document->GetVoxel({8, 1, 2})->PaletteIndex == 3U &&
+            !document->HasVoxel({5, 1, 2}) && !document->HasVoxel({9, 1, 2}) &&
+            selectionService_.Count() == 3U &&
+            selectionService_.EditableBounds() == boundsX(4);
+        RedoCommand();
+        const bool redone = restored &&
+            document->GetVoxelCount() == voxelsBeforeMerge + 2U &&
+            document->GetVoxel({6, 1, 2})->PaletteIndex == 11U &&
+            document->GetVoxel({7, 1, 2})->PaletteIndex == 5U &&
+            selectionService_.EditableBounds() == boundsX(9);
+        UndoCommand();   // etat A/B retabli pour la suite du smoke
+        const bool blocked = redone &&
+            document->GetVoxelCount() == voxelsBeforeMerge &&
+            selectionService_.Count() == 3U &&
+            selectionService_.EditableBounds() == boundsX(4) && clean();
+        ExecuteInputCommand(EditorInputCommand::ToolMove);
+        const bool moved = voxelToolState_.IsMoveActive();
+        ExecuteInputCommand(EditorInputCommand::ToolRotate);
+        const bool rotated = voxelToolState_.IsRotateActive();
+        ExecuteInputCommand(EditorInputCommand::ToolScale);
+        const bool scaled = voxelToolState_.IsScaleActive() &&
+            BeginVoxelScalePreview(VoxelScaleMode::X) &&
+            transformPreviewModel_.IsActive();
+        SelectVoxelTool(ActiveVoxelTool::Wrap);
+        voxelWrapSmokeChained_ = blocked && moved && rotated && scaled &&
+            voxelToolState_.IsWrapActive() && clean() &&
+            selectionService_.Count() == 3U &&
+            selectionService_.EditableBounds() == boundsX(4);
+    }
+    else if (frame == 14U)
+    {
+        // Contrat V1 save/reopen : les VOXELS committes sont preserves
+        // exactement. La selection est un etat d'edition temporaire : aucune
+        // exigence, aucune assertion, aucune reconstitution presentee comme
+        // une preuve.
+        voxelWrapSmokeSaved_ = document && voxelWrapSmokeChained_ &&
+            SaveVoxelModel() && !document->IsDirty() &&
+            std::filesystem::is_regular_file(voxelWrapSmokePath_);
+        if (!voxelWrapSmokeSaved_) return false;
+        const auto before = std::get<0>(snapshot());
+        ClearVoxelViewport();
+        voxelWrapSmokeReopened_ = OpenVoxInViewportNow(voxelWrapSmokePath_);
+        document = voxelDocumentSession_.ActiveDocument();
+        bool same = voxelWrapSmokeReopened_ && document &&
+            document->GetVoxelCount() == before.size();
+        for (const auto& [position, palette] : before)
+        {
+            const auto voxel = same ? document->GetVoxel(position) : std::nullopt;
+            same = same && voxel && voxel->PaletteIndex == palette;
+        }
+        voxelWrapSmokeReopened_ = same;
+    }
+    else if (frame == 15U)
+    {
+        // Fermeture pendant un vrai drag : tout tombe proprement. La selection
+        // creee ici sert UNIQUEMENT a demarrer un geste apres la reouverture ;
+        // ce n'est pas une persistance de la selection.
+        if (!document || !voxelWrapSmokeReopened_) return false;
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            croppedPattern, boundsX(4), SelectionMode::Replace));
+        SelectVoxelTool(ActiveVoxelTool::Wrap);
+        const bool dragging = drag(1) && IsWrapHandleDragActive() &&
+            transformPreviewModel_.IsActive();
+        PrepareForApplicationClose();
+        const bool closeSafe = dragging && clean();
+        CloseProject();
+        voxelWrapSmokeCleaned_ = closeSafe &&
+            !projectManager_.HasActiveProject() &&
+            !voxelDocumentSession_.HasActiveDocument() &&
+            !voxelDocumentMeshCache_.HasMesh() &&
+            !viewportRenderer_.HasModelMesh() &&
+            !transformPreviewModel_.IsActive() &&
+            !voxelEditHistory_.CanUndo() && !voxelEditHistory_.CanRedo() &&
+            !std::filesystem::exists(
+                voxelWrapSmokePath_.string() + ".vfsave.tmp") &&
+            !std::filesystem::exists(
+                voxelWrapSmokePath_.string() + ".vfsave.bak");
+    }
+    return VoxelWrapSmokePassed();
+}
+
+bool EditorWorkspace::VoxelWrapSmokePassed() const noexcept
+{
+    return voxelWrapSmokePrepared_ && voxelWrapSmokeExpandPreviewed_ &&
+        voxelWrapSmokeExpandApplied_ && voxelWrapSmokeUndoRedo_ &&
+        voxelWrapSmokeCropped_ && voxelWrapSmokeSpacingMirror_ &&
+        voxelWrapSmokeGuards_ && voxelWrapSmokeChained_ &&
+        voxelWrapSmokeSaved_ && voxelWrapSmokeReopened_ &&
+        voxelWrapSmokeCleaned_;
 }
 
 bool EditorWorkspace::RunVoxelAlignSmokeStep(const std::size_t frame)
@@ -5103,13 +5898,33 @@ bool EditorWorkspace::RunVoxelAlignSmokeStep(const std::size_t frame)
     {
         if (!document || !voxelAlignSmokeUndoRedo_) return false;
         const std::uint64_t revision = document->GetRevision();
-        const auto obstacle = document->SetVoxel({63, 1, 2}, 19U);
+        // Overlap/Merge : Align (Move contraint) fusionne sur l'obstacle,
+        // Undo le restaure exactement.
+        const std::vector<VoxelPosition> keptSelection(
+            selectionService_.Voxels().begin(), selectionService_.Voxels().end());
+        const SelectionBounds keptBounds = selectionService_.EditableBounds();
+        const VoxelEditHistoryResult obstacleSeeded = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Align obstacle",
+                {{0U, {63, 1, 2}, false, 0U, true, 19U}}});
+        {
+            selectionService_.SetDocumentGeneration(
+                voxelDocumentSession_.Generation());
+            static_cast<void>(selectionService_.ApplySortedVolume(
+                keptSelection, keptBounds, SelectionMode::Replace));
+        }
         const bool collisionPreview =
             BeginVoxelAlignPreview(VoxelAlignDirection::Right);
-        const bool collisionRejected = obstacle.Changed && collisionPreview &&
-            transformPreviewModel_.HasCollisions() && !ApplyVoxelAlign() &&
-            document->HasVoxel({63, 1, 2}) &&
-            document->RemoveVoxel({63, 1, 2}).Changed;
+        const bool collisionMerged = static_cast<bool>(obstacleSeeded) &&
+            collisionPreview && transformPreviewModel_.HasCollisions() &&
+            ApplyVoxelAlign() && document->HasVoxel({63, 1, 2}) &&
+            document->GetVoxel({63, 1, 2})->PaletteIndex != 19U;
+        UndoCommand();   // defait la fusion
+        const bool obstacleRestored = collisionMerged &&
+            document->GetVoxel({63, 1, 2}) &&
+            document->GetVoxel({63, 1, 2})->PaletteIndex == 19U;
+        UndoCommand();   // defait le seed
+        const bool collisionRejected = obstacleRestored &&
+            !document->HasVoxel({63, 1, 2});
         static_cast<void>(selectionService_.ApplySortedVolume(
             left, leftBounds, SelectionMode::Replace));
         const bool outsidePreview = transformPreviewModel_.BeginPreview(
@@ -5122,7 +5937,8 @@ bool EditorWorkspace::RunVoxelAlignSmokeStep(const std::size_t frame)
             transformPreviewModel_.HasOutOfBounds() && !ApplyVoxelAlign();
         voxelAlignSmokeRejected_ = collisionRejected && outsideRejected &&
             document->GetVoxelCount() == 2U &&
-            document->GetRevision() == revision + 2U;
+            // seed + Apply (fusion) + Undo fusion + Undo seed.
+            document->GetRevision() == revision + 4U;
     }
     else if (frame == 5U)
     {
@@ -5756,16 +6572,41 @@ bool EditorWorkspace::RunMoveGizmoSmokeStep(const std::size_t frame)
     else if (frame == 4U)
     {
         if (!document || !moveGizmoSmokeUndoRedo_) return false;
-        const auto obstacle = document->SetVoxel({15, 2, 2}, 27U);
-        const bool collision = obstacle.Changed &&
+        // Overlap/Merge : Move fusionne sur l'obstacle (voxel transforme
+        // prioritaire), Undo restaure l'obstacle et la selection.
+        const std::vector<VoxelPosition> keptSelection(
+            selectionService_.Voxels().begin(), selectionService_.Voxels().end());
+        const SelectionBounds keptBounds = selectionService_.EditableBounds();
+        const VoxelEditHistoryResult obstacle = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Move obstacle",
+                {{0U, {15, 2, 2}, false, 0U, true, 27U}}});
+        {
+            selectionService_.SetDocumentGeneration(
+                voxelDocumentSession_.Generation());
+            static_cast<void>(selectionService_.ApplySortedVolume(
+                keptSelection, keptBounds, SelectionMode::Replace));
+        }
+        const bool merged = static_cast<bool>(obstacle) &&
             transformPreviewModel_.BeginPreview(
                 *document, selectionService_,
                 voxelDocumentSession_.Generation()) &&
             transformPreviewModel_.SetDelta(
                 *document, selectionService_,
                 voxelDocumentSession_.Generation(), {3, 0, 0}) &&
-            transformPreviewModel_.HasCollisions() && !ApplyVoxelMove();
-        const bool removed = document->RemoveVoxel({15, 2, 2}).Changed;
+            transformPreviewModel_.HasCollisions() && ApplyVoxelMove() &&
+            document->GetVoxel({15, 2, 2}) &&
+            document->GetVoxel({15, 2, 2})->PaletteIndex != 27U;
+        UndoCommand();   // defait la fusion
+        const bool collision = merged && document->GetVoxel({15, 2, 2}) &&
+            document->GetVoxel({15, 2, 2})->PaletteIndex == 27U &&
+            selectionService_.EditableBounds() == movedBounds;
+        UndoCommand();   // defait le seed de l'obstacle (efface la selection)
+        const bool removed = !document->HasVoxel({15, 2, 2});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            keptSelection, keptBounds, SelectionMode::Replace));
+
         const bool outside = transformPreviewModel_.BeginPreview(
                 *document, selectionService_,
                 voxelDocumentSession_.Generation()) &&
@@ -6172,12 +7013,37 @@ bool EditorWorkspace::RunScaleGizmoSmokeStep(const std::size_t frame)
     else if (frame == 3U)
     {
         if (!document || !scaleGizmoSmokeUndoRedo_) return false;
-        const auto obstacle = document->SetVoxel({6, 2, 2}, 19U);
-        const bool collision = transformPreviewModel_.BeginPreview(
+        // Overlap/Merge : le gizmo Scale fusionne sur l'obstacle, Undo le
+        // restaure exactement.
+        const std::vector<VoxelPosition> keptSelection(
+            selectionService_.Voxels().begin(), selectionService_.Voxels().end());
+        const SelectionBounds keptBounds = selectionService_.EditableBounds();
+        const VoxelEditHistoryResult obstacle = voxelEditHistory_.Execute(
+            *this, VoxelEditOperation{"Seed Scale obstacle",
+                {{0U, {6, 2, 2}, false, 0U, true, 19U}}});
+        {
+            selectionService_.SetDocumentGeneration(
+                voxelDocumentSession_.Generation());
+            static_cast<void>(selectionService_.ApplySortedVolume(
+                keptSelection, keptBounds, SelectionMode::Replace));
+        }
+        const bool merged = static_cast<bool>(obstacle) &&
+            transformPreviewModel_.BeginPreview(
                 *document, selectionService_, voxelDocumentSession_.Generation()) &&
             UpdateVoxelScalePreview(VoxelScaleMode::X, {5U, 1U, 1U}) &&
-            transformPreviewModel_.HasCollisions() && !ApplyVoxelScale();
-        const bool obstacleRemoved = document->RemoveVoxel({6, 2, 2}).Changed;
+            transformPreviewModel_.HasCollisions() && ApplyVoxelScale() &&
+            document->GetVoxel({6, 2, 2}) &&
+            document->GetVoxel({6, 2, 2})->PaletteIndex != 19U;
+        UndoCommand();   // defait la fusion
+        const bool collision = merged && document->GetVoxel({6, 2, 2}) &&
+            document->GetVoxel({6, 2, 2})->PaletteIndex == 19U;
+        UndoCommand();   // defait le seed de l'obstacle (efface la selection)
+        const bool obstacleRemoved = !document->HasVoxel({6, 2, 2});
+        selectionService_.SetDocumentGeneration(
+            voxelDocumentSession_.Generation());
+        static_cast<void>(selectionService_.ApplySortedVolume(
+            keptSelection, keptBounds, SelectionMode::Replace));
+
         const bool minimum = transformPreviewModel_.BeginPreview(
                 *document, selectionService_, voxelDocumentSession_.Generation()) &&
             UpdateVoxelScalePreview(VoxelScaleMode::X, {1U, 1U, 1U}) &&
@@ -6185,7 +7051,7 @@ bool EditorWorkspace::RunScaleGizmoSmokeStep(const std::size_t frame)
                 Asset::Voxel::VoxelDimensions{1U, 1U, 1U};
         CancelTransformGizmoInteraction();
         SelectVoxelTool(ActiveVoxelTool::Move);
-        scaleGizmoSmokeRejected_ = obstacle.Changed && collision &&
+        scaleGizmoSmokeRejected_ = static_cast<bool>(obstacle) && collision &&
             obstacleRemoved && minimum && !transformPreviewModel_.IsActive() &&
             voxelToolState_.IsMoveActive();
     }
@@ -6628,7 +7494,10 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
                 !voxelDocumentSaveService_.IsBusy(),
             voxelToolState_.ActiveTool(), CanMoveSelection(),
             CanDuplicateSelection(), CanRotateSelection(),
-            CanMirrorSelection(), CanScaleSelection(), CanAlignSelection()};
+            CanMirrorSelection(), CanScaleSelection(), CanAlignSelection(),
+            // VF-UX-TOOLS : sans la geometrie courante, l'etat ne peut pas
+            // designer la famille active.
+            toolContext_.Smart.Geometry()};
     };
     const auto activeToolCount = [](const EditorToolbarState state)
     {
@@ -6663,14 +7532,16 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
         Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
         modernToolbarSmokeToolsEnabled_ = flow.Ready() && document != nullptr &&
-            EditorToolbarModel::Buttons().size() == 3U &&
+            EditorToolbarModel::Buttons().size() ==
+                EditorToolbarModel::ButtonCount &&
             std::all_of(
                 EditorToolbarModel::Buttons().begin(),
                 EditorToolbarModel::Buttons().end(),
                 [state = toolbarState()](const EditorToolbarButton& button)
                 {
-                    const bool expectedEnabled =
-                        button.Action == EditorToolbarAction::Pencil ||
+                    // Les cinq familles et Selection sont utilisables des
+                    // qu'un document existe ; Transform exige une selection.
+                    const bool expectedEnabled = button.HasFamily ||
                         button.Action == EditorToolbarAction::Selection;
                     return EditorToolbarModel::IsEnabled(button, state) ==
                         expectedEnabled;
@@ -6703,9 +7574,53 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
     }
     else if (frame == 2U)
     {
+        // VF-UX-TOOLS (correctif) : le vrai routage de l'application, pas la
+        // regle isolee. On passe par ExecuteInputCommand, comme un clic.
+        const auto family = [this](const EditorInputCommand command)
+        {
+            ExecuteInputCommand(command);
+            return SmartToolSelection{
+                toolContext_.Smart.Geometry(), toolContext_.Smart.Mode()};
+        };
+        // Entree depuis Pencil Cube 3D : le mode volumique ne doit pas fuir.
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetMode(SmartToolMode::CubeBrush);
+        toolContext_.Smart.SetAction(SmartAction::Paint);
+        const SmartToolSelection entered =
+            family(EditorInputCommand::ToolFamilyGeometry);
+        bool routing = entered.Geometry == SmartGeometry::Geometry &&
+            entered.Mode == kCanonicalGeometryCubeMode &&
+            // L'action survit au changement de famille.
+            toolContext_.Smart.Action() == SmartAction::Paint;
+        // Idempotence : recliquer ne mute rien.
+        routing = routing &&
+            family(EditorInputCommand::ToolFamilyGeometry) == entered;
+        // Line reste Line.
+        toolContext_.Smart.SetGeometry(SmartGeometry::Line);
+        routing = routing &&
+            family(EditorInputCommand::ToolFamilyGeometry).Geometry ==
+                SmartGeometry::Line;
+        // Cylinder deja actif : non mute.
+        toolContext_.Smart.SetGeometry(SmartGeometry::Geometry);
+        toolContext_.Smart.SetMode(SmartToolMode::CylinderBrush);
+        routing = routing &&
+            family(EditorInputCommand::ToolFamilyGeometry).Mode ==
+                SmartToolMode::CylinderBrush;
+        // Pencil conserve sa brosse 3D.
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetMode(SmartToolMode::SphereBrush);
+        routing = routing &&
+            family(EditorInputCommand::ToolFamilyPencil).Mode ==
+                SmartToolMode::SphereBrush;
+        modernToolbarSmokeFamilyRouting_ = routing;
+
+        toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
+        toolContext_.Smart.SetMode(SmartToolMode::SingleVoxel);
+        toolContext_.Smart.SetAction(SmartAction::Add);
         Asset::Voxel::VoxelDocument* document =
             voxelDocumentSession_.ActiveDocument();
         modernToolbarSmokeSaved_ = modernToolbarSmokeSingleActive_ &&
+            modernToolbarSmokeFamilyRouting_ &&
             document != nullptr && SaveVoxelModel() && !document->IsDirty();
     }
     else if (frame == 3U)
@@ -6729,8 +7644,8 @@ bool EditorWorkspace::RunModernToolbarSmokeStep(const std::size_t frame)
 bool EditorWorkspace::ModernToolbarSmokePassed() const noexcept
 {
     return modernToolbarSmokeDisabled_ && modernToolbarSmokeToolsEnabled_ &&
-        modernToolbarSmokeSingleActive_ && modernToolbarSmokeSaved_ &&
-        modernToolbarSmokeCleaned_;
+        modernToolbarSmokeSingleActive_ && modernToolbarSmokeFamilyRouting_ &&
+        modernToolbarSmokeSaved_ && modernToolbarSmokeCleaned_;
 }
 
 bool EditorWorkspace::RunKeyboardShortcutsSmokeStep(const std::size_t frame)

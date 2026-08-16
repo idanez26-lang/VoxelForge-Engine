@@ -1,6 +1,8 @@
 // Viewport panel of EditorWorkspace (VF-0260 lot 7d).
 // Pure code motion from EditorWorkspace.cpp.
 #include "EditorWorkspace.h"
+#include "Selection/SelectionHandlePolicy.h"
+#include "Transform/TransformPreviewFeedback.h"
 #include "EditorWorkspaceUiHelpers.h"
 #include "Layout/EditorPanelNames.h"
 #include "VoxelModelTransform.h"
@@ -167,10 +169,10 @@ void EditorWorkspace::DrawScenePanel()
             ExecuteInputCommand(EditorInputCommand::RotateRight);
         DrawTooltip("Rotate the preview right by 90 degrees (Shift+Q)");
         ImGui::SameLine();
+        // Overlap/Merge : garde commune — seul le hors-limites bloque, les
+        // recouvrements fusionnent au commit (voxel transforme prioritaire).
         ImGui::BeginDisabled(
-            !transformPreviewModel_.IsActive() ||
-            transformPreviewModel_.HasCollisions() ||
-            transformPreviewModel_.HasOutOfBounds());
+            !MergingTransformPreviewCanCommit(transformPreviewModel_));
         if (ImGui::Button("Apply"))
             ExecuteInputCommand(EditorInputCommand::TransformApply);
         ImGui::EndDisabled();
@@ -200,9 +202,7 @@ void EditorWorkspace::DrawScenePanel()
         DrawTooltip("Preview uniform Scale by 2 (U)");
         ImGui::SameLine();
         ImGui::BeginDisabled(
-            !transformPreviewModel_.IsActive() ||
-            transformPreviewModel_.HasCollisions() ||
-            transformPreviewModel_.HasOutOfBounds());
+            !MergingTransformPreviewCanCommit(transformPreviewModel_));
         if (ImGui::Button("Apply"))
             ExecuteInputCommand(EditorInputCommand::TransformApply);
         ImGui::EndDisabled();
@@ -253,9 +253,7 @@ void EditorWorkspace::DrawScenePanel()
         directionButton("Front", VoxelAlignDirection::Front);
         directionButton("Back", VoxelAlignDirection::Back);
         ImGui::BeginDisabled(
-            !transformPreviewModel_.IsActive() ||
-            transformPreviewModel_.HasCollisions() ||
-            transformPreviewModel_.HasOutOfBounds());
+            !MergingTransformPreviewCanCommit(transformPreviewModel_));
         if (ImGui::Button("Apply"))
             ExecuteInputCommand(EditorInputCommand::TransformApply);
         ImGui::EndDisabled();
@@ -414,15 +412,12 @@ void EditorWorkspace::DrawScenePanel()
         const ImGuiIO& io = ImGui::GetIO();
         SelectionHandles selectionHandles{};
         std::optional<SelectionHandle> hoveredSelectionHandle;
+        // VF-WRAP-V1 (correction visuelle) : la liste des outils qui montrent
+        // et saisissent les poignees est une autorite pure
+        // (SelectionHandlePolicy) — Wrap en fait partie.
         if (!stampPlacementSession_.IsActive() &&
             !useViewportInteractionV2_ &&
-            (voxelToolState_.IsSelectionActive() ||
-             voxelToolState_.IsMoveActive() ||
-             voxelToolState_.IsDuplicateActive() ||
-             voxelToolState_.IsRotateActive() ||
-             voxelToolState_.IsMirrorActive() ||
-             voxelToolState_.IsScaleActive() ||
-             voxelToolState_.IsAlignActive()) &&
+            ToolShowsSelectionHandles(voxelToolState_.ActiveTool()) &&
             selectionService_.EditableBounds().Valid &&
             selectionInteraction_.Mode() != SelectionInteractionMode::Creating)
         {
@@ -447,7 +442,7 @@ void EditorWorkspace::DrawScenePanel()
             selectionHandles = ProjectSelectionHandles(
                 handleBounds, voxelModelCenter_, currentViewportRectangle_,
                 viewportCamera_.GetViewProjection());
-            if (voxelToolState_.IsSelectionActive() &&
+            if (ToolPicksSelectionHandles(voxelToolState_.ActiveTool()) &&
                 selectionInteraction_.Mode() == SelectionInteractionMode::Idle &&
                 imageHovered)
             {
@@ -1033,10 +1028,14 @@ void EditorWorkspace::DrawScenePanel()
             {
                 const std::string_view gizmoHelp =
                     transformGizmoManager_.HelpText();
-                viewportHelp = transformPreviewModel_.HasCollisions()
-                    ? "Move blocked: destination is occupied"
-                    : transformPreviewModel_.HasOutOfBounds()
+                // Feedback commun : hors-limites (bloquant) AVANT overlap
+                // (information) — jamais l'inverse.
+                const TransformPreviewFeedback feedback =
+                    ResolveTransformPreviewFeedback(transformPreviewModel_);
+                viewportHelp = feedback == TransformPreviewFeedback::OutOfBounds
                     ? "Move blocked: destination is outside the model"
+                    : feedback == TransformPreviewFeedback::Overlap
+                    ? "Move overlaps existing voxels - they will be replaced on release"
                     : !gizmoHelp.empty()
                     ? gizmoHelp.data()
                     : "Moving — Release to apply — Esc to cancel";
@@ -1044,10 +1043,12 @@ void EditorWorkspace::DrawScenePanel()
             else if (selectionInteraction_.Mode() ==
                     SelectionInteractionMode::MovingContent)
             {
-                viewportHelp = transformPreviewModel_.HasCollisions()
-                    ? "Move blocked: destination is occupied"
-                    : transformPreviewModel_.HasOutOfBounds()
+                const TransformPreviewFeedback feedback =
+                    ResolveTransformPreviewFeedback(transformPreviewModel_);
+                viewportHelp = feedback == TransformPreviewFeedback::OutOfBounds
                     ? "Move blocked: destination is outside the model"
+                    : feedback == TransformPreviewFeedback::Overlap
+                    ? "Move overlaps existing voxels - they will be replaced on release"
                     : "Move voxels — Release to validate — Esc to cancel";
             }
             else
@@ -1087,10 +1088,12 @@ void EditorWorkspace::DrawScenePanel()
         {
             const std::string_view gizmoHelp =
                 transformGizmoManager_.HelpText();
-            viewportHelp = transformPreviewModel_.HasCollisions()
-                ? "Rotate blocked: destination is occupied"
-                : transformPreviewModel_.HasOutOfBounds()
+            const TransformPreviewFeedback feedback =
+                ResolveTransformPreviewFeedback(transformPreviewModel_);
+            viewportHelp = feedback == TransformPreviewFeedback::OutOfBounds
                 ? "Rotate blocked: destination is outside the model"
+                : feedback == TransformPreviewFeedback::Overlap
+                ? "Rotate overlaps existing voxels - they will be replaced on apply"
                 : !gizmoHelp.empty()
                 ? gizmoHelp.data()
                 : !voxelRotateStatusMessage_.empty()
@@ -1119,12 +1122,14 @@ void EditorWorkspace::DrawScenePanel()
         {
             const std::string_view gizmoHelp =
                 transformGizmoManager_.HelpText();
+            const TransformPreviewFeedback feedback =
+                ResolveTransformPreviewFeedback(transformPreviewModel_);
             viewportHelp = !voxelScaleStatusMessage_.empty()
                 ? voxelScaleStatusMessage_.c_str()
-                : transformPreviewModel_.HasCollisions()
-                ? "Scale blocked: destination is occupied"
-                : transformPreviewModel_.HasOutOfBounds()
+                : feedback == TransformPreviewFeedback::OutOfBounds
                 ? "Scale blocked: destination is outside the model"
+                : feedback == TransformPreviewFeedback::Overlap
+                ? "Scale overlaps existing voxels - they will be replaced on apply"
                 : !gizmoHelp.empty()
                 ? gizmoHelp.data()
                 : !transformPreviewModel_.IsActive()
@@ -1137,16 +1142,38 @@ void EditorWorkspace::DrawScenePanel()
                 ? "Scale Y x2 - Enter to apply - Esc to cancel"
                 : "Scale Z x2 - Enter to apply - Esc to cancel";
         }
+        else if (voxelToolState_.IsWrapActive())
+        {
+            // VF-WRAP-V1 : le message d'etat (budget memoire, resultat vide,
+            // refus) prime ; sinon le verdict de la preview, puis le guide.
+            const TransformPreviewFeedback feedback =
+                ResolveTransformPreviewFeedback(transformPreviewModel_);
+            viewportHelp = !voxelWrapStatusMessage_.empty()
+                ? voxelWrapStatusMessage_.c_str()
+                : feedback == TransformPreviewFeedback::OutOfBounds
+                ? "Wrap blocked: destination is outside the model"
+                : feedback == TransformPreviewFeedback::Overlap
+                ? "Wrap overlaps existing voxels - they will be replaced on release"
+                : !IsWrapHandleDragActive()
+                ? (hoveredSelectionHandle
+                    ? "Drag this face outward to repeat, inward to crop"
+                    : "Drag a bounds face to repeat or crop the pattern")
+                : transformPreviewModel_.IsCompact()
+                ? "Wrap (large result: bounds preview) - release to apply - Esc to cancel"
+                : "Wrap - release to apply - Esc to cancel";
+        }
         else if (voxelToolState_.IsAlignActive())
         {
             viewportHelp = !voxelAlignStatusMessage_.empty()
                 ? voxelAlignStatusMessage_.c_str()
                 : !transformPreviewModel_.IsActive()
                 ? "Choose Left, Right, Bottom, Top, Front or Back"
-                : transformPreviewModel_.HasCollisions()
-                ? "Align blocked: destination is occupied"
-                : transformPreviewModel_.HasOutOfBounds()
+                : ResolveTransformPreviewFeedback(transformPreviewModel_) ==
+                    TransformPreviewFeedback::OutOfBounds
                 ? "Align blocked: destination is outside the model"
+                : ResolveTransformPreviewFeedback(transformPreviewModel_) ==
+                    TransformPreviewFeedback::Overlap
+                ? "Align overlaps existing voxels - they will be replaced on apply"
                 : "Align preview - Enter to apply - Esc to cancel";
         }
         DrawTooltip(viewportHelp);
@@ -1399,11 +1426,25 @@ void EditorWorkspace::DrawScenePanel()
 
         if (!useViewportInteractionV2_)
         {
+        // VF-UX-SELECTION (arbitrage) : la decision passe par le membre unique,
+        // qui neutralise poignees et interieur quand Region est actif.
         const SelectionPointerTarget selectionPointerTarget =
-            ResolveSelectionPointerTarget(
+            ResolveSelectionPointerArbitration(
                 hoveredSelectionHandle.has_value(), interiorHovered);
         bool selectionHandleCaptured = false;
-        if (voxelToolState_.IsSelectionActive() &&
+        // VF-WRAP-V1 : Wrap pilote les faces des bounds avec la MEME poignee
+        // que Selection, par le chemin unique BeginWrapHandleDrag (preview +
+        // interaction ensemble, annules ensemble).
+        if (voxelToolState_.IsWrapActive() && selectionInputAvailable &&
+            selectionPointerTarget == SelectionPointerTarget::Handle &&
+            hoveredSelectionHandle &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            selectionHandleCaptured = BeginWrapHandleDrag(
+                hoveredSelectionHandle->Face, io.MousePos.x, io.MousePos.y,
+                hoveredSelectionHandle->ScreenAxisPerVoxel);
+        }
+        else if (voxelToolState_.IsSelectionActive() &&
             selectionInputAvailable &&
             selectionPointerTarget == SelectionPointerTarget::Handle &&
             hoveredSelectionHandle &&
@@ -1515,13 +1556,33 @@ void EditorWorkspace::DrawScenePanel()
             voxelSelectionClickCandidate_ = !cameraControl &&
                 !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
             selectionPointerAnchor_ = CurrentSelectionTarget();
+            // VF-UX-SELECTION-V1 : l'operation de BASE vient du panneau ; les
+            // modificateurs clavier historiques la surchargent pendant le
+            // geste. L'interface et les raccourcis disent la meme verite.
             selectionPointerMode_ = io.KeyCtrl && io.KeyShift
                 ? SelectionMode::Intersect
                 : io.KeyCtrl ? SelectionMode::Subtract
                 : io.KeyShift ? SelectionMode::Add
-                              : SelectionMode::Replace;
+                              : toolContext_.Selection.Operation;
+            // Rect : l'axe d'aplatissement vient de la normale visee au
+            // PointerDown — jamais d'un etat precedent.
+            if (const auto& rectHit = voxelSelection_.Hovered())
+                selectionRectAxis_ = DominantAxisOf(
+                    rectHit->Normal.X, rectHit->Normal.Y, rectHit->Normal.Z);
+            else
+                selectionRectAxis_ = 1;   // plan de travail : normale +Y
+            selectionRectLayer_ = selectionPointerAnchor_
+                ? (selectionRectAxis_ == 0 ? selectionPointerAnchor_->X
+                   : selectionRectAxis_ == 2 ? selectionPointerAnchor_->Z
+                   : selectionPointerAnchor_->Y)
+                : 0;
+            selectionPointerDownX_ = io.MousePos.x;
+            selectionPointerDownY_ = io.MousePos.y;
             if (voxelSelectionClickCandidate_ &&
-                voxelToolState_.IsSelectionActive())
+                voxelToolState_.IsSelectionActive() &&
+                // Region est un outil de CLIC : le marquee ne demarre pas, un
+                // drag ne peut donc jamais aboutir a un commit de boite.
+                SelectionModeStartsMarquee(toolContext_.Selection.Mode))
             {
                 if (selectionInteraction_.PointerDown(
                         selectionPointerAnchor_,
@@ -1569,6 +1630,14 @@ void EditorWorkspace::DrawScenePanel()
                         delta));
                 }
             }
+            else if (IsWrapHandleDragActive())
+            {
+                // VF-WRAP-V1 : la preview suit le drag via la MEME geometrie
+                // que le commit (chemin unique viewport / smokes).
+                static_cast<void>(UpdateWrapHandleDrag(
+                    io.MousePos.x, io.MousePos.y));
+                selectionChanged = false;
+            }
             else
             {
                 selectionChanged = selectionInteraction_.PointerMove(
@@ -1590,6 +1659,15 @@ void EditorWorkspace::DrawScenePanel()
         }
         if (voxelSelectionClickCandidate_ &&
             (!sceneFocused || io.WantTextInput))
+            voxelSelectionClickCandidate_ = false;
+        // Sans marquee (mode Region), rien n'invalidait le clic sur un drag :
+        // relacher apres un grand mouvement aurait selectionne une region a
+        // l'arrivee. Le meme seuil que le marquee tranche.
+        if (voxelSelectionClickCandidate_ &&
+            !SelectionModeStartsMarquee(toolContext_.Selection.Mode) &&
+            SelectionInteraction::ExceedsDragThreshold(
+                io.MousePos.x - selectionPointerDownX_,
+                io.MousePos.y - selectionPointerDownY_))
             voxelSelectionClickCandidate_ = false;
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
         {
@@ -1627,15 +1705,30 @@ void EditorWorkspace::DrawScenePanel()
                     static_cast<void>(ApplyVoxelMove());
                 UpdateVoxelHighlights();
             }
+            else if (IsWrapHandleDragActive())
+            {
+                // VF-WRAP-V1 : le relachement committe exactement le resultat
+                // montre pendant le drag (chemin unique viewport / smokes).
+                static_cast<void>(ReleaseWrapHandleDrag());
+            }
             else if (!stampPlacementSession_.IsActive())
             {
                 const SelectionPointerRelease release =
                     selectionInteraction_.PointerUp();
                 if (release.WasDrag && release.Bounds)
                 {
-                    if (release.Mode == SelectionInteractionMode::Creating)
+                    if (release.Mode == SelectionInteractionMode::Creating &&
+                        // Garde defensive, meme predicat qu'au demarrage : si
+                        // un marquee a ete demarre par un chemin imprevu alors
+                        // que Region est actif, il ne commit RIEN.
+                        SelectionModeStartsMarquee(toolContext_.Selection.Mode))
+                        // PREVIEW == COMMIT : strictement la meme fonction et
+                        // les memes entrees que la preview des highlights.
                         static_cast<void>(ApplySelectionBounds(
-                            *release.Bounds, release.Operation));
+                            ResolveSelectionGestureBounds(
+                                toolContext_.Selection.Mode, *release.Bounds,
+                                selectionRectAxis_, selectionRectLayer_),
+                            release.Operation));
                     else if (release.Mode ==
                              SelectionInteractionMode::MovingContent)
                         static_cast<void>(ApplyVoxelMove());
@@ -1657,10 +1750,27 @@ void EditorWorkspace::DrawScenePanel()
                                 static_cast<std::int32_t>(hit->Coordinates.X),
                                 static_cast<std::int32_t>(hit->Coordinates.Y),
                                 static_cast<std::int32_t>(hit->Coordinates.Z)};
-                            changed = selectionService_.Select(
-                                position, selectionPointerMode_);
+                            // VF-UX-SELECTION-V1 : en mode Region, le clic
+                            // resout la region et l'applique en UNE operation
+                            // logique sur le SelectionSet.
+                            if (toolContext_.Selection.Mode ==
+                                    SelectionFamilyMode::Region && document)
+                            {
+                                changed = ApplyRegionSelection(
+                                    position, hit->Normal,
+                                    selectionPointerMode_);
+                            }
+                            else
+                            {
+                                changed = selectionService_.Select(
+                                    position, selectionPointerMode_);
+                            }
                         }
-                        else if (!io.KeyCtrl && !io.KeyShift)
+                        // Clic dans le vide : semantique de l'operation
+                        // CAPTUREE au PointerDown (EmptyClickClearsSelection),
+                        // jamais une relecture de Shift/Ctrl au relachement.
+                        else if (EmptyClickClearsSelection(
+                                     selectionPointerMode_))
                         {
                             changed = selectionService_.Clear();
                         }

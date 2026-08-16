@@ -54,6 +54,7 @@
 #include "TransformPanel/TransformPanelViewModel.h"
 #include "Tools/ToolContext.h"
 #include "Tools/ToolManager.h"
+#include "Tools/SmartToolFamilies.h"
 #include "ViewportInput/ViewportCameraInput.h"
 #include "ViewportNavigationController.h"
 #include "ViewportRenderer.h"
@@ -234,6 +235,8 @@ public:
     [[nodiscard]] bool VoxelMirrorSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelScaleSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelScaleSmokePassed() const noexcept;
+    [[nodiscard]] bool RunVoxelWrapSmokeStep(std::size_t frame);
+    [[nodiscard]] bool VoxelWrapSmokePassed() const noexcept;
     [[nodiscard]] bool RunVoxelAlignSmokeStep(std::size_t frame);
     [[nodiscard]] bool VoxelAlignSmokePassed() const noexcept;
     [[nodiscard]] bool RunTransformGizmoFoundationSmokeStep(
@@ -379,6 +382,21 @@ private:
         SelectionNavigationBounds() const noexcept;
     [[nodiscard]] ViewportNavigationBounds SceneNavigationBounds() const noexcept;
     void UpdateVoxelHighlights() noexcept;
+    // VF-UX-TOOLS (correctif) : point d'entree UNIQUE pour changer de famille.
+    // La barre et le panneau passaient par deux chemins ; ils partagent
+    // desormais la meme regle canonique (voir Tools/SmartToolFamilies.h).
+    void ApplySmartToolFamily(SmartToolFamily family) noexcept;
+    // VF-UX-SELECTION-V1 : resout la region au clic et l'applique au
+    // SelectionSet en une operation logique. `normal` est la normale de la
+    // face visee (cible Face).
+    [[nodiscard]] bool ApplyRegionSelection(
+        Asset::Voxel::VoxelPosition seed, Vec3 normal, SelectionMode mode);
+    // VF-UX-SELECTION (arbitrage) : SEUL point de decision entre les
+    // interactions de boite (poignees, deplacement) et le clic outil. Le
+    // viewport le consulte, et le smoke l'appelle tel quel : la meme fonction
+    // est le routage ET la surface de test.
+    [[nodiscard]] SelectionPointerTarget ResolveSelectionPointerArbitration(
+        bool handleHovered, bool interiorHovered) const noexcept;
     // VF-0265 (lot 3c) : source de composition de la preview exacte. Les chunks
     // du modèle n'y sont fournis que s'ils décrivent exactement ce document à
     // cette révision ; sinon le compositeur retombe sur son chemin de référence
@@ -437,6 +455,29 @@ private:
         Asset::Voxel::VoxelDimensions targetDimensions);
     [[nodiscard]] bool ApplyVoxelScale();
     void CancelVoxelScale() noexcept;
+    // VF-WRAP-V1 : Repeat/Crop du motif de la selection par les faces des
+    // bounds. Une seule autorite geometrique (WrapVoxelSelectionOperation) est
+    // consommee par la preview ET le commit : PREVIEW == COMMIT.
+    [[nodiscard]] bool CanWrapSelection() const noexcept;
+    [[nodiscard]] bool BeginVoxelWrapPreview();
+    [[nodiscard]] bool UpdateVoxelWrapPreview(
+        SelectionBounds newBounds, SelectionFace draggedFace);
+    [[nodiscard]] bool ApplyVoxelWrap();
+    // Annulation COMPLETE : preview, interaction de poignee (ResizingFace),
+    // etat du geste. Sans effet si rien n'est actif.
+    void CancelVoxelWrap() noexcept;
+    // Vrai drag de poignee Wrap : ces trois fonctions sont le chemin unique
+    // du viewport (capture / mouvement / relachement) et des smokes.
+    [[nodiscard]] bool BeginWrapHandleDrag(
+        SelectionFace face, float screenX, float screenY,
+        Vec2 screenAxisPerVoxel);
+    [[nodiscard]] bool UpdateWrapHandleDrag(
+        float screenX, float screenY);
+    [[nodiscard]] bool ReleaseWrapHandleDrag();
+    [[nodiscard]] bool IsWrapHandleDragActive() const noexcept;
+    // Autorite des guides pendant la preview Wrap : les bornes DEMANDEES.
+    [[nodiscard]] const SelectionBounds& WrapTargetBounds() const noexcept;
+    [[nodiscard]] const std::string& WrapStatusMessage() const noexcept;
     [[nodiscard]] bool BeginVoxelAlignPreview(VoxelAlignDirection direction);
     [[nodiscard]] bool ApplyVoxelAlign();
     void CancelVoxelAlign() noexcept;
@@ -757,6 +798,25 @@ private:
     // complète par frame ; les appels suivants sont purgés au pré-rendu de la
     // frame suivante, où le renderer consomme l'état.
     std::uint64_t drawFrameIndex_ = 0U;
+    // VF-UX-SELECTION-V1 : axe et couche d'aplatissement du mode Rect,
+    // captures au PointerDown depuis la normale visee.
+    int selectionRectAxis_ = 1;
+    std::int32_t selectionRectLayer_ = 0;
+    // VF-WRAP-V1 : etat du geste Wrap. Les bornes source sont capturees au
+    // debut du geste ; les ancres par axe viennent de la face tiree.
+    SelectionBounds wrapSourceBounds_{};
+    SelectionBounds wrapTargetBounds_{};
+    VoxelWrapOptions wrapGestureOptions_{};
+    std::string voxelWrapStatusMessage_;
+    SelectionFace wrapDraggedFace_ = SelectionFace::None;
+    // Index du motif (une fois par geste) et suivi incremental des collisions
+    // de la preview compacte (point 6 du correctif).
+    WrapPatternIndex wrapPattern_;
+    WrapCollisionTracker wrapCollisions_;
+    // Position ecran du PointerDown : invalide le clic Region sur un drag.
+    bool selectionRegionSmokeChecks_ = false;
+    float selectionPointerDownX_ = 0.0F;
+    float selectionPointerDownY_ = 0.0F;
     std::uint64_t highlightsResolvedFrame_ =
         std::numeric_limits<std::uint64_t>::max();
     bool highlightsUpdatePending_ = false;
@@ -913,6 +973,7 @@ private:
     bool modernToolbarSmokeDisabled_ = false;
     bool modernToolbarSmokeToolsEnabled_ = false;
     bool modernToolbarSmokeSingleActive_ = false;
+    bool modernToolbarSmokeFamilyRouting_ = false;
     bool modernToolbarSmokeSaved_ = false;
     bool modernToolbarSmokeCleaned_ = false;
     std::filesystem::path keyboardShortcutsSmokePath_;
@@ -970,6 +1031,18 @@ private:
     bool voxelScaleSmokeSaved_ = false;
     bool voxelScaleSmokeReopened_ = false;
     bool voxelScaleSmokeCleaned_ = false;
+    std::filesystem::path voxelWrapSmokePath_;
+    bool voxelWrapSmokePrepared_ = false;
+    bool voxelWrapSmokeExpandPreviewed_ = false;
+    bool voxelWrapSmokeExpandApplied_ = false;
+    bool voxelWrapSmokeUndoRedo_ = false;
+    bool voxelWrapSmokeCropped_ = false;
+    bool voxelWrapSmokeSpacingMirror_ = false;
+    bool voxelWrapSmokeGuards_ = false;
+    bool voxelWrapSmokeChained_ = false;
+    bool voxelWrapSmokeSaved_ = false;
+    bool voxelWrapSmokeReopened_ = false;
+    bool voxelWrapSmokeCleaned_ = false;
     std::filesystem::path voxelAlignSmokePath_;
     bool voxelAlignSmokePrepared_ = false;
     bool voxelAlignSmokeDirections_ = false;

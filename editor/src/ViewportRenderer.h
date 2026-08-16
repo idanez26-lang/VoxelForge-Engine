@@ -237,6 +237,10 @@ public:
     [[nodiscard]] bool HasTransformGizmo() const noexcept;
     [[nodiscard]] std::size_t TransformGizmoAxisPrimitiveCount()
         const noexcept;
+    // Introspection (smokes) : les bornes editables configurees pour les
+    // guides / poignees — ce que l'utilisateur voit et manipule.
+    [[nodiscard]] const std::optional<SelectionBounds>&
+        EditableSelectionBoundsHighlight() const noexcept;
 
 private:
     struct HighlightGeometryCache;

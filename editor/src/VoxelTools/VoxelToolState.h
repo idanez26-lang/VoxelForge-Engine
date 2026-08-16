@@ -20,7 +20,8 @@ enum class ActiveVoxelTool : std::uint8_t
     Rotate,
     Mirror,
     Scale,
-    Align
+    Align,
+    Wrap
 };
 
 [[nodiscard]] const char* ActiveVoxelToolName(
@@ -46,6 +47,7 @@ public:
     [[nodiscard]] bool IsMirrorActive() const noexcept;
     [[nodiscard]] bool IsScaleActive() const noexcept;
     [[nodiscard]] bool IsAlignActive() const noexcept;
+    [[nodiscard]] bool IsWrapActive() const noexcept;
     [[nodiscard]] bool IsEditingToolActive() const noexcept;
 
 private:

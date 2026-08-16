@@ -2734,6 +2734,12 @@ bool ViewportRenderer::HasHighlightMesh() const noexcept
         highlightIndexBuffer_ != nullptr && highlightIndexCount_ > 0U;
 }
 
+const std::optional<SelectionBounds>&
+ViewportRenderer::EditableSelectionBoundsHighlight() const noexcept
+{
+    return editableSelectionBoundsHighlight_;
+}
+
 bool ViewportRenderer::HasTransformPreview() const noexcept
 {
     return transformPreview_ != nullptr;

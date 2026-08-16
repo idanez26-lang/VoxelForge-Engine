@@ -98,6 +98,8 @@ bool EditorInputService::IsAvailable(
         return availability.HasDocument && availability.CanMirrorSelection;
     if (command == EditorInputCommand::ToolScale)
         return availability.HasDocument && availability.CanScaleSelection;
+    if (command == EditorInputCommand::ToolWrap)
+        return availability.HasDocument && availability.CanMoveSelection;
     if (command == EditorInputCommand::ToolAlign)
         return availability.HasDocument && availability.CanAlignSelection;
     if (command == EditorInputCommand::RotateLeft ||
@@ -156,6 +158,11 @@ std::string_view EditorInputService::CommandName(
     switch (command)
     {
     case EditorInputCommand::ToolPencil: return "Tool.Pencil";
+    case EditorInputCommand::ToolFamilyPencil: return "Tool.Family.Pencil";
+    case EditorInputCommand::ToolFamilyGeometry: return "Tool.Family.Geometry";
+    case EditorInputCommand::ToolFamilyFace: return "Tool.Family.Face";
+    case EditorInputCommand::ToolFamilySurface: return "Tool.Family.Surface";
+    case EditorInputCommand::ToolFamilyFill: return "Tool.Family.Fill";
     case EditorInputCommand::ToolEraser: return "Tool.Eraser";
     case EditorInputCommand::ToolFill: return "Tool.Fill";
     case EditorInputCommand::ToolBox: return "Tool.Box";
@@ -167,6 +174,7 @@ std::string_view EditorInputService::CommandName(
     case EditorInputCommand::ToolRotate: return "Tool.Rotate";
     case EditorInputCommand::ToolMirror: return "Tool.Mirror";
     case EditorInputCommand::ToolScale: return "Tool.Scale";
+    case EditorInputCommand::ToolWrap: return "Tool.Wrap";
     case EditorInputCommand::ToolAlign: return "Tool.Align";
     case EditorInputCommand::RotateLeft: return "Rotate.Left90";
     case EditorInputCommand::RotateRight: return "Rotate.Right90";

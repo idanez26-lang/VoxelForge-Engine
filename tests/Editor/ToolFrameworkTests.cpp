@@ -1,5 +1,6 @@
 #include "Tools/ToolContext.h"
 #include "Tools/ToolManager.h"
+#include "Selection/SelectionHandlePolicy.h"
 #include "Tools/ToolPanel.h"
 
 #include <algorithm>
@@ -56,12 +57,26 @@ void TestSingleActiveToolTransitionsAndPanelSelection()
     Require(state.IsScaleActive() &&
         manager.ActiveDescriptor().Panel == ToolPanelKind::Scale,
         "Rotate to Scale did not select the Scale panel.");
+    // VF-WRAP-V1 : Wrap est un outil de plein droit — etat, panneau,
+    // commande centralisee et raccourci, dans la famille Transform.
+    manager.SetActiveTool(ActiveVoxelTool::Wrap);
+    Require(state.IsWrapActive() &&
+        manager.ActiveDescriptor().Tool == ActiveVoxelTool::Wrap &&
+        manager.ActiveDescriptor().Panel == ToolPanelKind::Wrap &&
+        manager.ActiveDescriptor().Command == EditorInputCommand::ToolWrap &&
+        manager.ActiveDescriptor().Name == "Wrap",
+        "Scale to Wrap did not select the Wrap tool, panel and command.");
+    Require(!EditorInputService{}.ShortcutLabel(
+        EditorInputCommand::ToolWrap).empty(),
+        "Wrap has no keyboard shortcut.");
     manager.SetActiveTool(ActiveVoxelTool::Selection);
     Require(state.IsSelectionActive() &&
         manager.ActiveDescriptor().Panel == ToolPanelKind::Selection,
-        "Scale to Select did not select the Selection panel.");
-    Require(manager.ActiveDescriptor().Panel != ToolPanelKind::Scale,
-        "Select retained the Scale panel.");
+        "Wrap to Select did not select the Selection panel.");
+    Require(manager.ActiveDescriptor().Panel != ToolPanelKind::Scale &&
+        manager.ActiveDescriptor().Panel != ToolPanelKind::Wrap &&
+        !state.IsWrapActive(),
+        "Select retained the Scale or Wrap panel.");
 
     constexpr std::array activeChecks{
         &VoxelToolState::IsPencilActive, &VoxelToolState::IsEraserActive,
@@ -70,10 +85,46 @@ void TestSingleActiveToolTransitionsAndPanelSelection()
         &VoxelToolState::IsSelectionActive, &VoxelToolState::IsMoveActive,
         &VoxelToolState::IsDuplicateActive, &VoxelToolState::IsRotateActive,
         &VoxelToolState::IsMirrorActive, &VoxelToolState::IsScaleActive,
-        &VoxelToolState::IsAlignActive};
+        &VoxelToolState::IsWrapActive, &VoxelToolState::IsAlignActive};
     Require(std::count_if(activeChecks.begin(), activeChecks.end(),
                 [&state](const auto check) { return (state.*check)(); }) == 1,
         "ToolManager left more than one active tool.");
+    // Wrap est exactement un des outils catalogues, une seule fois.
+    const auto tools = ToolManager::Tools();
+    Require(std::count_if(tools.begin(), tools.end(),
+                [](const ToolDescriptor& tool)
+                {
+                    return tool.Tool == ActiveVoxelTool::Wrap;
+                }) == 1,
+        "Wrap is not catalogued exactly once among the tools.");
+}
+
+// VF-WRAP-V1 (correction visuelle) : autorite pure des poignees de faces.
+// Wrap MONTRE et SAISIT les six poignees (comme Selection) ; Move/Rotate/
+// Scale/Mirror/Align/Duplicate les montrent en guides sans les saisir ; les
+// outils de dessin ne les montrent pas.
+void TestSelectionHandlePolicy()
+{
+    Require(ToolShowsSelectionHandles(ActiveVoxelTool::Wrap) &&
+        ToolPicksSelectionHandles(ActiveVoxelTool::Wrap),
+        "Wrap must show and pick the editable bounds face handles.");
+    Require(ToolShowsSelectionHandles(ActiveVoxelTool::Selection) &&
+        ToolPicksSelectionHandles(ActiveVoxelTool::Selection),
+        "Selection must keep showing and picking its face handles.");
+    for (const ActiveVoxelTool guideOnly : {ActiveVoxelTool::Move,
+             ActiveVoxelTool::Rotate, ActiveVoxelTool::Scale,
+             ActiveVoxelTool::Mirror, ActiveVoxelTool::Align,
+             ActiveVoxelTool::Duplicate})
+        Require(ToolShowsSelectionHandles(guideOnly) &&
+            !ToolPicksSelectionHandles(guideOnly),
+            "Transform tools show handles as guides but do not pick them.");
+    for (const ActiveVoxelTool none : {ActiveVoxelTool::Pencil,
+             ActiveVoxelTool::Eraser, ActiveVoxelTool::Fill,
+             ActiveVoxelTool::Box, ActiveVoxelTool::Line,
+             ActiveVoxelTool::Sphere, ActiveVoxelTool::None})
+        Require(!ToolShowsSelectionHandles(none) &&
+            !ToolPicksSelectionHandles(none),
+            "Drawing tools must not show selection handles.");
 }
 
 void TestExistingStateAndLegacyShortcutsArePreserved()
@@ -172,6 +223,7 @@ int main()
         TestSingleActiveToolTransitionsAndPanelSelection();
         TestExistingStateAndLegacyShortcutsArePreserved();
         TestMetadataAndFutureOrderingFoundation();
+        TestSelectionHandlePolicy();
         TestContextDefaults();
         TestSmartBrushStatePersistsAcrossToolChanges();
         std::cout << "Professional tool framework tests passed.\n";

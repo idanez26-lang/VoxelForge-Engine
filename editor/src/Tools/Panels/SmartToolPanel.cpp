@@ -1,5 +1,7 @@
 #include "SmartBrushOptions.h"
 #include "SmartToolPanel.h"
+
+#include "Tools/SmartToolFamilies.h"
 #include "SmartTools/BrushProfileService.h"
 
 #include <imgui.h>
@@ -13,48 +15,47 @@ bool DrawSmartToolPanel(ToolContext& context)
 {
     SmartTool& tool = context.Smart;
     bool changed = false;
-    ImGui::TextDisabled("SMART TOOL");
-    ImGui::TextDisabled("Geometry");
-    ImGui::PushID("Geometry");
-    int geometry = tool.Geometry() == SmartGeometry::Face ? 1
-        : tool.Geometry() == SmartGeometry::Line ? 2
-        : tool.Geometry() == SmartGeometry::Geometry ? 3
-        : tool.Geometry() == SmartGeometry::Surface ? 4
-        : tool.Geometry() == SmartGeometry::Fill ? 5 : 0;
-    changed |= ImGui::RadioButton("Pencil", &geometry, 0);
-    ImGui::SameLine();
-    changed |= ImGui::RadioButton("Face", &geometry, 1);
-    ImGui::SameLine();
-    changed |= ImGui::RadioButton("Line", &geometry, 2);
-    ImGui::SameLine();
-    changed |= ImGui::RadioButton("Geometry", &geometry, 3);
-    ImGui::NewLine();
-    changed |= ImGui::RadioButton("Surface", &geometry, 4);
-    ImGui::SameLine();
-    changed |= ImGui::RadioButton("Fill", &geometry, 5);
-    ImGui::PopID();
-    const SmartGeometry geometryBefore = tool.Geometry();
-    tool.SetGeometry(geometry == 1 ? SmartGeometry::Face
-        : geometry == 2 ? SmartGeometry::Line
-        : geometry == 3 ? SmartGeometry::Geometry
-        : geometry == 4 ? SmartGeometry::Surface
-        : geometry == 5 ? SmartGeometry::Fill : SmartGeometry::Pencil);
-    changed |= tool.Geometry() != geometryBefore;
+    // VF-UX-TOOLS : la FAMILLE est desormais choisie dans la barre de gauche.
+    // Ce panneau ne montre plus que les MODES et les OPTIONS de la famille
+    // courante — c'est la hierarchie demandee : famille, puis modes, puis
+    // seulement les options qui agissent.
+    const SmartGeometry family = tool.Geometry();
+    const bool geometryFamily =
+        FamilyOf(family) == SmartToolFamily::Geometry;
 
-    if (tool.Geometry() == SmartGeometry::Face)
+    // Une option qui n'agit pas doit se voir inerte, jamais disparaitre en
+    // silence. La regle vit desormais dans Tools/SmartToolFamilies.h, partagee
+    // avec la barre : la dupliquer ici etait la cause du defaut « Cube ».
+    // Pencil et Surface montrent toujours un Size actif : editer une taille
+    // heritee de 1 (SingleVoxel interne) bascule en CubeBrush. Le predicat
+    // canonique reste l'autorite pour les autres familles.
+    const bool usesFootprint = ConsumesBrushSize(
+        family, tool.Mode(), tool.Action()) ||
+        ((FamilyOf(family) == SmartToolFamily::Pencil ||
+          FamilyOf(family) == SmartToolFamily::Surface) &&
+         tool.Mode() == SmartToolMode::SingleVoxel &&
+         !(FamilyOf(family) == SmartToolFamily::Surface &&
+           tool.Action() == SmartAction::Paint));
+
+    ImGui::TextDisabled("FAMILY");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(SmartToolFamilyName(FamilyOf(family)));
+    ImGui::Separator();
+
+    if (family == SmartGeometry::Face)
     {
-        ImGui::TextDisabled("Face: connected exposed surface");
-        ImGui::TextDisabled("Size and shape are not used");
+        ImGui::TextDisabled("Acts on the whole connected exposed face");
+        ImGui::TextDisabled("Brush size and shape are not used");
     }
-    else if (tool.Geometry() == SmartGeometry::Fill)
+    else if (family == SmartGeometry::Fill)
     {
-        ImGui::TextDisabled("Fill Mode");
+        ImGui::TextDisabled("Mode");
         ImGui::PushID("FillMode");
         int fillMode = static_cast<int>(tool.FillMode());
-        changed |= ImGui::RadioButton("Connected", &fillMode,
+        changed |= ImGui::RadioButton("Connected Region", &fillMode,
             static_cast<int>(SmartFillMode::Connected));
         ImGui::SameLine();
-        changed |= ImGui::RadioButton("Plane", &fillMode,
+        changed |= ImGui::RadioButton("Face Plane", &fillMode,
             static_cast<int>(SmartFillMode::Plane));
         ImGui::PopID();
         const SmartFillMode fillModeBefore = tool.FillMode();
@@ -63,29 +64,125 @@ bool DrawSmartToolPanel(ToolContext& context)
         ImGui::TextDisabled(tool.FillMode() == SmartFillMode::Connected
             ? "Click a connected color region"
             : "Click a visible face to fill its plane");
+        ImGui::TextDisabled("Brush size and shape are not used");
+    }
+    else if (geometryFamily)
+    {
+        // Modes V1 de Geometry : Line, Cube, Sphere. Line reste porte par
+        // SmartGeometry::Line cote moteur — seule la PRESENTATION change, aucun
+        // planner n'est touche. Cylinder existe toujours et n'est pas casse :
+        // il n'est simplement pas promu en V1 (decision produit). S'il est
+        // actif, on l'affiche pour ne jamais alterer l'etat en silence.
+        ImGui::TextDisabled("Shape");
+        ImGui::PushID("GeometryShape");
+        const GeometryShape currentShape =
+            GeometryShapeOf(family, tool.Mode());
+        // Cylinder n'est pas un mode V1 : il n'apparait que s'il est deja
+        // actif, pour ne jamais alterer l'etat en silence.
+        const bool cylinderActive = currentShape == GeometryShape::Cylinder;
+        int shape = static_cast<int>(currentShape);
+        const int shapeBefore = shape;
+        changed |= ImGui::RadioButton("Line", &shape,
+            static_cast<int>(GeometryShape::Line));
+        ImGui::SameLine();
+        changed |= ImGui::RadioButton("Cube", &shape,
+            static_cast<int>(GeometryShape::Cube));
+        ImGui::SameLine();
+        changed |= ImGui::RadioButton("Sphere", &shape,
+            static_cast<int>(GeometryShape::Sphere));
+        if (cylinderActive)
+        {
+            ImGui::SameLine();
+            changed |= ImGui::RadioButton("Cylinder", &shape,
+                static_cast<int>(GeometryShape::Cylinder));
+        }
+        ImGui::PopID();
+        if (shape != shapeBefore)
+        {
+            // Une seule regle, celle de SmartToolFamilies.h : « Cube » ne peut
+            // plus designer deux etats internes distincts.
+            const SmartToolSelection selection = ApplyGeometryShape(
+                static_cast<GeometryShape>(shape), tool.Mode());
+            tool.SetGeometry(selection.Geometry);
+            tool.SetMode(selection.Mode);
+            changed = true;
+        }
+
+        if (tool.Geometry() == SmartGeometry::Line)
+        {
+            if (const auto axis = tool.LineConstraintAxis())
+                ImGui::TextDisabled("Axis %s", SmartToolLineAxisLabel(*axis));
+            else
+                ImGui::TextDisabled("Drag from A to B; hold Shift to constrain");
+            // L'epaisseur du trait etait reglable avant l'harmonisation, via la
+            // rangee Mode et la taille de brosse. La retirer aurait supprime une
+            // capacite existante : on la reexpose sous un seul controle, qui dit
+            // ce qu'il fait. Les formes Cube et Sphere, elles, restent a 1 par
+            // contrat produit et n'ont pas ce reglage.
+            int thickness = LineThicknessOf(tool.Mode(), tool.Brush().Size);
+            ImGui::SetNextItemWidth(90.0F);
+            if (ImGui::InputInt("Thickness", &thickness))
+            {
+                const LineThickness applied = ApplyLineThickness(std::clamp(
+                    thickness, 1, MaximumSmartToolBrushSize));
+                tool.SetMode(applied.Mode);
+                tool.Brush().Size = applied.Size;
+                changed = true;
+            }
+            ImGui::TextDisabled("1-64 voxels");
+        }
+        else
+        {
+            const bool cylinderHeightPhase =
+                context.IsGeometryCylinderHeightPhase &&
+                context.IsGeometryCylinderHeightPhase();
+            ImGui::TextDisabled(
+                tool.Mode() == SmartToolMode::SphereBrush
+                    ? "Drag from center to set radius"
+                : tool.Mode() == SmartToolMode::CylinderBrush
+                    ? (cylinderHeightPhase
+                        ? "Move along normal to set height, then click"
+                        : "Drag from center to set radius")
+                : "Drag from first corner to opposite corner");
+            ImGui::TextDisabled("2D shape, always 1 voxel thick");
+        }
     }
     else
     {
-        ImGui::TextDisabled("Mode");
-        ImGui::PushID("Mode");
-        int mode = static_cast<int>(tool.Mode());
-        changed |= ImGui::RadioButton("Single Voxel", &mode,
-            static_cast<int>(SmartToolMode::SingleVoxel));
+        // Pencil et Surface partagent l'axe Brush. « Single Voxel » n'est
+        // PLUS expose : Pencil est deja l'outil voxel — une brosse de taille 1
+        // EST un voxel, et le planner normalise CubeBrush taille 1 exactement
+        // comme SingleVoxel (Shape=Cube, Size=1 : SmartToolPlanner.cpp:1356).
+        // SingleVoxel reste une representation interne (Geometry Cube).
+        // L'interface n'ecrit donc jamais SingleVoxel ici ; un etat herite en
+        // SingleVoxel s'affiche comme Cube taille 1 et se re-ecrit des le
+        // premier reglage. Surface garde strictement son fonctionnement.
+        ImGui::TextDisabled("Brush");
+        ImGui::PushID("BrushShape");
+        const bool cylinderBrushActive =
+            tool.Mode() == SmartToolMode::CylinderBrush;
+        int shape = tool.Mode() == SmartToolMode::SphereBrush ? 1
+            : cylinderBrushActive ? 2 : 0;
+        const int shapeBefore = shape;
+        changed |= ImGui::RadioButton("Cube", &shape, 0);
         ImGui::SameLine();
-        changed |= ImGui::RadioButton("Cube Brush", &mode,
-            static_cast<int>(SmartToolMode::CubeBrush));
-        ImGui::NewLine();
-        changed |= ImGui::RadioButton("Sphere Brush", &mode,
-            static_cast<int>(SmartToolMode::SphereBrush));
-        ImGui::SameLine();
-        changed |= ImGui::RadioButton("Cylinder Brush", &mode,
-            static_cast<int>(SmartToolMode::CylinderBrush));
+        changed |= ImGui::RadioButton("Sphere", &shape, 1);
+        if (cylinderBrushActive)
+        {
+            // Compatibilite : jamais propose, jamais detruit en silence.
+            ImGui::SameLine();
+            changed |= ImGui::RadioButton("Cylinder", &shape, 2);
+        }
         ImGui::PopID();
-        const SmartToolMode modeBefore = tool.Mode();
-        tool.SetMode(static_cast<SmartToolMode>(mode));
-        changed |= tool.Mode() != modeBefore;
+        if (shape != shapeBefore)
+        {
+            tool.SetMode(shape == 1 ? SmartToolMode::SphereBrush
+                : shape == 2 ? SmartToolMode::CylinderBrush
+                : SmartToolMode::CubeBrush);
+            changed = true;
+        }
 
-        if (tool.Geometry() == SmartGeometry::Pencil)
+        if (family == SmartGeometry::Pencil)
         {
             ImGui::TextDisabled("Brush Mode");
             ImGui::PushID("PencilBrushMode");
@@ -98,55 +195,72 @@ bool DrawSmartToolPanel(ToolContext& context)
             tool.Brush().Dimension = static_cast<SmartBrushDimension>(dimension);
             ImGui::PopID();
         }
-
-        if (tool.Mode() == SmartToolMode::SingleVoxel)
-        {
-            ImGui::TextDisabled("Size: 1 voxel");
-        }
         else
         {
-            const int sizeBefore = tool.Brush().Size;
-            ImGui::SetNextItemWidth(90.0F);
-            changed |= ImGui::InputInt("Size", &tool.Brush().Size);
-            tool.Brush().Size = std::clamp(tool.Brush().Size, 1,
-                MaximumSmartToolBrushSize);
-            changed |= tool.Brush().Size != sizeBefore;
-            ImGui::TextDisabled("1-64 voxels");
-        }
-        if (tool.Geometry() == SmartGeometry::Line)
-        {
-            if (const auto axis = tool.LineConstraintAxis())
-                ImGui::TextDisabled("Line | Axis %s", SmartToolLineAxisLabel(*axis));
-            else
-                ImGui::TextDisabled("Drag from A to B; hold Shift to constrain");
-        }
-        else if (tool.Geometry() == SmartGeometry::Geometry ||
-            tool.Geometry() == SmartGeometry::Surface)
-        {
-            const bool cylinderHeightPhase =
-                context.IsGeometryCylinderHeightPhase &&
-                context.IsGeometryCylinderHeightPhase();
-            ImGui::TextDisabled(tool.Geometry() == SmartGeometry::Surface
-                    ? "Drag to extend the locked surface"
-                    : tool.Mode() == SmartToolMode::SingleVoxel ||
-                        tool.Mode() == SmartToolMode::CubeBrush
-                    ? "Drag from first corner to opposite corner"
-                    : tool.Mode() == SmartToolMode::SphereBrush
-                    ? "Drag from center to set radius"
-                    : cylinderHeightPhase
-                    ? "Move along normal to set height, then click to confirm"
-                    : "Drag from center to set radius");
+            ImGui::TextDisabled("Drag to extend the locked surface");
         }
     }
 
+    // Taille. Elle n'est montree active que si la representation canonique la
+    // consomme reellement ; sinon elle est grisee, avec la raison. Un Size
+    // actif que le planner ecrase serait pire qu'un Size absent.
+    if (family != SmartGeometry::Face && family != SmartGeometry::Fill &&
+        family != SmartGeometry::Line)
+    {
+        if (!usesFootprint)
+        {
+            ImGui::BeginDisabled(true);
+            // Line est deja exclu par la garde ci-dessus et possede son propre
+            // controle Thickness : ici, « famille Geometry » veut donc dire
+            // Cube, Sphere ou Cylinder, tous d'epaisseur 1.
+            int frozen = geometryFamily ? 1 : tool.Brush().Size;
+            ImGui::SetNextItemWidth(90.0F);
+            ImGui::InputInt("Size", &frozen);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled(geometryFamily
+                ? "2D shapes are always 1 voxel thick"
+                : "This mode does not use the brush size");
+        }
+        else
+        {
+            // Un etat herite en SingleVoxel s'affiche taille 1 ; le premier
+            // reglage l'ecrit en CubeBrush. L'interface ne produit jamais
+            // SingleVoxel.
+            int size = tool.Mode() == SmartToolMode::SingleVoxel
+                ? 1 : tool.Brush().Size;
+            ImGui::SetNextItemWidth(90.0F);
+            if (ImGui::InputInt("Size", &size))
+            {
+                if (tool.Mode() == SmartToolMode::SingleVoxel)
+                    tool.SetMode(SmartToolMode::CubeBrush);
+                tool.Brush().Size = std::clamp(size, 1,
+                    MaximumSmartToolBrushSize);
+                changed = true;
+            }
+            ImGui::TextDisabled("1-64 voxels; size 1 places a single voxel");
+        }
+    }
+
+    // Une action invalide pour la famille (etat herite) est normalisee AVANT
+    // affichage : l'interface ne montre jamais un etat qu'elle ne propose pas.
+    if (!ActionIsValidFor(FamilyOf(family), tool.Action()))
+    {
+        tool.SetAction(NormalizeActionFor(FamilyOf(family), tool.Action()));
+        changed = true;
+    }
     ImGui::TextDisabled("Action");
     ImGui::PushID("Action");
     int action = static_cast<int>(tool.Action());
+    // Fill ne propose pas Add — ni actif ni grise : la region de Fill est
+    // definie par des voxels existants, Add n'y a aucune cible.
+    if (ActionIsValidFor(FamilyOf(family), SmartAction::Add))
+    {
+        changed |= ImGui::RadioButton(
+            "Add", &action, static_cast<int>(SmartAction::Add));
+        ImGui::SameLine();
+    }
     changed |= ImGui::RadioButton(
-        "Create", &action, static_cast<int>(SmartAction::Add));
-    ImGui::SameLine();
-    changed |= ImGui::RadioButton(
-        "Remove", &action, static_cast<int>(SmartAction::Erase));
+        "Erase", &action, static_cast<int>(SmartAction::Erase));
     ImGui::SameLine();
     changed |= ImGui::RadioButton(
         "Paint", &action, static_cast<int>(SmartAction::Paint));

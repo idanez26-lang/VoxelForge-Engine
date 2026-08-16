@@ -204,7 +204,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         voxelToolState_.IsSelectionActive() || voxelToolState_.IsMoveActive() ||
         voxelToolState_.IsDuplicateActive() || voxelToolState_.IsRotateActive() ||
         voxelToolState_.IsMirrorActive() || voxelToolState_.IsScaleActive() ||
-        voxelToolState_.IsAlignActive();
+        voxelToolState_.IsAlignActive() ||
+        voxelToolState_.IsWrapActive();
     if (selectionVisualActive)
     {
         const auto selected = selectionService_.Voxels();
@@ -217,16 +218,35 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
         if (bounds.Valid)
             selectionBounds = VoxelBoxBounds{bounds.Minimum, bounds.Maximum};
         const SelectionBounds& editable =
+            // VF-WRAP-V1 : pendant la preview Wrap, les guides et poignees
+            // representent les bornes DEMANDEES par le geste — la face que
+            // l'utilisateur manipule — jamais les bornes serrees du resultat.
+            voxelToolState_.IsWrapActive() &&
+                transformPreviewModel_.IsActive() && WrapTargetBounds().Valid
+            ? WrapTargetBounds()
+            :
             (voxelToolState_.IsRotateActive() ||
              voxelToolState_.IsMirrorActive() ||
              voxelToolState_.IsScaleActive() ||
-             voxelToolState_.IsAlignActive()) &&
+             voxelToolState_.IsAlignActive() ||
+             voxelToolState_.IsWrapActive()) &&
                 transformPreviewModel_.IsActive()
             ? transformPreviewModel_.PreviewBounds()
             :
             selectionInteraction_.IsActive() &&
             selectionInteraction_.IsDragRecognized()
-            ? selectionInteraction_.CurrentBounds()
+            // PREVIEW == COMMIT : le geste de CREATION passe par la meme regle
+            // que le relachement (ResolveSelectionGestureBounds). En mode Rect
+            // la preview est donc deja aplatie a une couche pendant le drag —
+            // exactement ce que le commit appliquera. Les autres gestes
+            // (redimensionnement, deplacement) montrent leurs bornes brutes.
+            ? (selectionInteraction_.Mode() ==
+                       SelectionInteractionMode::Creating
+                   ? ResolveSelectionGestureBounds(
+                         toolContext_.Selection.Mode,
+                         selectionInteraction_.CurrentBounds(),
+                         selectionRectAxis_, selectionRectLayer_)
+                   : selectionInteraction_.CurrentBounds())
             : selectionService_.EditableBounds();
         if (editable.Valid) editableSelectionBounds = editable;
     }

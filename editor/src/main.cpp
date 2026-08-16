@@ -78,6 +78,7 @@ constexpr std::size_t VoxelDuplicateSmokeTestFrameCount = 9;
 constexpr std::size_t VoxelRotateSmokeTestFrameCount = 6;
 constexpr std::size_t VoxelMirrorSmokeTestFrameCount = 7;
 constexpr std::size_t VoxelScaleSmokeTestFrameCount = 8;
+constexpr std::size_t VoxelWrapSmokeTestFrameCount = 16;
 constexpr std::size_t VoxelAlignSmokeTestFrameCount = 9;
 constexpr std::size_t MoveGizmoSmokeTestFrameCount = 9;
 constexpr std::size_t RotateGizmoSmokeTestFrameCount = 7;
@@ -134,6 +135,7 @@ struct CommandLine final
     bool VoxelRotateSmokeTest = false;
     bool VoxelMirrorSmokeTest = false;
     bool VoxelScaleSmokeTest = false;
+    bool VoxelWrapSmokeTest = false;
     bool VoxelAlignSmokeTest = false;
     bool MoveGizmoSmokeTest = false;
     bool RotateGizmoSmokeTest = false;
@@ -255,6 +257,7 @@ CommandLine ParseCommandLine(const int count, char* arguments[])
         result.VoxelRotateSmokeTest |= argument == "--voxel-rotate-smoke-test";
         result.VoxelMirrorSmokeTest |= argument == "--voxel-mirror-smoke-test";
         result.VoxelScaleSmokeTest |= argument == "--voxel-scale-smoke-test";
+        result.VoxelWrapSmokeTest |= argument == "--voxel-wrap-smoke-test";
         result.VoxelAlignSmokeTest |= argument == "--voxel-align-smoke-test";
         result.MoveGizmoSmokeTest |= argument == "--move-gizmo-smoke-test";
         result.RotateGizmoSmokeTest |=
@@ -629,6 +632,7 @@ int main(const int argumentCount, char* arguments[])
             commandLine.VoxelRotateSmokeTest ||
             commandLine.VoxelMirrorSmokeTest ||
             commandLine.VoxelScaleSmokeTest ||
+            commandLine.VoxelWrapSmokeTest ||
             commandLine.VoxelAlignSmokeTest ||
             commandLine.MoveGizmoSmokeTest ||
             commandLine.RotateGizmoSmokeTest ||
@@ -669,6 +673,7 @@ int main(const int argumentCount, char* arguments[])
               || commandLine.VoxelRotateSmokeTest
               || commandLine.VoxelMirrorSmokeTest
               || commandLine.VoxelScaleSmokeTest
+               || commandLine.VoxelWrapSmokeTest
                || commandLine.VoxelAlignSmokeTest
                || commandLine.MoveGizmoSmokeTest
                || commandLine.RotateGizmoSmokeTest
@@ -787,6 +792,8 @@ int main(const int argumentCount, char* arguments[])
                      ? VoxelMirrorSmokeTestFrameCount
                      : commandLine.VoxelScaleSmokeTest
                      ? VoxelScaleSmokeTestFrameCount
+                     : commandLine.VoxelWrapSmokeTest
+                     ? VoxelWrapSmokeTestFrameCount
                      : commandLine.VoxelAlignSmokeTest
                      ? VoxelAlignSmokeTestFrameCount
                      : commandLine.MoveGizmoSmokeTest
@@ -845,6 +852,7 @@ int main(const int argumentCount, char* arguments[])
                      commandLine.VoxelRotateSmokeTest ||
                      commandLine.VoxelMirrorSmokeTest ||
                      commandLine.VoxelScaleSmokeTest ||
+                     commandLine.VoxelWrapSmokeTest ||
                      commandLine.VoxelAlignSmokeTest ||
                      commandLine.MoveGizmoSmokeTest ||
                      commandLine.RotateGizmoSmokeTest ||
@@ -894,6 +902,7 @@ int main(const int argumentCount, char* arguments[])
                  commandLine.VoxelRotateSmokeTest,
                  commandLine.VoxelMirrorSmokeTest,
                  commandLine.VoxelScaleSmokeTest,
+                 commandLine.VoxelWrapSmokeTest,
                  commandLine.VoxelAlignSmokeTest,
                  commandLine.MoveGizmoSmokeTest,
                  commandLine.RotateGizmoSmokeTest,

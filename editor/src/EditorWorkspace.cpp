@@ -1,4 +1,6 @@
 #include "EditorWorkspace.h"
+#include "Transform/TransformPreviewFeedback.h"
+#include "Selection/SelectionRegionResolver.h"
 #include "EditorWorkspaceUiHelpers.h"
 #include "Layout/EditorPanelNames.h"
 #include "VoxelModelTransform.h"
@@ -295,6 +297,11 @@ EditorWorkspace::EditorWorkspace(
     toolContext_.Constraints = &constraintSettings_;
     toolContext_.PivotManager = &transformPivotManager_;
     toolContext_.BrushProfiles = &brushProfileService_;
+    // VF-UX (validation Tony) : la rangee Transform du panneau change d'outil
+    // par le meme chemin que la barre et les raccourcis.
+    toolContext_.SelectTool = [this](const ActiveVoxelTool tool) {
+        SelectVoxelTool(tool);
+    };
     toolContext_.ActivePaletteIndex = [this]() { return paletteService_.ActiveIndex(); };
     toolContext_.SelectPaletteIndex = [this](const std::size_t index) {
         return paletteService_.SelectColor(index);
@@ -1143,9 +1150,7 @@ void EditorWorkspace::DrawMainMenuBar()
                 ExecuteInputCommand(EditorInputCommand::RotateRight);
             if (ImGui::MenuItem(
                     "Apply Rotation", shortcut(EditorInputCommand::TransformApply),
-                    false, transformPreviewModel_.IsActive() &&
-                        !transformPreviewModel_.HasCollisions() &&
-                        !transformPreviewModel_.HasOutOfBounds()))
+                    false, MergingTransformPreviewCanCommit(transformPreviewModel_)))
                 ExecuteInputCommand(EditorInputCommand::TransformApply);
             if (ImGui::MenuItem("Cancel Rotation", "Esc"))
                 ExecuteInputCommand(EditorInputCommand::InteractionCancel);
@@ -1193,9 +1198,7 @@ void EditorWorkspace::DrawMainMenuBar()
                 ExecuteInputCommand(EditorInputCommand::ScaleUniform);
             if (ImGui::MenuItem("Apply Scale",
                     shortcut(EditorInputCommand::TransformApply), false,
-                    transformPreviewModel_.IsActive() &&
-                        !transformPreviewModel_.HasCollisions() &&
-                        !transformPreviewModel_.HasOutOfBounds()))
+                    MergingTransformPreviewCanCommit(transformPreviewModel_)))
                 ExecuteInputCommand(EditorInputCommand::TransformApply);
             if (ImGui::MenuItem("Cancel Scale", "Esc"))
                 ExecuteInputCommand(EditorInputCommand::InteractionCancel);
@@ -1221,9 +1224,7 @@ void EditorWorkspace::DrawMainMenuBar()
                 ExecuteInputCommand(EditorInputCommand::AlignBack);
             if (ImGui::MenuItem("Apply Align",
                     shortcut(EditorInputCommand::TransformApply), false,
-                    transformPreviewModel_.IsActive() &&
-                        !transformPreviewModel_.HasCollisions() &&
-                        !transformPreviewModel_.HasOutOfBounds()))
+                    MergingTransformPreviewCanCommit(transformPreviewModel_)))
                 ExecuteInputCommand(EditorInputCommand::TransformApply);
             if (ImGui::MenuItem("Cancel Align", "Esc"))
                 ExecuteInputCommand(EditorInputCommand::InteractionCancel);
@@ -1303,6 +1304,8 @@ void EditorWorkspace::HandleCommandShortcuts()
         EditorInputKey::H, ImGui::IsKeyPressed(ImGuiKey_H, false));
     inputFrame.SetPressed(
         EditorInputKey::K, ImGui::IsKeyPressed(ImGuiKey_K, false));
+    inputFrame.SetPressed(
+        EditorInputKey::W, ImGui::IsKeyPressed(ImGuiKey_W, false));
     inputFrame.SetPressed(
         EditorInputKey::U, ImGui::IsKeyPressed(ImGuiKey_U, false));
     inputFrame.SetPressed(
@@ -1406,11 +1409,15 @@ EditorCommandAvailability EditorWorkspace::CurrentCommandAvailability() const
         voxelToolState_.IsScaleActive() && CanScaleSelection(),
         CanAlignSelection(),
         voxelToolState_.IsAlignActive() && CanAlignSelection(),
+        // Overlap/Merge (decision produit) : Rotate / Scale / Align (Move
+        // contraint) s'appliquent malgre les recouvrements — fusion au commit.
+        // Mirror historique garde son blocage.
         stampPlacement ||
             ((voxelToolState_.IsRotateActive() ||
-              voxelToolState_.IsMirrorActive() ||
               voxelToolState_.IsScaleActive() ||
               voxelToolState_.IsAlignActive()) &&
+             MergingTransformPreviewCanCommit(transformPreviewModel_)) ||
+            (voxelToolState_.IsMirrorActive() &&
              transformPreviewModel_.IsActive() &&
              !transformPreviewModel_.HasCollisions() &&
              !transformPreviewModel_.HasOutOfBounds()),
@@ -1448,6 +1455,11 @@ bool EditorWorkspace::CanScaleSelection() const noexcept
     return CanMoveSelection() && !selectionInteraction_.IsActive();
 }
 
+bool EditorWorkspace::CanWrapSelection() const noexcept
+{
+    return CanMoveSelection() && !selectionInteraction_.IsActive();
+}
+
 bool EditorWorkspace::CanAlignSelection() const noexcept
 {
     return CanMoveSelection() && !selectionInteraction_.IsActive();
@@ -1461,6 +1473,20 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
         toolContext_.Smart.SetAction(SmartAction::Add);
         SelectVoxelTool(ActiveVoxelTool::Pencil); break;
+    // VF-UX-TOOLS : selection de FAMILLE. Contrairement aux raccourcis
+    // historiques ci-dessus, ces commandes ne touchent PAS a l'action courante.
+    // Changer de famille en gardant Add / Erase / Paint est la propriete qui
+    // rend les deux axes reellement orthogonaux.
+    case EditorInputCommand::ToolFamilyPencil:
+        ApplySmartToolFamily(SmartToolFamily::Pencil); break;
+    case EditorInputCommand::ToolFamilyGeometry:
+        ApplySmartToolFamily(SmartToolFamily::Geometry); break;
+    case EditorInputCommand::ToolFamilyFace:
+        ApplySmartToolFamily(SmartToolFamily::Face); break;
+    case EditorInputCommand::ToolFamilySurface:
+        ApplySmartToolFamily(SmartToolFamily::Surface); break;
+    case EditorInputCommand::ToolFamilyFill:
+        ApplySmartToolFamily(SmartToolFamily::Fill); break;
     case EditorInputCommand::ToolEraser:
         toolContext_.Smart.SetGeometry(SmartGeometry::Pencil);
         toolContext_.Smart.SetAction(SmartAction::Erase);
@@ -1487,6 +1513,8 @@ void EditorWorkspace::ExecuteInputCommand(const EditorInputCommand command)
         SelectVoxelTool(ActiveVoxelTool::Mirror); break;
     case EditorInputCommand::ToolScale:
         SelectVoxelTool(ActiveVoxelTool::Scale); break;
+    case EditorInputCommand::ToolWrap:
+        SelectVoxelTool(ActiveVoxelTool::Wrap); break;
     case EditorInputCommand::ToolAlign:
         SelectVoxelTool(ActiveVoxelTool::Align); break;
     case EditorInputCommand::RotateLeft:
@@ -1606,6 +1634,10 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
         (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Rotate &&
          tool != ActiveVoxelTool::Scale))
         CancelTransformGizmoInteraction();
+    // VF-WRAP-V1 : un drag Wrap en cours tombe en entier AVANT l'annulation
+    // generique des interactions, qui reappliquerait des bornes.
+    if (tool != ActiveVoxelTool::Wrap && IsWrapHandleDragActive())
+        CancelVoxelWrap();
     if (selectionInteraction_.IsActive())
     {
         const SelectionInteractionMode interactionMode =
@@ -1623,13 +1655,14 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool != ActiveVoxelTool::Selection && tool != ActiveVoxelTool::Move &&
         tool != ActiveVoxelTool::Duplicate && tool != ActiveVoxelTool::Rotate &&
         tool != ActiveVoxelTool::Mirror && tool != ActiveVoxelTool::Scale &&
-        tool != ActiveVoxelTool::Align)
+        tool != ActiveVoxelTool::Wrap && tool != ActiveVoxelTool::Align)
         selectionBoxInteriorHovered_ = false;
     if (tool == ActiveVoxelTool::Selection)
         static_cast<void>(voxelSelection_.ClearSelection());
     if (tool != ActiveVoxelTool::Move && tool != ActiveVoxelTool::Duplicate &&
         tool != ActiveVoxelTool::Rotate && tool != ActiveVoxelTool::Mirror &&
-        tool != ActiveVoxelTool::Scale && tool != ActiveVoxelTool::Align)
+        tool != ActiveVoxelTool::Scale && tool != ActiveVoxelTool::Wrap &&
+        tool != ActiveVoxelTool::Align)
     {
         static_cast<void>(transformPreviewModel_.CancelPreview());
         voxelMoveStatusMessage_.clear();
@@ -1642,10 +1675,101 @@ void EditorWorkspace::SelectVoxelTool(const ActiveVoxelTool tool)
     if (tool != ActiveVoxelTool::Rotate) CancelVoxelRotate();
     if (tool != ActiveVoxelTool::Mirror) CancelVoxelMirror();
     if (tool != ActiveVoxelTool::Scale) CancelVoxelScale();
+    if (tool != ActiveVoxelTool::Wrap) CancelVoxelWrap();
     if (tool != ActiveVoxelTool::Align) CancelVoxelAlign();
     toolManager_.SetActiveTool(tool);
     voxelToolInput_.Reset();
     UpdateVoxelHighlights();
+}
+
+void EditorWorkspace::ApplySmartToolFamily(
+    const SmartToolFamily family) noexcept
+{
+    // L'action (Add / Erase / Paint) survit au changement de famille tant
+    // qu'elle y est VALIDE — les deux axes restent orthogonaux. La seule
+    // exception est produit, pas technique : Fill n'a pas de Add, donc entrer
+    // dans Fill avec Add retombe deterministiquement sur Paint, visible
+    // aussitot dans le panneau. ApplyFamily garantit par ailleurs l'idempotence
+    // et normalise les etats non canoniques (Geometry + CubeBrush).
+    const SmartToolSelection selection = ApplyFamily(
+        family, toolContext_.Smart.Geometry(), toolContext_.Smart.Mode());
+    toolContext_.Smart.SetGeometry(selection.Geometry);
+    toolContext_.Smart.SetMode(selection.Mode);
+    toolContext_.Smart.SetAction(
+        NormalizeActionFor(family, toolContext_.Smart.Action()));
+    SelectVoxelTool(ActiveVoxelTool::Pencil);
+}
+
+SelectionPointerTarget EditorWorkspace::ResolveSelectionPointerArbitration(
+    const bool handleHovered, const bool interiorHovered) const noexcept
+{
+    // En mode Region, ni les poignees ni l'interieur ne capturent : le clic
+    // appartient au resolveur. Exterior est la valeur qui laisse le geste
+    // suivre le chemin du clic outil sans rien intercepter.
+    if (voxelToolState_.IsSelectionActive() &&
+        !SelectionModeAllowsEditableBoxInteraction(
+            toolContext_.Selection.Mode))
+        return SelectionPointerTarget::Exterior;
+    return ResolveSelectionPointerTarget(handleHovered, interiorHovered);
+}
+
+bool EditorWorkspace::ApplyRegionSelection(
+    const Asset::Voxel::VoxelPosition seed, const Vec3 normal,
+    const SelectionMode mode)
+{
+    const Asset::Voxel::VoxelDocument* const document =
+        voxelDocumentSession_.ActiveDocument();
+    if (document == nullptr) return false;
+
+    // Requete -> resolveur -> operation sur le SelectionSet (architecture §9).
+    // Le resolveur lit le stockage CREUX du document : O(taille de la region),
+    // jamais un scan du volume vide.
+    SelectionRegionRequest request;
+    request.Seed = seed;
+    request.NormalX = normal.X;
+    request.NormalY = normal.Y;
+    request.NormalZ = normal.Z;
+    request.Target = toolContext_.Selection.RegionTarget;
+    request.Criterion = toolContext_.Selection.RegionCriterion;
+    request.Planar = toolContext_.Selection.PlanarConnectivity;
+    request.Volume = toolContext_.Selection.VolumeConnectivity;
+    request.ReadVoxel = [document](const Asset::Voxel::VoxelPosition position)
+        -> std::optional<std::uint8_t>
+    {
+        const auto voxel = document->GetVoxel(position, 0U);
+        if (!voxel) return std::nullopt;
+        return voxel->PaletteIndex;
+    };
+    request.ForEachVoxel = [document](const std::function<void(
+        Asset::Voxel::VoxelPosition, std::uint8_t)>& visit)
+    {
+        // L'enumeration vit sur le sous-modele ; le runtime adresse le 0.
+        const Asset::Voxel::VoxelSubModel* const model = document->GetModel(0U);
+        if (model == nullptr) return;
+        model->ForEachVoxel(
+            [&visit](const Asset::Voxel::VoxelPosition position,
+                const Asset::Voxel::Voxel voxel)
+            { visit(position, voxel.PaletteIndex); });
+    };
+
+    const SelectionRegionResult region = ResolveSelectionRegion(request);
+    if (region.TruncatedByLimit)
+        AddConsoleMessage("[Selection] Region truncated by safety limit.");
+    if (region.Empty())
+    {
+        // Aucun voxel atteint. La semantique par operation est la regle pure
+        // EmptyClickClearsSelection, avec l'operation CAPTUREE au PointerDown :
+        // Replace et Intersect vident, Add et Subtract ne changent rien.
+        return EmptyClickClearsSelection(mode) && selectionService_.Clear();
+    }
+    const bool positionsChanged =
+        selectionService_.Apply(region.Positions, mode);
+    // Les bornes editables suivent la selection FINALE. Un resserrement des
+    // bornes SANS changement de positions est aussi un changement : le caller
+    // rafraichit sur ce bool, et des bornes perimees resteraient affichees.
+    const bool boundsChanged =
+        selectionService_.AlignEditableBoundsToSelection();
+    return positionsChanged || boundsChanged;
 }
 
 void EditorWorkspace::CancelActiveInteraction()
@@ -1690,6 +1814,18 @@ void EditorWorkspace::CancelActiveInteraction()
         UpdateVoxelHighlights();
         return;
     }
+    if (voxelToolState_.IsWrapActive())
+    {
+        // Un vrai drag (preview + poignee ResizingFace) est annule EN ENTIER
+        // et l'outil reste Wrap, comme Escape annule un marquee sans quitter
+        // Selection. Sans drag, Wrap se replie sur Selection comme Scale.
+        const bool dragging = IsWrapHandleDragActive();
+        CancelVoxelWrap();
+        if (!dragging)
+            voxelToolState_.SetActiveTool(ActiveVoxelTool::Selection);
+        UpdateVoxelHighlights();
+        return;
+    }
     if (voxelToolState_.IsAlignActive())
     {
         CancelVoxelAlign();
@@ -1726,6 +1862,9 @@ void EditorWorkspace::UndoCommand()
         if (voxelToolState_.IsScaleActive() &&
             transformPreviewModel_.IsActive())
             CancelVoxelScale();
+        if (voxelToolState_.IsWrapActive() &&
+            (transformPreviewModel_.IsActive() || IsWrapHandleDragActive()))
+            CancelVoxelWrap();
         if (voxelToolState_.IsAlignActive() &&
             transformPreviewModel_.IsActive())
             CancelVoxelAlign();
@@ -1775,6 +1914,9 @@ void EditorWorkspace::RedoCommand()
         if (voxelToolState_.IsScaleActive() &&
             transformPreviewModel_.IsActive())
             CancelVoxelScale();
+        if (voxelToolState_.IsWrapActive() &&
+            (transformPreviewModel_.IsActive() || IsWrapHandleDragActive()))
+            CancelVoxelWrap();
         if (voxelToolState_.IsAlignActive() &&
             transformPreviewModel_.IsActive())
             CancelVoxelAlign();
@@ -1900,7 +2042,7 @@ void EditorWorkspace::DrawToolsPanel()
                  voxelToolState_.ActiveTool(), CanMoveSelection(),
                  CanDuplicateSelection(), CanRotateSelection(),
                  CanMirrorSelection(), CanScaleSelection(),
-                 CanAlignSelection()},
+                 CanAlignSelection(), toolContext_.Smart.Geometry()},
                 editorInputService_,
                 {[this](const EditorInputCommand command)
                  {
@@ -4495,6 +4637,7 @@ void EditorWorkspace::PrepareForApplicationClose()
     voxelBoxInteraction_.Cancel();
     voxelLineInteraction_.Cancel();
     voxelSphereInteraction_.Cancel();
+    CancelVoxelWrap();
     static_cast<void>(selectionInteraction_.Cancel());
     static_cast<void>(transformPreviewModel_.CancelPreview());
     transformGizmoManager_.Reset();

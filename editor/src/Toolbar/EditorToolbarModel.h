@@ -2,6 +2,7 @@
 
 #include "Input/EditorInputService.h"
 #include "VoxelTools/VoxelToolState.h"
+#include "Tools/SmartToolFamilies.h"
 
 #include <array>
 #include <cstddef>
@@ -28,7 +29,11 @@ enum class EditorToolbarAction : std::uint8_t
     Mirror,
     Align,
     Face,
-    Transform
+    Transform,
+    // VF-UX-TOOLS : familles exposees directement dans la barre.
+    Geometry,
+    Surface,
+    Fill
 };
 
 enum class EditorToolbarGroup : std::uint8_t
@@ -49,6 +54,10 @@ struct EditorToolbarButton final
     std::string_view Description;
     EditorInputCommand Command = EditorInputCommand::None;
     ActiveVoxelTool Tool = ActiveVoxelTool::None;
+    // VF-UX-TOOLS : famille Smart representee par ce bouton. `HasFamily` evite
+    // de faire porter ce sens a une valeur sentinelle de SmartGeometry.
+    bool HasFamily = false;
+    SmartGeometry Family = SmartGeometry::Pencil;
 };
 
 struct EditorToolbarState final
@@ -62,6 +71,10 @@ struct EditorToolbarState final
     bool CanMirrorSelection = false;
     bool CanScaleSelection = false;
     bool CanAlignSelection = false;
+    // VF-UX-TOOLS : sans elle, les cinq boutons de famille s'allumeraient
+    // ensemble des que l'outil Smart est actif. Placee EN FIN de structure :
+    // les initialisations positionnelles existantes restent valides.
+    SmartGeometry ActiveGeometry = SmartGeometry::Pencil;
 };
 
 struct EditorToolbarLayout final
@@ -75,8 +88,8 @@ struct EditorToolbarLayout final
 class EditorToolbarModel final
 {
 public:
-    static constexpr std::size_t ButtonCount = 3U;
-    static constexpr std::size_t PrimaryButtonCount = 3U;
+    static constexpr std::size_t ButtonCount = 7U;
+    static constexpr std::size_t PrimaryButtonCount = 7U;
 
     [[nodiscard]] static const std::array<EditorToolbarButton, ButtonCount>&
         Buttons() noexcept;

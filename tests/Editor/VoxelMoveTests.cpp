@@ -229,10 +229,14 @@ void TestRefusalsAreNonMutating()
     Editor::TransformPreviewModel collisionPreview;
     const auto collision = Prepare(
         document, selection, collisionPreview, {3, 0, 0});
-    Require(collision.Code == Editor::MoveVoxelSelectionResultCode::Collision &&
+    // Overlap/Merge (decision produit) : le recouvrement d'un voxel existant
+    // n'est plus un refus — la preview le SIGNALE, le commit est pret et
+    // fusionnera ; rien n'est mute avant Execute.
+    Require(collision.Ready() && collisionPreview.HasCollisions() &&
         document.GetVoxelCount() == initialCount &&
         document.GetRevision() == initialRevision && !document.IsDirty(),
-        "External collision changed the document.");
+        "External overlap must be reported by the preview, accepted by the "
+        "commit and non-mutating before Execute.");
 
     Editor::TransformPreviewModel outPreview;
     const auto out = Prepare(document, selection, outPreview, {-2, -2, -2});

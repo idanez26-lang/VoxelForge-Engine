@@ -21,6 +21,7 @@ const char* ActiveVoxelToolName(const ActiveVoxelTool tool) noexcept
     case ActiveVoxelTool::Mirror: return "Mirror";
     case ActiveVoxelTool::Scale: return "Scale";
     case ActiveVoxelTool::Align: return "Align";
+    case ActiveVoxelTool::Wrap: return "Wrap";
     }
     return "None";
 }
@@ -103,6 +104,11 @@ bool VoxelToolState::IsScaleActive() const noexcept
 bool VoxelToolState::IsAlignActive() const noexcept
 {
     return activeTool_ == ActiveVoxelTool::Align;
+}
+
+bool VoxelToolState::IsWrapActive() const noexcept
+{
+    return activeTool_ == ActiveVoxelTool::Wrap;
 }
 
 bool VoxelToolState::IsEditingToolActive() const noexcept

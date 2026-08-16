@@ -18,6 +18,7 @@ enum class ToolPanelKind : std::uint8_t
     Move,
     Rotate,
     Scale,
+    Wrap,
     Generic
 };
 
@@ -45,7 +46,7 @@ struct ToolDescriptor final
 class ToolManager final
 {
 public:
-    static constexpr std::size_t ToolCount = 14U;
+    static constexpr std::size_t ToolCount = 15U;
     static constexpr std::size_t PrimaryToolCount = 3U;
 
     explicit ToolManager(VoxelToolState& state) noexcept;

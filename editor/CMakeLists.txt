@@ -156,6 +156,7 @@ target_sources(
         src/VoxelSelection/ViewportRayBuilder.cpp
         src/VoxelSelection/VoxelRaycast.cpp
         src/VoxelSelection/VoxelSelectionState.cpp
+        src/Selection/SelectionRegionResolver.cpp
         src/Selection/SelectionService.cpp
         src/Selection/SelectionInteraction.cpp
         src/Selection/SelectionHandleModel.cpp
@@ -402,6 +403,7 @@ target_sources(
         src/Transform/MirrorVoxelSelectionOperation.cpp
         src/Transform/RotateVoxelSelectionOperation.cpp
         src/Transform/ScaleVoxelSelectionOperation.cpp
+        src/Transform/WrapVoxelSelectionOperation.cpp
         src/Transform/TransformOperationFramework.cpp
         src/VoxelHistory/VoxelEditHistory.cpp
         src/VoxelHistory/VoxelEditOperation.cpp

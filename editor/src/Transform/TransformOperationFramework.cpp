@@ -51,6 +51,13 @@ using Voxel = Asset::Voxel::Voxel;
     return SelectionBounds::FromCorners(minimum, maximum);
 }
 
+[[nodiscard]] bool ContainsBounds(
+    const SelectionBounds& outer, const SelectionBounds& inner) noexcept
+{
+    return outer.Valid && inner.Valid &&
+        outer.Contains(inner.Minimum) && outer.Contains(inner.Maximum);
+}
+
 TransformOperationBuildResult Refused(
     const TransformOperationBuildCode code,
     std::string message)
@@ -168,31 +175,58 @@ TransformOperationBuildResult TransformOperationBuilder::Build(
                     Prefix(name,
                         " blocked: destination is outside the model"));
 
-            const bool sourceOverlap =
-                sourceIndices.contains(voxel.PreviewPosition);
-            const bool occupied = document.HasVoxel(
-                voxel.PreviewPosition, data.ModelIndex);
-            if (occupied &&
-                (request.Policy.Collision ==
-                    TransformCollisionPolicy::RejectAnyOccupiedDestination ||
-                 !sourceOverlap))
-                return Refused(TransformOperationBuildCode::Collision,
-                    Prefix(name, " blocked: destination is occupied"));
+            if (request.Policy.Collision != TransformCollisionPolicy::MergeOverlap)
+            {
+                const bool sourceOverlap =
+                    sourceIndices.contains(voxel.PreviewPosition);
+                const bool occupied = document.HasVoxel(
+                    voxel.PreviewPosition, data.ModelIndex);
+                if (occupied &&
+                    (request.Policy.Collision ==
+                        TransformCollisionPolicy::RejectAnyOccupiedDestination ||
+                     !sourceOverlap))
+                    return Refused(TransformOperationBuildCode::Collision,
+                        Prefix(name, " blocked: destination is occupied"));
+            }
             destinations.emplace_back(voxel.PreviewPosition, voxel.Value);
         }
 
-        std::sort(destinations.begin(), destinations.end(),
-            [](const auto& left, const auto& right)
-            {
-                return PositionLess(left.first, right.first);
-            });
-        if (std::adjacent_find(destinations.begin(), destinations.end(),
+        if (request.Policy.Collision == TransformCollisionPolicy::MergeOverlap)
+        {
+            // Fusion : les destinations coincidentes sont dedupliquees, la
+            // derniere emise l'emporte (tri stable puis conservation du dernier
+            // de chaque serie). L'ordre d'emission est celui de la geometrie
+            // de l'outil : deterministe.
+            std::stable_sort(destinations.begin(), destinations.end(),
                 [](const auto& left, const auto& right)
                 {
-                    return left.first == right.first;
-                }) != destinations.end())
-            return Refused(TransformOperationBuildCode::InvalidDestinations,
-                Prefix(name, " destinations are not unique."));
+                    return PositionLess(left.first, right.first);
+                });
+            std::size_t kept = 0U;
+            for (std::size_t index = 0U; index < destinations.size(); ++index)
+            {
+                if (index + 1U < destinations.size() &&
+                    destinations[index + 1U].first == destinations[index].first)
+                    continue;
+                destinations[kept++] = destinations[index];
+            }
+            destinations.resize(kept);
+        }
+        else
+        {
+            std::sort(destinations.begin(), destinations.end(),
+                [](const auto& left, const auto& right)
+                {
+                    return PositionLess(left.first, right.first);
+                });
+            if (std::adjacent_find(destinations.begin(), destinations.end(),
+                    [](const auto& left, const auto& right)
+                    {
+                        return left.first == right.first;
+                    }) != destinations.end())
+                return Refused(TransformOperationBuildCode::InvalidDestinations,
+                    Prefix(name, " destinations are not unique."));
+        }
 
         std::vector<Position> destinationPositions;
         destinationPositions.reserve(destinations.size());
@@ -202,6 +236,19 @@ TransformOperationBuildResult TransformOperationBuilder::Build(
             return Refused(TransformOperationBuildCode::InvalidDestinations,
                 Prefix(name,
                     " destination bounds do not match the preview."));
+        // Bornes semantiques optionnelles : elles doivent contenir les bornes
+        // serrees, sinon la transition mentirait sur ce qu'elle restaure.
+        if (request.SourceEditableBounds.Valid &&
+            !ContainsBounds(request.SourceEditableBounds, data.SourceBounds))
+            return Refused(TransformOperationBuildCode::InvalidPreview,
+                Prefix(name,
+                    " source editable bounds do not contain the selection."));
+        if (request.DestinationEditableBounds.Valid &&
+            !ContainsBounds(request.DestinationEditableBounds,
+                request.DestinationBounds))
+            return Refused(TransformOperationBuildCode::InvalidDestinations,
+                Prefix(name,
+                    " destination editable bounds do not contain the result."));
 
         std::vector<Position> affected;
         affected.reserve(destinations.size() +
@@ -250,10 +297,13 @@ TransformOperationBuildResult TransformOperationBuilder::Build(
             documentGeneration,
             std::vector<Position>(data.SourcePositions.begin(),
                 data.SourcePositions.end()),
-            data.SourceBounds};
+            request.SourceEditableBounds.Valid
+                ? request.SourceEditableBounds : data.SourceBounds};
         transition->After = {
             documentGeneration, std::move(destinationPositions),
-            request.DestinationBounds};
+            request.DestinationEditableBounds.Valid
+                ? request.DestinationEditableBounds
+                : request.DestinationBounds};
         operation.SelectionTransition = std::move(transition);
         return {TransformOperationBuildCode::Ready,
             std::move(operation), {}};

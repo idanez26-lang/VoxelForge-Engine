@@ -148,6 +148,7 @@ bool TransformPreviewModel::SetDelta(
         (!expandedDestinations_ && explicitDestinations_.empty() &&
          delta == delta_))
         return false;
+    compact_ = false;
     expandedDestinations_ = false;
     explicitDestinations_.clear();
     delta_ = delta;
@@ -168,6 +169,7 @@ bool TransformPreviewModel::SetExplicitDestinations(
         std::equal(explicitDestinations_.begin(),
             explicitDestinations_.end(), destinations.begin()))
         return false;
+    compact_ = false;
     expandedDestinations_ = false;
     explicitDestinations_.assign(destinations.begin(), destinations.end());
     delta_ = {};
@@ -218,10 +220,93 @@ bool TransformPreviewModel::SetExplicitVoxelDestinations(
             destination.Value,
             TransformPreviewVoxelState::Valid});
     }
+    compact_ = false;
     expandedDestinations_ = true;
     explicitDestinations_.clear();
     delta_ = {};
     return Rebuild(document);
+}
+
+bool TransformPreviewModel::SetGeneratedVoxelDestinations(
+    const Asset::Voxel::VoxelDocument& document,
+    const SelectionService& selection,
+    const std::uint64_t documentGeneration,
+    const std::size_t expectedCount,
+    const TransformPreviewDestinationProducer& produce)
+{
+    if (!IsValidFor(document, selection, documentGeneration) ||
+        expectedCount == 0U || !produce)
+        return false;
+
+    voxels_.clear();
+    voxels_.reserve(expectedCount);
+    bool valid = true;
+    produce([this, &valid](const TransformPreviewDestinationVoxel& destination)
+    {
+        if (!valid) return;
+        const auto source = std::lower_bound(
+            sourcePositions_.begin(), sourcePositions_.end(),
+            destination.SourcePosition, PositionLess);
+        if (source == sourcePositions_.end() ||
+            *source != destination.SourcePosition ||
+            sourceVoxels_[static_cast<std::size_t>(
+                std::distance(sourcePositions_.begin(), source))].Value !=
+                destination.Value)
+        {
+            valid = false;
+            return;
+        }
+        voxels_.push_back({
+            destination.SourcePosition,
+            destination.DestinationPosition,
+            destination.Value,
+            TransformPreviewVoxelState::Valid});
+    });
+    if (!valid || voxels_.size() != expectedCount)
+    {
+        // Retour a une preview identite valide : le commit echouera
+        // proprement au lieu de lire un tampon partiel.
+        voxels_.assign(sourceVoxels_.begin(), sourceVoxels_.end());
+        compact_ = false;
+        expandedDestinations_ = false;
+        explicitDestinations_.clear();
+        delta_ = {};
+        static_cast<void>(Rebuild(document));
+        return false;
+    }
+    compact_ = false;
+    expandedDestinations_ = true;
+    explicitDestinations_.clear();
+    delta_ = {};
+    return Rebuild(document);
+}
+
+bool TransformPreviewModel::SetCompactDestinations(
+    const Asset::Voxel::VoxelDocument& document,
+    const SelectionService& selection,
+    const std::uint64_t documentGeneration,
+    const TransformPreviewCompactSummary& summary)
+{
+    if (!IsValidFor(document, selection, documentGeneration) ||
+        summary.DestinationCount == 0U || !summary.PreviewBounds.Valid)
+        return false;
+    if (compact_ && compactSummary_ == summary) return false;
+    voxels_.clear();
+    explicitDestinations_.clear();
+    collisionPositions_.clear();
+    outOfBoundsPositions_.clear();
+    compactSummary_ = summary;
+    previewBounds_ = summary.PreviewBounds;
+    collisionBounds_ = summary.CollisionCount > 0U
+        ? summary.CollisionBounds : SelectionBounds{};
+    outOfBoundsBounds_ = summary.OutOfBoundsCount > 0U
+        ? summary.OutOfBoundsBounds : SelectionBounds{};
+    compact_ = true;
+    expandedDestinations_ = false;
+    delta_ = {};
+    ++renderRevision_;
+    ++rebuildCount_;
+    return true;
 }
 
 bool TransformPreviewModel::IsValidFor(
@@ -342,6 +427,8 @@ void TransformPreviewModel::ClearState() noexcept
     sourceVoxels_.clear();
     sourcePositions_.clear();
     explicitDestinations_.clear();
+    compactSummary_ = {};
+    compact_ = false;
     collisionPositions_.clear();
     outOfBoundsPositions_.clear();
     sourceBounds_ = {};
@@ -363,23 +450,29 @@ void TransformPreviewModel::ClearState() noexcept
 bool TransformPreviewModel::IsActive() const noexcept { return active_; }
 bool TransformPreviewModel::HasCollisions() const noexcept
 {
-    return !collisionPositions_.empty();
+    return CollisionCount() > 0U;
 }
 bool TransformPreviewModel::HasOutOfBounds() const noexcept
 {
-    return !outOfBoundsPositions_.empty();
+    return OutOfBoundsCount() > 0U;
 }
 std::size_t TransformPreviewModel::VoxelCount() const noexcept
 {
-    return voxels_.size();
+    return compact_ ? compactSummary_.DestinationCount : voxels_.size();
 }
 std::size_t TransformPreviewModel::CollisionCount() const noexcept
 {
-    return collisionPositions_.size();
+    return compact_ ? compactSummary_.CollisionCount
+                    : collisionPositions_.size();
 }
 std::size_t TransformPreviewModel::OutOfBoundsCount() const noexcept
 {
-    return outOfBoundsPositions_.size();
+    return compact_ ? compactSummary_.OutOfBoundsCount
+                    : outOfBoundsPositions_.size();
+}
+bool TransformPreviewModel::IsCompact() const noexcept
+{
+    return compact_;
 }
 std::uint64_t TransformPreviewModel::DocumentGeneration() const noexcept
 {
@@ -441,14 +534,21 @@ TransformPreviewModel::OutOfBoundsPositions() const noexcept
 
 TransformPreviewRenderData TransformPreviewModel::RenderData() const noexcept
 {
+    TransformPreviewRenderPlan plan = TransformPreviewRenderPolicy::Build(
+        sourcePositions_.size(), VoxelCount(), CollisionCount(),
+        OutOfBoundsCount());
+    if (compact_)
+    {
+        // Aucun voxel individuel n'existe : le rendu ne peut etre que degrade
+        // (bornes / silhouette / validite), meme pour un petit compte.
+        plan.DrawIndividualVoxels = false;
+        plan.DrawIndividualCollisions = false;
+    }
     return {
         renderRevision_,
         collisionPolicy_ == TransformPreviewCollisionPolicy::IgnoreSource,
         voxels_, sourcePositions_, palette_, sourceBounds_, previewBounds_,
-        collisionBounds_, outOfBoundsBounds_,
-        TransformPreviewRenderPolicy::Build(
-            sourcePositions_.size(), voxels_.size(), collisionPositions_.size(),
-            outOfBoundsPositions_.size())};
+        collisionBounds_, outOfBoundsBounds_, plan};
 }
 
 TransformPreviewOperationData TransformPreviewModel::OperationData()

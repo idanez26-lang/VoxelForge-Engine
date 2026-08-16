@@ -654,6 +654,109 @@ add_test(
     COMMAND $<TARGET_FILE:VoxelForgeEditorPencilCompactPlanTests>
 )
 
+# VF-UX-TOOLS (correctif) : correspondance canonique des familles, prouvee sur
+# le plan reellement produit par le planner.
+add_executable(
+    VoxelForgeEditorSmartToolFamilyMappingTests
+    Editor/SmartToolFamilyMappingTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSmartToolFamilyMappingTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorSmartToolFamilyMappingTests)
+add_test(
+    NAME VoxelForge.Editor.SmartToolFamilyMapping
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSmartToolFamilyMappingTests>
+)
+
+# VF-UX-SELECTION-V1 : resolveur Region + regles Rect, purs et sans GPU.
+add_executable(
+    VoxelForgeEditorSelectionRegionResolverTests
+    Editor/SelectionRegionResolverTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorSelectionRegionResolverTests
+    PRIVATE VoxelForgeEditorVoxelSelection
+)
+vf_configure_test(VoxelForgeEditorSelectionRegionResolverTests)
+add_test(
+    NAME VoxelForge.Editor.SelectionRegionResolver
+    COMMAND $<TARGET_FILE:VoxelForgeEditorSelectionRegionResolverTests>
+)
+
+# VF-WRAP-V1 : geometrie pure de Wrap (Repeat/Crop/Spacing/MirrorRepeat).
+add_executable(
+    VoxelForgeEditorWrapVoxelSelectionTests
+    Editor/WrapVoxelSelectionTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorWrapVoxelSelectionTests
+    PRIVATE VoxelForgeEditorCommands
+)
+vf_configure_test(VoxelForgeEditorWrapVoxelSelectionTests)
+add_test(
+    NAME VoxelForge.Editor.WrapVoxelSelection
+    COMMAND $<TARGET_FILE:VoxelForgeEditorWrapVoxelSelectionTests>
+)
+
+# VF-WRAP-V1 (correctif) : Wrap au niveau document/historique — bornes source
+# partagees, transition Before/After, A/Undo/Redo/B, mode compact, framework.
+add_executable(
+    VoxelForgeEditorWrapVoxelSelectionCommitTests
+    Editor/WrapVoxelSelectionCommitTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorWrapVoxelSelectionCommitTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorWrapVoxelSelectionCommitTests)
+add_test(
+    NAME VoxelForge.Editor.WrapVoxelSelectionCommit
+    COMMAND $<TARGET_FILE:VoxelForgeEditorWrapVoxelSelectionCommitTests>
+)
+
+# Transform Overlap/Merge (decision produit) : Move/Scale/Rotate/Wrap
+# fusionnent sur la geometrie existante, voxel transforme prioritaire,
+# Undo/Redo exacts, deduplication, OutOfBounds et autres politiques inchanges.
+add_executable(
+    VoxelForgeEditorTransformOverlapMergeTests
+    Editor/TransformOverlapMergeTests.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorTransformOverlapMergeTests
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorTransformOverlapMergeTests)
+add_test(
+    NAME VoxelForge.Editor.TransformOverlapMerge
+    COMMAND $<TARGET_FILE:VoxelForgeEditorTransformOverlapMergeTests>
+)
+
+# VF-WRAP-V1 (correctif) : mesure memoire/temps de Wrap, 16^3 -> 256^3.
+add_executable(
+    VoxelForgeEditorWrapVoxelSelectionBenchmark
+    Editor/WrapVoxelSelectionBenchmark.cpp
+)
+target_link_libraries(
+    VoxelForgeEditorWrapVoxelSelectionBenchmark
+    PRIVATE VoxelForgeEditorCommands VoxelForgeMesh
+)
+vf_configure_test(VoxelForgeEditorWrapVoxelSelectionBenchmark)
+add_test(
+    NAME VoxelForge.Editor.WrapVoxelSelectionBenchmark
+    COMMAND $<TARGET_FILE:VoxelForgeEditorWrapVoxelSelectionBenchmark>
+)
+add_test(
+    NAME VoxelForge.Editor.WrapVoxelSelectionCommitBenchmark
+    COMMAND $<TARGET_FILE:VoxelForgeEditorWrapVoxelSelectionBenchmark> --commit
+)
+set_tests_properties(
+    VoxelForge.Editor.WrapVoxelSelectionBenchmark
+    VoxelForge.Editor.WrapVoxelSelectionCommitBenchmark
+    PROPERTIES LABELS "Performance"
+)
+
 add_executable(VoxelForgeEditorPencilInteractionV2Tests Editor/PencilInteractionV2Tests.cpp)
 target_link_libraries(VoxelForgeEditorPencilInteractionV2Tests PRIVATE VoxelForgeEditorViewportInteractionV2)
 vf_configure_test(VoxelForgeEditorPencilInteractionV2Tests)
@@ -1869,6 +1972,10 @@ if(TARGET VoxelForgeEditor)
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-scale-smoke-test
     )
     add_test(
+        NAME VoxelForge.Editor.VoxelWrapSmoke
+        COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-wrap-smoke-test
+    )
+    add_test(
         NAME VoxelForge.Editor.VoxelAlignSmoke
         COMMAND $<TARGET_FILE:VoxelForgeEditor> --voxel-align-smoke-test
     )
@@ -1944,6 +2051,7 @@ if(TARGET VoxelForgeEditor)
         VoxelForge.Editor.VoxelRotateSmoke
         VoxelForge.Editor.VoxelMirrorSmoke
         VoxelForge.Editor.VoxelScaleSmoke
+        VoxelForge.Editor.VoxelWrapSmoke
         VoxelForge.Editor.VoxelAlignSmoke
         VoxelForge.Editor.TransformGizmoFoundationSmoke
         VoxelForge.Editor.MoveGizmoSmoke

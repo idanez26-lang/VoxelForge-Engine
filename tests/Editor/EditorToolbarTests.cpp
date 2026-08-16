@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace
 {
@@ -17,16 +18,30 @@ void Require(const bool condition, const std::string_view message)
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
+// VF-UX-TOOLS : la barre expose desormais les FAMILLES. Les modes et options
+// vivent dans le panneau contextuel juste en dessous.
+constexpr std::size_t kPencil = 0U;
+constexpr std::size_t kGeometry = 1U;
+constexpr std::size_t kFace = 2U;
+constexpr std::size_t kSurface = 3U;
+constexpr std::size_t kFill = 4U;
+constexpr std::size_t kSelection = 5U;
+constexpr std::size_t kTransform = 6U;
+
 void TestOrderGroupsAndTooltips()
 {
     const EditorInputService inputService;
     const auto buttons = EditorToolbarModel::PrimaryButtons();
     constexpr EditorToolbarAction expected[] = {
         EditorToolbarAction::Pencil,
+        EditorToolbarAction::Geometry,
+        EditorToolbarAction::Face,
+        EditorToolbarAction::Surface,
+        EditorToolbarAction::Fill,
         EditorToolbarAction::Selection,
         EditorToolbarAction::Transform};
     Require(buttons.size() == std::size(expected),
-        "Toolbar does not expose exactly Smart Tool, Selection, and Transform.");
+        "Toolbar does not expose the five families plus Selection and Transform.");
     for (std::size_t index = 0U; index < buttons.size(); ++index)
     {
         Require(buttons[index].Action == expected[index],
@@ -35,15 +50,29 @@ void TestOrderGroupsAndTooltips()
             !buttons[index].Description.empty(),
             "A Toolbar action has no usable tooltip text.");
     }
-    Require(buttons[0].Name == "Smart Tool" &&
-        buttons[0].Group == EditorToolbarGroup::Sculpt &&
-        buttons[1].Group == EditorToolbarGroup::Selection &&
-        buttons[2].Group == EditorToolbarGroup::Transform,
+    constexpr std::string_view names[] = {
+        "Pencil", "Geometry", "Face", "Surface", "Fill",
+        "Selection", "Transform"};
+    for (std::size_t index = 0U; index < buttons.size(); ++index)
+        Require(buttons[index].Name == names[index],
+            "A Toolbar family carries an unexpected label.");
+    for (std::size_t index = kPencil; index <= kFill; ++index)
+        Require(buttons[index].Group == EditorToolbarGroup::Sculpt &&
+            buttons[index].HasFamily,
+            "A sculpt family is missing its group or its family binding.");
+    Require(buttons[kSelection].Group == EditorToolbarGroup::Selection &&
+        buttons[kTransform].Group == EditorToolbarGroup::Transform &&
+        !buttons[kSelection].HasFamily && !buttons[kTransform].HasFamily,
         "Toolbar visual groups are incorrect.");
-    Require(inputService.ShortcutLabel(buttons[0].Command) == "P" &&
-        inputService.ShortcutLabel(buttons[1].Command) == "V" &&
-        inputService.ShortcutLabel(buttons[2].Command) == "M",
+    Require(inputService.ShortcutLabel(buttons[kSelection].Command) == "V" &&
+        inputService.ShortcutLabel(buttons[kTransform].Command) == "M",
         "Toolbar does not use the centralized shortcut bindings.");
+    // Les familles n'ont volontairement pas de raccourci : les touches
+    // historiques P / E / Shift+F restent des selecteurs outil + action, et
+    // leur redonner un sens different serait un changement non demande.
+    for (std::size_t index = kPencil; index <= kFill; ++index)
+        Require(inputService.ShortcutLabel(buttons[index].Command).empty(),
+            "A family button claims a keyboard shortcut it was not given.");
 }
 
 void TestAvailabilityAndSingleActiveTool()
@@ -58,10 +87,11 @@ void TestAvailabilityAndSingleActiveTool()
         }), "Toolbar is actionable without a voxel document.");
 
     EditorToolbarState cleanDocument{true, false, ActiveVoxelTool::Pencil};
-    Require(EditorToolbarModel::IsEnabled(buttons[0], cleanDocument) &&
-        EditorToolbarModel::IsEnabled(buttons[1], cleanDocument) &&
-        !EditorToolbarModel::IsEnabled(buttons[2], cleanDocument),
-        "Smart toolbar availability is incorrect.");
+    for (std::size_t index = kPencil; index <= kSelection; ++index)
+        Require(EditorToolbarModel::IsEnabled(buttons[index], cleanDocument),
+            "A family or Selection button is unavailable with a document.");
+    Require(!EditorToolbarModel::IsEnabled(buttons[kTransform], cleanDocument),
+        "Transform is available without a selection.");
     const auto activeCount = std::count_if(buttons.begin(), buttons.end(),
         [&cleanDocument](const EditorToolbarButton& button)
         {
@@ -70,39 +100,46 @@ void TestAvailabilityAndSingleActiveTool()
     Require(activeCount == 1,
         "Toolbar does not expose exactly one active tool.");
 
+    // Invariant central de la nouvelle barre : une famille, et une seule,
+    // s'allume — pour chaque geometrie et chaque action. Sans le test sur
+    // ActiveGeometry, les cinq familles s'allumeraient ensemble.
     SmartTool smartTool;
-    const auto requireSmartToolOnly = [&buttons, &smartTool](
-        const SmartToolMode mode,
-        const SmartAction action,
-        const std::string_view description)
-    {
-        smartTool.SetGeometry(SmartGeometry::Pencil);
-        smartTool.SetMode(mode);
-        smartTool.SetAction(action);
-        const EditorToolbarState smartState{
-            true, false, ActiveVoxelTool::Pencil};
-        const auto active = std::count_if(buttons.begin(), buttons.end(),
-            [&smartState](const EditorToolbarButton& button)
-            {
-                return EditorToolbarModel::IsActive(button, smartState);
-            });
-        Require(smartTool.IsOperational() &&
-            EditorToolbarModel::IsActive(buttons[0], smartState) &&
-            !EditorToolbarModel::IsActive(buttons[1], smartState) &&
-            !EditorToolbarModel::IsActive(buttons[2], smartState) && active == 1,
-            description);
-    };
+    constexpr std::pair<SmartGeometry, std::size_t> families[] = {
+        {SmartGeometry::Pencil, kPencil},
+        {SmartGeometry::Geometry, kGeometry},
+        {SmartGeometry::Line, kGeometry},
+        {SmartGeometry::Face, kFace},
+        {SmartGeometry::Surface, kSurface},
+        {SmartGeometry::Fill, kFill}};
     constexpr SmartToolMode smartModes[] = {
         SmartToolMode::SingleVoxel, SmartToolMode::CubeBrush,
         SmartToolMode::SphereBrush, SmartToolMode::CylinderBrush};
     constexpr SmartAction smartActions[] = {
         SmartAction::Add, SmartAction::Erase, SmartAction::Paint};
-    for (const SmartToolMode mode : smartModes)
+    for (const auto& [geometry, expectedIndex] : families)
     {
-        for (const SmartAction action : smartActions)
+        for (const SmartToolMode mode : smartModes)
         {
-            requireSmartToolOnly(mode, action,
-                "Smart Tool is not exclusively active for a supported configuration.");
+            for (const SmartAction action : smartActions)
+            {
+                smartTool.SetGeometry(geometry);
+                smartTool.SetMode(mode);
+                smartTool.SetAction(action);
+                EditorToolbarState smartState{
+                    true, false, ActiveVoxelTool::Pencil};
+                smartState.ActiveGeometry = geometry;
+                const auto active = std::count_if(
+                    buttons.begin(), buttons.end(),
+                    [&smartState](const EditorToolbarButton& button)
+                    {
+                        return EditorToolbarModel::IsActive(button, smartState);
+                    });
+                Require(smartTool.IsOperational() && active == 1 &&
+                    EditorToolbarModel::IsActive(
+                        buttons[expectedIndex], smartState),
+                    "Exactly one family must light up for a supported "
+                    "configuration.");
+            }
         }
     }
     for (const SmartGeometry unsupported :
@@ -115,13 +152,16 @@ void TestAvailabilityAndSingleActiveTool()
 
     const EditorToolbarState selectionState{
         true, false, ActiveVoxelTool::Selection};
-    Require(!EditorToolbarModel::IsActive(buttons[0], selectionState) &&
-        EditorToolbarModel::IsActive(buttons[1], selectionState) &&
-        !EditorToolbarModel::IsActive(buttons[2], selectionState),
+    Require(EditorToolbarModel::IsActive(buttons[kSelection], selectionState) &&
+        std::count_if(buttons.begin(), buttons.end(),
+            [&selectionState](const EditorToolbarButton& button)
+            {
+                return EditorToolbarModel::IsActive(button, selectionState);
+            }) == 1,
         "Selection is not the only active toolbar button for Selection.");
 
     cleanDocument.CanMoveSelection = true;
-    Require(EditorToolbarModel::IsEnabled(buttons[2], cleanDocument),
+    Require(EditorToolbarModel::IsEnabled(buttons[kTransform], cleanDocument),
         "Transform is disabled with a valid selection.");
 
     constexpr ActiveVoxelTool transformTools[] = {
@@ -131,9 +171,12 @@ void TestAvailabilityAndSingleActiveTool()
     for (const ActiveVoxelTool tool : transformTools)
     {
         cleanDocument.ActiveTool = tool;
-        Require(EditorToolbarModel::IsActive(buttons[2], cleanDocument) &&
-            !EditorToolbarModel::IsActive(buttons[0], cleanDocument) &&
-            !EditorToolbarModel::IsActive(buttons[1], cleanDocument),
+        Require(EditorToolbarModel::IsActive(buttons[kTransform], cleanDocument) &&
+            std::count_if(buttons.begin(), buttons.end(),
+                [&cleanDocument](const EditorToolbarButton& button)
+                {
+                    return EditorToolbarModel::IsActive(button, cleanDocument);
+                }) == 1,
             "Transform is not the only active button for a transform-family tool.");
     }
 }
@@ -141,9 +184,12 @@ void TestAvailabilityAndSingleActiveTool()
 void TestHiddenToolbarActionsAndLegacyShortcuts()
 {
     const auto buttons = EditorToolbarModel::PrimaryButtons();
+    // Face est desormais une famille visible. Les outils herites Box / Line /
+    // Sphere et les boutons Eraser / Paint restent hors de la barre : leur
+    // sort est une dette distincte, volontairement non traitee ici.
     constexpr EditorToolbarAction hiddenActions[] = {
         EditorToolbarAction::Eraser, EditorToolbarAction::Paint,
-        EditorToolbarAction::Face, EditorToolbarAction::Box,
+        EditorToolbarAction::Box,
         EditorToolbarAction::Line, EditorToolbarAction::Sphere};
     for (const EditorToolbarAction action : hiddenActions)
     {

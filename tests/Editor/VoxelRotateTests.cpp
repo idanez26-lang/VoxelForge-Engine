@@ -289,12 +289,15 @@ void TestExactCollisionMembership()
     const auto blocked = Prepare(
         collisionDocument, collisionSelection, collisionPreview,
         Direction::Clockwise);
-    Require(blocked.Code == Editor::RotateVoxelSelectionResultCode::Collision &&
+    // Overlap/Merge (decision produit) : la preview signale exactement le
+    // recouvrement externe (information), le commit reste pret (fusion).
+    Require(blocked.Ready() &&
         collisionPreview.CollisionPositions().size() == 1U &&
         collisionPreview.CollisionPositions().front() == Position{2, 1, 3} &&
         std::find(selected.begin(), selected.end(), Position{2, 1, 3}) ==
             selected.end(),
-        "Rotate did not report the exact external destination collision.");
+        "Rotate did not report the exact external overlap as information "
+        "while keeping the merge commit ready.");
 }
 
 void TestExactGeometryAndCycles()
@@ -472,9 +475,11 @@ void TestRefusalsAndRollback()
     Editor::TransformPreviewModel collisionPreview;
     const auto collision = Prepare(collisionDocument, collisionSelection,
         collisionPreview, Direction::Clockwise);
-    Require(collision.Code == Editor::RotateVoxelSelectionResultCode::Collision &&
+    // Overlap/Merge (decision produit) : recouvrement signale, commit pret,
+    // aucune mutation avant Execute.
+    Require(collision.Ready() && collisionPreview.HasCollisions() &&
         !collisionDocument.IsDirty() && collisionDocument.GetVoxelCount() == 4U,
-        "External Rotate collision changed the document.");
+        "External Rotate overlap must be reported, accepted and non-mutating.");
 
     auto edgeDocument = MakeDocument({
         {0U, 1U, 0U, 3U}, {1U, 1U, 0U, 4U}, {2U, 1U, 0U, 5U}});

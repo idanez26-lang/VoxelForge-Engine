@@ -7,11 +7,32 @@ namespace VoxelForge::Editor
 {
 namespace
 {
+// VF-UX-TOOLS : la barre expose desormais les FAMILLES. Les modes et les
+// options restent dans le panneau juste en dessous, contextuels a la famille
+// selectionnee. L'action (Add / Erase / Paint) est un axe independant : changer
+// de famille ne la modifie pas.
 constexpr std::array<EditorToolbarButton, EditorToolbarModel::ButtonCount>
     ToolbarButtons{{
         {EditorToolbarAction::Pencil, EditorToolbarGroup::Sculpt,
-         "Smart Tool", "Edit voxels with Smart Brush", EditorInputCommand::ToolPencil,
-         ActiveVoxelTool::Pencil},
+         "Pencil", "Freehand voxels with a 3D brush",
+         EditorInputCommand::ToolFamilyPencil,
+         ActiveVoxelTool::Pencil, true, SmartGeometry::Pencil},
+        {EditorToolbarAction::Geometry, EditorToolbarGroup::Sculpt,
+         "Geometry", "Draw 2D shapes: Line, Cube, Sphere",
+         EditorInputCommand::ToolFamilyGeometry,
+         ActiveVoxelTool::Pencil, true, SmartGeometry::Geometry},
+        {EditorToolbarAction::Face, EditorToolbarGroup::Sculpt,
+         "Face", "Act on a whole exposed face",
+         EditorInputCommand::ToolFamilyFace,
+         ActiveVoxelTool::Pencil, true, SmartGeometry::Face},
+        {EditorToolbarAction::Surface, EditorToolbarGroup::Sculpt,
+         "Surface", "Act on a connected surface",
+         EditorInputCommand::ToolFamilySurface,
+         ActiveVoxelTool::Pencil, true, SmartGeometry::Surface},
+        {EditorToolbarAction::Fill, EditorToolbarGroup::Sculpt,
+         "Fill", "Fill a connected region or a face plane",
+         EditorInputCommand::ToolFamilyFill,
+         ActiveVoxelTool::Pencil, true, SmartGeometry::Fill},
         {EditorToolbarAction::Selection, EditorToolbarGroup::Selection,
          "Selection", "Select voxels", EditorInputCommand::ToolSelection,
          ActiveVoxelTool::Selection},
@@ -58,15 +79,24 @@ bool EditorToolbarModel::IsActive(
     const EditorToolbarState& state) noexcept
 {
     if (!state.HasDocument) return false;
-    if (button.Action == EditorToolbarAction::Pencil)
-        return state.ActiveTool == ActiveVoxelTool::Pencil;
+    // VF-UX-TOOLS : un bouton de famille n'est actif que si l'outil Smart est
+    // selectionne ET que la geometrie courante est la sienne. Sans le second
+    // test, les cinq familles s'allumeraient simultanement.
+    if (button.HasFamily)
+    {
+        if (state.ActiveTool != ActiveVoxelTool::Pencil) return false;
+        // Une seule autorite repond a « quelle famille ? ». La barre recopiait
+        // la regle Geometry/Line ; elle la demande desormais.
+        return FamilyOf(state.ActiveGeometry) == FamilyOf(button.Family);
+    }
     if (button.Action == EditorToolbarAction::Transform)
         return state.ActiveTool == ActiveVoxelTool::Move ||
             state.ActiveTool == ActiveVoxelTool::Duplicate ||
             state.ActiveTool == ActiveVoxelTool::Rotate ||
             state.ActiveTool == ActiveVoxelTool::Mirror ||
             state.ActiveTool == ActiveVoxelTool::Scale ||
-            state.ActiveTool == ActiveVoxelTool::Align;
+            state.ActiveTool == ActiveVoxelTool::Align ||
+            state.ActiveTool == ActiveVoxelTool::Wrap;
     return button.Tool != ActiveVoxelTool::None &&
         button.Tool == state.ActiveTool;
 }
@@ -90,8 +120,13 @@ EditorToolbarLayout EditorToolbarModel::CalculateLayout(
         return {preferredButton, regularSpacing, groupSpacing, false};
 
     constexpr float MinimumButtonSize = 24.0F;
+    // Le diviseur suivait autrefois les trois boutons d'origine ; il doit
+    // suivre le nombre reel, sinon la rangee repliee deborde.
+    constexpr float ButtonsPerWrappedRow =
+        static_cast<float>(EditorToolbarModel::PrimaryButtonCount);
     const float wrappedButton = std::clamp(
-        (safeWidth - regularSpacing * 2.0F) / 3.0F,
+        (safeWidth - regularSpacing * (ButtonsPerWrappedRow - 1.0F)) /
+            ButtonsPerWrappedRow,
         MinimumButtonSize, preferredButton);
     return {wrappedButton, regularSpacing, groupSpacing, true};
 }

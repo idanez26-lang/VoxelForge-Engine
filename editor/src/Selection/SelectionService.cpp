@@ -168,6 +168,13 @@ bool SelectionService::ApplySortedVolume(
     return changed;
 }
 
+bool SelectionService::AlignEditableBoundsToSelection() noexcept
+{
+    const bool changed = !(editableBounds_ == bounds_);
+    editableBounds_ = bounds_;
+    return changed;
+}
+
 bool SelectionService::Clear() noexcept
 {
     const bool changed = !positions_.empty() || editableBounds_.Valid;

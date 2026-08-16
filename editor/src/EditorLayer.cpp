@@ -62,6 +62,7 @@ EditorLayer::EditorLayer(
     const bool voxelRotateSmokeTest,
     const bool voxelMirrorSmokeTest,
     const bool voxelScaleSmokeTest,
+    const bool voxelWrapSmokeTest,
     const bool voxelAlignSmokeTest,
     const bool moveGizmoSmokeTest,
     const bool rotateGizmoSmokeTest,
@@ -93,6 +94,7 @@ EditorLayer::EditorLayer(
               keyboardShortcutsSmokeTest || voxelMoveSmokeTest ||
               voxelDuplicateSmokeTest || voxelRotateSmokeTest ||
               voxelMirrorSmokeTest || voxelScaleSmokeTest ||
+              voxelWrapSmokeTest ||
               voxelAlignSmokeTest || moveGizmoSmokeTest ||
               rotateGizmoSmokeTest || scaleGizmoSmokeTest ||
               transformGizmoManagerSmokeTest ||
@@ -117,6 +119,7 @@ EditorLayer::EditorLayer(
               keyboardShortcutsSmokeTest || voxelMoveSmokeTest ||
               voxelDuplicateSmokeTest || voxelRotateSmokeTest ||
               voxelMirrorSmokeTest || voxelScaleSmokeTest ||
+              voxelWrapSmokeTest ||
               voxelAlignSmokeTest || moveGizmoSmokeTest ||
               rotateGizmoSmokeTest || scaleGizmoSmokeTest ||
               transformGizmoManagerSmokeTest ||
@@ -171,6 +174,7 @@ EditorLayer::EditorLayer(
       voxelRotateSmokeTest_(voxelRotateSmokeTest),
       voxelMirrorSmokeTest_(voxelMirrorSmokeTest),
       voxelScaleSmokeTest_(voxelScaleSmokeTest),
+      voxelWrapSmokeTest_(voxelWrapSmokeTest),
       voxelAlignSmokeTest_(voxelAlignSmokeTest),
       moveGizmoSmokeTest_(moveGizmoSmokeTest),
       rotateGizmoSmokeTest_(rotateGizmoSmokeTest),
@@ -301,6 +305,7 @@ void EditorLayer::OnImGuiRender()
          !keyboardShortcutsSmokeTest_ && !voxelMoveSmokeTest_ &&
          !voxelDuplicateSmokeTest_ && !voxelRotateSmokeTest_ &&
          !voxelMirrorSmokeTest_ && !voxelScaleSmokeTest_ &&
+         !voxelWrapSmokeTest_ &&
          !voxelAlignSmokeTest_ && !moveGizmoSmokeTest_ &&
          !rotateGizmoSmokeTest_ && !scaleGizmoSmokeTest_ &&
          !transformGizmoManagerSmokeTest_ &&
@@ -446,6 +451,11 @@ void EditorLayer::OnImGuiRender()
         static_cast<void>(workspace_.RunVoxelScaleSmokeStep(
             renderedFrameCount_));
     }
+    if (voxelWrapSmokeTest_)
+    {
+        static_cast<void>(workspace_.RunVoxelWrapSmokeStep(
+            renderedFrameCount_));
+    }
     if (voxelAlignSmokeTest_)
     {
         static_cast<void>(workspace_.RunVoxelAlignSmokeStep(
@@ -577,6 +587,7 @@ void EditorLayer::OnImGuiRender()
         (voxelRotateSmokeTest_ && workspace_.VoxelRotateSmokePassed()) ||
         (voxelMirrorSmokeTest_ && workspace_.VoxelMirrorSmokePassed()) ||
         (voxelScaleSmokeTest_ && workspace_.VoxelScaleSmokePassed()) ||
+        (voxelWrapSmokeTest_ && workspace_.VoxelWrapSmokePassed()) ||
         (voxelAlignSmokeTest_ && workspace_.VoxelAlignSmokePassed()) ||
         (moveGizmoSmokeTest_ && workspace_.MoveGizmoSmokePassed()) ||
         (rotateGizmoSmokeTest_ && workspace_.RotateGizmoSmokePassed()) ||
@@ -784,6 +795,11 @@ void EditorLayer::OnImGuiRender()
         !workspace_.VoxelScaleSmokePassed())
     {
         throw std::runtime_error("Voxel Scale smoke test did not complete.");
+    }
+    if (voxelWrapSmokeTest_ && smokeTestComplete &&
+        !workspace_.VoxelWrapSmokePassed())
+    {
+        throw std::runtime_error("Voxel Wrap smoke test did not complete.");
     }
     if (voxelAlignSmokeTest_ && smokeTestComplete &&
         !workspace_.VoxelAlignSmokePassed())

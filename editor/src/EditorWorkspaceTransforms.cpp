@@ -518,6 +518,329 @@ void EditorWorkspace::CancelVoxelMirror() noexcept
     voxelMirrorStatusMessage_.clear();
 }
 
+// --- VF-WRAP-V1 -----------------------------------------------------------
+//
+// Preview et commit partagent : les MEMES bornes source (EditableBounds
+// capturees au debut du geste), le meme index de motif, la meme
+// autorite geometrique. En dessous du budget de materialisation, la preview
+// est exacte (destinations dans le modele) ; au-dela, elle est compacte
+// (compte + bornes + collisions suivies incrementalement) et la
+// materialisation exacte n'a lieu qu'au commit, une seule fois.
+
+bool EditorWorkspace::BeginVoxelWrapPreview()
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || !CanWrapSelection())
+    {
+        voxelWrapStatusMessage_ = "Select voxels before using Wrap";
+        UpdateVoxelHighlights();
+        return false;
+    }
+    const std::uint64_t generation = voxelDocumentSession_.Generation();
+    if (voxelToolState_.IsWrapActive() &&
+        transformPreviewModel_.IsValidFor(
+            *document, selectionService_, generation) &&
+        wrapSourceBounds_.Valid && wrapPattern_.Valid())
+        return true;
+    if (!transformPreviewModel_.BeginPreview(
+            *document, selectionService_, generation, 0U,
+            TransformPreviewCollisionPolicy::IgnoreSource))
+    {
+        voxelWrapStatusMessage_ = "Wrap preview could not capture selection";
+        UpdateVoxelHighlights();
+        return false;
+    }
+    // Le motif est fige au debut du geste : bornes source (EditableBounds),
+    // index des voxels sources, options d'axe.
+    wrapSourceBounds_ = selectionService_.EditableBounds();
+    wrapTargetBounds_ = wrapSourceBounds_;
+    wrapGestureOptions_ = toolContext_.Wrap;
+    wrapPattern_ = WrapPatternIndex(
+        transformPreviewModel_.SourceVoxels(), wrapSourceBounds_);
+    wrapCollisions_.Reset();
+    voxelWrapStatusMessage_.clear();
+    return true;
+}
+
+bool EditorWorkspace::UpdateVoxelWrapPreview(
+    const SelectionBounds newBounds, const SelectionFace draggedFace)
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || !newBounds.Valid || !wrapSourceBounds_.Valid ||
+        !wrapPattern_.Valid())
+        return false;
+
+    // L'ancre par axe est la face OPPOSEE a celle qui est tiree ; les axes
+    // non manipules gardent leur ancre precedente (sans effet si leur etendue
+    // est inchangee). Le spacing et le mirror viennent du panneau, relus a
+    // chaque mise a jour pour que les champs agissent en direct.
+    wrapGestureOptions_ = toolContext_.Wrap;
+    switch (draggedFace)
+    {
+    case SelectionFace::XMinimum:
+        wrapGestureOptions_.X.Anchor = WrapAxisAnchor::Maximum; break;
+    case SelectionFace::XMaximum:
+        wrapGestureOptions_.X.Anchor = WrapAxisAnchor::Minimum; break;
+    case SelectionFace::YMinimum:
+        wrapGestureOptions_.Y.Anchor = WrapAxisAnchor::Maximum; break;
+    case SelectionFace::YMaximum:
+        wrapGestureOptions_.Y.Anchor = WrapAxisAnchor::Minimum; break;
+    case SelectionFace::ZMinimum:
+        wrapGestureOptions_.Z.Anchor = WrapAxisAnchor::Maximum; break;
+    case SelectionFace::ZMaximum:
+        wrapGestureOptions_.Z.Anchor = WrapAxisAnchor::Minimum; break;
+    case SelectionFace::None:
+    default: break;
+    }
+    wrapTargetBounds_ = newBounds;
+
+    // LA MEME autorite geometrique que le commit : PREVIEW == COMMIT.
+    const VoxelWrapSummary summary = WrapVoxelSelectionOperation::Summarize(
+        wrapPattern_, newBounds, wrapGestureOptions_);
+    if (!summary.Valid())
+    {
+        // Resultat vide (crop en zone vide) : la preview precedente reste, et
+        // le message dit pourquoi le commit refusera.
+        voxelWrapStatusMessage_ = summary.Message;
+        UpdateVoxelHighlights();
+        return false;
+    }
+    const std::uint64_t generation = voxelDocumentSession_.Generation();
+    bool changed = false;
+    if (summary.DestinationCount <=
+        WrapVoxelSelectionOperation::ExactPreviewDestinationBudget)
+    {
+        // Preview EXACTE : chaque destination est dans le modele.
+        wrapCollisions_.Reset();
+        const VoxelWrapGeometry geometry =
+            WrapVoxelSelectionOperation::BuildGeometry(
+                wrapPattern_, newBounds, wrapGestureOptions_);
+        if (!geometry.Valid()) return false;
+        changed = transformPreviewModel_.SetExplicitVoxelDestinations(
+            *document, selectionService_, generation, geometry.Destinations);
+    }
+    else
+    {
+        // Preview COMPACTE : compte et bornes analytiques, collisions suivies
+        // sur la difference de bounds. Aucune materialisation par delta.
+        const std::size_t modelIndex = transformPreviewModel_.ModelIndex();
+        const WrapCollisionState collisions = wrapCollisions_.Update(
+            *document, modelIndex, wrapPattern_, newBounds,
+            wrapGestureOptions_, summary.DestinationCount);
+        TransformPreviewCompactSummary compact;
+        compact.DestinationCount =
+            static_cast<std::size_t>(summary.DestinationCount);
+        compact.PreviewBounds = summary.Bounds;
+        compact.CollisionCount = collisions.Count;
+        compact.CollisionBounds = collisions.Bounds;
+        if (const auto dimensions = document->GetDimensions(modelIndex))
+        {
+            const SelectionBounds inside = newBounds.ClampedTo(*dimensions);
+            if (inside != newBounds)
+            {
+                const VoxelWrapSummary insideSummary =
+                    WrapVoxelSelectionOperation::Summarize(
+                        wrapPattern_, inside, wrapGestureOptions_);
+                compact.OutOfBoundsCount = static_cast<std::size_t>(
+                    summary.DestinationCount -
+                    insideSummary.DestinationCount);
+                compact.OutOfBoundsBounds = newBounds;
+            }
+        }
+        changed = transformPreviewModel_.SetCompactDestinations(
+            *document, selectionService_, generation, compact);
+    }
+
+    // Garde memoire du commit, annoncee PENDANT le drag : ce que l'historique
+    // refuserait n'est jamais materialise.
+    const std::size_t estimated =
+        WrapVoxelSelectionOperation::EstimateOperationMemory(
+            summary.DestinationCount, wrapPattern_.Sources().size());
+    if (estimated > voxelEditHistory_.Limits().MaximumEstimatedMemory)
+        voxelWrapStatusMessage_ = "Wrap result exceeds the undo memory budget (" +
+            std::to_string(estimated / (1024U * 1024U)) + " MiB > " +
+            std::to_string(voxelEditHistory_.Limits().MaximumEstimatedMemory /
+                (1024U * 1024U)) + " MiB)";
+    else
+        voxelWrapStatusMessage_.clear();
+    UpdateVoxelHighlights();
+    return changed;
+}
+
+bool EditorWorkspace::ApplyVoxelWrap()
+{
+    Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document || voxelEditInProgress_ || voxelEditHistory_.IsBusy())
+        return false;
+    if (!wrapSourceBounds_.Valid || !wrapTargetBounds_.Valid ||
+        !wrapPattern_.Valid())
+        return false;
+
+    // Refus AVANT toute materialisation si l'historique refuserait le
+    // resultat : aucune allocation massive pour un commit voue a l'echec.
+    const VoxelWrapSummary summary = WrapVoxelSelectionOperation::Summarize(
+        wrapPattern_, wrapTargetBounds_, wrapGestureOptions_);
+    if (summary.Valid() &&
+        WrapVoxelSelectionOperation::EstimateOperationMemory(
+            summary.DestinationCount, wrapPattern_.Sources().size()) >
+            voxelEditHistory_.Limits().MaximumEstimatedMemory)
+    {
+        CancelVoxelWrap();
+        voxelWrapStatusMessage_ =
+            "Wrap refused: result exceeds the undo memory budget";
+        AddConsoleMessage("[Edit] " + voxelWrapStatusMessage_);
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    // Overlap/Merge (decision produit) : les recouvrements FUSIONNENT au
+    // commit ; seul le hors-limites reste un refus, pris ici avant toute
+    // materialisation d'un resultat massif (meme verdict que le framework).
+    if (transformPreviewModel_.HasOutOfBounds())
+    {
+        voxelWrapStatusMessage_ = "Wrap blocked: destination is outside the model";
+        AddConsoleMessage("[Edit] Wrap refused: " + voxelWrapStatusMessage_);
+        const std::string message = voxelWrapStatusMessage_;
+        CancelVoxelWrap();
+        voxelWrapStatusMessage_ = message;
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    // Le commit recoit EXPLICITEMENT les memes bornes source que la preview.
+    // `prepared` n'est PAS const : son operation est DEPLACEE vers
+    // l'historique, comme pour Move/Scale/Rotate — jamais recopiee (a 128^3,
+    // ~2,1 M VoxelChange, ~48 MiB de copie evitee). Le code et le message
+    // sont lus avant le transfert.
+    WrapVoxelSelectionResult prepared = WrapVoxelSelectionOperation::Build(
+        *document, selectionService_, voxelDocumentSession_.Generation(),
+        transformPreviewModel_, wrapSourceBounds_, wrapTargetBounds_,
+        wrapGestureOptions_);
+    CancelVoxelWrap();
+    if (!prepared.Ready())
+    {
+        voxelWrapStatusMessage_ = prepared.Message;
+        AddConsoleMessage("[Edit] Wrap refused: " + prepared.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+
+    voxelEditInProgress_ = true;
+    const VoxelEditHistoryResult result = voxelEditHistory_.Execute(
+        *this, std::move(prepared.Operation));
+    voxelEditInProgress_ = false;
+    if (!result)
+    {
+        voxelWrapStatusMessage_ = result.Message;
+        AddConsoleMessage("[Edit] Wrap failed: " + result.Message);
+        UpdateVoxelHighlights();
+        return false;
+    }
+    // La transition d'historique porte les bornes editables demandees :
+    // la selection et ses bornes sont exactement celles du geste, et Redo
+    // les restaurera a l'identique.
+    ApplyVoxelHistorySelection(result);
+    voxelWrapStatusMessage_.clear();
+    AddConsoleMessage("[Edit] Wrapped selection to " +
+        std::to_string(selectionService_.Count()) + " voxel(s).");
+    UpdateVoxelHighlights();
+    return true;
+}
+
+void EditorWorkspace::CancelVoxelWrap() noexcept
+{
+    static_cast<void>(transformPreviewModel_.CancelPreview());
+    // Un vrai drag possede aussi l'interaction de poignee : elle tombe avec la
+    // preview, sans jamais reappliquer de bornes (la selection n'a pas bouge
+    // pendant le geste, il n'y a rien a restaurer).
+    if (wrapDraggedFace_ != SelectionFace::None &&
+        selectionInteraction_.IsActive() &&
+        selectionInteraction_.Mode() == SelectionInteractionMode::ResizingFace)
+    {
+        static_cast<void>(selectionInteraction_.Cancel());
+        voxelSelectionClickCandidate_ = false;
+        selectionPointerAnchor_.reset();
+    }
+    wrapDraggedFace_ = SelectionFace::None;
+    wrapSourceBounds_ = {};
+    wrapTargetBounds_ = {};
+    wrapGestureOptions_ = {};
+    wrapPattern_.Reset();
+    wrapCollisions_.Reset();
+    voxelWrapStatusMessage_.clear();
+}
+
+bool EditorWorkspace::BeginWrapHandleDrag(
+    const SelectionFace face, const float screenX, const float screenY,
+    const Vec2 screenAxisPerVoxel)
+{
+    if (!voxelToolState_.IsWrapActive() || face == SelectionFace::None ||
+        selectionInteraction_.IsActive() || !BeginVoxelWrapPreview())
+        return false;
+    if (!selectionInteraction_.BeginResizingFace(
+            face, wrapSourceBounds_, voxelDocumentSession_.Generation(),
+            screenX, screenY, screenAxisPerVoxel))
+    {
+        CancelVoxelWrap();
+        return false;
+    }
+    wrapDraggedFace_ = face;
+    voxelSelectionClickCandidate_ = false;
+    selectionPointerAnchor_.reset();
+    UpdateVoxelHighlights();
+    return true;
+}
+
+bool EditorWorkspace::UpdateWrapHandleDrag(
+    const float screenX, const float screenY)
+{
+    if (!IsWrapHandleDragActive()) return false;
+    const Asset::Voxel::VoxelDocument* document =
+        voxelDocumentSession_.ActiveDocument();
+    if (!document) return false;
+    if (!selectionInteraction_.PointerMove(
+            screenX, screenY, std::nullopt, document->GetDimensions()))
+        return false;
+    // La preview suit le drag via la MEME geometrie que le commit.
+    static_cast<void>(UpdateVoxelWrapPreview(
+        selectionInteraction_.CurrentBounds(), wrapDraggedFace_));
+    return true;
+}
+
+bool EditorWorkspace::ReleaseWrapHandleDrag()
+{
+    if (!IsWrapHandleDragActive()) return false;
+    const SelectionPointerRelease release = selectionInteraction_.PointerUp();
+    if (release.Mode != SelectionInteractionMode::ResizingFace)
+    {
+        CancelVoxelWrap();
+        return false;
+    }
+    // Le relachement committe exactement le resultat montre pendant le drag.
+    return ApplyVoxelWrap();
+}
+
+bool EditorWorkspace::IsWrapHandleDragActive() const noexcept
+{
+    return voxelToolState_.IsWrapActive() &&
+        wrapDraggedFace_ != SelectionFace::None &&
+        selectionInteraction_.IsActive() &&
+        selectionInteraction_.Mode() == SelectionInteractionMode::ResizingFace;
+}
+
+const SelectionBounds& EditorWorkspace::WrapTargetBounds() const noexcept
+{
+    return wrapTargetBounds_;
+}
+
+const std::string& EditorWorkspace::WrapStatusMessage() const noexcept
+{
+    return voxelWrapStatusMessage_;
+}
+
 bool EditorWorkspace::BeginVoxelScalePreview(const VoxelScaleMode mode)
 {
     Asset::Voxel::VoxelDocument* document =

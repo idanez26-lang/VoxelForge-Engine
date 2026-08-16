@@ -21,6 +21,8 @@ constexpr std::array<ToolDescriptor, ToolManager::ToolCount> ToolDefinitions{{
         ToolPanelKind::Rotate, ToolCursor::Rotate},
     {ActiveVoxelTool::Scale, "Scale", EditorInputCommand::ToolScale,
         ToolPanelKind::Scale, ToolCursor::Scale},
+    {ActiveVoxelTool::Wrap, "Wrap", EditorInputCommand::ToolWrap,
+        ToolPanelKind::Wrap, ToolCursor::Scale},
     {ActiveVoxelTool::Box, "Box", EditorInputCommand::ToolBox,
         ToolPanelKind::Generic, ToolCursor::Crosshair},
     {ActiveVoxelTool::Line, "Line", EditorInputCommand::ToolLine,

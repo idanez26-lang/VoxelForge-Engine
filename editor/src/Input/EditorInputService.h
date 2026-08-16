@@ -12,6 +12,17 @@ enum class EditorInputCommand : std::uint8_t
 {
     None,
     ToolPencil,
+    // VF-UX-TOOLS : selection de FAMILLE depuis la barre de gauche. Distinctes
+    // de ToolPencil / ToolEraser / ToolFill, qui restent les raccourcis
+    // historiques et imposent en plus une action. Une famille, elle, ne touche
+    // jamais a l'action courante : les deux axes sont orthogonaux, comme dans
+    // MagicaVoxel. Placees a l'interieur de la plage ToolPencil..ToolAlign pour
+    // que IsToolCommand les reconnaisse.
+    ToolFamilyPencil,
+    ToolFamilyGeometry,
+    ToolFamilyFace,
+    ToolFamilySurface,
+    ToolFamilyFill,
     ToolEraser,
     ToolFill,
     ToolBox,
@@ -23,6 +34,7 @@ enum class EditorInputCommand : std::uint8_t
     ToolRotate,
     ToolMirror,
     ToolScale,
+    ToolWrap,
     ToolAlign,
     RotateLeft,
     RotateRight,
@@ -67,6 +79,7 @@ enum class EditorInputKey : std::uint8_t
     Q,
     R,
     A,
+    W,
     Enter,
     Z,
     Y,
@@ -148,7 +161,7 @@ struct SmartBrushSizeInputResult final
 class EditorInputService final
 {
 public:
-    static constexpr std::size_t BindingCount = 29U;
+    static constexpr std::size_t BindingCount = 30U;
 
     [[nodiscard]] EditorInputCommand Resolve(
         const EditorInputFrame& frame,
@@ -200,6 +213,8 @@ private:
          false, false, false, "H"},
         {EditorInputCommand::ToolScale, EditorInputKey::K,
          false, false, false, "K"},
+        {EditorInputCommand::ToolWrap, EditorInputKey::W,
+         false, false, false, "W"},
         {EditorInputCommand::ToolAlign, EditorInputKey::A,
          false, true, false, "Shift+A"},
         {EditorInputCommand::RotateLeft, EditorInputKey::Q,

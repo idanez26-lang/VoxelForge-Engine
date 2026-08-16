@@ -156,6 +156,17 @@ void ResolvePivot(
 
 void TestVisibilityModesAndStateMachine()
 {
+    // VF-WRAP-V1 : Wrap pilote les poignees de faces de ses bounds, jamais un
+    // gizmo ; Move, Rotate et Scale gardent le leur.
+    Require(TransformGizmoModel::ModeForTool(ActiveVoxelTool::Wrap) ==
+            TransformGizmoMode::None &&
+        TransformGizmoModel::ModeForTool(ActiveVoxelTool::Move) ==
+            TransformGizmoMode::Move &&
+        TransformGizmoModel::ModeForTool(ActiveVoxelTool::Rotate) ==
+            TransformGizmoMode::Rotate &&
+        TransformGizmoModel::ModeForTool(ActiveVoxelTool::Scale) ==
+            TransformGizmoMode::Scale,
+        "Wrap must have no gizmo while Move/Rotate/Scale keep theirs.");
     TransformGizmoModel model;
     Require(!model.View().Visible &&
             model.View().State == TransformGizmoInteractionState::Hidden &&
@@ -171,6 +182,9 @@ void TestVisibilityModesAndStateMachine()
     context.SelectionEmpty = true;
     Require(!model.Update(context) && !model.View().Visible,
         "An empty selection must keep the gizmo hidden.");
+    context = MakeContext({}, ActiveVoxelTool::Wrap);
+    Require(!model.Update(context) && !model.View().Visible,
+        "Wrap with a valid selection must keep the gizmo hidden.");
     context = MakeContext({}, ActiveVoxelTool::Pencil);
     Require(!model.Update(context) && !model.View().Visible,
         "An incompatible tool must keep the gizmo hidden.");

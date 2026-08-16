@@ -65,7 +65,7 @@ MoveVoxelSelectionResult MoveVoxelSelectionOperation::Build(
         document, selection, documentGeneration, preview,
         {"Move", "Move Voxels",
          {TransformSourcePolicy::RemoveSource,
-          TransformCollisionPolicy::AllowSourceOverlap},
+          TransformCollisionPolicy::MergeOverlap},
          preview.PreviewBounds()}));
 }
 

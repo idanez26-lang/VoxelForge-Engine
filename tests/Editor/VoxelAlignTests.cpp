@@ -215,10 +215,11 @@ void TestDirectionsPreviewAndRefusals()
     Editor::TransformPreviewModel collisionPreview;
     const auto collision = Prepare(collisionDocument, collisionSelection,
         collisionPreview, Editor::VoxelAlignDirection::Right);
-    Require(collision.Code ==
-            Editor::MoveVoxelSelectionResultCode::Collision &&
+    // Overlap/Merge (decision produit) : Align est un Move contraint et herite
+    // de la fusion — recouvrement signale, commit pret, aucune mutation.
+    Require(collision.Ready() && collisionPreview.HasCollisions() &&
         !collisionDocument.IsDirty(),
-        "Align did not reuse Move external-collision rejection.");
+        "Align did not reuse Move overlap merge (reported, ready, non-mutating).");
 
     auto outDocument = MakeDocument();
     outDocument.MarkSaved();

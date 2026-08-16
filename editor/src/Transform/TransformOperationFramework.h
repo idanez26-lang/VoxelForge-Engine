@@ -18,8 +18,19 @@ enum class TransformSourcePolicy : std::uint8_t
 
 enum class TransformCollisionPolicy : std::uint8_t
 {
+    // Une destination peut recouvrir une SOURCE liberee ; toute autre cellule
+    // occupee refuse le commit (Mirror historique).
     AllowSourceOverlap,
-    RejectAnyOccupiedDestination
+    // Toute cellule occupee refuse le commit (Duplicate).
+    RejectAnyOccupiedDestination,
+    // Decision produit (Tony) — Move / Scale / Rotate / Wrap : une destination
+    // peut recouvrir n'importe quel voxel existant ; le commit FUSIONNE, le
+    // voxel transforme est prioritaire (valeur), l'existant est remplace et
+    // restaure exactement par Undo. Les destinations qui coincident (plusieurs
+    // voxels transformes vers une meme cellule) sont dedupliquees : la
+    // derniere emise l'emporte, deterministe. Les collisions detectees par la
+    // preview restent une INFORMATION, jamais une invalidite.
+    MergeOverlap
 };
 
 enum class TransformOperationBuildCode : std::uint8_t
@@ -47,7 +58,18 @@ struct TransformOperationRequest final
     std::string_view Name;
     std::string Label;
     TransformOperationPolicy Policy{};
+    // Bornes SERREES du resultat occupe : validees contre les destinations.
     SelectionBounds DestinationBounds{};
+    // VF-WRAP-V1 (correctif) : bornes SEMANTIQUES (editables) enregistrees
+    // dans la transition d'historique, distinctes des bornes serrees.
+    // Invalides (defaut) : comportement historique — Before/After portent
+    // les bornes serrees de la source et des destinations, exactement comme
+    // avant, pour toutes les Transform existantes. Valides : Before/After
+    // portent ces bornes, qui doivent CONTENIR les bornes serrees
+    // correspondantes ; Undo restaure les bornes source, Redo les bornes
+    // demandees. Aucun patch apres Redo n'est necessaire.
+    SelectionBounds SourceEditableBounds{};
+    SelectionBounds DestinationEditableBounds{};
 };
 
 struct TransformOperationBuildResult final

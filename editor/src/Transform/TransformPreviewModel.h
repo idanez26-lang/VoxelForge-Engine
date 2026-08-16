@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <span>
 #include <vector>
 
@@ -70,6 +71,33 @@ public:
         std::size_t collisionCount,
         std::size_t outOfBoundsCount) noexcept;
 };
+
+// VF-WRAP-V1 (correctif, point 6) : resume COMPACT d'une preview dont le
+// resultat est trop massif pour etre materialise a chaque delta. Le modele ne
+// detient alors aucun voxel de destination : seulement des comptes et des
+// bornes, calcules par l'autorite geometrique de l'outil. Le rendu se degrade
+// en bornes/silhouette/validite ; le commit exige une materialisation
+// (SetGeneratedVoxelDestinations) — jamais un commit depuis un resume.
+struct TransformPreviewCompactSummary final
+{
+    std::size_t DestinationCount = 0U;
+    SelectionBounds PreviewBounds{};        // bornes serrees du resultat occupe
+    std::size_t CollisionCount = 0U;
+    SelectionBounds CollisionBounds{};
+    std::size_t OutOfBoundsCount = 0U;
+    SelectionBounds OutOfBoundsBounds{};
+
+    [[nodiscard]] bool operator==(
+        const TransformPreviewCompactSummary&) const noexcept = default;
+};
+
+// Producteur de destinations : appele une fois, il pousse chaque destination
+// dans le puits. Permet de materialiser un resultat massif directement dans
+// le tampon du modele, sans vecteur intermediaire.
+using TransformPreviewDestinationSink =
+    std::function<void(const TransformPreviewDestinationVoxel&)>;
+using TransformPreviewDestinationProducer =
+    std::function<void(const TransformPreviewDestinationSink&)>;
 
 struct TransformPreviewBufferMetrics final
 {
@@ -137,6 +165,25 @@ public:
         const SelectionService& selection,
         std::uint64_t documentGeneration,
         std::span<const TransformPreviewDestinationVoxel> destinations);
+    // Materialise `expectedCount` destinations produites par `produce` dans le
+    // tampon du modele (reserve une fois). Toute destination doit referencer
+    // un voxel source capture avec sa valeur ; sinon le modele revient a la
+    // preview identite et retourne false. Toujours reconstruit (pas de
+    // court-circuit "inchange") : c'est le chemin du commit.
+    [[nodiscard]] bool SetGeneratedVoxelDestinations(
+        const Asset::Voxel::VoxelDocument& document,
+        const SelectionService& selection,
+        std::uint64_t documentGeneration,
+        std::size_t expectedCount,
+        const TransformPreviewDestinationProducer& produce);
+    // Passe en mode compact : aucun voxel materialise, comptes et bornes
+    // fournis par l'outil. Retourne false si invalide ou si le resume est
+    // identique au precedent (rien a redessiner).
+    [[nodiscard]] bool SetCompactDestinations(
+        const Asset::Voxel::VoxelDocument& document,
+        const SelectionService& selection,
+        std::uint64_t documentGeneration,
+        const TransformPreviewCompactSummary& summary);
     [[nodiscard]] bool IsValidFor(
         const Asset::Voxel::VoxelDocument& document,
         const SelectionService& selection,
@@ -156,6 +203,7 @@ public:
     [[nodiscard]] Asset::Voxel::VoxelPosition Delta() const noexcept;
     [[nodiscard]] bool HasExplicitDestinations() const noexcept;
     [[nodiscard]] bool HasExpandedDestinations() const noexcept;
+    [[nodiscard]] bool IsCompact() const noexcept;
     [[nodiscard]] const SelectionBounds& SourceBounds() const noexcept;
     [[nodiscard]] const SelectionBounds& PreviewBounds() const noexcept;
     [[nodiscard]] std::span<const TransformPreviewVoxel> Voxels() const noexcept;
@@ -197,6 +245,8 @@ private:
     std::size_t modelIndex_ = 0U;
     TransformPreviewCollisionPolicy collisionPolicy_ =
         TransformPreviewCollisionPolicy::IgnoreSource;
+    TransformPreviewCompactSummary compactSummary_{};
+    bool compact_ = false;
     bool expandedDestinations_ = false;
     bool active_ = false;
 };

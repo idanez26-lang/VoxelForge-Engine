@@ -348,12 +348,13 @@ void TestRefusalsAndRollback()
     Editor::TransformPreviewModel collisionPreview;
     const auto collisionResult = Prepare(collision, collisionSelection,
         collisionPreview, Editor::VoxelScaleMode::X);
-    Require(collisionResult.Code ==
-            Editor::ScaleVoxelSelectionResultCode::Collision &&
+    // Overlap/Merge (decision produit) : recouvrement signale, commit pret,
+    // aucune mutation avant Execute.
+    Require(collisionResult.Ready() &&
         collisionPreview.CollisionPositions().size() == 1U &&
         collisionPreview.CollisionPositions().front() == Position{4, 1, 1} &&
         !collision.IsDirty(),
-        "Scale external collision was not rejected before mutation.");
+        "Scale external overlap must be reported, accepted and non-mutating.");
 
     auto outside = MakeDocument({
         {7U, 1U, 1U, 3U}, {8U, 1U, 1U, 4U}}, {10U, 10U, 10U});

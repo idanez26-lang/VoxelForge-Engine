@@ -33,8 +33,12 @@ void TestCommandsAndBindings()
     const EditorInputService service;
     Require(!service.HasBindingConflicts(),
         "Default keyboard bindings contain a conflict.");
-    Require(service.Bindings().size() == 29U,
+    Require(service.Bindings().size() == 30U,
         "The expected command bindings are incomplete.");
+    // VF-WRAP-V1 : W selectionne Wrap, disponible avec une selection.
+    Require(Resolve(service, EditorInputKey::W, {true, false, false, false,
+            false, true}) == EditorInputCommand::ToolWrap,
+        "W does not resolve to Tool.Wrap with a selection.");
     Require(service.CommandName(EditorInputCommand::ToolPencil) ==
             "Tool.Pencil" &&
         service.CommandName(EditorInputCommand::InteractionCancel) ==

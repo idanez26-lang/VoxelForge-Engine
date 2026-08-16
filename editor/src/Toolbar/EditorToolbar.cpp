@@ -309,10 +309,19 @@ bool DrawIcon(
     {
     case EditorToolbarAction::Save:
         DrawSaveIcon(drawList, minimum, maximum, color, thickness); return true;
+    // VF-UX-TOOLS : Pencil recupere le crayon, qui le designait mieux que le
+    // glyphe generique « Smart Tool ». Face et Surface reutilisent des glyphes
+    // existants faute de dessins dedies — a arbitrer par Tony (polish visuel).
     case EditorToolbarAction::Pencil:
-        DrawSmartToolIcon(drawList, minimum, maximum, color, thickness); return true;
-    case EditorToolbarAction::Face:
         DrawPencilIcon(drawList, minimum, maximum, color, thickness); return true;
+    case EditorToolbarAction::Geometry:
+        DrawBoxIcon(drawList, minimum, maximum, color, thickness); return true;
+    case EditorToolbarAction::Face:
+        DrawSmartToolIcon(drawList, minimum, maximum, color, thickness); return true;
+    case EditorToolbarAction::Surface:
+        DrawSphereIcon(drawList, minimum, maximum, color, thickness); return true;
+    case EditorToolbarAction::Fill:
+        DrawFillIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Eraser:
         DrawEraserIcon(drawList, minimum, maximum, color, thickness); return true;
     case EditorToolbarAction::Paint:

@@ -73,6 +73,7 @@ public:
         bool voxelRotateSmokeTest = false,
         bool voxelMirrorSmokeTest = false,
         bool voxelScaleSmokeTest = false,
+        bool voxelWrapSmokeTest = false,
         bool voxelAlignSmokeTest = false,
         bool moveGizmoSmokeTest = false,
         bool rotateGizmoSmokeTest = false,
@@ -165,6 +166,7 @@ private:
     bool voxelRotateSmokeTest_ = false;
     bool voxelMirrorSmokeTest_ = false;
     bool voxelScaleSmokeTest_ = false;
+    bool voxelWrapSmokeTest_ = false;
     bool voxelAlignSmokeTest_ = false;
     bool moveGizmoSmokeTest_ = false;
     bool rotateGizmoSmokeTest_ = false;
