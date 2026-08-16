@@ -239,6 +239,16 @@ bool VoxelDocument::IsDirty() const noexcept
     return dirty_;
 }
 
+bool VoxelDocument::IsReadOnly() const noexcept
+{
+    return !readOnlyReason_.empty();
+}
+
+const std::string& VoxelDocument::ReadOnlyReason() const noexcept
+{
+    return readOnlyReason_;
+}
+
 std::uint64_t VoxelDocument::GetRevision() const noexcept
 {
     return revision_;
@@ -249,6 +259,10 @@ VoxelDocumentOperationResult VoxelDocument::SetVoxel(
     const std::size_t paletteIndex,
     const std::size_t modelIndex)
 {
+    // VF-STAB-01A bug 1 : garde explicite, meme si ValidateMutation la porte
+    // aussi. L'invariant verifiable devient « tout mutateur public commence par
+    // cette ligne », au lieu de dependre d'un validateur interne.
+    if (IsReadOnly()) return ReadOnlyRefusal();
     const VoxelDocumentOperationResult validation =
         ValidateMutation(position, paletteIndex, modelIndex);
     if (!validation) return validation;
@@ -276,6 +290,10 @@ VoxelDocumentOperationResult VoxelDocument::RemoveVoxel(
     const VoxelPosition& position,
     const std::size_t modelIndex)
 {
+    // VF-STAB-01A bug 1 : RemoveVoxel n'appelle pas ValidateMutation (il n'a pas
+    // d'index de palette a valider), il echappait donc entierement a la lecture
+    // seule et permettait encore d'effacer des voxels.
+    if (IsReadOnly()) return ReadOnlyRefusal();
     if (modelIndex >= models_.size())
         return Failure(VoxelDocumentError::InvalidModelIndex,
             "Voxel sub-model index is invalid.");
@@ -306,6 +324,8 @@ VoxelDocumentOperationResult VoxelDocument::ReplaceVoxelColor(
     const std::size_t paletteIndex,
     const std::size_t modelIndex)
 {
+    // VF-STAB-01A bug 1 : garde explicite, voir SetVoxel.
+    if (IsReadOnly()) return ReadOnlyRefusal();
     const VoxelDocumentOperationResult validation =
         ValidateMutation(position, paletteIndex, modelIndex);
     if (!validation) return validation;
@@ -326,6 +346,10 @@ VoxelDocumentOperationResult VoxelDocument::SetPaletteColor(
     const std::size_t paletteIndex,
     const VoxelColor color)
 {
+    // VF-STAB-01A bug 1 : la palette fait partie du document et part dans le
+    // meme fichier. La modifier sur un document non enregistrable perdait le
+    // travail exactement comme une modification de voxel.
+    if (IsReadOnly()) return ReadOnlyRefusal();
     if (paletteIndex == 0U || paletteIndex >= palette_.size())
         return Failure(VoxelDocumentError::InvalidPaletteIndex,
             "Palette index 0 is reserved; valid editable indices are 1..255.");
@@ -358,6 +382,9 @@ VoxelDocumentOperationResult VoxelDocument::ValidatePaletteSnapshot(
 VoxelDocumentOperationResult VoxelDocument::ReplacePalette(
     const VoxelDocumentPaletteSnapshot& snapshot)
 {
+    // VF-STAB-01A bug 1 : ValidatePaletteSnapshot ne valide que la coherence de
+    // la palette, jamais l'etat du document — ce chemin echappait a la garde.
+    if (IsReadOnly()) return ReadOnlyRefusal();
     const VoxelDocumentOperationResult validation =
         ValidatePaletteSnapshot(snapshot);
     if (!validation) return validation;
@@ -382,6 +409,11 @@ VoxelDocumentOperationResult VoxelDocument::ApplyVoxelChanges(
 VoxelDocumentOperationResult VoxelDocument::ValidateVoxelChanges(
     const std::span<const VoxelDocumentChange> changes) const
 {
+    // VF-STAB-01 bug 3: a read-only document refuses here, which is the single
+    // rejection authority shared by the preview and the commit. Preview ==
+    // Commit therefore still holds: neither shows nor applies an edit that
+    // could never be written back to the file.
+    if (IsReadOnly()) return ReadOnlyRefusal();
     struct ChangeKey final
     {
         std::size_t ModelIndex = 0U;
@@ -448,6 +480,10 @@ VoxelDocumentOperationResult VoxelDocument::ApplyCompositeChanges(
     const VoxelDocumentPaletteChange* paletteChange,
     const VoxelDocumentCompositeOrder order)
 {
+    // VF-STAB-01A bug 1 : en tete, avant meme la sortie « ensemble vide ». La
+    // garde de ValidateVoxelChanges plus bas suffisait au cas nominal, mais on
+    // ne veut plus dependre de l'ordre interne des controles.
+    if (IsReadOnly()) return ReadOnlyRefusal();
     if (voxelChanges.empty() && paletteChange == nullptr)
         return Success(false, "Composite change set is empty.");
 
@@ -548,15 +584,40 @@ VoxelDocumentOperationResult VoxelDocument::ApplyCompositeChanges(
     return Success(true, "Composite voxel document changes applied atomically.");
 }
 
+// VF-STAB-01B blocage 1 (revue Codex). INVARIANT : si IsReadOnly() est vrai,
+// le document ne peut pas devenir sale.
+//
+// Le raisonnement precedent — « un document en lecture seule ne devient jamais
+// sale puisque toutes les mutations sont refusees » — etait FAUX.
+// UpdateDirtyFromHistory ecrit `dirty_` DIRECTEMENT depuis l'etat de la pile
+// d'historique, sans passer par la moindre mutation de contenu : apres le
+// chargement d'un .vox 257x1x1, un simple UpdateDirtyFromHistory(false)
+// rendait le document sale, donc « a enregistrer », alors qu'il ne peut pas
+// l'etre. L'invariant est desormais applique dans le seul endroit qui ecrit ce
+// drapeau depuis l'exterieur, et non masque dans l'interface.
 void VoxelDocument::MarkSaved() noexcept
 {
+    // Toujours autorise : remettre a « non modifie » ne peut pas violer
+    // l'invariant, quel que soit l'etat du document.
     dirty_ = false;
 }
 
 void VoxelDocument::UpdateDirtyFromHistory(
     const bool isAtSavedState) noexcept
 {
+    // Un document en lecture seule reste propre, quoi que dise l'historique :
+    // Undo, Redo, restauration ou recalcul d'etat ne peuvent pas le salir.
+    if (IsReadOnly())
+    {
+        dirty_ = false;
+        return;
+    }
     dirty_ = !isAtSavedState;
+}
+
+VoxelDocumentOperationResult VoxelDocument::ReadOnlyRefusal() const
+{
+    return Failure(VoxelDocumentError::ReadOnlyDocument, readOnlyReason_);
 }
 
 VoxelDocumentOperationResult VoxelDocument::ValidateMutation(
@@ -564,6 +625,9 @@ VoxelDocumentOperationResult VoxelDocument::ValidateMutation(
     const std::size_t paletteIndex,
     const std::size_t modelIndex) const
 {
+    // VF-STAB-01 bug 3: refuse before anything else, so a document that could
+    // never be written back never accumulates edits the artist would lose.
+    if (IsReadOnly()) return ReadOnlyRefusal();
     if (modelIndex >= models_.size())
         return Failure(VoxelDocumentError::InvalidModelIndex,
             "Voxel sub-model index is invalid.");

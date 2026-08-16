@@ -1,6 +1,7 @@
 #include "VoxelStamps/Workflow/StampPreviewController.h"
 
 #include "VoxelStamps/Placement/StampPlacementPlan.h"
+#include "VoxelStamps/Workflow/ScopedEditInProgress.h"
 
 #include <cstddef>
 #include <limits>
@@ -305,23 +306,28 @@ bool StampPreviewController::Place()
     }
 
     console_.AddMessage("Place Stamp: command received.");
-    editInProgress_ = true;
-    Stamps::StampPlacementSessionPlaceResult result =
-        placement_.PlaceOnce(
-            *document, editSession_.VoxelModelGeneration(),
-            editSession_, history_);
-    // A UI confirmation is a single user action. If an unrelated document
-    // revision made the immutable plan stale, refresh once and immediately
-    // execute the now-current plan instead of requiring a mysterious second
-    // click.
-    if (result.Status ==
-        Stamps::StampPlacementSessionPlaceStatus::PreviewRefreshed)
+    Stamps::StampPlacementSessionPlaceResult result;
     {
+        // VF-STAB-01 bug 4: the shared reentrancy flag is now cleared by RAII,
+        // so an exception from PlaceOnce (e.g. std::bad_alloc on a large plan)
+        // no longer leaks `true` and permanently blocks future edits. The
+        // exception still propagates past the guard; it is not swallowed.
+        const ScopedEditInProgress editGuard{editInProgress_};
         result = placement_.PlaceOnce(
             *document, editSession_.VoxelModelGeneration(),
             editSession_, history_);
+        // A UI confirmation is a single user action. If an unrelated document
+        // revision made the immutable plan stale, refresh once and immediately
+        // execute the now-current plan instead of requiring a mysterious second
+        // click.
+        if (result.Status ==
+            Stamps::StampPlacementSessionPlaceStatus::PreviewRefreshed)
+        {
+            result = placement_.PlaceOnce(
+                *document, editSession_.VoxelModelGeneration(),
+                editSession_, history_);
+        }
     }
-    editInProgress_ = false;
     if (result.PreviewChanged)
     {
         onHighlightsChanged_();

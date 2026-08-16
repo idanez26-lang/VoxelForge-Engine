@@ -4,8 +4,10 @@
 #include "VoxelForge/Asset/Vox/VoxModelAnalyzer.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
+#include <span>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -185,12 +187,152 @@ void TestMultiModelPackAndLimits(TemporaryDirectory& temporary)
         "Multi-model writer output has an invalid PACK chunk.");
     VerifyRoundTrip(multi, temporary.Path / "multi.vox");
 
-    const Voxel::VoxelDocument tooWide = Build(Source({
+    Voxel::VoxelDocument tooWide = Build(Source({
         {{257U, 1U, 1U}, {}}}));
     const auto refused = Voxel::VoxDocumentWriter{}.Serialize(tooWide);
     Require(!refused.Succeeded() &&
         refused.Error == Voxel::VoxDocumentWriteError::InvalidDimensions,
         "XYZI dimensions beyond 256 must be refused without truncation.");
+
+    // VF-STAB-01 bug 3 (arbitrage Tony du 06/08). The loader tolerates up to
+    // 2048 per axis so third-party files still open, but the writer can never
+    // store more than 256. Such a document used to open fully editable and then
+    // fail forever at save time, losing the work. It now opens READ-ONLY, and
+    // the refusal happens before any edit is accepted.
+    Require(tooWide.IsReadOnly() && !tooWide.ReadOnlyReason().empty(),
+        "A document the VOX format cannot write back must open read-only.");
+    const auto blockedSet = tooWide.SetVoxel({0, 0, 0}, 2U);
+    Require(!blockedSet.Succeeded && !blockedSet.Changed &&
+        blockedSet.Error == Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse an edit, with an explicit reason.");
+    Require(!tooWide.IsDirty(),
+        "A refused edit must not mark a read-only document dirty.");
+
+    // VF-STAB-01A bug 1 (revue Codex) : la lecture seule doit être ABSOLUE.
+    // SetVoxel passait par ValidateMutation et était couvert, mais RemoveVoxel,
+    // SetPaletteColor et ReplacePalette n'empruntaient aucun validateur portant
+    // la garde et modifiaient donc encore le document. Chaque mutateur public
+    // est vérifié ici, refus explicite ET absence d'effet de bord.
+    const auto paletteBefore = tooWide.GetPaletteSnapshot();
+    const auto revisionBefore = tooWide.GetRevision();
+    const auto voxelCountBefore = tooWide.GetVoxelCount();
+
+    const auto blockedRemove = tooWide.RemoveVoxel({0, 0, 0});
+    Require(!blockedRemove.Succeeded && !blockedRemove.Changed &&
+        blockedRemove.Error == Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse RemoveVoxel.");
+
+    const auto blockedReplaceColor = tooWide.ReplaceVoxelColor({0, 0, 0}, 3U);
+    Require(!blockedReplaceColor.Succeeded && !blockedReplaceColor.Changed &&
+        blockedReplaceColor.Error ==
+            Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse ReplaceVoxelColor.");
+
+    const auto blockedPaletteColor =
+        tooWide.SetPaletteColor(5U, {9U, 9U, 9U, 255U});
+    Require(!blockedPaletteColor.Succeeded && !blockedPaletteColor.Changed &&
+        blockedPaletteColor.Error ==
+            Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse SetPaletteColor.");
+
+    auto replacement = tooWide.GetPaletteSnapshot();
+    replacement.Colors[7U] = {1U, 2U, 3U, 255U};
+    replacement.HasCustomPalette = true;
+    const auto blockedPalette = tooWide.ReplacePalette(replacement);
+    Require(!blockedPalette.Succeeded && !blockedPalette.Changed &&
+        blockedPalette.Error == Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse ReplacePalette.");
+
+    // Aucun de ces refus n'a laissé de trace : palette, révision, nombre de
+    // voxels et drapeau « modifié » sont tous intacts.
+    Require(tooWide.GetPaletteSnapshot() == paletteBefore &&
+        tooWide.GetRevision() == revisionBefore &&
+        tooWide.GetVoxelCount() == voxelCountBefore && !tooWide.IsDirty(),
+        "A refused edit must leave a read-only document byte-for-byte intact.");
+
+    // Preview and commit share ValidateVoxelChanges, so both must refuse: the
+    // artist never sees a preview of an edit that can never be written.
+    const std::array<Voxel::VoxelDocumentChange, 1U> change{
+        Voxel::VoxelDocumentChange{
+            .SubModelIndex = 0U,
+            .Position = {0, 0, 0},
+            .ExistedBefore = false,
+            .PaletteIndexBefore = 0U,
+            .ExistsAfter = true,
+            .PaletteIndexAfter = 2U}};
+    Require(tooWide.ValidateVoxelChanges(change).Error ==
+        Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "Preview and commit must refuse a read-only document identically.");
+
+    // VF-STAB-01B blocage 2, tests 1 à 4 (revue Codex). Les chemins par lot
+    // doivent refuser AUSSI avec un lot VIDE : un lot vide sortait en succès
+    // (« ensemble vide ») avant toute garde, ce qui aurait fait d'un document
+    // non enregistrable une cible d'écriture apparemment acceptée.
+    const std::span<const Voxel::VoxelDocumentChange> emptyBatch{};
+
+    // 1. ApplyVoxelChanges, lot vide.
+    const auto emptyApply = tooWide.ApplyVoxelChanges(emptyBatch);
+    Require(!emptyApply.Succeeded && !emptyApply.Changed &&
+        emptyApply.Error == Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse ApplyVoxelChanges with an empty "
+        "batch instead of reporting an empty-set success.");
+
+    // 2. ApplyVoxelChanges, lot non vide.
+    const auto filledApply = tooWide.ApplyVoxelChanges(change);
+    Require(!filledApply.Succeeded && !filledApply.Changed &&
+        filledApply.Error == Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse ApplyVoxelChanges with a real "
+        "batch.");
+
+    // 3. ApplyCompositeChanges, lot vide (et sans changement de palette).
+    const auto emptyComposite =
+        tooWide.ApplyCompositeChanges(emptyBatch, nullptr);
+    Require(!emptyComposite.Succeeded && !emptyComposite.Changed &&
+        emptyComposite.Error == Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse ApplyCompositeChanges with an empty "
+        "batch instead of reporting an empty-set success.");
+
+    // 4. ApplyCompositeChanges, lot non vide accompagné d'un changement de
+    //    palette : ni les voxels ni la palette ne doivent passer.
+    Voxel::VoxelDocumentPaletteChange paletteChange;
+    paletteChange.Before = tooWide.GetPaletteSnapshot();
+    paletteChange.After = paletteChange.Before;
+    paletteChange.After.Colors[9U] = {3U, 2U, 1U, 255U};
+    paletteChange.After.HasCustomPalette = true;
+    const auto filledComposite =
+        tooWide.ApplyCompositeChanges(change, &paletteChange);
+    Require(!filledComposite.Succeeded && !filledComposite.Changed &&
+        filledComposite.Error == Voxel::VoxelDocumentError::ReadOnlyDocument,
+        "A read-only document must refuse a composite voxel + palette batch.");
+
+    // VF-STAB-01B blocage 1 : l'état « modifié » ne peut pas être atteint par
+    // l'historique. UpdateDirtyFromHistory écrivait `dirty_` directement, sans
+    // aucune mutation — un document non enregistrable se déclarait donc « à
+    // enregistrer ».
+    tooWide.UpdateDirtyFromHistory(false);
+    Require(!tooWide.IsDirty(),
+        "History state must never make a read-only document dirty.");
+    tooWide.UpdateDirtyFromHistory(true);
+    Require(!tooWide.IsDirty(),
+        "A read-only document must stay clean when history reports saved.");
+    tooWide.MarkSaved();
+    Require(!tooWide.IsDirty(),
+        "MarkSaved must keep a read-only document clean.");
+
+    // Après TOUS ces refus : contenu, palette, révision et état inchangés.
+    Require(tooWide.GetPaletteSnapshot() == paletteBefore &&
+        tooWide.GetRevision() == revisionBefore &&
+        tooWide.GetVoxelCount() == voxelCountBefore && !tooWide.IsDirty(),
+        "Batch refusals and history updates must leave a read-only document "
+        "completely unchanged.");
+
+    // A document inside the writable ceiling stays fully editable.
+    Voxel::VoxelDocument writable = Build(Source({
+        {{256U, 1U, 1U}, {}}}));
+    Require(!writable.IsReadOnly() && writable.ReadOnlyReason().empty(),
+        "A document at the 256 ceiling must remain editable.");
+    Require(writable.SetVoxel({0, 0, 0}, 2U).Changed,
+        "A writable document must still accept edits.");
 }
 
 void TestMutationsAndEquivalence(TemporaryDirectory& temporary)

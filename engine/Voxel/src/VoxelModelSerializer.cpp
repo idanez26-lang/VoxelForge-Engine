@@ -508,9 +508,36 @@ private:
 
 } // namespace
 
+VoxelModelSerializer::FileOperations
+VoxelModelSerializer::DefaultFileOperations()
+{
+    return {
+        [](const std::filesystem::path& path, std::error_code& error)
+        {
+            return std::filesystem::exists(path, error);
+        },
+        [](const std::filesystem::path& from,
+           const std::filesystem::path& to, std::error_code& error)
+        {
+            std::filesystem::rename(from, to, error);
+        },
+        [](const std::filesystem::path& path, std::error_code& error)
+        {
+            return std::filesystem::remove(path, error);
+        }};
+}
+
 VoxelSerializationResult VoxelModelSerializer::Save(
     const std::filesystem::path& destination,
     const VoxelModel& model)
+{
+    return Save(destination, model, DefaultFileOperations());
+}
+
+VoxelSerializationResult VoxelModelSerializer::Save(
+    const std::filesystem::path& destination,
+    const VoxelModel& model,
+    const FileOperations& operations)
 {
     if (destination.empty())
     {
@@ -535,21 +562,59 @@ VoxelSerializationResult VoxelModelSerializer::Save(
     const std::filesystem::path temporary = AuxiliaryPath(destination, ".tmp");
     const std::filesystem::path backup = AuxiliaryPath(destination, ".bak");
     std::error_code error;
-    if (std::filesystem::exists(temporary, error) || error ||
-        std::filesystem::exists(backup, error) || error)
+    if (operations.Exists(temporary, error) || error)
     {
         return FailSave("Stale VFVOXEL temporary or backup file exists.");
     }
-    if (std::filesystem::exists(destination, error))
-    {
-        if (error || !std::filesystem::is_regular_file(destination, error) || error)
-        {
-            return FailSave("VFVOXEL destination is not a regular file.");
-        }
-    }
-    else if (error)
+    const bool destinationExists = operations.Exists(destination, error);
+    if (error)
     {
         return FailSave("Unable to inspect VFVOXEL destination.");
+    }
+    if (destinationExists &&
+        (!std::filesystem::is_regular_file(destination, error) || error))
+    {
+        return FailSave("VFVOXEL destination is not a regular file.");
+    }
+
+    // VF-STAB-01B blocage 3 (revue Codex) : un backup n'est redondant que si la
+    // destination est REELLEMENT RECHARGEABLE, pas seulement presente.
+    //
+    // Le controle precedent ne verifiait qu'un fichier regulier. Une
+    // destination tronquee ou corrompue suffisait donc a faire supprimer un
+    // `.bak` valide, c'est-a-dire la seule copie recuperable. On recharge
+    // desormais la destination avec le lecteur officiel — aucun second
+    // parseur — avant tout effacement, et on conserve le backup au moindre
+    // doute. Un backup n'est jamais supprime sans preuve qu'il est superflu.
+    if (operations.Exists(backup, error) || error)
+    {
+        if (error)
+        {
+            return FailSave("Stale VFVOXEL temporary or backup file exists.");
+        }
+        // Un backup sans son modele est la seule copie survivante : refus, et
+        // surtout aucune suppression.
+        if (!destinationExists)
+        {
+            return FailSave(
+                "A VFVOXEL backup exists without its model file. Restore the "
+                ".bak file manually before saving again.");
+        }
+        if (!Load(destination))
+        {
+            return FailSave(
+                "A VFVOXEL backup exists and the model file cannot be "
+                "reloaded. The backup was kept because it may be the only "
+                "recoverable copy; check both files before saving again.");
+        }
+        // La destination est rechargeable : ce backup est prouve redondant.
+        operations.Remove(backup, error);
+        if (error)
+        {
+            return FailSave(
+                "A redundant VFVOXEL backup could not be removed. Delete the "
+                ".bak file manually before saving again.");
+        }
     }
 
     {
@@ -566,7 +631,7 @@ VoxelSerializationResult VoxelModelSerializer::Save(
         if (!output)
         {
             output.close();
-            std::filesystem::remove(temporary, error);
+            operations.Remove(temporary, error);
             return FailSave("Unable to write VFVOXEL temporary file.");
         }
     }
@@ -574,52 +639,84 @@ VoxelSerializationResult VoxelModelSerializer::Save(
     const VoxelDeserializationResult validation = Load(temporary);
     if (!validation)
     {
-        std::filesystem::remove(temporary, error);
+        operations.Remove(temporary, error);
         return FailSave("VFVOXEL temporary file validation failed: " +
                         validation.Message);
     }
 
-    const bool hadDestination = std::filesystem::exists(destination, error);
+    const bool hadDestination = operations.Exists(destination, error);
     if (error)
     {
-        std::filesystem::remove(temporary, error);
+        operations.Remove(temporary, error);
         return FailSave("Unable to inspect VFVOXEL destination before replacement.");
     }
     if (hadDestination)
     {
-        std::filesystem::rename(destination, backup, error);
+        operations.Rename(destination, backup, error);
         if (error)
         {
-            std::filesystem::remove(temporary, error);
+            operations.Remove(temporary, error);
             return FailSave("Unable to create VFVOXEL backup.");
         }
     }
 
-    std::filesystem::rename(temporary, destination, error);
+    operations.Rename(temporary, destination, error);
     if (error)
     {
         const std::error_code replacementError = error;
         if (hadDestination)
         {
             std::error_code rollbackError;
-            std::filesystem::rename(backup, destination, rollbackError);
+            operations.Rename(backup, destination, rollbackError);
             if (rollbackError)
             {
                 return FailSave(
                     "VFVOXEL replacement and backup rollback both failed.");
             }
         }
-        std::filesystem::remove(temporary, error);
+        operations.Remove(temporary, error);
         return FailSave("Unable to replace VFVOXEL destination: " +
                         replacementError.message());
     }
 
+    // VF-STAB-01B blocage 3 : la destination publiee doit etre prouvee
+    // RECHARGEABLE avant que le backup ne soit seulement envisage pour
+    // suppression. Sans cette preuve, on ne peut ni affirmer que la sauvegarde
+    // est saine, ni justifier d'effacer la copie precedente.
+    if (!Load(destination))
+    {
+        if (hadDestination)
+        {
+            return FailSave(
+                "The VFVOXEL file was replaced but cannot be reloaded. Its "
+                "backup was kept as the recoverable copy; restore the .bak "
+                "file.");
+        }
+        return FailSave(
+            "The VFVOXEL file was written but cannot be reloaded.");
+    }
+
     if (hadDestination)
     {
-        std::filesystem::remove(backup, error);
+        operations.Remove(backup, error);
         if (error)
         {
-            return FailSave("VFVOXEL saved, but its backup could not be removed.");
+            // VF-STAB-01 bug 8 : le rename atomique a reussi ET la destination
+            // vient d'etre rechargee avec succes — le modele EST donc bien
+            // enregistre. Un echec de suppression du backup desormais superflu
+            // (verrou transitoire d'antivirus ou d'indexeur) etait signale
+            // comme un echec de sauvegarde : un faux negatif qui annoncait a
+            // l'artiste un travail perdu qui ne l'etait pas.
+            //
+            // VF-STAB-01B blocage 3 : le message ne PROMET plus le nettoyage.
+            // Le code ne garantit qu'une nouvelle TENTATIVE : si le verrou
+            // persiste, la sauvegarde suivante refusera et demandera une
+            // suppression manuelle. Le texte dit maintenant exactement ce que
+            // le programme fait.
+            return {true,
+                "Voxel model saved and verified. Its backup file could not be "
+                "removed and was kept; cleanup will be retried on the next "
+                "save, and may need to be done by hand."};
         }
     }
     return {true, {}};

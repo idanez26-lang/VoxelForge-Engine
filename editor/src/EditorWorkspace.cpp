@@ -2703,7 +2703,10 @@ void EditorWorkspace::DrawInspectorPanel()
             ImVec2(18.0F, 18.0F));
     }
     const float swatchSize = std::max(14.0F, ImGui::GetFrameHeight() * 0.70F);
-    for (std::size_t index = 0U;
+    // VF-STAB-01 bugs 6-7: index 0 means "no voxel", so it is not a paintable
+    // colour. Offering it let the artist pick a swatch the document always
+    // rejects, and the Add or Paint failed silently.
+    for (std::size_t index = PaintPaletteSelection::MinimumIndex();
          index < Voxel::VoxelPalette::Size();
          ++index)
     {

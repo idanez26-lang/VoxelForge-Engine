@@ -1,6 +1,7 @@
 #include "ViewportRenderer.h"
 #include "Preview/FacePlanGhostSurface.h"
 #include "Transform/TransformPlacementPreviewAdapter.h"
+#include "ViewportInteractionV2/HighlightBufferCapacity.h"
 #include "ViewportInteractionV2/ViewportPresentation.h"
 #include "VoxelModelTransform.h"
 #include "VoxelViewportState.h"
@@ -1056,21 +1057,23 @@ bool ViewportRenderer::UploadInteractionV2Highlights(
     const std::uint32_t* indexData,
     const std::size_t indexBytes)
 {
-    const auto grow = [](const std::size_t current,
-                         const std::size_t required) noexcept
-    {
-        std::size_t capacity = std::max<std::size_t>(current, 4096U);
-        while (capacity < required &&
-               capacity <= std::numeric_limits<std::size_t>::max() / 2U)
-            capacity *= 2U;
-        return std::max(capacity, required);
-    };
-    const std::size_t vertexCapacity = grow(
-        interactionV2HighlightVertexCapacity_, vertexBytes);
-    const std::size_t indexCapacity = grow(
-        interactionV2HighlightIndexCapacity_, indexBytes);
-    const std::size_t transferCapacity = grow(
-        interactionV2HighlightTransferCapacity_, vertexBytes + indexBytes);
+    // VF-STAB-01 bug 2: the vertex/index buffers are SHARED with the legacy
+    // upload path. PlanHighlightBuffer is the single authority for the
+    // grow/reuse decision; it is safe only because UploadLegacyHighlights keeps
+    // the capacity trackers equal to the real buffer sizes (see that method).
+    const HighlightBufferDecision vertexPlan = PlanHighlightBuffer(
+        interactionV2HighlightVertexCapacity_,
+        highlightVertexBuffer_ != nullptr, vertexBytes);
+    const HighlightBufferDecision indexPlan = PlanHighlightBuffer(
+        interactionV2HighlightIndexCapacity_,
+        highlightIndexBuffer_ != nullptr, indexBytes);
+    const HighlightBufferDecision transferPlan = PlanHighlightBuffer(
+        interactionV2HighlightTransferCapacity_,
+        interactionV2HighlightTransferBuffer_ != nullptr,
+        vertexBytes + indexBytes);
+    const std::size_t vertexCapacity = vertexPlan.Capacity;
+    const std::size_t indexCapacity = indexPlan.Capacity;
+    const std::size_t transferCapacity = transferPlan.Capacity;
     if (vertexCapacity > std::numeric_limits<std::uint32_t>::max() ||
         indexCapacity > std::numeric_limits<std::uint32_t>::max() ||
         transferCapacity > std::numeric_limits<std::uint32_t>::max())
@@ -1083,12 +1086,9 @@ bool ViewportRenderer::UploadInteractionV2Highlights(
     SDL_GPUBuffer* index = highlightIndexBuffer_;
     SDL_GPUTransferBuffer* transfer =
         interactionV2HighlightTransferBuffer_;
-    const bool replaceVertex = vertex == nullptr ||
-        vertexCapacity != interactionV2HighlightVertexCapacity_;
-    const bool replaceIndex = index == nullptr ||
-        indexCapacity != interactionV2HighlightIndexCapacity_;
-    const bool replaceTransfer = transfer == nullptr ||
-        transferCapacity != interactionV2HighlightTransferCapacity_;
+    const bool replaceVertex = vertexPlan.Replace;
+    const bool replaceIndex = indexPlan.Replace;
+    const bool replaceTransfer = transferPlan.Replace;
     if (replaceVertex)
     {
         const SDL_GPUBufferCreateInfo info{
@@ -1210,6 +1210,31 @@ bool ViewportRenderer::UploadInteractionV2Highlights(
     }
     ++interactionV2UploadCount_;
     interactionV2UploadedBytes_ += vertexBytes + indexBytes;
+    return true;
+}
+
+bool ViewportRenderer::UploadLegacyHighlights(
+    const void* vertexData,
+    const std::size_t vertexBytes,
+    const std::uint32_t* indexData,
+    const std::size_t indexBytes)
+{
+    // highlightVertexBuffer_/highlightIndexBuffer_ are SHARED with the
+    // Interaction V2 upload path, whose reuse decision trusts the capacity
+    // trackers. UploadBufferPair recreates them at EXACTLY vertexBytes/
+    // indexBytes; if we left the trackers untouched they would keep claiming a
+    // larger (stale V2) capacity, and the V2 path would later reuse this small
+    // buffer and write out of bounds. Sync the trackers to the real sizes so
+    // the invariant "tracked capacity == real buffer size" holds for both
+    // paths. The V2 path owns its own persistent transfer buffer, which
+    // UploadBufferPair never touches, so no transfer tracker update is needed.
+    if (!UploadBufferPair(
+            vertexData, vertexBytes, indexData, indexBytes,
+            highlightVertexBuffer_, highlightIndexBuffer_,
+            "voxel selection highlights"))
+        return false;
+    interactionV2HighlightVertexCapacity_ = vertexBytes;
+    interactionV2HighlightIndexCapacity_ = indexBytes;
     return true;
 }
 
@@ -1809,11 +1834,9 @@ bool ViewportRenderer::EnsureHighlights()
             ? UploadInteractionV2Highlights(
                 vertices.data(), vertices.size() * sizeof(GPUVertex),
                 indices.data(), indices.size() * sizeof(std::uint32_t))
-            : UploadBufferPair(
+            : UploadLegacyHighlights(
                 vertices.data(), vertices.size() * sizeof(GPUVertex),
-                indices.data(), indices.size() * sizeof(std::uint32_t),
-                highlightVertexBuffer_, highlightIndexBuffer_,
-                "voxel selection highlights")))
+                indices.data(), indices.size() * sizeof(std::uint32_t))))
     {
         return false;
     }

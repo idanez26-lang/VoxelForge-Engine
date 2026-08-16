@@ -775,6 +775,14 @@ using Position = Asset::Voxel::VoxelPosition;
     }
     result.Statistics.New = result.AddablePositions.size();
     result.Statistics.Existing = result.ExistingPositions.size();
+    if (result.Positions.empty())
+    {
+        // Plane + Add can filter every candidate out (destinations outside the
+        // grid, or already occupied), leaving no cell to fill. Same guard as the
+        // other CalculateBounds call sites: front() on an empty vector is UB.
+        result.Code = SmartBrushResultCode::OutOfBounds;
+        return result;
+    }
     result.RenderPlan.Mode = SmartBrushRenderMode::DetailedCells;
     result.RenderPlan.Bounds = CalculateBounds(result.Positions);
     result.Code = SmartBrushResultCode::Valid;

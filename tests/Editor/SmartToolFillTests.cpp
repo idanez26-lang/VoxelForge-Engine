@@ -249,6 +249,26 @@ void TestPlaneInvalidTargetsLimitAndDeterminism()
             limited.Code == SmartBrushResultCode::InvalidRequest,
         "Fill safety limit returned a partial plan.");
 }
+
+void TestPlaneAddEmptyFootprintIsBounded()
+{
+    // VF-STAB-01 bug 1: an isolated boundary voxel at X=0 with the locked face
+    // pointing off the grid ({-1,0,0}). The Plane region is the seed alone, and
+    // its only outward destination leaves the model, so ResolveFill ends with an
+    // EMPTY Positions vector. CalculateBounds does `positions.front()` — front()
+    // on an empty std::vector is undefined behaviour, which the try/catch in
+    // Plan() cannot catch. This must resolve deterministically instead.
+    const Position seed{0, 4, 4};
+    const States source{{seed, {true, 3U}}};
+    SmartToolPlanner planner;
+    const SmartToolResult result = planner.Plan(Request(
+        source, SmartFillMode::Plane, SmartAction::Add, seed,
+        Position{-1, 0, 0}));
+    Require(result.Code == SmartBrushResultCode::OutOfBounds,
+        "Plane Add off-grid footprint did not report OutOfBounds.");
+    Require(!result.HasPlan() || result.Plan->Cells().empty(),
+        "Plane Add off-grid footprint produced spurious cells to commit.");
+}
 }
 
 int main()
@@ -258,6 +278,7 @@ int main()
         TestConnectedRegionsAndActions();
         TestPlaneAxesActionsAndOccupiedDestinations();
         TestPlaneInvalidTargetsLimitAndDeterminism();
+        TestPlaneAddEmptyFootprintIsBounded();
         std::cout << "Smart Tool Fill tests passed.\n";
         return 0;
     }

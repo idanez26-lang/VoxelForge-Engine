@@ -719,6 +719,189 @@ void TestDocumentOnlyCanonicalTransactions()
         "A failed document-only rebuild did not roll back canonical state.");
 }
 
+// VF-STAB-01B blocage 2, tests 5 et 6 (revue Codex). Les tests d'API unitaires
+// ne suffisent pas : il faut prouver que le CHEMIN TRANSACTIONNEL REEL de
+// l'editeur — celui qu'empruntent les outils — ne peut pas contourner la garde
+// de lecture seule, et que Undo/Redo ne rendent pas le document modifiable.
+void TestReadOnlyDocumentRefusesEditorTransactions()
+{
+    // Un axe au-dela de 256 : le format VOX ne sait pas le reecrire, donc le
+    // loader ouvre le document en lecture seule.
+    auto readOnly = Document({Model({257U, 1U, 1U}, {{0U, 0U, 0U, 3U}})});
+    Require(readOnly.IsReadOnly(),
+        "The 257-wide fixture must be loaded read-only.");
+
+    TestSession session(readOnly);
+    session.hasModel_ = false;
+    Require(session.PrimeMesh(),
+        "Unable to prime the read-only history mesh.");
+
+    const auto paletteBefore = readOnly.GetPaletteSnapshot();
+    const auto revisionBefore = readOnly.GetRevision();
+    const auto voxelCountBefore = readOnly.GetVoxelCount();
+    const auto voxelBefore = readOnly.GetVoxel({0, 0, 0});
+
+    Editor::VoxelEditHistory history;
+    history.MarkSavedState(readOnly);
+
+    // 5. Transaction editeur reelle sur un document en lecture seule.
+    const auto executed =
+        history.Execute(session, AddOperation("Read-only add", {1, 0, 0}, 7U));
+    Require(!static_cast<bool>(executed),
+        "The real editor transaction path must refuse a read-only document.");
+    Require(history.UndoCount() == 0U && history.RedoCount() == 0U,
+        "A refused transaction must not enter the undo history.");
+    Require(readOnly.GetVoxel({1, 0, 0}) ==
+            std::optional<Asset::Voxel::Voxel>{},
+        "A refused transaction must not create a voxel.");
+
+    // 6. Undo/Redo sur un document en lecture seule : rien a defaire, et
+    //    surtout aucun retour a un etat modifiable.
+    Require(!static_cast<bool>(history.Undo(session)),
+        "Undo must not succeed on a read-only document with no history.");
+    Require(!static_cast<bool>(history.Redo(session)),
+        "Redo must not succeed on a read-only document with no history.");
+    Require(history.UndoCount() == 0U && history.RedoCount() == 0U,
+        "Undo/Redo must leave the history of a read-only document empty.");
+
+    // L'historique pilote aussi l'etat « modifie » : il ne doit jamais salir un
+    // document non enregistrable (blocage 1, verifie ici sur le vrai chemin).
+    readOnly.UpdateDirtyFromHistory(false);
+    Require(!readOnly.IsDirty(),
+        "History state must never make a read-only document dirty.");
+
+    // Aucun effet partiel : contenu, palette, revision et etat intacts.
+    Require(readOnly.GetPaletteSnapshot() == paletteBefore &&
+            readOnly.GetRevision() == revisionBefore &&
+            readOnly.GetVoxelCount() == voxelCountBefore &&
+            readOnly.GetVoxel({0, 0, 0}) == voxelBefore &&
+            !readOnly.IsDirty(),
+        "A read-only document must be untouched after the editor path, "
+        "Undo/Redo and a history dirty update.");
+}
+
+// VF-STAB-01C (revue Codex). Le test precedent appelait Undo et Redo sur un
+// historique VIDE : les deux sortaient en NothingToUndo / NothingToRedo AVANT
+// d'atteindre la moindre transaction. Il ne prouvait donc rien du comportement
+// avec des piles peuplees, qui est justement le cas ou la mutation est tentee.
+//
+// Ce test peuple reellement les piles par l'API de l'historique, puis vise un
+// document en lecture seule. Deux preuves rendent le chemin incontestable :
+//   - le code de retour est `Failed`, et non NothingToUndo/NothingToRedo : la
+//     pile n'etait donc pas vide et l'operation a bien ete tentee ;
+//   - le message porte la raison de lecture seule du DOCUMENT, ce qui prouve
+//     que le refus vient de ApplyCompositeChanges et non d'un controle
+//     anterieur d'ApplyVoxelEditOperation (etat attendu, bornes, generation).
+// L'etat de chaque document en lecture seule est prepare pour SATISFAIRE le
+// controle d'etat attendu : sans cela, le refus viendrait de ce controle et ne
+// dirait rien de la garde lecture seule.
+void TestReadOnlyDocumentRefusesUndoRedoWithPopulatedStacks()
+{
+    const Asset::Voxel::VoxelPosition target{1, 0, 0};
+    constexpr std::uint8_t palette = 7U;
+
+    // Un document editable recoit une vraie transaction : la pile Undo se
+    // remplit par le chemin de production, jamais a la main.
+    auto editable = Document({Model({8U, 8U, 8U}, {})});
+    TestSession editableSession(editable);
+    editableSession.hasModel_ = false;
+    Require(editableSession.PrimeMesh(),
+        "Unable to prime the editable history mesh.");
+
+    Editor::VoxelEditHistory history;
+    history.MarkSavedState(editable);
+    Require(static_cast<bool>(
+            history.Execute(editableSession,
+                AddOperation("Editable add", target, palette))),
+        "The editable transaction that fills the undo stack failed.");
+    Require(history.UndoCount() == 1U && history.RedoCount() == 0U,
+        "The undo stack was not populated by the real transaction.");
+    Require(editable.GetVoxel(target).has_value(),
+        "The editable transaction did not create its voxel.");
+
+    // --- Scenario A : Undo avec une pile Undo NON VIDE ---
+    //
+    // Le document en lecture seule porte deja l'etat que l'annulation attend
+    // (le voxel pose), donc le controle d'etat passe et l'operation atteint la
+    // mutation, ou la garde lecture seule la refuse.
+    auto readOnlyUndo =
+        Document({Model({257U, 1U, 1U}, {{1U, 0U, 0U, palette}})});
+    Require(readOnlyUndo.IsReadOnly(),
+        "The undo fixture must be loaded read-only.");
+    TestSession readOnlyUndoSession(readOnlyUndo);
+    readOnlyUndoSession.hasModel_ = false;
+    Require(readOnlyUndoSession.PrimeMesh(),
+        "Unable to prime the read-only undo mesh.");
+
+    const auto paletteBeforeUndo = readOnlyUndo.GetPaletteSnapshot();
+    const auto revisionBeforeUndo = readOnlyUndo.GetRevision();
+    const auto countBeforeUndo = readOnlyUndo.GetVoxelCount();
+    const auto voxelBeforeUndo = readOnlyUndo.GetVoxel(target);
+
+    const auto undone = history.Undo(readOnlyUndoSession);
+
+    Require(undone.Code == Editor::VoxelEditHistoryResultCode::Failed,
+        "Undo on a read-only document must fail at the transaction, not "
+        "return NothingToUndo: the stack was not empty.");
+    Require(undone.Message.find("read-only") != std::string::npos,
+        "The undo refusal must come from the document's read-only guard, not "
+        "from an earlier expected-state or bounds check.");
+    Require(!static_cast<bool>(undone),
+        "A refused undo must not report success.");
+    // La pile n'est pas consommee et aucune entree Redo n'est fabriquee.
+    Require(history.UndoCount() == 1U && history.RedoCount() == 0U,
+        "A refused undo must leave both stacks exactly as they were.");
+    Require(readOnlyUndo.GetVoxel(target) == voxelBeforeUndo &&
+            readOnlyUndo.GetPaletteSnapshot() == paletteBeforeUndo &&
+            readOnlyUndo.GetRevision() == revisionBeforeUndo &&
+            readOnlyUndo.GetVoxelCount() == countBeforeUndo &&
+            !readOnlyUndo.IsDirty(),
+        "A refused undo must leave the read-only document untouched.");
+
+    // --- Scenario B : Redo avec une pile Redo NON VIDE ---
+    //
+    // L'annulation est d'abord effectuee pendant que le document est encore
+    // editable, ce qui remplit la pile Redo par le chemin reel.
+    Require(static_cast<bool>(history.Undo(editableSession)),
+        "The editable undo that fills the redo stack failed.");
+    Require(history.UndoCount() == 0U && history.RedoCount() == 1U,
+        "The redo stack was not populated by the real history path.");
+    Require(!editable.GetVoxel(target).has_value(),
+        "The editable undo did not restore the initial state.");
+
+    // Cette fois le retablissement attend une cellule VIDE : le document en
+    // lecture seule est prepare en consequence.
+    auto readOnlyRedo = Document({Model({257U, 1U, 1U}, {})});
+    Require(readOnlyRedo.IsReadOnly(),
+        "The redo fixture must be loaded read-only.");
+    TestSession readOnlyRedoSession(readOnlyRedo);
+    readOnlyRedoSession.hasModel_ = false;
+    Require(readOnlyRedoSession.PrimeMesh(),
+        "Unable to prime the read-only redo mesh.");
+
+    const auto paletteBeforeRedo = readOnlyRedo.GetPaletteSnapshot();
+    const auto revisionBeforeRedo = readOnlyRedo.GetRevision();
+    const auto countBeforeRedo = readOnlyRedo.GetVoxelCount();
+
+    const auto redone = history.Redo(readOnlyRedoSession);
+
+    Require(redone.Code == Editor::VoxelEditHistoryResultCode::Failed,
+        "Redo on a read-only document must fail at the transaction, not "
+        "return NothingToRedo: the stack was not empty.");
+    Require(redone.Message.find("read-only") != std::string::npos,
+        "The redo refusal must come from the document's read-only guard.");
+    Require(!static_cast<bool>(redone),
+        "A refused redo must not report success.");
+    Require(history.UndoCount() == 0U && history.RedoCount() == 1U,
+        "A refused redo must leave both stacks exactly as they were.");
+    Require(!readOnlyRedo.GetVoxel(target).has_value() &&
+            readOnlyRedo.GetPaletteSnapshot() == paletteBeforeRedo &&
+            readOnlyRedo.GetRevision() == revisionBeforeRedo &&
+            readOnlyRedo.GetVoxelCount() == countBeforeRedo &&
+            !readOnlyRedo.IsDirty(),
+        "A refused redo must leave the read-only document untouched.");
+}
+
 void TestShortcutInput()
 {
     Editor::VoxelHistoryInputController input;
@@ -776,6 +959,8 @@ int main()
         TestLimitsAndMemory();
         TestRefusalsAndRollback();
         TestDocumentOnlyCanonicalTransactions();
+        TestReadOnlyDocumentRefusesEditorTransactions();
+        TestReadOnlyDocumentRefusesUndoRedoWithPopulatedStacks();
         TestShortcutInput();
         std::cout << "Voxel edit history tests passed.\n";
         return 0;

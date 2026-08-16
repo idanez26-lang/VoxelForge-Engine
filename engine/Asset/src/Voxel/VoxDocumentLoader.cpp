@@ -124,6 +124,21 @@ VoxDocumentLoadResult VoxDocumentLoader::Build(
                 VoxelDocumentError::InvalidDimensions,
                 "VOX document contains invalid sub-model dimensions.");
         }
+        // VF-STAB-01 bug 3 (arbitrage Tony du 06/08) : la lecture tolere
+        // jusqu'a MaximumVoxDimension pour ne pas fermer la porte aux fichiers
+        // tiers, mais XYZI ne sait reecrire que 256 valeurs par axe. Un tel
+        // document s'ouvre donc en LECTURE SEULE, decide ICI, avant toute
+        // edition — au lieu d'etre edite puis refuse a l'enregistrement, ce qui
+        // perdait le travail de l'artiste.
+        if (dimensions.X > Vox::MaximumWritableVoxDimension ||
+            dimensions.Y > Vox::MaximumWritableVoxDimension ||
+            dimensions.Z > Vox::MaximumWritableVoxDimension)
+        {
+            document.readOnlyReason_ =
+                "This VOX model is larger than 256 voxels on one axis, which "
+                "the VOX format cannot store. It is open read-only so no edit "
+                "is lost at save time.";
+        }
         if (sourceModel.Voxels.size() > Vox::MaximumVoxVoxelCount ||
             document.voxelCount_ >
                 Vox::MaximumVoxVoxelCount - sourceModel.Voxels.size())

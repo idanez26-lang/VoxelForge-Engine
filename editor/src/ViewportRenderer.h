@@ -263,6 +263,13 @@ private:
         std::size_t vertexBytes,
         const std::uint32_t* indexData,
         std::size_t indexBytes);
+    // VF-STAB-01 bug 2: legacy highlight upload that keeps the shared V2
+    // capacity trackers in sync with the exact-size buffers it allocates.
+    [[nodiscard]] bool UploadLegacyHighlights(
+        const void* vertexData,
+        std::size_t vertexBytes,
+        const std::uint32_t* indexData,
+        std::size_t indexBytes);
     [[nodiscard]] bool UploadInteractionV2MoveSource(
         const void* vertexData,
         std::size_t vertexBytes,

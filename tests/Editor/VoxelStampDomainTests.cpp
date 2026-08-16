@@ -1,4 +1,5 @@
 #include "VoxelStamps/VoxelStamp.h"
+#include "VoxelStamps/Workflow/ScopedEditInProgress.h"
 
 #include <cstdint>
 #include <iostream>
@@ -18,6 +19,47 @@ void Check(const bool condition, const std::string& message)
     {
         throw std::runtime_error(message);
     }
+}
+
+// VF-STAB-01 bug 4: StampPreviewController::Place() used to set the SHARED
+// reentrancy flag and clear it only on the normal return path. An exception
+// escaping PlaceOnce (std::bad_alloc on a large placement plan is the realistic
+// one — nothing on that path is noexcept) skipped the reset and left the shared
+// flag stuck at true, which disables every later edit for the whole session.
+void TestScopedEditInProgressRestoresOnThrow()
+{
+    using VoxelForge::Editor::ScopedEditInProgress;
+
+    bool flag = false;
+    {
+        const ScopedEditInProgress guard{flag};
+        Check(flag, "the guard must mark the edit as in progress");
+    }
+    Check(!flag, "the guard must clear the flag on a normal return");
+
+    // The exception must still propagate: the guard restores state, it does not
+    // swallow the failure.
+    bool propagated = false;
+    try
+    {
+        const ScopedEditInProgress guard{flag};
+        Check(flag, "the guard must mark the edit as in progress before a throw");
+        throw std::runtime_error("simulated PlaceOnce allocation failure");
+    }
+    catch (const std::runtime_error&)
+    {
+        propagated = true;
+    }
+    Check(propagated, "the guard must not swallow the exception");
+    Check(!flag, "the guard must clear the shared flag during unwinding");
+
+    // After the failed edit, a new edit must be possible: this is the session
+    // lock-up the bug caused.
+    {
+        const ScopedEditInProgress guard{flag};
+        Check(flag, "a later edit must still be able to acquire the flag");
+    }
+    Check(!flag, "the flag must be released again after the later edit");
 }
 
 StampIdentity ValidIdentity()
@@ -342,6 +384,8 @@ int main()
         Check(EvaluateStampLimits({}, invalidLimits).Status ==
                   StampLimitStatus::InvalidConfiguration,
               "injected limits must preserve soft/hard ordering");
+
+        TestScopedEditInProgressRestoresOnThrow();
 
         std::cout << "Voxel Stamp domain tests passed.\n";
         return 0;

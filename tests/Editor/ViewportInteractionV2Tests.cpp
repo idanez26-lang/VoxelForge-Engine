@@ -1,4 +1,6 @@
 #include "ViewportInteractionV2/ViewportInteractionController.h"
+#include "ViewportInteractionV2/HighlightBufferCapacity.h"
+#include "ViewportInteractionV2/SelectionProjectionCache.h"
 #include "Commands/Voxel/VoxelEditSession.h"
 #include "VoxelHistory/VoxelEditHistory.h"
 
@@ -764,6 +766,157 @@ void TestMoveCacheIsBoundedAndCleared()
         "Move cache survived explicit gesture cancellation cleanup.");
 }
 
+// VF-STAB-01 bug 5: a voxel footprint must never absorb corners projected from
+// BEHIND the camera. TransformPoint only returns NaN for |w| <= 1e-8; a negative
+// w yields a finite, sign-flipped point, so the un-clipped code inflated the
+// screen footprint and box-selection then picked up voxels the user never
+// dragged over. D3D depth convention: near plane is clip z = 0.
+Editor::Matrix4 PerspectiveViewProjection(const float cameraZ)
+{
+    // Column-major-by-row layout matching TransformPoint's indexing.
+    // near = 0.5, far = 100, 90 deg vertical FOV (focal = 1), aspect = 1.
+    constexpr float nearPlane = 0.5F;
+    constexpr float farPlane = 100.0F;
+    // Looks down -Z from cameraZ: view maps world z to (cameraZ - z).
+    const Editor::Matrix4 view{
+        1.0F, 0.0F, 0.0F, 0.0F,
+        0.0F, 1.0F, 0.0F, 0.0F,
+        0.0F, 0.0F, -1.0F, cameraZ,
+        0.0F, 0.0F, 0.0F, 1.0F};
+    const float range = farPlane / (farPlane - nearPlane);
+    const Editor::Matrix4 projection{
+        1.0F, 0.0F, 0.0F, 0.0F,
+        0.0F, 1.0F, 0.0F, 0.0F,
+        0.0F, 0.0F, range, -range * nearPlane,
+        0.0F, 0.0F, 1.0F, 0.0F};
+    return Editor::MultiplyMatrix(projection, view);
+}
+
+void TestSelectionFootprintClipsAtNearPlane()
+{
+    const Position voxel{0, 0, 0};
+    const std::array<Position, 1U> positions{voxel};
+    Asset::Voxel::VoxelDocument document =
+        MakeDocument(Asset::Voxel::VoxelDimensions{4U, 4U, 4U}, positions);
+
+    // Selects with an arbitrary rectangle so the test observes the FOOTPRINT,
+    // which is the quantity the bug corrupts, not merely "is it selectable".
+    const auto hits = [&](const float cameraZ,
+                          const V2::ScreenRectangle& rectangle)
+    {
+        V2::SelectionProjectionCache cache;
+        V2::ViewportInteractionMetrics metrics;
+        V2::ViewportInputFrame input = Input(1U, {0.0F, 0.0F});
+        input.ViewProjection = PerspectiveViewProjection(cameraZ);
+        input.ModelCenter = {0.5F, 0.5F, 0.5F};
+        input.DocumentRevision = document.GetRevision();
+        if (!cache.Ensure(document, input, metrics)) return std::size_t{0U};
+        return cache.Query(rectangle, metrics).size();
+    };
+
+    // The voxel spans world [0,1]^3 and the model centre is its middle, so its
+    // local corners are at +/-0.5. With the camera at z = 0.25 the far corners
+    // sit at view depth 0.75 (in front of the 0.5 near plane) while the near
+    // corners sit at view depth -0.25 — genuinely BEHIND the camera, with a
+    // negative w large enough to survive the |w| <= 1e-8 guard. That is the
+    // configuration that actually corrupts the footprint.
+    //
+    // Clipped at the near plane, the footprint spans screen x in [0, 1000].
+    // Accumulating the sign-flipped corners instead stretches it to [-500,
+    // 1500], so a rectangle just outside the viewport separates the two.
+    constexpr float straddlingCamera = 0.25F;
+    const V2::ScreenRectangle outside{
+        1100.0F, 1100.0F, 1400.0F, 1400.0F};
+    const V2::ScreenRectangle whole{
+        -1.0e6F, -1.0e6F, 1.0e6F, 1.0e6F};
+
+    // Entirely in front of the near plane: selectable, footprint where it
+    // belongs (screen x about 458..542).
+    Require(hits(6.0F, whole) == 1U,
+        "A voxel fully in front of the camera must stay selectable.");
+    Require(hits(6.0F, outside) == 0U,
+        "A fully visible voxel leaked a footprint outside the viewport.");
+
+    // Straddling the near plane: the visible part must remain selectable, and
+    // the corners behind the camera must NOT stretch the footprint.
+    Require(hits(straddlingCamera, whole) == 1U,
+        "The visible part of a near-plane voxel must remain selectable.");
+    Require(hits(straddlingCamera, outside) == 0U,
+        "A near-plane voxel's footprint absorbed behind-camera corners.");
+
+    // Entirely behind the camera: never selectable, and never contributing a
+    // sign-flipped footprint.
+    Require(hits(-6.0F, whole) == 0U,
+        "A voxel behind the camera must not be selectable.");
+    Require(hits(-6.0F, outside) == 0U,
+        "A voxel behind the camera produced a wrapped-around footprint.");
+
+    // Determinism: the same camera must give the same answer every time.
+    for (int repeat = 0; repeat < 3; ++repeat)
+        Require(hits(straddlingCamera, whole) == 1U &&
+                hits(straddlingCamera, outside) == 0U,
+            "Near-plane footprint resolution is not deterministic.");
+}
+
+void TestHighlightBufferCapacityNeverOverflows()
+{
+    // VF-STAB-01 bug 2: the legacy and Interaction V2 highlight upload paths
+    // share highlightVertexBuffer_/highlightIndexBuffer_. This models the shared
+    // buffer as the pair (tracked capacity, real GPU size) and drives both
+    // paths through PlanHighlightBuffer / the legacy exact-size recreation. The
+    // fix keeps "tracked == real" across a path switch; the bug was the legacy
+    // path leaving `tracked` stale so the V2 path reused a too-small buffer.
+    std::size_t tracked = 0U;
+    std::size_t real = 0U;
+    bool hasBuffer = false;
+
+    // Interaction V2 upload: grows via the shared decision authority.
+    const auto v2Step = [&](const std::size_t required)
+    {
+        const Editor::HighlightBufferDecision plan =
+            Editor::PlanHighlightBuffer(tracked, hasBuffer, required);
+        if (plan.Replace)
+        {
+            real = plan.Capacity;
+            tracked = plan.Capacity;
+            hasBuffer = true;
+        }
+        // The core safety invariant: an in-place (or fresh) upload never writes
+        // more than the real buffer holds, and the tracker never lies.
+        Require(required <= real,
+            "V2 highlight upload would exceed the real GPU buffer.");
+        Require(tracked == real,
+            "V2 highlight capacity tracker diverged from the real buffer.");
+    };
+
+    // Legacy upload: UploadBufferPair unconditionally recreates at EXACTLY
+    // `required`, and UploadLegacyHighlights syncs the trackers to that size.
+    const auto legacyStep = [&](const std::size_t required)
+    {
+        real = required;
+        tracked = required;
+        hasBuffer = true;
+        Require(tracked == real,
+            "Legacy highlight upload left the tracker out of sync.");
+    };
+
+    // The exact reported tool-switch sequence.
+    v2Step(8192U);     // large Selection V2 highlight -> 8192-byte buffer
+    legacyStep(300U);  // switch to Pencil/Box legacy tool -> 300-byte buffer
+    v2Step(4000U);     // back to Selection V2 at an intermediate size
+
+    // Growing and shrinking alternations, both directions.
+    for (const std::size_t bytes :
+         {200U, 9000U, 500U, 4096U, 16384U, 1U, 8000U})
+        v2Step(bytes);
+    for (const std::size_t bytes : {50U, 12000U, 300U, 6000U})
+    {
+        legacyStep(bytes);
+        v2Step(bytes * 2U + 7U);
+        v2Step(bytes / 3U + 1U);
+    }
+}
+
 }
 
 int main()
@@ -781,6 +934,8 @@ int main()
         TestMoveCostDependsOnSelectionNotBoxVolume();
         TestLargeMoveDefersInteractiveScanAndCachesDelta();
         TestMoveCacheIsBoundedAndCleared();
+        TestSelectionFootprintClipsAtNearPlane();
+        TestHighlightBufferCapacityNeverOverflows();
         std::cout << "Viewport Interaction V2 tests passed.\n";
         return 0;
     }

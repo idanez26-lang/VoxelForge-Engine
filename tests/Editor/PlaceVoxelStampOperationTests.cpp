@@ -524,7 +524,12 @@ void TestHistoryMemoryLimitRefusesBeforeMutation()
 
 void TestFullPaletteFailsWithoutMutation()
 {
-    auto document = Document(300U);
+    // VF-STAB-01 bug 3 : la largeur etait 300, au-dela des 256 valeurs par axe
+    // que le format VOX sait reecrire — un tel document s'ouvre desormais en
+    // lecture seule et refuse toute mutation. 256 suffit a l'intention du test
+    // (255 indices distincts en x=0..254, y=1) et reste dans le plafond que le
+    // produit impose deja partout ailleurs (VoxelModelCreationService).
+    auto document = Document(256U);
     for (std::size_t index = 1U; index < 256U; ++index)
     {
         Require(document.SetVoxel(
@@ -532,8 +537,10 @@ void TestFullPaletteFailsWithoutMutation()
             "Unable to fill palette fixture.");
     }
     const VoxelStamp stamp = Stamp();
+    // Le stamp reste dans les bornes et sur y=0, donc sans recouvrir la rangee
+    // qui sature la palette (y=1).
     const auto plan = Plan(stamp, document,
-        {256 * StampFixedPoint::UnitsPerVoxel, 0, 0});
+        {250 * StampFixedPoint::UnitsPerVoxel, 0, 0});
     const auto revision = document.GetRevision();
     const auto result = PreparePlaceVoxelStampOperation(plan);
     Require(result.Status ==

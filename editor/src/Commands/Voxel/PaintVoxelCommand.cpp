@@ -24,6 +24,11 @@ PaintVoxelCommand::PaintVoxelCommand(
 
 CommandResult PaintVoxelCommand::Execute()
 {
+    // VF-STAB-01 bugs 6-7: no lower-bound check here on purpose. This command
+    // only ever runs on the raw VoxelGrid path (no active document), where
+    // occupancy is a separate flag and palette index 0 is a legitimate colour —
+    // covered by PaintVoxelTests. The index-0 defect lives in the document path
+    // and is fixed at its source, PaintPaletteSelection.
     if (newColorIndex_ >= Voxel::VoxelPalette::Size())
         return CommandResult::Failure("Paint color index is outside the active palette.");
 

@@ -131,10 +131,23 @@ int main()
     bool passed = true;
 
     PaintPaletteSelection paletteSelection;
-    passed &= Check(paletteSelection.Index() == 0U,
-        "Paint palette selection must default to index zero.");
+    // VF-STAB-01 bugs 6-7: palette index 0 means "no voxel", and VoxelDocument
+    // rejects it for any present voxel. The selection therefore starts on the
+    // first paintable colour and refuses 0 outright; it used to default to 0,
+    // so an Add or Paint with the untouched default failed silently.
+    passed &= Check(PaintPaletteSelection::MinimumIndex() == 1U,
+        "The first paintable palette index must be one.");
+    passed &= Check(paletteSelection.Index() ==
+        PaintPaletteSelection::MinimumIndex(),
+        "Paint palette selection must default to a paintable index.");
     passed &= Check(paletteSelection.SelectedColor(nullptr) == nullptr,
         "An absent palette must not expose a selected color.");
+    passed &= Check(!paletteSelection.SetIndex(0U) &&
+        paletteSelection.Index() == PaintPaletteSelection::MinimumIndex(),
+        "Paint palette selection must refuse the empty-voxel index zero.");
+    passed &= Check(paletteSelection.SetIndex(1U) &&
+        paletteSelection.Index() == 1U,
+        "Paint palette selection must accept the first paintable index.");
     passed &= Check(paletteSelection.SetIndex(255U) &&
         paletteSelection.Index() == 255U &&
         !paletteSelection.SetIndex(256U) &&

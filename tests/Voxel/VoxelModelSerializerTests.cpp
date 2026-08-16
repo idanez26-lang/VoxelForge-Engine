@@ -280,22 +280,215 @@ void TestTransactionalReplacement(const TemporaryDirectory& temporary)
             !std::filesystem::exists(path.string() + ".bak"),
         "Transactional replacement left auxiliary files.");
 
+    // VF-STAB-01 bug 8, arbitrage Tony du 06/08. A backup left behind by a save
+    // whose cleanup failed used to block EVERY later save to this path forever:
+    // the guard saw the .bak and refused, and nothing ever removed it. A backup
+    // is only the sole surviving copy when the model file is missing, so that
+    // is the only case that must still refuse.
     WriteBytes(path, oldBytes);
     const auto staleBackup = std::filesystem::path(path.string() + ".bak");
     WriteBytes(staleBackup, {1U, 2U, 3U});
-    const auto failed = VoxelModelSerializer::Save(path, replacement);
-    Require(!failed.Succeeded && !failed.Message.empty(),
-        "Unsafe replacement with stale backup was accepted.");
-    Require(ReadBytes(path) == oldBytes,
-        "Failed replacement changed the previous valid file.");
+    const auto cleaned = VoxelModelSerializer::Save(path, replacement);
+    Require(cleaned.Succeeded,
+        "A redundant backup must not block a save whose model file is intact.");
+    Require(!std::filesystem::exists(staleBackup),
+        "The redundant backup was not cleared, so saves stay blocked.");
+    const auto cleanedLoad = VoxelModelSerializer::Load(path);
+    Require(cleanedLoad.Model &&
+            cleanedLoad.Model->Name() == "Replacement model",
+        "The save that cleared a redundant backup did not publish the model.");
     Require(!std::filesystem::exists(path.string() + ".tmp"),
-        "Failed replacement left a temporary file.");
+        "Backup cleanup left a temporary file.");
+
+    // The model file is gone: the backup is now the ONLY copy and must never be
+    // deleted, so the save has to refuse and say so.
+    WriteBytes(staleBackup, {4U, 5U, 6U});
+    std::filesystem::remove(path);
+    const auto refused = VoxelModelSerializer::Save(path, replacement);
+    Require(!refused.Succeeded && !refused.Message.empty(),
+        "A backup without its model file must refuse the save.");
+    Require(std::filesystem::exists(staleBackup) &&
+            ReadBytes(staleBackup) == std::vector<std::uint8_t>{4U, 5U, 6U},
+        "A sole-surviving backup copy must never be touched.");
+    Require(!std::filesystem::exists(path.string() + ".tmp"),
+        "Refused replacement left a temporary file.");
+    std::filesystem::remove(staleBackup);
+    WriteBytes(path, oldBytes);
 
     VoxelModel invalid = replacement;
     invalid.SetName(std::string("Bad UTF-8 \xC0\xAF", 12U));
     const auto invalidSave = VoxelModelSerializer::Save(path, invalid);
     Require(!invalidSave.Succeeded && ReadBytes(path) == oldBytes,
         "Preflight failure changed the previous file.");
+}
+
+
+// VF-STAB-01B blocage 3 (revue Codex). Le seam minimal du serializer permet
+// enfin d'exercer la branche centrale du contrat utilisateur : rename final
+// REUSSI, suppression du backup ECHOUEE. Toute la logique de Save s'execute ;
+// seule l'operation OS ciblee est substituee, donc rien n'est contourne.
+VoxelModelSerializer::FileOperations OperationsFailingRemoveOf(
+    const std::filesystem::path& blocked, int& blockedAttempts)
+{
+    auto operations = VoxelModelSerializer::DefaultFileOperations();
+    operations.Remove = [blocked, &blockedAttempts](
+        const std::filesystem::path& path, std::error_code& error)
+    {
+        if (path == blocked)
+        {
+            ++blockedAttempts;
+            error = std::make_error_code(std::errc::permission_denied);
+            return false;
+        }
+        return std::filesystem::remove(path, error);
+    };
+    return operations;
+}
+
+// A. rename final reussi + remove(.bak) echoue.
+void TestBackupRemovalFailureAfterSuccessfulSave(
+    const TemporaryDirectory& temporary)
+{
+    const auto path = temporary.Path() / "cleanup-retry.vfvoxel";
+    const auto backup = std::filesystem::path(path.string() + ".bak");
+
+    VoxelModel first = MakeModel();
+    first.SetName("First model");
+    Require(VoxelModelSerializer::Save(path, first).Succeeded,
+        "Initial save of the cleanup fixture failed.");
+    Require(!std::filesystem::exists(backup),
+        "A clean save must not leave a backup behind.");
+
+    int blockedAttempts = 0;
+    VoxelModel second = MakeModel();
+    second.SetName("Second model");
+    const auto saved = VoxelModelSerializer::Save(
+        path, second, OperationsFailingRemoveOf(backup, blockedAttempts));
+
+    Require(blockedAttempts == 1,
+        "The test must have blocked exactly the post-rename backup removal.");
+    // La sauvegarde principale est un SUCCES : les donnees sont publiees et la
+    // destination a ete rechargee avec succes. C'est le faux negatif corrige.
+    Require(saved.Succeeded && !saved.Message.empty(),
+        "A save whose backup cleanup failed must succeed with a warning.");
+    // Le message ne doit plus PROMETTRE le nettoyage : seule une nouvelle
+    // tentative est garantie.
+    Require(saved.Message.find("retried") != std::string::npos,
+        "The warning must announce a retry, not promise a cleanup.");
+    Require(std::filesystem::exists(backup),
+        "The backup must be kept when its removal failed.");
+    const auto reloaded = VoxelModelSerializer::Load(path);
+    Require(reloaded.Model && reloaded.Model->Name() == "Second model",
+        "The save reported as successful did not publish the new model.");
+    Require(!std::filesystem::exists(path.string() + ".tmp"),
+        "The save left a temporary file behind.");
+
+    // C. destination valide + backup residuel : une nouvelle tentative de
+    // nettoyage est possible, et elle aboutit une fois l'obstacle levé.
+    VoxelModel third = MakeModel();
+    third.SetName("Third model");
+    const auto next = VoxelModelSerializer::Save(path, third);
+    Require(next.Succeeded,
+        "The next save must be possible after a failed backup cleanup.");
+    Require(!std::filesystem::exists(backup),
+        "The retried cleanup must clear the redundant backup.");
+    const auto finalLoad = VoxelModelSerializer::Load(path);
+    Require(finalLoad.Model && finalLoad.Model->Name() == "Third model",
+        "The next save did not publish its model.");
+
+    // ... et si l'obstacle persiste, la sauvegarde reste utilisable avec
+    // avertissement : aucune boucle de blocage permanent.
+    int stillBlocked = 0;
+    VoxelModel fourth = MakeModel();
+    fourth.SetName("Fourth model");
+    const auto again = VoxelModelSerializer::Save(
+        path, fourth, OperationsFailingRemoveOf(backup, stillBlocked));
+    Require(again.Succeeded && !again.Message.empty() &&
+            std::filesystem::exists(backup),
+        "A persisting lock must still leave a usable save plus a warning.");
+    std::error_code cleanup;
+    std::filesystem::remove(backup, cleanup);
+}
+
+// B. destination presente mais corrompue, backup valide.
+void TestCorruptDestinationKeepsValidBackup(
+    const TemporaryDirectory& temporary)
+{
+    const auto path = temporary.Path() / "corrupt-destination.vfvoxel";
+    const auto backup = std::filesystem::path(path.string() + ".bak");
+
+    VoxelModel original = MakeModel();
+    original.SetName("Recoverable model");
+    Require(VoxelModelSerializer::Save(path, original).Succeeded,
+        "Initial save of the corruption fixture failed.");
+    const std::vector<std::uint8_t> good = ReadBytes(path);
+
+    // Le `.bak` porte la seule copie saine ; la destination est tronquee.
+    WriteBytes(backup, good);
+    WriteBytes(path, {good.begin(), good.begin() + 8});
+    Require(!VoxelModelSerializer::Load(path),
+        "The corruption fixture is not actually unreadable.");
+    Require(VoxelModelSerializer::Load(backup).Model.has_value(),
+        "The backup fixture must stay loadable.");
+
+    VoxelModel replacement = MakeModel();
+    replacement.SetName("Replacement model");
+    const auto refused = VoxelModelSerializer::Save(path, replacement);
+
+    Require(!refused.Succeeded && !refused.Message.empty(),
+        "A corrupt destination must not be treated as a healthy save.");
+    Require(refused.Message.find("reloaded") != std::string::npos,
+        "The diagnostic must say the model file could not be reloaded.");
+    Require(std::filesystem::exists(backup) && ReadBytes(backup) == good,
+        "The only recoverable copy must never be deleted.");
+    Require(!std::filesystem::exists(path.string() + ".tmp"),
+        "The refused save left a temporary file behind.");
+    std::error_code cleanup;
+    std::filesystem::remove(backup, cleanup);
+    WriteBytes(path, good);
+}
+
+// D. veritable echec AVANT le rename final.
+void TestFailureBeforeFinalRenameKeepsRecovery(
+    const TemporaryDirectory& temporary)
+{
+    const auto path = temporary.Path() / "rename-failure.vfvoxel";
+    const auto backup = std::filesystem::path(path.string() + ".bak");
+
+    VoxelModel original = MakeModel();
+    original.SetName("Original model");
+    Require(VoxelModelSerializer::Save(path, original).Succeeded,
+        "Initial save of the rename-failure fixture failed.");
+    const std::vector<std::uint8_t> good = ReadBytes(path);
+
+    // Le rename final (temporaire -> destination) echoue ; le rollback doit
+    // ramener le backup en place et la sauvegarde doit etre signalee en echec.
+    auto operations = VoxelModelSerializer::DefaultFileOperations();
+    const auto temporaryPath = std::filesystem::path(path.string() + ".tmp");
+    operations.Rename = [temporaryPath](const std::filesystem::path& from,
+        const std::filesystem::path& to, std::error_code& error)
+    {
+        if (from == temporaryPath)
+        {
+            error = std::make_error_code(std::errc::permission_denied);
+            return;
+        }
+        std::filesystem::rename(from, to, error);
+    };
+
+    VoxelModel replacement = MakeModel();
+    replacement.SetName("Never published");
+    const auto failed =
+        VoxelModelSerializer::Save(path, replacement, operations);
+
+    Require(!failed.Succeeded && !failed.Message.empty(),
+        "A failed final rename must be reported as a failure.");
+    Require(std::filesystem::exists(path) && ReadBytes(path) == good,
+        "The original model must be recoverable after a failed rename.");
+    Require(VoxelModelSerializer::Load(path).Model.has_value(),
+        "The rolled-back destination must still be loadable.");
+    Require(!std::filesystem::exists(backup),
+        "The rollback must return the backup to its destination name.");
 }
 
 } // namespace
@@ -308,6 +501,9 @@ int main()
         TestEmptyAndCompleteRoundTrips(temporary);
         TestCorruptFiles(temporary);
         TestTransactionalReplacement(temporary);
+        TestBackupRemovalFailureAfterSuccessfulSave(temporary);
+        TestCorruptDestinationKeepsValidBackup(temporary);
+        TestFailureBeforeFinalRenameKeepsRecovery(temporary);
         std::cout << "Voxel model serializer tests passed.\n";
         return 0;
     }

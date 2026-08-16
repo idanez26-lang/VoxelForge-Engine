@@ -115,7 +115,11 @@ enum class VoxelDocumentError
     InvalidTransaction,
     // VF-0265 (lot 2): appended, never inserted — existing values keep their
     // ordinal so no serialized or logged code changes meaning.
-    AllocationFailure
+    AllocationFailure,
+    // VF-STAB-01 bug 3: the document exceeds what the VOX format can write
+    // back, so it opens read-only rather than accepting edits it could never
+    // save. Appended, never inserted, per the rule above.
+    ReadOnlyDocument
 };
 
 struct VoxelDocumentOperationResult final
@@ -207,6 +211,13 @@ public:
     [[nodiscard]] bool IsDirty() const noexcept;
     [[nodiscard]] std::uint64_t GetRevision() const noexcept;
 
+    // VF-STAB-01 bug 3 (arbitrage Tony du 06/08) : un document dont une
+    // dimension depasse ce que le format VOX sait reecrire s'ouvre en LECTURE
+    // SEULE. L'artiste peut le regarder, jamais l'editer puis perdre son
+    // travail au moment d'enregistrer. La raison est destinee a l'interface.
+    [[nodiscard]] bool IsReadOnly() const noexcept;
+    [[nodiscard]] const std::string& ReadOnlyReason() const noexcept;
+
     // VF-0262 (262-2): bounded revision journal. Each successful mutation
     // records the voxel positions it touched (palette-only mutations record
     // an empty set, so mesh caches can skip remeshing entirely). Positions
@@ -278,6 +289,12 @@ public:
 private:
     friend class VoxDocumentLoader;
 
+    // VF-STAB-01A bug 1 : refus unique, appele en TETE de chaque point d'entree
+    // mutant. La garde ne vit plus seulement dans les validateurs internes :
+    // RemoveVoxel, SetPaletteColor et ReplacePalette ne passaient par aucun
+    // d'eux et modifiaient donc encore un document en lecture seule.
+    [[nodiscard]] VoxelDocumentOperationResult ReadOnlyRefusal() const;
+
     [[nodiscard]] VoxelDocumentOperationResult ValidateMutation(
         const VoxelPosition& position,
         std::size_t paletteIndex,
@@ -299,6 +316,9 @@ private:
         bool overflowed);
 
     std::filesystem::path sourcePath_;
+    // VF-STAB-01 bug 3: set by VoxDocumentLoader only, never cleared — a
+    // document that cannot be written back never becomes writable.
+    std::string readOnlyReason_;
     std::optional<std::string> assetId_;
     std::uint32_t voxVersion_ = 0U;
     std::array<VoxelColor, 256U> palette_{};
