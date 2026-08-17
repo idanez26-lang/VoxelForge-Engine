@@ -7,6 +7,7 @@
 // le mesh assemblé.
 
 #include "SmartTools/SmartToolExactPreviewComposer.h"
+#include "SmartTools/SmartToolPlanner.h"
 
 #include "VoxelForge/Asset/Vox/VoxFormat.h"
 #include "VoxelForge/Asset/Voxel/VoxDocumentLoader.h"
@@ -301,6 +302,346 @@ void TestOverridesWithoutAssembly()
         "Les overrides doivent être identiques avec et sans assemblage.");
 }
 
+// VF-STAB-01R-FIX. Regression visuelle : repeindre un voxel avec SA COULEUR
+// ACTUELLE faisait disparaitre tout le modele. Cause : le mesh monolithique
+// n'est pas assemble sur le chemin chunke (AssembleMesh == false), il reste
+// donc vide PAR CONSTRUCTION ; sans changement effectif il n'y a en plus aucun
+// override, et le consommateur prenait ce vide pour un « etat final vide » et
+// masquait le modele permanent. L'etat d'assemblage est desormais explicite.
+
+// Test 1 — Paint meme couleur, avec un VRAI SmartToolPlan (pas un plan vide).
+void TestPaintSameColourLeavesNothingToPresent()
+{
+    constexpr VoxelPosition target{20, 20, 20};
+    const std::uint8_t current = ColourAt(target);
+
+    // Le vrai planificateur, sur un repeint a l'identique.
+    SmartToolPlanner planner;
+    SmartToolRequest request;
+    request.Geometry = SmartGeometry::Pencil;
+    request.Action = SmartAction::Paint;
+    request.BrushRequest = {BaseDocument().GetModel(0U)->Dimensions(),
+        {SmartBrushShape::Cube, SmartBrushDimension::Volume3D,
+            SmartBrushOrientation::Auto, 1, current, SmartBrushMode::Paint},
+        {target, {0, 1, 0}}, {}};
+    request.ReadVoxel = [](const VoxelPosition position)
+    {
+        const auto voxel = BaseDocument().GetVoxel(position);
+        return voxel ? SmartToolVoxelState{true, voxel->PaletteIndex}
+                     : SmartToolVoxelState{};
+    };
+    request.SourceIdentity = 1U;
+    request.SourceRevision = BaseDocument().GetRevision();
+    const SmartToolResult planned = planner.Plan(request);
+    Require(planned.HasPlan(),
+        std::string("Le repeint a l'identique doit produire un plan : ") +
+            planned.Error);
+
+    // Le coeur du scenario : chaque cellule a Before == After.
+    bool sawTarget = false;
+    for (const SmartToolPlanCell& cell : planned.Plan->Cells())
+    {
+        if (cell.WorldPosition != target) continue;
+        sawTarget = true;
+        Require(cell.Before.Exists == cell.After.Exists &&
+                cell.Before.PaletteIndex == cell.After.PaletteIndex,
+            "Repeindre a l'identique doit donner Before == After.");
+        Require(!cell.HasChange(),
+            "Une cellule inchangee doit rapporter HasChange() == false.");
+    }
+    Require(sawTarget, "Le plan doit couvrir la cellule visee.");
+
+    // Chemin chunke reel de l'editeur : overrides seuls, aucun assemblage.
+    const SmartToolExactPreviewComposer::Source source{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U,
+        .AssembleMesh = false};
+    const auto composed =
+        SmartToolExactPreviewComposer::Compose(source, *planned.Plan);
+
+    Require(composed.Succeeded(), "La composition doit reussir.");
+    Require(composed.Overrides.empty(),
+        "Sans changement effectif, aucun override ne doit etre produit.");
+    Require(composed.Assembly == ExactPreviewAssemblyState::NotAssembled,
+        "Sans assemblage, l'etat doit etre NotAssembled — c'est la correction.");
+    Require(!composed.HasAssembledMesh(),
+        "Aucun mesh monolithique ne doit etre presente au renderer.");
+    // La preuve de la regression : le mesh est vide, mais ce vide ne doit PLUS
+    // etre interprete comme un etat final vide.
+    Require(composed.Mesh.Empty(),
+        "Le mesh reste vide par construction sur ce chemin.");
+}
+
+// Test 4 — chunke sans override : meme contrat, exprime directement.
+void TestChunkedWithoutOverrideIsNotAssembled()
+{
+    const std::vector<VoxelDocumentChange> none;
+    const SmartToolExactPreviewComposer::Source source{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U,
+        .AssembleMesh = false};
+    const auto composed =
+        SmartToolExactPreviewComposer::Compose(source, none);
+    Require(composed.Succeeded() && composed.Overrides.empty() &&
+            composed.Assembly == ExactPreviewAssemblyState::NotAssembled &&
+            !composed.HasAssembledMesh(),
+        "Chunke sans override doit rester NotAssembled.");
+}
+
+// Test 3 — Erase du dernier voxel en monolithique : le cas legitime que la
+// correction doit PRESERVER. Ici un mesh est reellement assemble et il est
+// vide ; le modele permanent doit donc bien etre masque.
+void TestEraseLastVoxelIsAssembledEmpty()
+{
+    // Document d'un seul voxel, chemin de reference (pas de chunks fournis).
+    Asset::Vox::VoxModel single;
+    single.Version = 150U;
+    single.Palette = Asset::Vox::DefaultVoxPalette();
+    Asset::Vox::VoxModelMetadata model;
+    model.Dimensions = {8U, 8U, 8U};
+    model.Voxels.push_back({0U, 0U, 0U, 4U});
+    single.Models.push_back(std::move(model));
+    single.DeclaredModelCount = 1U;
+    auto loaded = Asset::Voxel::VoxDocumentLoader{}.Build(single, "erase.vox");
+    Require(loaded.Succeeded(), "Fixture d'un voxel unique indisponible.");
+    const VoxelDocument document = std::move(*loaded.Document);
+
+    const std::vector<VoxelDocumentChange> changes{Remove({0, 0, 0}, 4U)};
+    const auto composed =
+        SmartToolExactPreviewComposer::Compose(document, changes);
+
+    Require(composed.Succeeded(), "L'effacement doit se composer.");
+    Require(composed.Mesh.Empty(), "L'etat final doit etre vide.");
+    Require(composed.Assembly == ExactPreviewAssemblyState::AssembledEmpty,
+        "Effacer le dernier voxel doit donner AssembledEmpty, pas "
+        "NotAssembled : le modele permanent doit rester masque.");
+    Require(composed.HasAssembledMesh(),
+        "Un mesh assemble vide reste un mesh assemble.");
+}
+
+// Test 2 et 5 — un changement effectif produit bien un resultat presentable,
+// par chacun des deux chemins.
+void TestEffectiveChangeIsPresentable()
+{
+    constexpr VoxelPosition target{20, 20, 20};
+    const std::uint8_t current = ColourAt(target);
+    const std::uint8_t other = static_cast<std::uint8_t>(
+        current == 5U ? 6U : 5U);
+    const std::vector<VoxelDocumentChange> changes{
+        Paint(target, current, other)};
+
+    // Chemin chunke : overrides presents, aucun mesh requis.
+    const SmartToolExactPreviewComposer::Source chunked{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U,
+        .AssembleMesh = false};
+    const auto viaChunks =
+        SmartToolExactPreviewComposer::Compose(chunked, changes);
+    Require(viaChunks.Succeeded() && !viaChunks.Overrides.empty(),
+        "Un changement effectif doit produire des overrides.");
+    Require(viaChunks.Assembly == ExactPreviewAssemblyState::NotAssembled,
+        "Le chemin chunke ne pretend jamais avoir assemble un mesh.");
+
+    // Chemin monolithique : mesh assemble non vide.
+    const auto viaMesh =
+        SmartToolExactPreviewComposer::Compose(BaseDocument(), changes);
+    Require(viaMesh.Succeeded() && !viaMesh.Mesh.Empty(),
+        "Le chemin de reference doit produire de la geometrie.");
+    Require(viaMesh.Assembly == ExactPreviewAssemblyState::AssembledNonEmpty,
+        "Un mesh assemble non vide doit etre declare comme tel.");
+    Require(viaMesh.HasAssembledMesh(), "Ce mesh doit etre presentable.");
+}
+
+// Test 6 — invariants document : la preview ne touche jamais le document.
+void TestPreviewNeverMutatesDocument()
+{
+    constexpr VoxelPosition target{20, 20, 20};
+    const std::uint8_t current = ColourAt(target);
+    const auto paletteBefore = BaseDocument().GetPaletteSnapshot();
+    const auto revisionBefore = BaseDocument().GetRevision();
+    const auto countBefore = BaseDocument().GetVoxelCount();
+
+    const std::vector<std::vector<VoxelDocumentChange>> scenarios{
+        {},
+        {Paint(target, current, current)},
+        {Paint(target, current, static_cast<std::uint8_t>(current + 1U))},
+        {Remove(target, current)}};
+    for (const auto& changes : scenarios)
+    {
+        for (const bool assemble : {false, true})
+        {
+            const SmartToolExactPreviewComposer::Source source{
+                .Document = &BaseDocument(),
+                .DocumentChunks = &DocumentChunks().Chunks(),
+                .ModelIndex = 0U,
+                .AssembleMesh = assemble};
+            static_cast<void>(
+                SmartToolExactPreviewComposer::Compose(source, changes));
+        }
+    }
+    Require(BaseDocument().GetPaletteSnapshot() == paletteBefore &&
+            BaseDocument().GetRevision() == revisionBefore &&
+            BaseDocument().GetVoxelCount() == countBefore,
+        "La preview ne doit jamais modifier le document.");
+}
+
+// VF-STAB-01R2 test 6 — la cle du cache doit inclure ce qui influence
+// l'etat d'assemblage. `AssembleMesh` bascule avec ModelChunkCount() du
+// renderer SANS que le pointeur de chunks change : si la cle l'ignore, un
+// resultat NotAssembled est resservi a un appelant qui a besoin d'un mesh
+// monolithique, ou l'inverse.
+void TestCacheKeyHonoursAssembleMesh()
+{
+    constexpr VoxelPosition target{20, 20, 20};
+    const std::uint8_t current = ColourAt(target);
+    const std::uint8_t other = static_cast<std::uint8_t>(
+        current == 5U ? 6U : 5U);
+
+    SmartToolPlanner planner;
+    SmartToolRequest request;
+    request.Geometry = SmartGeometry::Pencil;
+    request.Action = SmartAction::Paint;
+    request.BrushRequest = {BaseDocument().GetModel(0U)->Dimensions(),
+        {SmartBrushShape::Cube, SmartBrushDimension::Volume3D,
+            SmartBrushOrientation::Auto, 1, other, SmartBrushMode::Paint},
+        {target, {0, 1, 0}}, {}};
+    request.ReadVoxel = [](const VoxelPosition position)
+    {
+        const auto voxel = BaseDocument().GetVoxel(position);
+        return voxel ? SmartToolVoxelState{true, voxel->PaletteIndex}
+                     : SmartToolVoxelState{};
+    };
+    request.SourceIdentity = 1U;
+    request.SourceRevision = BaseDocument().GetRevision();
+    const SmartToolResult planned = planner.Plan(request);
+    Require(planned.HasPlan(), "Le plan du test de cache doit exister.");
+
+    SmartToolExactPreviewCache cache;
+    SmartToolExactPreviewComposer::Source source{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U,
+        .AssembleMesh = false};
+
+    // false : chemin chunke, aucun mesh monolithique.
+    const auto& first = cache.Resolve(source, 1U, planned.Plan);
+    Require(first.Assembly == ExactPreviewAssemblyState::NotAssembled,
+        "Sans assemblage, l'etat doit etre NotAssembled.");
+
+    // true : MEME document, MEME revision, MEME pointeur de chunks, MEME plan —
+    // seul AssembleMesh change. Le resultat doit etre recompose.
+    source.AssembleMesh = true;
+    const auto& second = cache.Resolve(source, 1U, planned.Plan);
+    Require(second.HasAssembledMesh(),
+        "Basculer AssembleMesh a true doit recomposer : un appelant qui "
+        "reclame un mesh monolithique ne doit pas recevoir NotAssembled.");
+    Require(second.Assembly == ExactPreviewAssemblyState::AssembledNonEmpty,
+        "Le mesh assemble de ce plan porte de la geometrie.");
+
+    // Retour a false : l'etat doit redevenir NotAssembled, sans resservir le
+    // mesh monolithique memorise.
+    source.AssembleMesh = false;
+    const auto& third = cache.Resolve(source, 1U, planned.Plan);
+    Require(third.Assembly == ExactPreviewAssemblyState::NotAssembled,
+        "Revenir a false doit redonner NotAssembled, pas le mesh memorise.");
+
+    // VF-STAB-01R3 : le cache doit rester EFFICACE. Ajouter un champ a la cle
+    // ne doit pas transformer chaque appel en recomposition ; les hits stables
+    // sont mesures par BuildCount(), pas supposes.
+    SmartToolExactPreviewCache counted;
+    SmartToolExactPreviewComposer::Source counting{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U,
+        .AssembleMesh = false};
+
+    static_cast<void>(counted.Resolve(counting, 1U, planned.Plan));
+    const std::size_t afterFirst = counted.BuildCount();
+    Require(afterFirst == 1U, "La premiere resolution doit composer une fois.");
+
+    // A. false -> false : hit stable, aucune recomposition.
+    static_cast<void>(counted.Resolve(counting, 1U, planned.Plan));
+    Require(counted.BuildCount() == afterFirst,
+        "false -> false doit etre un hit : BuildCount ne doit pas bouger.");
+
+    // B. false -> true : recomposition, exactement une.
+    counting.AssembleMesh = true;
+    static_cast<void>(counted.Resolve(counting, 1U, planned.Plan));
+    Require(counted.BuildCount() == afterFirst + 1U,
+        "false -> true doit recomposer exactement une fois.");
+
+    // C. true -> true : hit stable.
+    static_cast<void>(counted.Resolve(counting, 1U, planned.Plan));
+    Require(counted.BuildCount() == afterFirst + 1U,
+        "true -> true doit etre un hit : BuildCount ne doit pas bouger.");
+
+    // D. true -> false : recomposition, exactement une.
+    counting.AssembleMesh = false;
+    static_cast<void>(counted.Resolve(counting, 1U, planned.Plan));
+    Require(counted.BuildCount() == afterFirst + 2U,
+        "true -> false doit recomposer exactement une fois.");
+}
+
+// VF-STAB-01R3 — le predicat de presentabilite. `Succeeded()` ne suffit pas :
+// une composition peut reussir sans rien avoir a montrer, et c'est ce cas qui
+// faisait effacer survol, selection et bornes au profit d'une preview
+// inexistante.
+void TestPresentableGeometryPredicate()
+{
+    constexpr VoxelPosition target{20, 20, 20};
+    const std::uint8_t current = ColourAt(target);
+    const std::uint8_t other = static_cast<std::uint8_t>(
+        current == 5U ? 6U : 5U);
+
+    const SmartToolExactPreviewComposer::Source chunked{
+        .Document = &BaseDocument(),
+        .DocumentChunks = &DocumentChunks().Chunks(),
+        .ModelIndex = 0U,
+        .AssembleMesh = false};
+
+    // A. Aucun changement effectif : reussi, mais RIEN a presenter.
+    const auto noop =
+        SmartToolExactPreviewComposer::Compose(chunked, {});
+    Require(noop.Succeeded(), "La composition no-op reussit.");
+    Require(!noop.HasAssembledMesh() && !noop.HasOverrides(),
+        "La composition no-op ne produit ni mesh ni override.");
+    Require(!noop.HasPresentableGeometry(),
+        "Reussir n'est pas avoir quelque chose a montrer : les reperes ne "
+        "doivent pas etre effaces dans ce cas.");
+
+    // D. Overrides presents : presentable sans mesh assemble.
+    const std::vector<VoxelDocumentChange> real{
+        Paint(target, current, other)};
+    const auto withOverrides =
+        SmartToolExactPreviewComposer::Compose(chunked, real);
+    Require(withOverrides.HasOverrides() &&
+            !withOverrides.HasAssembledMesh() &&
+            withOverrides.HasPresentableGeometry(),
+        "Des overrides suffisent a rendre la preview presentable.");
+
+    // C. Mesh assemble vide (gomme du dernier voxel) : presentable, et le
+    // masquage du modele reste volontaire.
+    Asset::Vox::VoxModel single;
+    single.Version = 150U;
+    single.Palette = Asset::Vox::DefaultVoxPalette();
+    Asset::Vox::VoxModelMetadata model;
+    model.Dimensions = {8U, 8U, 8U};
+    model.Voxels.push_back({0U, 0U, 0U, 4U});
+    single.Models.push_back(std::move(model));
+    single.DeclaredModelCount = 1U;
+    auto loaded = Asset::Voxel::VoxDocumentLoader{}.Build(single, "pres.vox");
+    Require(loaded.Succeeded(), "Fixture d'un voxel unique indisponible.");
+    const VoxelDocument document = std::move(*loaded.Document);
+    const auto erased = SmartToolExactPreviewComposer::Compose(
+        document, std::vector<VoxelDocumentChange>{Remove({0, 0, 0}, 4U)});
+    Require(erased.Assembly == ExactPreviewAssemblyState::AssembledEmpty &&
+            erased.HasPresentableGeometry(),
+        "Un mesh assemble vide reste presentable : le masquage est voulu.");
+}
+
 void TestTripleOracleAcrossScenarios()
 {
     constexpr VoxelPosition interior{20, 20, 20};
@@ -531,6 +872,13 @@ int main()
 {
     try
     {
+        TestPaintSameColourLeavesNothingToPresent();
+        TestChunkedWithoutOverrideIsNotAssembled();
+        TestEraseLastVoxelIsAssembledEmpty();
+        TestEffectiveChangeIsPresentable();
+        TestPreviewNeverMutatesDocument();
+        TestCacheKeyHonoursAssembleMesh();
+        TestPresentableGeometryPredicate();
         TestTripleOracleAcrossScenarios();
         TestOverridesWithoutAssembly();
         TestEmptyPlanReusesEveryChunk();

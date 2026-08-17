@@ -179,6 +179,12 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
             return result;
         }
         result.Mesh = std::move(*built.Mesh);
+        // VF-STAB-01R-FIX : ce chemin de reference assemble TOUJOURS. Un mesh
+        // vide y signifie donc « etat final vide » — la gomme du dernier voxel
+        // doit bien masquer le modele.
+        result.Assembly = result.Mesh.Empty()
+            ? ExactPreviewAssemblyState::AssembledEmpty
+            : ExactPreviewAssemblyState::AssembledNonEmpty;
         result.Palette = BuildRenderPalette(finalDocument);
     }
     catch (const std::exception& exception)
@@ -190,6 +196,11 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
     {
         result.Error = "Unable to compose Smart Tool final preview.";
     }
+    // VF-STAB-01R-FIX : un refus ne produit aucun mesh utilisable, quel que
+    // soit l'endroit ou il survient. L'etat est donc pose explicitement, jamais
+    // laisse a l'interpretation d'un Mesh partiellement rempli.
+    if (!result.Succeeded())
+        result.Assembly = ExactPreviewAssemblyState::NotAssembled;
     return result;
 }
 
@@ -473,7 +484,16 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
                 mesh.Append(override.Mesh);
             }
             result.Mesh = std::move(mesh);
+            // VF-STAB-01R-FIX : ici, et ici SEULEMENT sur ce chemin, un mesh a
+            // reellement ete assemble. Vide veut donc dire « etat final vide ».
+            result.Assembly = result.Mesh.Empty()
+                ? ExactPreviewAssemblyState::AssembledEmpty
+                : ExactPreviewAssemblyState::AssembledNonEmpty;
         }
+        // AssembleMesh == false : `result.Mesh` reste vide PAR CONSTRUCTION et
+        // `Assembly` conserve sa valeur NotAssembled. C'est l'ambiguite qui a
+        // fait disparaitre tout le modele : le consommateur prenait ce vide
+        // pour un etat final vide et masquait le modele permanent.
         result.Palette = BuildRenderPalette(*source.Document);
     }
     catch (const std::exception& exception)
@@ -485,6 +505,8 @@ SmartToolExactPreviewMesh SmartToolExactPreviewComposer::Compose(
     {
         result.Error = "Unable to compose Smart Tool final preview.";
     }
+    if (!result.Succeeded())
+        result.Assembly = ExactPreviewAssemblyState::NotAssembled;
     return result;
 }
 
@@ -513,15 +535,22 @@ const SmartToolExactPreviewMesh& SmartToolExactPreviewCache::Resolve(
     // VF-0265 (lot 3c) : le jeu de chunks entre dans la clé. Changer de source
     // de chunks — modèle rechargé, cache vidé — doit recomposer, sinon la
     // preview réutiliserait des chunks qui ne décrivent plus ce document.
+    // VF-STAB-01R2 : `AssembleMesh` fait partie de la cle. Il decide si un mesh
+    // monolithique est produit, donc l'etat d'assemblage du resultat, et il
+    // bascule avec ModelChunkCount() du renderer SANS que le pointeur de chunks
+    // change. L'omettre resservait un resultat dont l'etat ne correspondait plus
+    // a ce que l'appelant demandait.
     if (document_ != source.Document || documentIdentity_ != documentIdentity ||
         documentRevision_ != revision || documentChunks_ != source.DocumentChunks ||
-        modelIndex_ != source.ModelIndex || plan_ != plan)
+        modelIndex_ != source.ModelIndex || assembleMesh_ != source.AssembleMesh ||
+        plan_ != plan)
     {
         document_ = source.Document;
         documentIdentity_ = documentIdentity;
         documentRevision_ = revision;
         documentChunks_ = source.DocumentChunks;
         modelIndex_ = source.ModelIndex;
+        assembleMesh_ = source.AssembleMesh;
         plan_ = std::move(plan);
         mesh_ = plan_
             ? SmartToolExactPreviewComposer::Compose(source, *plan_)
@@ -538,6 +567,7 @@ void SmartToolExactPreviewCache::Clear() noexcept
     documentRevision_ = 0U;
     documentChunks_ = nullptr;
     modelIndex_ = 0U;
+    assembleMesh_ = true;
     plan_.reset();
     mesh_ = {};
 }

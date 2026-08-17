@@ -100,9 +100,35 @@ private:
     std::size_t rebuilds_ = 0U;
 };
 
+// VF-STAB-01R-FIX : etat d'assemblage EXPLICITE du mesh monolithique.
+//
+// `Mesh.Empty()` etait ambigu et cette ambiguite a fait disparaitre tout le
+// modele : un mesh vide pouvait signifier « jamais assemble » (chemin chunke,
+// AssembleMesh == false) ou « etat final reellement vide » (gomme du dernier
+// voxel). Le premier cas doit laisser le modele permanent se dessiner, le
+// second doit le masquer. Aucun consommateur ne peut plus deviner : le
+// compositeur declare lequel des trois cas s'applique.
+enum class ExactPreviewAssemblyState
+{
+    // Aucun mesh monolithique n'a ete produit. Ne rien conclure de `Mesh` :
+    // il est vide par construction. Arrive quand AssembleMesh == false, quand
+    // la preview repose sur des overrides chunkes, quand aucun override
+    // n'existe, ou quand aucun changement effectif n'est a presenter.
+    NotAssembled,
+    // Un mesh monolithique a REELLEMENT ete assemble et son etat final est
+    // vide. Cas legitime : la gomme retire le dernier voxel. Le modele
+    // permanent doit alors etre masque — c'est le resultat exact.
+    AssembledEmpty,
+    // Un mesh monolithique a reellement ete assemble et porte de la geometrie.
+    AssembledNonEmpty
+};
+
 struct SmartToolExactPreviewMesh final
 {
     bool Active = false;
+    // VF-STAB-01R-FIX : jamais derive de Mesh.Empty(). Renseigne explicitement
+    // par chaque chemin de retour du compositeur.
+    ExactPreviewAssemblyState Assembly = ExactPreviewAssemblyState::NotAssembled;
     Mesh::MeshData Mesh;
     // VF-0265 (lot 3e): the chunks that differ from the document, and only
     // those. Every chunk absent from this list is displayed exactly as the
@@ -115,6 +141,32 @@ struct SmartToolExactPreviewMesh final
 
     [[nodiscard]] bool Succeeded() const noexcept { return Error.empty(); }
     [[nodiscard]] bool Empty() const noexcept { return Mesh.Empty(); }
+
+    // VF-STAB-01R-FIX : « un mesh monolithique utilisable existe ». Seul ce
+    // predicat, jamais Mesh.Empty(), doit decider de presenter la preview
+    // monolithique au renderer.
+    [[nodiscard]] bool HasAssembledMesh() const noexcept
+    {
+        return Assembly != ExactPreviewAssemblyState::NotAssembled;
+    }
+
+    [[nodiscard]] bool HasOverrides() const noexcept
+    {
+        return !Overrides.empty();
+    }
+
+    // VF-STAB-01R3 : « cette composition a-t-elle REELLEMENT quelque chose a
+    // montrer ? »
+    //
+    // `Succeeded()` ne dit que « la composition n'a pas echoue ». Une
+    // composition peut reussir sans rien produire du tout : plan sans
+    // changement effectif, sur un modele chunke — aucun override, et aucun mesh
+    // assemble. Confondre les deux faisait supprimer le surlignage de survol,
+    // la selection et les bornes au profit d'une preview qui n'existait pas.
+    [[nodiscard]] bool HasPresentableGeometry() const noexcept
+    {
+        return Succeeded() && (HasAssembledMesh() || HasOverrides());
+    }
 };
 
 class SmartToolExactPreviewComposer final
@@ -189,6 +241,12 @@ private:
     const std::map<Mesh::VoxelChunkKey, Mesh::MeshData>* documentChunks_ =
         nullptr;
     std::size_t modelIndex_ = 0U;
+    // VF-STAB-01R2 : `AssembleMesh` gouverne l'etat d'assemblage du resultat et
+    // DOIT donc entrer dans la cle. Il bascule avec ModelChunkCount() du
+    // renderer sans que le pointeur de chunks change : sans lui, un
+    // `NotAssembled` etait resservi a un appelant reclamant un mesh
+    // monolithique, et inversement.
+    bool assembleMesh_ = true;
     SmartToolPlanPtr plan_;
     SmartToolExactPreviewMesh mesh_{};
     std::size_t buildCount_ = 0U;

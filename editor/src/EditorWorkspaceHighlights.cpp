@@ -660,7 +660,12 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                         geometricToolPreviewKey_ = boxKey;
                         ++geometricToolPreviewRevision_;
                     }
-                    if (geometricToolPreviewMesh_.Succeeded())
+                    // VF-STAB-01R5 : meme contrat que R3. `Succeeded()` ne dit
+                    // que « la composition n'a pas echoue » : une Box no-op
+                    // reussit sans rien produire, et le contour disparaissait
+                    // sans que rien ne le remplace. Le contour ne cede la place
+                    // qu'a une preview REELLEMENT presentable.
+                    if (geometricToolPreviewMesh_.HasPresentableGeometry())
                     {
                         exactSmartToolPreview = &geometricToolPreviewMesh_;
                         boxPreview.reset();
@@ -742,11 +747,13 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                     geometricToolPreviewKey_ = lineKey;
                     ++geometricToolPreviewRevision_;
                 }
-                if (geometricToolPreviewMesh_.Succeeded())
+                // VF-STAB-01R5 : meme contrat que R3 et que la Box. Le contour
+                // filaire ferait doublon avec l'etat final — mais seulement si
+                // cet etat final existe reellement. Une Ligne no-op reussit
+                // sans rien produire et retirait quand meme le contour.
+                if (geometricToolPreviewMesh_.HasPresentableGeometry())
                 {
                     exactSmartToolPreview = &geometricToolPreviewMesh_;
-                    // Le contour filaire ferait doublon avec l'etat final : la
-                    // regle interdit la double presentation.
                     linePreview = {};
                 }
             }
@@ -835,7 +842,8 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                         geometricToolPreviewKey_ = sphereKey;
                         ++geometricToolPreviewRevision_;
                     }
-                    if (geometricToolPreviewMesh_.Succeeded())
+                    // VF-STAB-01R5 : meme contrat que R3, la Box et la Ligne.
+                    if (geometricToolPreviewMesh_.HasPresentableGeometry())
                     {
                         exactSmartToolPreview = &geometricToolPreviewMesh_;
                         spherePreview.reset();
@@ -1046,10 +1054,18 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     // ShouldRenderExactPreviewGeometry, le cas « crayon un voxel hors trait »
     // calculait la preview, ne la rendait pas, et supprimait quand meme le
     // surlignage de survol : l'utilisateur perdait son repere sans rien gagner.
-    // La condition est desormais exactement celle du bloc de presentation.
+    //
+    // VF-STAB-01R3 : meme erreur, un cran plus loin. `Succeeded()` ne dit que
+    // « la composition n'a pas echoue » — une composition peut reussir sans
+    // RIEN produire : un clic Paint avec la couleur deja posee ne change
+    // aucune cellule, donc aucun override, et sur un modele chunke aucun mesh
+    // n'est assemble. On supprimait alors survol, selection et bornes au profit
+    // d'une preview inexistante, et l'ecran se vidait. La condition doit porter
+    // sur ce qui est REELLEMENT presentable.
     if (ShouldRenderExactPreviewGeometry(
             previewSubject, smartToolStroke_.IsActive()) &&
-        exactSmartToolPreview != nullptr && exactSmartToolPreview->Succeeded())
+        exactSmartToolPreview != nullptr &&
+        exactSmartToolPreview->HasPresentableGeometry())
     {
         // The exact final-state mesh replaces the base model for this frame;
         // legacy hover/selection highlights would otherwise falsely describe
@@ -1119,7 +1135,7 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
     if (ShouldRenderExactPreviewGeometry(
             previewSubject, smartToolStroke_.IsActive()) &&
         exactSmartToolPreview != nullptr &&
-        exactSmartToolPreview->Succeeded())
+        exactSmartToolPreview->HasPresentableGeometry())
     {
         // VF-0265 (lot 3g) : chemin chunké quand le compositeur a produit des
         // overrides. Le renderer refuse si le modèle n'est pas chunké — au
@@ -1150,14 +1166,38 @@ void EditorWorkspace::UpdateVoxelHighlights() noexcept
                 activeDocument ? activeDocument->GetRevision() : 0U,
                 exactPreviewCompositionOrdinal_);
         }
+        // VF-STAB-01R-FIX : le repli monolithique n'est legitime que si un mesh
+        // a REELLEMENT ete assemble. Auparavant on passait `Mesh` sans se
+        // demander s'il existait : sur le chemin chunke il est vide PAR
+        // CONSTRUCTION (AssembleMesh == false), et le renderer se declarait
+        // « preview active avec zero index ». Sa chaine de dessin prenait alors
+        // la branche monolithique, ne dessinait rien, et n'atteignait jamais
+        // celle du modele permanent — tout le modele disparaissait. C'est ce qui
+        // arrivait en repeignant un voxel avec sa couleur actuelle : aucune
+        // cellule ne change, donc aucun override, donc ce repli.
         if (!presented)
         {
-            static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
-                &exactSmartToolPreview->Mesh, &exactSmartToolPreview->Palette,
-                voxelModelCenter_, exactSmartToolPreview->Active,
-                voxelDocumentSession_.Generation(), activeDocument
-                    ? activeDocument->GetRevision() : 0U,
-                exactPreviewPlanId, exactPreviewPlanRevision));
+            if (exactSmartToolPreview->HasAssembledMesh())
+            {
+                // Cas C et D : mesh assemble. Vide veut alors dire « etat final
+                // vide » — la gomme du dernier voxel doit masquer le modele.
+                static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
+                    &exactSmartToolPreview->Mesh,
+                    &exactSmartToolPreview->Palette,
+                    voxelModelCenter_, exactSmartToolPreview->Active,
+                    voxelDocumentSession_.Generation(), activeDocument
+                        ? activeDocument->GetRevision() : 0U,
+                    exactPreviewPlanId, exactPreviewPlanRevision));
+            }
+            else
+            {
+                // Cas A : rien d'assemble et aucun override retenu — il n'y a
+                // rien a presenter. On desactive la preview exacte pour que le
+                // modele permanent se dessine, au lieu de le masquer derriere
+                // une preview vide qui n'a jamais existe.
+                static_cast<void>(viewportRenderer_.ConfigureExactPreviewMesh(
+                    nullptr, nullptr, {}, false, 0U, 0U, 0U, 0U));
+            }
         }
     }
     else if (!ShouldRetainExactPreviewOnMissingFrame(
